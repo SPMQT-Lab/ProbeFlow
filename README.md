@@ -26,12 +26,33 @@ python -m pip install -e .
 
 That installs these commands into your active Python environment:
 
-- `dat-png`
-- `dat-sxm`
+- `dat-png` — CLI: convert to PNG
+- `dat-sxm` — CLI: convert to SXM
+- `dat-gui` — graphical interface (recommended for most users)
 
 ## Usage
 
-### Use the built-in default paths
+### Graphical interface (recommended)
+
+```bash
+dat-gui
+```
+
+Opens a window where you can:
+- Browse to your input folder of `.dat` files
+- Browse to your output folder
+- Choose to convert to PNG, SXM, or both
+- Adjust contrast clipping under Advanced options
+- Toggle dark/light mode
+- Watch live progress in the log panel
+
+Your folder selections and preferences are saved automatically between sessions.
+
+---
+
+### Command line
+
+#### Use the built-in default paths
 
 The repository ships with two sample `.dat` files in [data/sample_input](data/sample_input). With the defaults unchanged, you can run:
 

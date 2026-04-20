@@ -19,6 +19,7 @@ dev = ["pytest"]
 [project.scripts]
 dat-png = "nanonis_tools.dats_to_pngs:main"
 dat-sxm = "nanonis_tools.dat_sxm_cli:main"
+dat-gui = "nanonis_tools.gui:main"
 
 [tool.setuptools]
 include-package-data = false
