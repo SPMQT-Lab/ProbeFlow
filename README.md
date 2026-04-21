@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.gif" alt="ProbeFlow logo" width="400"/>
+  <img src="assets/logo.gif" alt="ProbeFlow logo" width="100%"/>
 </p>
 
 <h1 align="center">ProbeFlow</h1>
