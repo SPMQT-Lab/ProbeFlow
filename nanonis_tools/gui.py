@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog,
     QDoubleSpinBox, QFileDialog, QFrame, QGridLayout,
     QHBoxLayout, QLabel, QLineEdit, QMainWindow, QPushButton,
-    QScrollArea, QSplitter, QStackedWidget, QStatusBar,
+    QScrollArea, QSlider, QSplitter, QStackedWidget, QStatusBar,
     QTableWidget, QTableWidgetItem, QHeaderView, QTextEdit,
     QVBoxLayout, QWidget,
 )
@@ -33,6 +33,7 @@ REPO_ROOT       = Path(__file__).resolve().parent.parent
 DEFAULT_CUSHION = REPO_ROOT / "src" / "file_cushions"
 LOGO_PATH       = REPO_ROOT / "assets" / "logo.png"
 LOGO_GIF_PATH   = REPO_ROOT / "assets" / "logo.gif"
+LOGO_NAV_PATH   = REPO_ROOT / "assets" / "logo_nav.png"
 GITHUB_URL      = "https://github.com/SPMQT-Lab/Createc-to-Nanonis-file-conversion"
 
 NAVBAR_BG = "#3273dc"
@@ -314,18 +315,22 @@ class ThumbnailSignals(QObject):
 
 
 class ThumbnailLoader(QRunnable):
-    def __init__(self, entry: SxmFile, colormap: str, token, w: int, h: int):
+    def __init__(self, entry: SxmFile, colormap: str, token, w: int, h: int,
+                 clip_low: float = 1.0, clip_high: float = 99.0):
         super().__init__()
         self.setAutoDelete(True)
-        self.signals  = ThumbnailSignals()
-        self.entry    = entry
-        self.colormap = colormap
-        self.token    = token
-        self.w        = w
-        self.h        = h
+        self.signals    = ThumbnailSignals()
+        self.entry      = entry
+        self.colormap   = colormap
+        self.token      = token
+        self.w          = w
+        self.h          = h
+        self.clip_low   = clip_low
+        self.clip_high  = clip_high
 
     def run(self):
         img = render_sxm_plane(self.entry.path, 0, self.colormap,
+                                self.clip_low, self.clip_high,
                                 size=(self.w, self.h))
         if img is not None:
             self.signals.loaded.emit(self.entry.stem, pil_to_pixmap(img), self.token)
@@ -338,19 +343,23 @@ class ChannelSignals(QObject):
 
 class ChannelLoader(QRunnable):
     def __init__(self, entry: SxmFile, idx: int, colormap: str,
-                 token, w: int, h: int, signals: ChannelSignals):
+                 token, w: int, h: int, signals: ChannelSignals,
+                 clip_low: float = 1.0, clip_high: float = 99.0):
         super().__init__()
         self.setAutoDelete(True)
-        self.signals  = signals
-        self.entry    = entry
-        self.idx      = idx
-        self.colormap = colormap
-        self.token    = token
-        self.w        = w
-        self.h        = h
+        self.signals   = signals
+        self.entry     = entry
+        self.idx       = idx
+        self.colormap  = colormap
+        self.token     = token
+        self.w         = w
+        self.h         = h
+        self.clip_low  = clip_low
+        self.clip_high = clip_high
 
     def run(self):
         img = render_sxm_plane(self.entry.path, self.idx, self.colormap,
+                                self.clip_low, self.clip_high,
                                 size=(self.w, self.h))
         if img is not None:
             self.signals.loaded.emit(self.idx, pil_to_pixmap(img), self.token)
@@ -618,8 +627,10 @@ class ThumbnailGrid(QWidget):
             loader.signals.loaded.connect(self._on_thumb)
             self._pool.start(loader)
 
-    def set_colormap_for_selection(self, colormap_key: str) -> int:
-        """Apply colormap to selected cards only. Returns count updated."""
+    def set_colormap_for_selection(self, colormap_key: str,
+                                    clip_low: float = 1.0,
+                                    clip_high: float = 99.0) -> int:
+        """Apply colormap and scale to selected cards only. Returns count updated."""
         if not self._selected:
             return 0
         token = self._load_token
@@ -629,7 +640,8 @@ class ThumbnailGrid(QWidget):
             if entry and card:
                 self._card_colormaps[stem] = colormap_key
                 loader = ThumbnailLoader(entry, colormap_key, token,
-                                         ScanCard.IMG_W, ScanCard.IMG_H)
+                                         ScanCard.IMG_W, ScanCard.IMG_H,
+                                         clip_low, clip_high)
                 loader.signals.loaded.connect(self._on_thumb)
                 self._pool.start(loader)
         return len(self._selected)
@@ -718,7 +730,8 @@ class ThumbnailGrid(QWidget):
 
 # ── Browse sidebar ────────────────────────────────────────────────────────────
 class BrowseSidebar(QWidget):
-    colormap_apply_requested = Signal(str)  # emits colormap key
+    colormap_apply_requested = Signal(str)   # emits colormap key
+    scale_changed            = Signal(float, float)  # emits (clip_low, clip_high)
 
     def __init__(self, t: dict, cfg: dict, parent=None):
         super().__init__(parent)
@@ -727,6 +740,8 @@ class BrowseSidebar(QWidget):
         self._ch_token  = object()
         self._ch_sigs:  Optional[ChannelSignals] = None
         self._meta_rows: list[tuple[str, str]]   = []
+        self._clip_low  = cfg.get("clip_low",  1.0)
+        self._clip_high = cfg.get("clip_high", 99.0)
         self._build(cfg)
 
     def _build(self, cfg: dict):
@@ -768,6 +783,48 @@ class BrowseSidebar(QWidget):
         self._sel_hint.setFont(QFont("Helvetica", 7))
         self._sel_hint.setWordWrap(True)
         lay.addWidget(self._sel_hint)
+        lay.addWidget(_sep())
+
+        # ── Display Scale ──────────────────────────────────────────────────────
+        scale_hdr = QLabel("Display Scale")
+        scale_hdr.setFont(QFont("Helvetica", 9, QFont.Bold))
+        lay.addWidget(scale_hdr)
+
+        def _slider_row(label: str, init_val: float, mn: int, mx: int, callback):
+            row  = QHBoxLayout()
+            lbl  = QLabel(label)
+            lbl.setFont(QFont("Helvetica", 8))
+            lbl.setFixedWidth(58)
+            sl   = QSlider(Qt.Horizontal)
+            sl.setRange(mn, mx)
+            sl.setValue(int(init_val))
+            sl.setTickInterval(10)
+            val_lbl = QLabel(f"{init_val:.0f}%")
+            val_lbl.setFont(QFont("Helvetica", 8))
+            val_lbl.setFixedWidth(32)
+            def _upd(v, vl=val_lbl, cb=callback):
+                vl.setText(f"{v}%")
+                cb(v)
+            sl.valueChanged.connect(_upd)
+            row.addWidget(lbl)
+            row.addWidget(sl, 1)
+            row.addWidget(val_lbl)
+            lay.addLayout(row)
+            return sl
+
+        self._low_slider  = _slider_row(
+            "Low clip:", cfg.get("clip_low", 1.0), 0, 20,
+            self._on_low_changed,
+        )
+        self._high_slider = _slider_row(
+            "High clip:", cfg.get("clip_high", 99.0), 80, 100,
+            self._on_high_changed,
+        )
+
+        scale_hint = QLabel("Drag sliders — applies to selected images")
+        scale_hint.setFont(QFont("Helvetica", 7))
+        scale_hint.setWordWrap(True)
+        lay.addWidget(scale_hint)
         lay.addWidget(_sep())
 
         # 4-channel thumbnails (2×2)
@@ -830,6 +887,17 @@ class BrowseSidebar(QWidget):
         self.meta_table.setShowGrid(False)
         lay.addWidget(self.meta_table, 1)
 
+    def _on_low_changed(self, v: int):
+        self._clip_low = float(v)
+        self.scale_changed.emit(self._clip_low, self._clip_high)
+
+    def _on_high_changed(self, v: int):
+        self._clip_high = float(v)
+        self.scale_changed.emit(self._clip_low, self._clip_high)
+
+    def get_clip_values(self) -> tuple[float, float]:
+        return self._clip_low, self._clip_high
+
     def _on_apply(self):
         cmap_key = CMAP_KEY.get(self.cmap_cb.currentText(), DEFAULT_CMAP_KEY)
         self.colormap_apply_requested.emit(cmap_key)
@@ -870,7 +938,8 @@ class BrowseSidebar(QWidget):
         self._ch_sigs = sigs
         for i in range(4):
             loader = ChannelLoader(entry, i, colormap_key,
-                                   self._ch_token, 120, 94, sigs)
+                                   self._ch_token, 120, 94, sigs,
+                                   self._clip_low, self._clip_high)
             self._pool.start(loader)
 
     @Slot(int, QPixmap, object)
@@ -1119,7 +1188,7 @@ class AboutDialog(QDialog):
     def __init__(self, t: dict, parent=None):
         super().__init__(parent)
         self.setWindowTitle("About ProbeFlow")
-        self.setFixedSize(420, 460)
+        self.setFixedSize(420, 640)
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(24, 18, 24, 18)
@@ -1131,13 +1200,13 @@ class AboutDialog(QDialog):
             logo_lbl.setAlignment(Qt.AlignCenter)
             if str(logo_path).endswith(".gif"):
                 movie = QMovie(str(logo_path))
-                movie.setScaledSize(QSize(320, 106))
+                movie.setScaledSize(QSize(372, 372))  # square — matches logo aspect ratio
                 logo_lbl.setMovie(movie)
                 movie.start()
                 self._about_movie = movie
             else:
                 pix = QPixmap(str(logo_path))
-                logo_lbl.setPixmap(pix.scaledToWidth(320, Qt.SmoothTransformation))
+                logo_lbl.setPixmap(pix.scaledToWidth(372, Qt.SmoothTransformation))
             lay.addWidget(logo_lbl)
 
         def _row(text, size=10, bold=False, sub=False):
@@ -1186,20 +1255,14 @@ class Navbar(QWidget):
         lay.setContentsMargins(8, 6, 8, 6)
         lay.setSpacing(6)
 
-        logo_path = LOGO_GIF_PATH if LOGO_GIF_PATH.exists() else LOGO_PATH
-        if logo_path.exists():
+        nav_logo_path = LOGO_NAV_PATH if LOGO_NAV_PATH.exists() else None
+        if nav_logo_path:
             logo_lbl = QLabel()
             logo_lbl.setStyleSheet("background: transparent;")
-            if str(logo_path).endswith(".gif"):
-                movie = QMovie(str(logo_path))
-                movie.setScaledSize(QSize(120, 44))
-                logo_lbl.setMovie(movie)
-                movie.start()
-                self._nav_movie = movie
-            else:
-                pix = QPixmap(str(logo_path))
-                logo_lbl.setPixmap(
-                    pix.scaled(120, 44, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            pix = QPixmap(str(nav_logo_path))
+            # Scale to navbar height, unconstrained width so no letters are cut
+            logo_lbl.setPixmap(
+                pix.scaled(9999, 44, Qt.KeepAspectRatio, Qt.SmoothTransformation))
             logo_lbl.setCursor(QCursor(Qt.PointingHandCursor))
             logo_lbl.mousePressEvent = lambda e: webbrowser.open(GITHUB_URL)
             lay.addWidget(logo_lbl)
@@ -1209,13 +1272,9 @@ class Navbar(QWidget):
         tf_lay = QVBoxLayout(tf)
         tf_lay.setContentsMargins(4, 0, 0, 0)
         tf_lay.setSpacing(0)
-        t1 = QLabel("ProbeFlow")
-        t1.setFont(QFont("Helvetica", 14, QFont.Bold))
-        t1.setStyleSheet("color: #ffffff; background: transparent;")
         t2 = QLabel("Createc → Nanonis")
         t2.setFont(QFont("Helvetica", 8))
         t2.setStyleSheet("color: #a8c8f0; background: transparent;")
-        tf_lay.addWidget(t1)
         tf_lay.addWidget(t2)
         lay.addWidget(tf)
         lay.addStretch()
@@ -1331,6 +1390,7 @@ class ProbeFlowWindow(QMainWindow):
         self._grid.entry_selected.connect(self._on_entry_select)
         self._grid.selection_changed.connect(self._on_selection_changed)
         self._browse_sidebar.colormap_apply_requested.connect(self._on_apply_colormap)
+        self._browse_sidebar.scale_changed.connect(self._on_scale_changed)
         self._convert_sidebar.run_btn.clicked.connect(self._run)
         self._conv_panel.input_entry.textChanged.connect(self._update_count)
 
@@ -1409,7 +1469,10 @@ class ProbeFlowWindow(QMainWindow):
         self._browse_sidebar.update_selection_hint(n_selected)
 
     def _on_apply_colormap(self, cmap_key: str):
-        n = self._grid.set_colormap_for_selection(cmap_key)
+        clip_low, clip_high = self._browse_sidebar.get_clip_values()
+        n = self._grid.set_colormap_for_selection(cmap_key,
+                                                   clip_low=clip_low,
+                                                   clip_high=clip_high)
         if n == 0:
             self._status_bar.showMessage(
                 "No images selected — click images first (Ctrl+click for multi-select)")
@@ -1417,7 +1480,22 @@ class ProbeFlowWindow(QMainWindow):
             label = next((l for l, k in CMAP_KEY.items() if k == cmap_key), cmap_key)
             self._status_bar.showMessage(
                 f"Applied {label} colormap to {n} image{'s' if n > 1 else ''}")
-            # refresh sidebar channels with new colormap for primary
+            primary = self._grid.get_primary()
+            if primary:
+                entry = next((e for e in self._grid.get_entries()
+                              if e.stem == primary), None)
+                if entry:
+                    self._browse_sidebar._load_channels(entry, cmap_key)
+
+    def _on_scale_changed(self, clip_low: float, clip_high: float):
+        cmap_key = CMAP_KEY.get(
+            self._browse_sidebar.cmap_cb.currentText(), DEFAULT_CMAP_KEY)
+        n = self._grid.set_colormap_for_selection(cmap_key,
+                                                   clip_low=clip_low,
+                                                   clip_high=clip_high)
+        if n > 0:
+            self._status_bar.showMessage(
+                f"Scale: {clip_low:.0f}%–{clip_high:.0f}% on {n} image{'s' if n > 1 else ''}")
             primary = self._grid.get_primary()
             if primary:
                 entry = next((e for e in self._grid.get_entries()
@@ -1501,6 +1579,7 @@ class ProbeFlowWindow(QMainWindow):
 
     # ── Close ──────────────────────────────────────────────────────────────────
     def closeEvent(self, event):
+        cl, ch = self._browse_sidebar.get_clip_values()
         save_config({
             "dark_mode":     self._dark,
             "input_dir":     self._conv_panel.input_entry.text(),
@@ -1508,8 +1587,8 @@ class ProbeFlowWindow(QMainWindow):
             "custom_output": self._conv_panel._custom_out_cb.isChecked(),
             "do_png":        self._convert_sidebar.png_cb.isChecked(),
             "do_sxm":        self._convert_sidebar.sxm_cb.isChecked(),
-            "clip_low":      self._convert_sidebar.clip_low_spin.value(),
-            "clip_high":     self._convert_sidebar.clip_high_spin.value(),
+            "clip_low":      cl,
+            "clip_high":     ch,
             "colormap":      self._browse_sidebar.cmap_cb.currentText(),
         })
         super().closeEvent(event)
@@ -1540,6 +1619,10 @@ BrowseSidebar, BrowseSidebar QWidget,
 ConvertSidebar, ConvertSidebar QWidget,
 ConvertPanel, ConvertPanel QWidget {{
     background-color: {t['sidebar_bg']};
+}}
+BrowseSidebar QLabel, ConvertSidebar QLabel, ConvertPanel QLabel {{
+    color: {t['fg']};
+    background: transparent;
 }}
 QPushButton {{
     background-color: {t['btn_bg']};

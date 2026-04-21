@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "probeflow"
-version = "1.01.0"
+version = "1.2.0"
 description = "ProbeFlow — Createc to Nanonis file conversion. Converts STM .dat files to .sxm format and PNG previews."
 readme = "README.md"
 requires-python = ">=3.11"
