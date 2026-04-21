@@ -638,9 +638,8 @@ class ThumbnailGrid(QWidget):
     - set_colormap_for_selection() reloads ONLY selected cards with the new colormap.
     - Unselected cards keep their current colormap (gray by default).
     """
-    entry_selected   = Signal(object)          # primary SxmFile for sidebar
-    selection_changed = Signal(int)            # count of selected items
-    open_folder_requested = Signal()
+    entry_selected    = Signal(object)   # primary SxmFile for sidebar
+    selection_changed = Signal(int)      # count of selected items
 
     GAP = 10
 
@@ -653,24 +652,17 @@ class ThumbnailGrid(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
-        # ── Folder toolbar ───────────────────────────────────────────────────
+        # ── Path strip (folder name + count) ────────────────────────────────
         self._toolbar = QWidget()
-        self._toolbar.setFixedHeight(40)
+        self._toolbar.setFixedHeight(28)
         tb_lay = QHBoxLayout(self._toolbar)
-        tb_lay.setContentsMargins(8, 4, 8, 4)
-        tb_lay.setSpacing(8)
-
-        self._open_btn = QPushButton("Open SXM folder…")
-        self._open_btn.setFont(QFont("Helvetica", 9))
-        self._open_btn.setCursor(QCursor(Qt.PointingHandCursor))
-        self._open_btn.setFixedHeight(28)
-        self._open_btn.clicked.connect(self.open_folder_requested.emit)
+        tb_lay.setContentsMargins(10, 4, 8, 4)
+        tb_lay.setSpacing(0)
 
         self._path_lbl = QLabel("No folder open")
         self._path_lbl.setFont(QFont("Helvetica", 8))
         self._path_lbl.setStyleSheet("background: transparent;")
 
-        tb_lay.addWidget(self._open_btn)
         tb_lay.addWidget(self._path_lbl, 1)
         outer.addWidget(self._toolbar)
 
@@ -849,41 +841,50 @@ class ThumbnailGrid(QWidget):
                 self._grid.addWidget(card, row, col, Qt.AlignTop | Qt.AlignLeft)
 
 
-# ── Browse sidebar ────────────────────────────────────────────────────────────
-class BrowseSidebar(QWidget):
-    colormap_apply_requested  = Signal(str)         # emits colormap key
-    scale_changed             = Signal(float, float) # emits (clip_low, clip_high)
-    processing_apply_requested = Signal(dict)        # emits processing config
+# ── Browse tool panel (LEFT) ──────────────────────────────────────────────────
+class BrowseToolPanel(QWidget):
+    """Left-side control panel: folder, colormap, scale, processing, export."""
+    open_folder_requested      = Signal()
+    colormap_apply_requested   = Signal(str)
+    scale_changed              = Signal(float, float)
+    processing_apply_requested = Signal(dict)
     measure_requested          = Signal()
     export_requested           = Signal()
 
     def __init__(self, t: dict, cfg: dict, parent=None):
         super().__init__(parent)
         self._t         = t
-        self._pool      = QThreadPool.globalInstance()
-        self._ch_token  = object()
-        self._ch_sigs:  Optional[ChannelSignals] = None
-        self._meta_rows: list[tuple[str, str]]   = []
         self._clip_low  = cfg.get("clip_low",  1.0)
         self._clip_high = cfg.get("clip_high", 99.0)
         self._build(cfg)
 
     def _build(self, cfg: dict):
-        lay = QVBoxLayout(self)
+        # Wrap everything in a scroll area so nothing gets clipped on small screens
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+        inner = QWidget()
+        lay = QVBoxLayout(inner)
         lay.setContentsMargins(10, 10, 10, 6)
         lay.setSpacing(4)
 
-        # File info
-        self.name_lbl = QLabel("No scan selected")
-        self.name_lbl.setFont(QFont("Helvetica", 9, QFont.Bold))
-        self.name_lbl.setWordWrap(True)
-        self.dim_lbl = QLabel("")
-        self.dim_lbl.setFont(QFont("Helvetica", 8))
-        lay.addWidget(self.name_lbl)
-        lay.addWidget(self.dim_lbl)
+        # ── Open folder button ─────────────────────────────────────────────────
+        open_btn = QPushButton("Open SXM folder…")
+        open_btn.setFont(QFont("Helvetica", 9))
+        open_btn.setFixedHeight(30)
+        open_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        open_btn.setObjectName("accentBtn")
+        open_btn.clicked.connect(self.open_folder_requested.emit)
+        lay.addWidget(open_btn)
         lay.addWidget(_sep())
 
-        # Colormap + Apply button
+        # ── Colormap ───────────────────────────────────────────────────────────
         cm_lbl = QLabel("Colormap")
         cm_lbl.setFont(QFont("Helvetica", 9, QFont.Bold))
         lay.addWidget(cm_lbl)
@@ -893,7 +894,7 @@ class BrowseSidebar(QWidget):
         self.cmap_cb.addItems(CMAP_NAMES)
         self.cmap_cb.setCurrentText(cfg.get("colormap", DEFAULT_CMAP_LABEL))
         self.cmap_cb.setFont(QFont("Helvetica", 9))
-        self._apply_btn = QPushButton("Apply to selection")
+        self._apply_btn = QPushButton("Apply")
         self._apply_btn.setFont(QFont("Helvetica", 8))
         self._apply_btn.setFixedHeight(26)
         self._apply_btn.setCursor(QCursor(Qt.PointingHandCursor))
@@ -915,14 +916,13 @@ class BrowseSidebar(QWidget):
         lay.addWidget(scale_hdr)
 
         def _slider_row(label: str, init_val: float, mn: int, mx: int, callback):
-            row  = QHBoxLayout()
-            lbl  = QLabel(label)
+            row = QHBoxLayout()
+            lbl = QLabel(label)
             lbl.setFont(QFont("Helvetica", 8))
-            lbl.setFixedWidth(58)
-            sl   = QSlider(Qt.Horizontal)
+            lbl.setFixedWidth(44)
+            sl = QSlider(Qt.Horizontal)
             sl.setRange(mn, mx)
             sl.setValue(int(init_val))
-            sl.setTickInterval(10)
             val_lbl = QLabel(f"{init_val:.0f}%")
             val_lbl.setFont(QFont("Helvetica", 8))
             val_lbl.setFixedWidth(32)
@@ -936,56 +936,42 @@ class BrowseSidebar(QWidget):
             lay.addLayout(row)
             return sl
 
-        self._low_slider  = _slider_row(
-            "Low clip:", cfg.get("clip_low", 1.0), 0, 20,
-            self._on_low_changed,
-        )
-        self._high_slider = _slider_row(
-            "High clip:", cfg.get("clip_high", 99.0), 80, 100,
-            self._on_high_changed,
-        )
-
-        scale_hint = QLabel("Drag sliders — applies to selected images")
-        scale_hint.setFont(QFont("Helvetica", 7))
-        scale_hint.setWordWrap(True)
-        lay.addWidget(scale_hint)
+        self._low_slider  = _slider_row("Low:", cfg.get("clip_low",  1.0),  0,  20, self._on_low_changed)
+        self._high_slider = _slider_row("High:", cfg.get("clip_high", 99.0), 80, 100, self._on_high_changed)
         lay.addWidget(_sep())
 
-        # ── Processing section (collapsible) ──────────────────────────────────
+        # ── Processing (collapsible) ───────────────────────────────────────────
         self._proc_toggle = QPushButton("[+] Processing")
         self._proc_toggle.setFlat(True)
-        self._proc_toggle.setFont(QFont("Helvetica", 9))
+        self._proc_toggle.setFont(QFont("Helvetica", 9, QFont.Bold))
         self._proc_toggle.setCursor(QCursor(Qt.PointingHandCursor))
-        self._proc_toggle.clicked.connect(self._toggle_proc_section)
+        self._proc_toggle.clicked.connect(self._toggle_proc)
         lay.addWidget(self._proc_toggle)
 
         self._proc_widget = QWidget()
         proc_lay = QVBoxLayout(self._proc_widget)
-        proc_lay.setContentsMargins(0, 2, 0, 2)
+        proc_lay.setContentsMargins(4, 2, 0, 2)
         proc_lay.setSpacing(4)
 
-        # Remove bad lines checkbox
         self._rbl_cb = QCheckBox("Remove bad lines")
         self._rbl_cb.setFont(QFont("Helvetica", 8))
         proc_lay.addWidget(self._rbl_cb)
 
-        # Background subtraction
         bg_row = QHBoxLayout()
         bg_lbl = QLabel("Background:")
         bg_lbl.setFont(QFont("Helvetica", 8))
-        bg_lbl.setFixedWidth(80)
+        bg_lbl.setFixedWidth(76)
         self._bg_combo = QComboBox()
-        self._bg_combo.addItems(["None", "Plane", "Quadratic 2nd"])
+        self._bg_combo.addItems(["None", "Plane", "Quadratic"])
         self._bg_combo.setFont(QFont("Helvetica", 8))
         bg_row.addWidget(bg_lbl)
         bg_row.addWidget(self._bg_combo, 1)
         proc_lay.addLayout(bg_row)
 
-        # FFT filter mode
         fft_row = QHBoxLayout()
         fft_lbl = QLabel("FFT filter:")
         fft_lbl.setFont(QFont("Helvetica", 8))
-        fft_lbl.setFixedWidth(80)
+        fft_lbl.setFixedWidth(76)
         self._fft_combo = QComboBox()
         self._fft_combo.addItems(["None", "Low-pass", "High-pass"])
         self._fft_combo.setFont(QFont("Helvetica", 8))
@@ -994,29 +980,26 @@ class BrowseSidebar(QWidget):
         fft_row.addWidget(self._fft_combo, 1)
         proc_lay.addLayout(fft_row)
 
-        # FFT cutoff slider (hidden when FFT=None)
         self._fft_cutoff_widget = QWidget()
         cutoff_lay = QHBoxLayout(self._fft_cutoff_widget)
         cutoff_lay.setContentsMargins(0, 0, 0, 0)
         cutoff_lbl = QLabel("Cutoff:")
         cutoff_lbl.setFont(QFont("Helvetica", 8))
-        cutoff_lbl.setFixedWidth(50)
+        cutoff_lbl.setFixedWidth(46)
         self._fft_sl = QSlider(Qt.Horizontal)
         self._fft_sl.setRange(1, 50)
         self._fft_sl.setValue(10)
         self._fft_cutoff_lbl = QLabel("10%")
         self._fft_cutoff_lbl.setFont(QFont("Helvetica", 8))
         self._fft_cutoff_lbl.setFixedWidth(32)
-        self._fft_sl.valueChanged.connect(
-            lambda v: self._fft_cutoff_lbl.setText(f"{v}%"))
+        self._fft_sl.valueChanged.connect(lambda v: self._fft_cutoff_lbl.setText(f"{v}%"))
         cutoff_lay.addWidget(cutoff_lbl)
         cutoff_lay.addWidget(self._fft_sl, 1)
         cutoff_lay.addWidget(self._fft_cutoff_lbl)
         proc_lay.addWidget(self._fft_cutoff_widget)
         self._fft_cutoff_widget.setVisible(False)
 
-        # Apply processing button
-        self._proc_apply_btn = QPushButton("Apply to selection")
+        self._proc_apply_btn = QPushButton("Apply processing")
         self._proc_apply_btn.setFont(QFont("Helvetica", 8))
         self._proc_apply_btn.setFixedHeight(26)
         self._proc_apply_btn.setCursor(QCursor(Qt.PointingHandCursor))
@@ -1026,12 +1009,11 @@ class BrowseSidebar(QWidget):
 
         proc_lay.addWidget(_sep())
 
-        # Measure periodicity
         self._meas_btn = QPushButton("Measure Periodicity")
         self._meas_btn.setFont(QFont("Helvetica", 8))
         self._meas_btn.setFixedHeight(26)
         self._meas_btn.setCursor(QCursor(Qt.PointingHandCursor))
-        self._meas_btn.clicked.connect(self._on_measure_periodicity)
+        self._meas_btn.clicked.connect(self.measure_requested.emit)
         proc_lay.addWidget(self._meas_btn)
 
         self._meas_result = QLabel("")
@@ -1042,10 +1024,9 @@ class BrowseSidebar(QWidget):
 
         lay.addWidget(self._proc_widget)
         self._proc_widget.setVisible(False)
-
         lay.addWidget(_sep())
 
-        # ── Export button ──────────────────────────────────────────────────────
+        # ── Export ─────────────────────────────────────────────────────────────
         self._export_btn = QPushButton("\u2b07 Export PNG\u2026")
         self._export_btn.setFont(QFont("Helvetica", 9, QFont.Bold))
         self._export_btn.setFixedHeight(30)
@@ -1054,9 +1035,95 @@ class BrowseSidebar(QWidget):
         self._export_btn.clicked.connect(self.export_requested.emit)
         lay.addWidget(self._export_btn)
 
+        lay.addStretch()
+        scroll.setWidget(inner)
+        outer.addWidget(scroll)
+
+    # ── Slots ──────────────────────────────────────────────────────────────────
+    def _on_low_changed(self, v: int):
+        self._clip_low = float(v)
+        self.scale_changed.emit(self._clip_low, self._clip_high)
+
+    def _on_high_changed(self, v: int):
+        self._clip_high = float(v)
+        self.scale_changed.emit(self._clip_low, self._clip_high)
+
+    def _on_apply(self):
+        cmap_key = CMAP_KEY.get(self.cmap_cb.currentText(), DEFAULT_CMAP_KEY)
+        self.colormap_apply_requested.emit(cmap_key)
+
+    def _toggle_proc(self):
+        vis = not self._proc_widget.isVisible()
+        self._proc_widget.setVisible(vis)
+        self._proc_toggle.setText("[-] Processing" if vis else "[+] Processing")
+
+    def _on_fft_mode_changed(self, idx: int):
+        self._fft_cutoff_widget.setVisible(idx != 0)
+
+    def _on_proc_apply(self):
+        bg_map  = {0: None, 1: 1, 2: 2}
+        fft_map = {0: None, 1: 'low_pass', 2: 'high_pass'}
+        cfg = {
+            'remove_bad_lines': self._rbl_cb.isChecked(),
+            'bg_order':         bg_map[self._bg_combo.currentIndex()],
+            'fft_mode':         fft_map[self._fft_combo.currentIndex()],
+            'fft_cutoff':       self._fft_sl.value() / 100.0,
+            'fft_window':       'hanning',
+        }
+        self.processing_apply_requested.emit(cfg)
+
+    # ── Public API ─────────────────────────────────────────────────────────────
+    def get_clip_values(self) -> tuple[float, float]:
+        return self._clip_low, self._clip_high
+
+    def update_selection_hint(self, n: int):
+        if n == 0:
+            self._sel_hint.setText("Select images first (Ctrl+click for multi-select)")
+        elif n == 1:
+            self._sel_hint.setText("1 image selected")
+        else:
+            self._sel_hint.setText(f"{n} images selected")
+
+    def show_periodicity_result(self, results: list):
+        if not results:
+            self._meas_result.setText("No peaks found.")
+            return
+        lines = [f"Peak {i}: {r['period_m']*1e9:.3f} nm  {r['angle_deg']:.1f}°"
+                 for i, r in enumerate(results, 1)]
+        self._meas_result.setText("\n".join(lines))
+
+    def apply_theme(self, t: dict):
+        self._t = t
+
+
+# ── Browse info panel (RIGHT) ─────────────────────────────────────────────────
+class BrowseInfoPanel(QWidget):
+    """Right-side info panel: selected file name, channel thumbnails, metadata."""
+
+    def __init__(self, t: dict, cfg: dict, parent=None):
+        super().__init__(parent)
+        self._t         = t
+        self._pool      = QThreadPool.globalInstance()
+        self._ch_token  = object()
+        self._meta_rows: list[tuple[str, str]] = []
+        self._clip_low  = cfg.get("clip_low",  1.0)
+        self._clip_high = cfg.get("clip_high", 99.0)
+        self._build()
+
+    def _build(self):
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(10, 10, 10, 6)
+        lay.setSpacing(4)
+
+        self.name_lbl = QLabel("No scan selected")
+        self.name_lbl.setFont(QFont("Helvetica", 9, QFont.Bold))
+        self.name_lbl.setWordWrap(True)
+        self.dim_lbl = QLabel("")
+        self.dim_lbl.setFont(QFont("Helvetica", 8))
+        lay.addWidget(self.name_lbl)
+        lay.addWidget(self.dim_lbl)
         lay.addWidget(_sep())
 
-        # 4-channel thumbnails (2×2)
         ch_hdr = QLabel("Channels")
         ch_hdr.setFont(QFont("Helvetica", 9, QFont.Bold))
         lay.addWidget(ch_hdr)
@@ -1068,12 +1135,12 @@ class BrowseSidebar(QWidget):
         self._ch_name_lbls: list[QLabel] = []
         for i, name in enumerate(PLANE_NAMES):
             r, c = divmod(i, 2)
-            cell     = QWidget()
+            cell = QWidget()
             cell_lay = QVBoxLayout(cell)
             cell_lay.setContentsMargins(0, 0, 0, 0)
             cell_lay.setSpacing(1)
             img_lbl = QLabel()
-            img_lbl.setFixedSize(124, 98)
+            img_lbl.setFixedSize(118, 94)
             img_lbl.setAlignment(Qt.AlignCenter)
             img_lbl.setFrameShape(QFrame.StyledPanel)
             nm_lbl = QLabel(name)
@@ -1087,7 +1154,6 @@ class BrowseSidebar(QWidget):
         lay.addLayout(ch_grid)
         lay.addWidget(_sep())
 
-        # Metadata table + search
         meta_hdr_row = QHBoxLayout()
         meta_hdr = QLabel("Metadata")
         meta_hdr.setFont(QFont("Helvetica", 9, QFont.Bold))
@@ -1103,10 +1169,8 @@ class BrowseSidebar(QWidget):
 
         self.meta_table = QTableWidget(0, 2)
         self.meta_table.setHorizontalHeaderLabels(["Parameter", "Value"])
-        self.meta_table.horizontalHeader().setSectionResizeMode(
-            0, QHeaderView.ResizeToContents)
-        self.meta_table.horizontalHeader().setSectionResizeMode(
-            1, QHeaderView.Stretch)
+        self.meta_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.meta_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.meta_table.verticalHeader().setVisible(False)
         self.meta_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.meta_table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -1116,35 +1180,12 @@ class BrowseSidebar(QWidget):
         self.meta_table.setShowGrid(False)
         lay.addWidget(self.meta_table, 1)
 
-    def _on_low_changed(self, v: int):
-        self._clip_low = float(v)
-        self.scale_changed.emit(self._clip_low, self._clip_high)
-
-    def _on_high_changed(self, v: int):
-        self._clip_high = float(v)
-        self.scale_changed.emit(self._clip_low, self._clip_high)
-
-    def get_clip_values(self) -> tuple[float, float]:
-        return self._clip_low, self._clip_high
-
-    def _on_apply(self):
-        cmap_key = CMAP_KEY.get(self.cmap_cb.currentText(), DEFAULT_CMAP_KEY)
-        self.colormap_apply_requested.emit(cmap_key)
-
-    # ── Public API ────────────────────────────────────────────────────────────
+    # ── Public API ─────────────────────────────────────────────────────────────
     def show_entry(self, entry: SxmFile, colormap_key: str):
         self.name_lbl.setText(entry.stem)
         self.dim_lbl.setText(f"{entry.Nx} × {entry.Ny} px")
         self._load_channels(entry, colormap_key)
         self._load_metadata(entry)
-
-    def update_selection_hint(self, n_selected: int):
-        if n_selected == 0:
-            self._sel_hint.setText("Select images first (Ctrl+click for multi-select)")
-        elif n_selected == 1:
-            self._sel_hint.setText("1 image selected — click Apply to colorize")
-        else:
-            self._sel_hint.setText(f"{n_selected} images selected — click Apply to colorize")
 
     def clear(self):
         self.name_lbl.setText("No scan selected")
@@ -1153,13 +1194,16 @@ class BrowseSidebar(QWidget):
             lbl.clear()
         self._meta_rows = []
         self.meta_table.setRowCount(0)
-        self.update_selection_hint(0)
+
+    def update_clip(self, clip_low: float, clip_high: float):
+        self._clip_low  = clip_low
+        self._clip_high = clip_high
 
     def apply_theme(self, t: dict):
         self._t = t
         self._filter_meta()
 
-    # ── Internal ──────────────────────────────────────────────────────────────
+    # ── Internal ───────────────────────────────────────────────────────────────
     def _load_channels(self, entry: SxmFile, colormap_key: str):
         self._ch_token = object()
         sigs = ChannelSignals()
@@ -1167,7 +1211,7 @@ class BrowseSidebar(QWidget):
         self._ch_sigs = sigs
         for i in range(4):
             loader = ChannelLoader(entry, i, colormap_key,
-                                   self._ch_token, 120, 94, sigs,
+                                   self._ch_token, 114, 90, sigs,
                                    self._clip_low, self._clip_high)
             self._pool.start(loader)
 
@@ -1212,40 +1256,6 @@ class BrowseSidebar(QWidget):
                 v_item.setForeground(QColor(t["fg"]))
                 self.meta_table.setItem(row, 0, p_item)
                 self.meta_table.setItem(row, 1, v_item)
-
-    def _toggle_proc_section(self):
-        vis = not self._proc_widget.isVisible()
-        self._proc_widget.setVisible(vis)
-        self._proc_toggle.setText("[-] Processing" if vis else "[+] Processing")
-
-    def _on_fft_mode_changed(self, idx: int):
-        self._fft_cutoff_widget.setVisible(idx != 0)
-
-    def _on_proc_apply(self):
-        bg_map  = {0: None, 1: 1, 2: 2}
-        fft_map = {0: None, 1: 'low_pass', 2: 'high_pass'}
-        cfg = {
-            'remove_bad_lines': self._rbl_cb.isChecked(),
-            'bg_order':         bg_map[self._bg_combo.currentIndex()],
-            'fft_mode':         fft_map[self._fft_combo.currentIndex()],
-            'fft_cutoff':       self._fft_sl.value() / 100.0,
-            'fft_window':       'hanning',
-        }
-        self.processing_apply_requested.emit(cfg)
-
-    def _on_measure_periodicity(self):
-        self.measure_requested.emit()
-
-    def show_periodicity_result(self, results: list):
-        if not results:
-            self._meas_result.setText("No peaks found.")
-            return
-        lines = []
-        for i, r in enumerate(results, 1):
-            period_nm = r['period_m'] * 1e9
-            angle     = r['angle_deg']
-            lines.append(f"Peak {i}: {period_nm:.3f} nm  {angle:.1f}°")
-        self._meas_result.setText("\n".join(lines))
 
 
 # ── Export dialog ────────────────────────────────────────────────────────────
@@ -1683,34 +1693,45 @@ class ProbeFlowWindow(QMainWindow):
 
         t = THEMES["dark" if self._dark else "light"]
 
-        # Left: content stack
+        # ── Content stack (center+left area) ──────────────────────────────────
         self._content_stack = QStackedWidget()
-        self._grid           = ThumbnailGrid(t)
-        self._conv_panel     = ConvertPanel(t, self._cfg)
-        self._content_stack.addWidget(self._grid)
+
+        # Browse mode: inner splitter [BrowseToolPanel | ThumbnailGrid]
+        self._browse_tools = BrowseToolPanel(t, self._cfg)
+        self._browse_tools.setFixedWidth(230)
+        self._grid         = ThumbnailGrid(t)
+        browse_split = QSplitter(Qt.Horizontal)
+        browse_split.setHandleWidth(3)
+        browse_split.addWidget(self._browse_tools)
+        browse_split.addWidget(self._grid)
+        browse_split.setStretchFactor(0, 0)
+        browse_split.setStretchFactor(1, 1)
+
+        self._conv_panel = ConvertPanel(t, self._cfg)
+        self._content_stack.addWidget(browse_split)
         self._content_stack.addWidget(self._conv_panel)
         self._splitter.addWidget(self._content_stack)
 
-        # Right: sidebar stack
+        # ── Right: sidebar stack ───────────────────────────────────────────────
         self._sidebar_stack   = QStackedWidget()
-        self._sidebar_stack.setFixedWidth(318)
-        self._browse_sidebar  = BrowseSidebar(t, self._cfg)
+        self._sidebar_stack.setFixedWidth(280)
+        self._browse_info     = BrowseInfoPanel(t, self._cfg)
         self._convert_sidebar = ConvertSidebar(t, self._cfg)
-        self._sidebar_stack.addWidget(self._browse_sidebar)
+        self._sidebar_stack.addWidget(self._browse_info)
         self._sidebar_stack.addWidget(self._convert_sidebar)
         self._splitter.addWidget(self._sidebar_stack)
         self._splitter.setStretchFactor(0, 1)
         self._splitter.setStretchFactor(1, 0)
 
         # Wire signals
-        self._grid.open_folder_requested.connect(self._open_browse_folder)
+        self._browse_tools.open_folder_requested.connect(self._open_browse_folder)
         self._grid.entry_selected.connect(self._on_entry_select)
         self._grid.selection_changed.connect(self._on_selection_changed)
-        self._browse_sidebar.colormap_apply_requested.connect(self._on_apply_colormap)
-        self._browse_sidebar.scale_changed.connect(self._on_scale_changed)
-        self._browse_sidebar.processing_apply_requested.connect(self._on_processing_apply)
-        self._browse_sidebar.measure_requested.connect(self._on_measure_periodicity)
-        self._browse_sidebar.export_requested.connect(self._on_export)
+        self._browse_tools.colormap_apply_requested.connect(self._on_apply_colormap)
+        self._browse_tools.scale_changed.connect(self._on_scale_changed)
+        self._browse_tools.processing_apply_requested.connect(self._on_processing_apply)
+        self._browse_tools.measure_requested.connect(self._on_measure_periodicity)
+        self._browse_tools.export_requested.connect(self._on_export)
         self._convert_sidebar.run_btn.clicked.connect(self._run)
         self._conv_panel.input_entry.textChanged.connect(self._update_count)
 
@@ -1773,23 +1794,21 @@ class ProbeFlowWindow(QMainWindow):
         self._status_bar.showMessage(
             f"Loaded {self._n_loaded} scan(s) — grayscale by default | "
             "Select + Apply to colorize")
-        self._browse_sidebar.clear()
+        self._browse_info.clear()
 
     def _on_entry_select(self, entry: SxmFile):
         cmap_key = self._grid._card_colormaps.get(entry.stem, DEFAULT_CMAP_KEY)
-        self._browse_sidebar.show_entry(entry, cmap_key)
-        idx = next((i for i, e in enumerate(self._grid.get_entries())
-                    if e.stem == entry.stem), 0) + 1
+        self._browse_info.show_entry(entry, cmap_key)
         n_sel = len(self._grid.get_selected())
         self._status_bar.showMessage(
             f"{entry.stem}  |  {entry.Nx}×{entry.Ny} px  |  "
             f"{n_sel} selected / {self._n_loaded} total")
 
     def _on_selection_changed(self, n_selected: int):
-        self._browse_sidebar.update_selection_hint(n_selected)
+        self._browse_tools.update_selection_hint(n_selected)
 
     def _on_apply_colormap(self, cmap_key: str):
-        clip_low, clip_high = self._browse_sidebar.get_clip_values()
+        clip_low, clip_high = self._browse_tools.get_clip_values()
         n = self._grid.set_colormap_for_selection(cmap_key,
                                                    clip_low=clip_low,
                                                    clip_high=clip_high)
@@ -1805,11 +1824,12 @@ class ProbeFlowWindow(QMainWindow):
                 entry = next((e for e in self._grid.get_entries()
                               if e.stem == primary), None)
                 if entry:
-                    self._browse_sidebar._load_channels(entry, cmap_key)
+                    self._browse_info._load_channels(entry, cmap_key)
 
     def _on_scale_changed(self, clip_low: float, clip_high: float):
         cmap_key = CMAP_KEY.get(
-            self._browse_sidebar.cmap_cb.currentText(), DEFAULT_CMAP_KEY)
+            self._browse_tools.cmap_cb.currentText(), DEFAULT_CMAP_KEY)
+        self._browse_info.update_clip(clip_low, clip_high)
         n = self._grid.set_colormap_for_selection(cmap_key,
                                                    clip_low=clip_low,
                                                    clip_high=clip_high)
@@ -1821,12 +1841,12 @@ class ProbeFlowWindow(QMainWindow):
                 entry = next((e for e in self._grid.get_entries()
                               if e.stem == primary), None)
                 if entry:
-                    self._browse_sidebar._load_channels(entry, cmap_key)
+                    self._browse_info._load_channels(entry, cmap_key)
 
     def _on_processing_apply(self, cfg: dict):
-        clip_low, clip_high = self._browse_sidebar.get_clip_values()
+        clip_low, clip_high = self._browse_tools.get_clip_values()
         cmap_key = CMAP_KEY.get(
-            self._browse_sidebar.cmap_cb.currentText(), DEFAULT_CMAP_KEY)
+            self._browse_tools.cmap_cb.currentText(), DEFAULT_CMAP_KEY)
         n = self._grid.set_colormap_for_selection(
             cmap_key, clip_low=clip_low, clip_high=clip_high, processing=cfg)
         if n == 0:
@@ -1864,7 +1884,7 @@ class ProbeFlowWindow(QMainWindow):
         px_y = h_m / Ny if Ny > 0 and h_m > 0 else 1e-10
         try:
             results = _proc.measure_periodicity(arr, px_x, px_y)
-            self._browse_sidebar.show_periodicity_result(results)
+            self._browse_tools.show_periodicity_result(results)
             self._status_bar.showMessage(
                 f"Periodicity: {len(results)} peak(s) found")
         except Exception as exc:
@@ -1899,7 +1919,7 @@ class ProbeFlowWindow(QMainWindow):
 
         hdr = parse_sxm_header(entry.path)
         w_m, h_m = _sxm_scan_range(hdr)
-        clip_low, clip_high = self._browse_sidebar.get_clip_values()
+        clip_low, clip_high = self._browse_tools.get_clip_values()
         cmap_key = self._grid._card_colormaps.get(entry.stem, DEFAULT_CMAP_KEY)
 
         try:
@@ -1979,7 +1999,8 @@ class ProbeFlowWindow(QMainWindow):
         t = THEMES["dark" if self._dark else "light"]
         QApplication.instance().setStyleSheet(_build_qss(t))
         self._grid.apply_theme(t)
-        self._browse_sidebar.apply_theme(t)
+        self._browse_tools.apply_theme(t)
+        self._browse_info.apply_theme(t)
         self._tab_bar.setStyleSheet(f"background-color: {t['main_bg']};")
         self._update_tab_styles()
 
@@ -1991,7 +2012,7 @@ class ProbeFlowWindow(QMainWindow):
 
     # ── Close ──────────────────────────────────────────────────────────────────
     def closeEvent(self, event):
-        cl, ch = self._browse_sidebar.get_clip_values()
+        cl, ch = self._browse_tools.get_clip_values()
         save_config({
             "dark_mode":     self._dark,
             "input_dir":     self._conv_panel.input_entry.text(),
@@ -2001,7 +2022,7 @@ class ProbeFlowWindow(QMainWindow):
             "do_sxm":        self._convert_sidebar.sxm_cb.isChecked(),
             "clip_low":      cl,
             "clip_high":     ch,
-            "colormap":      self._browse_sidebar.cmap_cb.currentText(),
+            "colormap":      self._browse_tools.cmap_cb.currentText(),
         })
         super().closeEvent(event)
 
@@ -2027,12 +2048,14 @@ QScrollArea, QScrollArea > QWidget > QWidget {{
     background-color: {t['main_bg']};
     border: none;
 }}
-BrowseSidebar, BrowseSidebar QWidget,
+BrowseToolPanel, BrowseToolPanel QWidget,
+BrowseInfoPanel, BrowseInfoPanel QWidget,
 ConvertSidebar, ConvertSidebar QWidget,
 ConvertPanel, ConvertPanel QWidget {{
     background-color: {t['sidebar_bg']};
 }}
-BrowseSidebar QLabel, ConvertSidebar QLabel, ConvertPanel QLabel {{
+BrowseToolPanel QLabel, BrowseInfoPanel QLabel,
+ConvertSidebar QLabel, ConvertPanel QLabel {{
     color: {t['fg']};
     background: transparent;
 }}
