@@ -18,14 +18,16 @@ from PySide6.QtGui import (
     QColor, QCursor, QFont, QImage, QMovie, QPixmap,
 )
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog,
-    QDoubleSpinBox, QFileDialog, QFrame, QGridLayout,
+    QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QComboBox,
+    QDialog, QDoubleSpinBox, QFileDialog, QFrame, QGridLayout,
     QHBoxLayout, QLabel, QLineEdit, QMainWindow, QPushButton,
-    QScrollArea, QSlider, QSplitter, QStackedWidget, QStatusBar,
-    QTableWidget, QTableWidgetItem, QHeaderView, QTextEdit,
+    QRadioButton, QScrollArea, QSlider, QSplitter, QStackedWidget,
+    QStatusBar, QTableWidget, QTableWidgetItem, QHeaderView, QTextEdit,
     QVBoxLayout, QWidget,
 )
 import webbrowser
+
+from nanonis_tools import processing as _proc
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 CONFIG_PATH     = Path.home() / ".probeflow_config.json"
@@ -261,6 +263,100 @@ def render_sxm_plane(
         return None
 
 
+def read_sxm_plane_raw(sxm_path: Path, plane_idx: int = 0) -> Optional[np.ndarray]:
+    """Read raw float32 array for a plane from an SXM file, returns None on error."""
+    try:
+        hdr    = parse_sxm_header(sxm_path)
+        Nx, Ny = _sxm_dims(hdr)
+        if Nx <= 0 or Ny <= 0:
+            return None
+
+        data_offset = int((DEFAULT_CUSHION / "data_offset.txt").read_text().strip())
+        raw = sxm_path.read_bytes()
+
+        plane_bytes = Ny * Nx * 4
+        start = data_offset + plane_idx * plane_bytes
+        if start + plane_bytes > len(raw):
+            return None
+
+        arr = np.frombuffer(raw[start: start + plane_bytes], dtype=">f4").copy()
+        return arr.reshape((Ny, Nx))
+    except Exception:
+        return None
+
+
+def _sxm_scan_range(hdr: dict) -> tuple[float, float]:
+    """Return (width_m, height_m) from the SCAN_RANGE header entry."""
+    nums = _re.findall(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?",
+                       hdr.get("SCAN_RANGE", ""))
+    if len(nums) >= 2:
+        try:
+            return (float(nums[0]), float(nums[1]))
+        except ValueError:
+            pass
+    return (0.0, 0.0)
+
+
+def render_with_processing(
+    arr:        np.ndarray,
+    colormap:   str,
+    clip_low:   float,
+    clip_high:  float,
+    processing: dict,
+    size:       Optional[tuple] = None,
+) -> Optional[Image.Image]:
+    """
+    Apply the processing pipeline to *arr* then render to a PIL Image.
+
+    processing keys (all optional / defaulted):
+        remove_bad_lines : bool
+        bg_order         : None | 1 | 2
+        fft_mode         : None | 'low_pass' | 'high_pass'
+        fft_cutoff       : float  (0.01 – 0.50)
+        fft_window       : str    ('hanning')
+    """
+    if processing is None:
+        processing = {}
+    try:
+        a = arr.astype(np.float64, copy=True)
+
+        if processing.get('remove_bad_lines'):
+            a = _proc.remove_bad_lines(a)
+
+        bg_order = processing.get('bg_order')
+        if bg_order is not None:
+            a = _proc.subtract_background(a, order=int(bg_order))
+
+        fft_mode = processing.get('fft_mode')
+        if fft_mode is not None:
+            a = _proc.fourier_filter(
+                a,
+                mode=fft_mode,
+                cutoff=float(processing.get('fft_cutoff', 0.10)),
+                window=str(processing.get('fft_window', 'hanning')),
+            )
+
+        finite = a[np.isfinite(a)]
+        if finite.size == 0:
+            return None
+        vmin = float(np.percentile(finite, clip_low))
+        vmax = float(np.percentile(finite, clip_high))
+        if vmax <= vmin:
+            vmin, vmax = float(finite.min()), float(finite.max())
+        if vmax <= vmin:
+            return None
+
+        safe    = np.where(np.isfinite(a), a, vmin).astype(np.float64)
+        u8      = np.clip((safe - vmin) / (vmax - vmin) * 255, 0, 255).astype(np.uint8)
+        colored = _get_lut(colormap)[u8]
+        img     = Image.fromarray(colored, mode="RGB")
+        if size:
+            img.thumbnail(size, Image.LANCZOS)
+        return img
+    except Exception:
+        return None
+
+
 def scan_sxm_folder(root: Path) -> list[SxmFile]:
     entries = []
     for sxm in sorted(Path(root).rglob("*.sxm")):
@@ -316,7 +412,8 @@ class ThumbnailSignals(QObject):
 
 class ThumbnailLoader(QRunnable):
     def __init__(self, entry: SxmFile, colormap: str, token, w: int, h: int,
-                 clip_low: float = 1.0, clip_high: float = 99.0):
+                 clip_low: float = 1.0, clip_high: float = 99.0,
+                 processing: dict = None):
         super().__init__()
         self.setAutoDelete(True)
         self.signals    = ThumbnailSignals()
@@ -327,11 +424,22 @@ class ThumbnailLoader(QRunnable):
         self.h          = h
         self.clip_low   = clip_low
         self.clip_high  = clip_high
+        self.processing = processing or {}
 
     def run(self):
-        img = render_sxm_plane(self.entry.path, 0, self.colormap,
-                                self.clip_low, self.clip_high,
-                                size=(self.w, self.h))
+        if self.processing:
+            # Use raw array path so processing functions receive unscaled data
+            arr = read_sxm_plane_raw(self.entry.path, 0)
+            if arr is not None:
+                img = render_with_processing(
+                    arr, self.colormap, self.clip_low, self.clip_high,
+                    self.processing, size=(self.w, self.h))
+            else:
+                img = None
+        else:
+            img = render_sxm_plane(self.entry.path, 0, self.colormap,
+                                   self.clip_low, self.clip_high,
+                                   size=(self.w, self.h))
         if img is not None:
             self.signals.loaded.emit(self.entry.stem, pil_to_pixmap(img), self.token)
 
@@ -344,23 +452,34 @@ class ChannelSignals(QObject):
 class ChannelLoader(QRunnable):
     def __init__(self, entry: SxmFile, idx: int, colormap: str,
                  token, w: int, h: int, signals: ChannelSignals,
-                 clip_low: float = 1.0, clip_high: float = 99.0):
+                 clip_low: float = 1.0, clip_high: float = 99.0,
+                 processing: dict = None):
         super().__init__()
         self.setAutoDelete(True)
-        self.signals   = signals
-        self.entry     = entry
-        self.idx       = idx
-        self.colormap  = colormap
-        self.token     = token
-        self.w         = w
-        self.h         = h
-        self.clip_low  = clip_low
-        self.clip_high = clip_high
+        self.signals    = signals
+        self.entry      = entry
+        self.idx        = idx
+        self.colormap   = colormap
+        self.token      = token
+        self.w          = w
+        self.h          = h
+        self.clip_low   = clip_low
+        self.clip_high  = clip_high
+        self.processing = processing or {}
 
     def run(self):
-        img = render_sxm_plane(self.entry.path, self.idx, self.colormap,
-                                self.clip_low, self.clip_high,
-                                size=(self.w, self.h))
+        if self.processing:
+            arr = read_sxm_plane_raw(self.entry.path, self.idx)
+            if arr is not None:
+                img = render_with_processing(
+                    arr, self.colormap, self.clip_low, self.clip_high,
+                    self.processing, size=(self.w, self.h))
+            else:
+                img = None
+        else:
+            img = render_sxm_plane(self.entry.path, self.idx, self.colormap,
+                                   self.clip_low, self.clip_high,
+                                   size=(self.w, self.h))
         if img is not None:
             self.signals.loaded.emit(self.idx, pil_to_pixmap(img), self.token)
 
@@ -629,8 +748,9 @@ class ThumbnailGrid(QWidget):
 
     def set_colormap_for_selection(self, colormap_key: str,
                                     clip_low: float = 1.0,
-                                    clip_high: float = 99.0) -> int:
-        """Apply colormap and scale to selected cards only. Returns count updated."""
+                                    clip_high: float = 99.0,
+                                    processing: dict = None) -> int:
+        """Apply colormap, scale and optional processing to selected cards. Returns count updated."""
         if not self._selected:
             return 0
         token = self._load_token
@@ -641,7 +761,8 @@ class ThumbnailGrid(QWidget):
                 self._card_colormaps[stem] = colormap_key
                 loader = ThumbnailLoader(entry, colormap_key, token,
                                          ScanCard.IMG_W, ScanCard.IMG_H,
-                                         clip_low, clip_high)
+                                         clip_low, clip_high,
+                                         processing=processing)
                 loader.signals.loaded.connect(self._on_thumb)
                 self._pool.start(loader)
         return len(self._selected)
@@ -730,8 +851,11 @@ class ThumbnailGrid(QWidget):
 
 # ── Browse sidebar ────────────────────────────────────────────────────────────
 class BrowseSidebar(QWidget):
-    colormap_apply_requested = Signal(str)   # emits colormap key
-    scale_changed            = Signal(float, float)  # emits (clip_low, clip_high)
+    colormap_apply_requested  = Signal(str)         # emits colormap key
+    scale_changed             = Signal(float, float) # emits (clip_low, clip_high)
+    processing_apply_requested = Signal(dict)        # emits processing config
+    measure_requested          = Signal()
+    export_requested           = Signal()
 
     def __init__(self, t: dict, cfg: dict, parent=None):
         super().__init__(parent)
@@ -825,6 +949,111 @@ class BrowseSidebar(QWidget):
         scale_hint.setFont(QFont("Helvetica", 7))
         scale_hint.setWordWrap(True)
         lay.addWidget(scale_hint)
+        lay.addWidget(_sep())
+
+        # ── Processing section (collapsible) ──────────────────────────────────
+        self._proc_toggle = QPushButton("[+] Processing")
+        self._proc_toggle.setFlat(True)
+        self._proc_toggle.setFont(QFont("Helvetica", 9))
+        self._proc_toggle.setCursor(QCursor(Qt.PointingHandCursor))
+        self._proc_toggle.clicked.connect(self._toggle_proc_section)
+        lay.addWidget(self._proc_toggle)
+
+        self._proc_widget = QWidget()
+        proc_lay = QVBoxLayout(self._proc_widget)
+        proc_lay.setContentsMargins(0, 2, 0, 2)
+        proc_lay.setSpacing(4)
+
+        # Remove bad lines checkbox
+        self._rbl_cb = QCheckBox("Remove bad lines")
+        self._rbl_cb.setFont(QFont("Helvetica", 8))
+        proc_lay.addWidget(self._rbl_cb)
+
+        # Background subtraction
+        bg_row = QHBoxLayout()
+        bg_lbl = QLabel("Background:")
+        bg_lbl.setFont(QFont("Helvetica", 8))
+        bg_lbl.setFixedWidth(80)
+        self._bg_combo = QComboBox()
+        self._bg_combo.addItems(["None", "Plane", "Quadratic 2nd"])
+        self._bg_combo.setFont(QFont("Helvetica", 8))
+        bg_row.addWidget(bg_lbl)
+        bg_row.addWidget(self._bg_combo, 1)
+        proc_lay.addLayout(bg_row)
+
+        # FFT filter mode
+        fft_row = QHBoxLayout()
+        fft_lbl = QLabel("FFT filter:")
+        fft_lbl.setFont(QFont("Helvetica", 8))
+        fft_lbl.setFixedWidth(80)
+        self._fft_combo = QComboBox()
+        self._fft_combo.addItems(["None", "Low-pass", "High-pass"])
+        self._fft_combo.setFont(QFont("Helvetica", 8))
+        self._fft_combo.currentIndexChanged.connect(self._on_fft_mode_changed)
+        fft_row.addWidget(fft_lbl)
+        fft_row.addWidget(self._fft_combo, 1)
+        proc_lay.addLayout(fft_row)
+
+        # FFT cutoff slider (hidden when FFT=None)
+        self._fft_cutoff_widget = QWidget()
+        cutoff_lay = QHBoxLayout(self._fft_cutoff_widget)
+        cutoff_lay.setContentsMargins(0, 0, 0, 0)
+        cutoff_lbl = QLabel("Cutoff:")
+        cutoff_lbl.setFont(QFont("Helvetica", 8))
+        cutoff_lbl.setFixedWidth(50)
+        self._fft_sl = QSlider(Qt.Horizontal)
+        self._fft_sl.setRange(1, 50)
+        self._fft_sl.setValue(10)
+        self._fft_cutoff_lbl = QLabel("10%")
+        self._fft_cutoff_lbl.setFont(QFont("Helvetica", 8))
+        self._fft_cutoff_lbl.setFixedWidth(32)
+        self._fft_sl.valueChanged.connect(
+            lambda v: self._fft_cutoff_lbl.setText(f"{v}%"))
+        cutoff_lay.addWidget(cutoff_lbl)
+        cutoff_lay.addWidget(self._fft_sl, 1)
+        cutoff_lay.addWidget(self._fft_cutoff_lbl)
+        proc_lay.addWidget(self._fft_cutoff_widget)
+        self._fft_cutoff_widget.setVisible(False)
+
+        # Apply processing button
+        self._proc_apply_btn = QPushButton("Apply to selection")
+        self._proc_apply_btn.setFont(QFont("Helvetica", 8))
+        self._proc_apply_btn.setFixedHeight(26)
+        self._proc_apply_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self._proc_apply_btn.setObjectName("accentBtn")
+        self._proc_apply_btn.clicked.connect(self._on_proc_apply)
+        proc_lay.addWidget(self._proc_apply_btn)
+
+        proc_lay.addWidget(_sep())
+
+        # Measure periodicity
+        self._meas_btn = QPushButton("Measure Periodicity")
+        self._meas_btn.setFont(QFont("Helvetica", 8))
+        self._meas_btn.setFixedHeight(26)
+        self._meas_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self._meas_btn.clicked.connect(self._on_measure_periodicity)
+        proc_lay.addWidget(self._meas_btn)
+
+        self._meas_result = QLabel("")
+        self._meas_result.setFont(QFont("Courier", 8))
+        self._meas_result.setWordWrap(True)
+        self._meas_result.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        proc_lay.addWidget(self._meas_result)
+
+        lay.addWidget(self._proc_widget)
+        self._proc_widget.setVisible(False)
+
+        lay.addWidget(_sep())
+
+        # ── Export button ──────────────────────────────────────────────────────
+        self._export_btn = QPushButton("\u2b07 Export PNG\u2026")
+        self._export_btn.setFont(QFont("Helvetica", 9, QFont.Bold))
+        self._export_btn.setFixedHeight(30)
+        self._export_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self._export_btn.setObjectName("accentBtn")
+        self._export_btn.clicked.connect(self.export_requested.emit)
+        lay.addWidget(self._export_btn)
+
         lay.addWidget(_sep())
 
         # 4-channel thumbnails (2×2)
@@ -983,6 +1212,116 @@ class BrowseSidebar(QWidget):
                 v_item.setForeground(QColor(t["fg"]))
                 self.meta_table.setItem(row, 0, p_item)
                 self.meta_table.setItem(row, 1, v_item)
+
+    def _toggle_proc_section(self):
+        vis = not self._proc_widget.isVisible()
+        self._proc_widget.setVisible(vis)
+        self._proc_toggle.setText("[-] Processing" if vis else "[+] Processing")
+
+    def _on_fft_mode_changed(self, idx: int):
+        self._fft_cutoff_widget.setVisible(idx != 0)
+
+    def _on_proc_apply(self):
+        bg_map  = {0: None, 1: 1, 2: 2}
+        fft_map = {0: None, 1: 'low_pass', 2: 'high_pass'}
+        cfg = {
+            'remove_bad_lines': self._rbl_cb.isChecked(),
+            'bg_order':         bg_map[self._bg_combo.currentIndex()],
+            'fft_mode':         fft_map[self._fft_combo.currentIndex()],
+            'fft_cutoff':       self._fft_sl.value() / 100.0,
+            'fft_window':       'hanning',
+        }
+        self.processing_apply_requested.emit(cfg)
+
+    def _on_measure_periodicity(self):
+        self.measure_requested.emit()
+
+    def show_periodicity_result(self, results: list):
+        if not results:
+            self._meas_result.setText("No peaks found.")
+            return
+        lines = []
+        for i, r in enumerate(results, 1):
+            period_nm = r['period_m'] * 1e9
+            angle     = r['angle_deg']
+            lines.append(f"Peak {i}: {period_nm:.3f} nm  {angle:.1f}°")
+        self._meas_result.setText("\n".join(lines))
+
+
+# ── Export dialog ────────────────────────────────────────────────────────────
+class ExportDialog(QDialog):
+    def __init__(self, t: dict, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Export PNG")
+        self.setFixedSize(340, 240)
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(18, 14, 18, 14)
+        lay.setSpacing(8)
+
+        self._scalebar_cb = QCheckBox("Add scale bar")
+        self._scalebar_cb.setChecked(True)
+        self._scalebar_cb.toggled.connect(self._on_scalebar_toggled)
+        lay.addWidget(self._scalebar_cb)
+
+        self._sb_opts = QWidget()
+        sb_lay = QVBoxLayout(self._sb_opts)
+        sb_lay.setContentsMargins(12, 0, 0, 0)
+        sb_lay.setSpacing(4)
+
+        unit_row = QHBoxLayout()
+        unit_lbl = QLabel("Unit:")
+        unit_lbl.setFixedWidth(60)
+        self._unit_group = QButtonGroup(self)
+        self._nm_rb  = QRadioButton("nm")
+        self._ang_rb = QRadioButton("Å")
+        self._pm_rb  = QRadioButton("pm")
+        self._nm_rb.setChecked(True)
+        for rb in (self._nm_rb, self._ang_rb, self._pm_rb):
+            self._unit_group.addButton(rb)
+            unit_row.addWidget(rb)
+        unit_row.insertWidget(0, unit_lbl)
+        unit_row.addStretch()
+        sb_lay.addLayout(unit_row)
+
+        pos_row = QHBoxLayout()
+        pos_lbl = QLabel("Position:")
+        pos_lbl.setFixedWidth(60)
+        self._pos_cb = QComboBox()
+        self._pos_cb.addItems(["bottom-right", "bottom-left", "top-right", "top-left"])
+        pos_row.addWidget(pos_lbl)
+        pos_row.addWidget(self._pos_cb, 1)
+        sb_lay.addLayout(pos_row)
+
+        lay.addWidget(self._sb_opts)
+        lay.addWidget(_sep())
+
+        btn_row = QHBoxLayout()
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(self.reject)
+        ok_btn = QPushButton("Export…")
+        ok_btn.setObjectName("accentBtn")
+        ok_btn.clicked.connect(self.accept)
+        btn_row.addWidget(cancel_btn)
+        btn_row.addStretch()
+        btn_row.addWidget(ok_btn)
+        lay.addLayout(btn_row)
+        lay.addStretch()
+
+    def _on_scalebar_toggled(self, checked: bool):
+        self._sb_opts.setEnabled(checked)
+
+    def get_settings(self) -> dict:
+        unit = "nm"
+        if self._ang_rb.isChecked():
+            unit = "Å"
+        elif self._pm_rb.isChecked():
+            unit = "pm"
+        return {
+            'add_scalebar':  self._scalebar_cb.isChecked(),
+            'scalebar_unit': unit,
+            'scalebar_pos':  self._pos_cb.currentText(),
+        }
 
 
 # ── Convert panel ─────────────────────────────────────────────────────────────
@@ -1369,6 +1708,9 @@ class ProbeFlowWindow(QMainWindow):
         self._grid.selection_changed.connect(self._on_selection_changed)
         self._browse_sidebar.colormap_apply_requested.connect(self._on_apply_colormap)
         self._browse_sidebar.scale_changed.connect(self._on_scale_changed)
+        self._browse_sidebar.processing_apply_requested.connect(self._on_processing_apply)
+        self._browse_sidebar.measure_requested.connect(self._on_measure_periodicity)
+        self._browse_sidebar.export_requested.connect(self._on_export)
         self._convert_sidebar.run_btn.clicked.connect(self._run)
         self._conv_panel.input_entry.textChanged.connect(self._update_count)
 
@@ -1480,6 +1822,98 @@ class ProbeFlowWindow(QMainWindow):
                               if e.stem == primary), None)
                 if entry:
                     self._browse_sidebar._load_channels(entry, cmap_key)
+
+    def _on_processing_apply(self, cfg: dict):
+        clip_low, clip_high = self._browse_sidebar.get_clip_values()
+        cmap_key = CMAP_KEY.get(
+            self._browse_sidebar.cmap_cb.currentText(), DEFAULT_CMAP_KEY)
+        n = self._grid.set_colormap_for_selection(
+            cmap_key, clip_low=clip_low, clip_high=clip_high, processing=cfg)
+        if n == 0:
+            self._status_bar.showMessage(
+                "No images selected — click images first")
+        else:
+            steps = []
+            if cfg.get('remove_bad_lines'):
+                steps.append("bad lines removed")
+            if cfg.get('bg_order') is not None:
+                steps.append(f"bg order {cfg['bg_order']}")
+            if cfg.get('fft_mode'):
+                steps.append(
+                    f"FFT {cfg['fft_mode']} {cfg.get('fft_cutoff', 0.1)*100:.0f}%")
+            desc = ", ".join(steps) if steps else "no processing"
+            self._status_bar.showMessage(
+                f"Processing ({desc}) applied to {n} image{'s' if n > 1 else ''}")
+
+    def _on_measure_periodicity(self):
+        primary = self._grid.get_primary()
+        if not primary:
+            self._status_bar.showMessage("Select an image first")
+            return
+        entry = next((e for e in self._grid.get_entries() if e.stem == primary), None)
+        if not entry:
+            return
+        arr = read_sxm_plane_raw(entry.path, 0)
+        if arr is None:
+            self._status_bar.showMessage("Could not read scan data")
+            return
+        hdr = parse_sxm_header(entry.path)
+        w_m, h_m = _sxm_scan_range(hdr)
+        Ny, Nx = arr.shape
+        px_x = w_m / Nx if Nx > 0 and w_m > 0 else 1e-10
+        px_y = h_m / Ny if Ny > 0 and h_m > 0 else 1e-10
+        try:
+            results = _proc.measure_periodicity(arr, px_x, px_y)
+            self._browse_sidebar.show_periodicity_result(results)
+            self._status_bar.showMessage(
+                f"Periodicity: {len(results)} peak(s) found")
+        except Exception as exc:
+            self._status_bar.showMessage(f"Periodicity error: {exc}")
+
+    def _on_export(self):
+        primary = self._grid.get_primary()
+        if not primary:
+            self._status_bar.showMessage("Select an image first")
+            return
+        entry = next((e for e in self._grid.get_entries() if e.stem == primary), None)
+        if not entry:
+            return
+
+        t   = THEMES["dark" if self._dark else "light"]
+        dlg = ExportDialog(t, self)
+        dlg.setStyleSheet(QApplication.instance().styleSheet())
+        if dlg.exec() != QDialog.Accepted:
+            return
+        settings = dlg.get_settings()
+
+        out_path, _ = QFileDialog.getSaveFileName(
+            self, "Save PNG", str(Path.home() / f"{entry.stem}.png"),
+            "PNG images (*.png)")
+        if not out_path:
+            return
+
+        arr = read_sxm_plane_raw(entry.path, 0)
+        if arr is None:
+            self._status_bar.showMessage("Could not read scan data")
+            return
+
+        hdr = parse_sxm_header(entry.path)
+        w_m, h_m = _sxm_scan_range(hdr)
+        clip_low, clip_high = self._browse_sidebar.get_clip_values()
+        cmap_key = self._grid._card_colormaps.get(entry.stem, DEFAULT_CMAP_KEY)
+
+        try:
+            _proc.export_png(
+                arr, out_path, cmap_key, clip_low, clip_high,
+                lut_fn=lambda key: _get_lut(key),
+                scan_range_m=(w_m, h_m),
+                add_scalebar=settings['add_scalebar'],
+                scalebar_unit=settings['scalebar_unit'],
+                scalebar_pos=settings['scalebar_pos'],
+            )
+            self._status_bar.showMessage(f"Exported → {out_path}")
+        except Exception as exc:
+            self._status_bar.showMessage(f"Export error: {exc}")
 
     # ── Convert ────────────────────────────────────────────────────────────────
     def _update_count(self, text: str = ""):
