@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "createc-to-nanonis-file-conversion"
+name = "probeflow"
 version = "1.01.0"
-description = "CLI tools for converting Createc STM .dat files to Nanonis .sxm format and PNG previews."
+description = "ProbeFlow — Createc to Nanonis file conversion. Converts STM .dat files to .sxm format and PNG previews."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -17,9 +17,9 @@ dependencies = [
 dev = ["pytest"]
 
 [project.scripts]
-dat-png = "nanonis_tools.dats_to_pngs:main"
-dat-sxm = "nanonis_tools.dat_sxm_cli:main"
-dat-gui = "nanonis_tools.gui:main"
+dat-png    = "nanonis_tools.dats_to_pngs:main"
+dat-sxm    = "nanonis_tools.dat_sxm_cli:main"
+probeflow  = "nanonis_tools.gui:main"
 
 [tool.setuptools]
 include-package-data = false
