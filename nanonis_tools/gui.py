@@ -30,7 +30,33 @@ from PySide6.QtWidgets import (
     QStatusBar, QTableWidget, QTableWidgetItem, QHeaderView, QTextEdit,
     QVBoxLayout, QWidget,
 )
+import shutil
+import subprocess
 import webbrowser
+
+from PySide6.QtCore import QUrl
+from PySide6.QtGui import QDesktopServices
+
+
+def _open_url(url: str) -> None:
+    """Open URL in default browser. Tries Qt first, then Windows (WSL), then webbrowser."""
+    try:
+        if QDesktopServices.openUrl(QUrl(url)):
+            return
+    except Exception:
+        pass
+    if shutil.which("cmd.exe"):
+        try:
+            subprocess.Popen(["cmd.exe", "/c", "start", "", url],
+                             stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL)
+            return
+        except Exception:
+            pass
+    try:
+        webbrowser.open(url)
+    except Exception:
+        pass
 
 from nanonis_tools import processing as _proc
 
@@ -1585,20 +1611,19 @@ class BrowseToolPanel(QWidget):
         cm_lbl.setFont(QFont("Helvetica", 11, QFont.Bold))
         lay.addWidget(cm_lbl)
 
-        cm_row = QHBoxLayout()
         self.cmap_cb = QComboBox()
         self.cmap_cb.addItems(CMAP_NAMES)
         self.cmap_cb.setCurrentText(cfg.get("colormap", DEFAULT_CMAP_LABEL))
         self.cmap_cb.setFont(QFont("Helvetica", 10))
+        lay.addWidget(self.cmap_cb)
+
         self._apply_btn = QPushButton("Apply to selection")
         self._apply_btn.setFont(QFont("Helvetica", 10))
         self._apply_btn.setFixedHeight(30)
         self._apply_btn.setCursor(QCursor(Qt.PointingHandCursor))
         self._apply_btn.setObjectName("accentBtn")
         self._apply_btn.clicked.connect(self._on_apply)
-        cm_row.addWidget(self.cmap_cb, 1)
-        cm_row.addWidget(self._apply_btn)
-        lay.addLayout(cm_row)
+        lay.addWidget(self._apply_btn)
 
         self._sel_hint = QLabel("Select images first (Ctrl+click for multi-select)")
         self._sel_hint.setFont(QFont("Helvetica", 9))
@@ -2411,7 +2436,7 @@ class AboutDialog(QDialog):
         gh_btn.setCursor(QCursor(Qt.PointingHandCursor))
         gh_btn.setObjectName("accentBtn")
         gh_btn.setFixedHeight(36)
-        gh_btn.clicked.connect(lambda: webbrowser.open(GITHUB_URL))
+        gh_btn.clicked.connect(lambda: _open_url(GITHUB_URL))
         lay.addWidget(gh_btn)
 
 
@@ -2437,7 +2462,7 @@ class Navbar(QWidget):
             self._logo_lbl.setPixmap(
                 pix.scaled(9999, 46, Qt.KeepAspectRatio, Qt.SmoothTransformation))
             self._logo_lbl.setCursor(QCursor(Qt.PointingHandCursor))
-            self._logo_lbl.mousePressEvent = lambda e: webbrowser.open(GITHUB_URL)
+            self._logo_lbl.mousePressEvent = lambda e: _open_url(GITHUB_URL)
             lay.addWidget(self._logo_lbl)
 
         lay.addStretch()
@@ -2456,7 +2481,7 @@ class Navbar(QWidget):
             "Light mode" if dark else "Dark mode",
             self.theme_toggle_clicked.emit,
         )
-        _nbtn("GitHub", lambda: webbrowser.open(GITHUB_URL))
+        _nbtn("GitHub", lambda: _open_url(GITHUB_URL))
         _nbtn("About",  self.about_clicked.emit)
 
         self._apply_nav_theme()
