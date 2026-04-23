@@ -399,6 +399,109 @@ def _cmd_dat2png(args) -> int:
 
 # ─── Parser construction ─────────────────────────────────────────────────────
 
+def _cmd_spec_info(args) -> int:
+    setup_logging(args.verbose)
+    from probeflow.spec_io import read_spec_file
+    spec = read_spec_file(args.input)
+    if args.json:
+        import json as _json
+        out = {
+            "file": str(args.input),
+            "sweep_type": spec.metadata["sweep_type"],
+            "n_points": spec.metadata["n_points"],
+            "channels": list(spec.channels.keys()),
+            "x_label": spec.x_label,
+            "x_unit": spec.x_unit,
+            "position_m": list(spec.position),
+            "metadata": spec.metadata,
+        }
+        print(_json.dumps(out, indent=2))
+    else:
+        print(f"file        : {args.input}")
+        print(f"sweep type  : {spec.metadata['sweep_type']}")
+        print(f"n_points    : {spec.metadata['n_points']}")
+        print(f"channels    : {', '.join(spec.channels)}")
+        print(f"x_axis      : {spec.x_label}")
+        x = spec.x_array
+        print(f"x_range     : {x.min():.4g} to {x.max():.4g} {spec.x_unit}")
+        px, py = spec.position
+        print(f"position    : ({px*1e9:.3f}, {py*1e9:.3f}) nm")
+        for key in ("bias_mv", "spec_freq_hz", "gain_pre_exp", "fb_log", "title"):
+            if key in spec.metadata:
+                print(f"{key:12s}: {spec.metadata[key]}")
+    return 0
+
+
+def _cmd_spec_plot(args) -> int:
+    setup_logging(args.verbose)
+    import matplotlib
+    matplotlib.use("Agg" if args.output else "TkAgg", force=False)
+    import matplotlib.pyplot as plt
+    from probeflow.spec_io import read_spec_file
+    from probeflow.spec_plot import plot_spectrum
+
+    spec = read_spec_file(args.input)
+    fig, ax = plt.subplots()
+    plot_spectrum(spec, channel=args.channel, ax=ax)
+    ax.set_title(Path(args.input).stem)
+
+    if args.output:
+        fig.savefig(args.output, dpi=150, bbox_inches="tight")
+        log.info("[OK] %s → %s", args.input.name, args.output)
+    else:
+        plt.show()
+    return 0
+
+
+def _cmd_spec_overlay(args) -> int:
+    setup_logging(args.verbose)
+    import matplotlib
+    matplotlib.use("Agg" if args.output else "TkAgg", force=False)
+    import matplotlib.pyplot as plt
+    from probeflow.spec_io import read_spec_file
+    from probeflow.spec_plot import plot_spectra
+    from probeflow.spec_processing import average_spectra
+
+    specs = [read_spec_file(p) for p in args.inputs]
+    fig, ax = plt.subplots()
+    plot_spectra(specs, channel=args.channel, offset=args.offset, ax=ax)
+
+    if args.average:
+        ch_data = [s.channels[args.channel] for s in specs]
+        avg = average_spectra(ch_data)
+        ax.plot(specs[0].x_array, avg, "k--", linewidth=2, label="average")
+
+    ax.legend(fontsize=7)
+
+    if args.output:
+        fig.savefig(args.output, dpi=150, bbox_inches="tight")
+        log.info("[OK] overlay → %s", args.output)
+    else:
+        plt.show()
+    return 0
+
+
+def _cmd_spec_positions(args) -> int:
+    setup_logging(args.verbose)
+    import matplotlib
+    matplotlib.use("Agg" if args.output else "TkAgg", force=False)
+    import matplotlib.pyplot as plt
+    from probeflow.spec_io import read_spec_file
+    from probeflow.spec_plot import plot_spec_positions
+
+    specs = [read_spec_file(p) for p in args.inputs]
+    fig, ax = plt.subplots()
+    plot_spec_positions(str(args.image), specs, ax=ax)
+    ax.set_title(Path(args.image).stem)
+
+    if args.output:
+        fig.savefig(args.output, dpi=150, bbox_inches="tight")
+        log.info("[OK] positions → %s", args.output)
+    else:
+        plt.show()
+    return 0
+
+
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="probeflow",
@@ -568,6 +671,50 @@ def _build_parser() -> argparse.ArgumentParser:
 
     gui = sub.add_parser("gui", help="Launch the ProbeFlow graphical interface")
     gui.set_defaults(func=_cmd_gui)
+
+    # ── spectroscopy ──
+    spec_info = sub.add_parser("spec-info",
+        help="Print metadata from a Createc .VERT spectroscopy file")
+    spec_info.add_argument("input", type=Path, help="Path to a .VERT file")
+    spec_info.add_argument("--json", action="store_true",
+        help="Output as JSON")
+    spec_info.add_argument("--verbose", action="store_true")
+    spec_info.set_defaults(func=_cmd_spec_info)
+
+    spec_plot = sub.add_parser("spec-plot",
+        help="Quick plot of a single .VERT spectrum")
+    spec_plot.add_argument("input", type=Path, help="Path to a .VERT file")
+    spec_plot.add_argument("--channel", default="Z",
+        help="Data channel to plot: I, Z, or V (default: Z)")
+    spec_plot.add_argument("-o", "--output", type=Path, default=None,
+        help="Save plot to this path instead of showing it interactively")
+    spec_plot.add_argument("--verbose", action="store_true")
+    spec_plot.set_defaults(func=_cmd_spec_plot)
+
+    spec_overlay = sub.add_parser("spec-overlay",
+        help="Overlay multiple .VERT spectra on one axes")
+    spec_overlay.add_argument("inputs", nargs="+", type=Path,
+        help="Two or more .VERT files")
+    spec_overlay.add_argument("--channel", default="Z",
+        help="Data channel to plot (default: Z)")
+    spec_overlay.add_argument("--offset", type=float, default=0.0,
+        help="Vertical offset between curves for waterfall display")
+    spec_overlay.add_argument("--average", action="store_true",
+        help="Also plot the mean of all spectra")
+    spec_overlay.add_argument("-o", "--output", type=Path, default=None,
+        help="Save plot to this path instead of showing it interactively")
+    spec_overlay.add_argument("--verbose", action="store_true")
+    spec_overlay.set_defaults(func=_cmd_spec_overlay)
+
+    spec_pos = sub.add_parser("spec-positions",
+        help="Show tip positions of .VERT files overlaid on an .sxm topography")
+    spec_pos.add_argument("image", type=Path, help="Path to the .sxm topography file")
+    spec_pos.add_argument("inputs", nargs="+", type=Path,
+        help="One or more .VERT files whose positions to mark")
+    spec_pos.add_argument("-o", "--output", type=Path, default=None,
+        help="Save plot to this path instead of showing it interactively")
+    spec_pos.add_argument("--verbose", action="store_true")
+    spec_pos.set_defaults(func=_cmd_spec_positions)
 
     return p
 
