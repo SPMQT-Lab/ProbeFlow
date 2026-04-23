@@ -551,6 +551,7 @@ def load_config() -> dict:
         "clip_low":        1.0,
         "clip_high":       99.0,
         "colormap":        DEFAULT_CMAP_LABEL,
+        "browse_filter":   "all",
     }
     try:
         if CONFIG_PATH.exists():
@@ -1042,6 +1043,7 @@ class ThumbnailGrid(QWidget):
         self._history:        dict[str, list[tuple]]           = {}
         self._load_token                                       = object()
         self._current_cols: int                                = 1
+        self._filter_mode: str                                 = "all"
 
         # empty-state placeholder
         self._empty_lbl = QLabel("Open a folder to browse SXM scans")
@@ -1088,7 +1090,7 @@ class ThumbnailGrid(QWidget):
         cols = self._calc_cols()
         self._current_cols = cols
         dark = True  # will be updated via apply_theme if needed
-        for i, entry in enumerate(entries):
+        for entry in entries:
             if isinstance(entry, VertFile):
                 card = SpecCard(entry, self._t)
             else:
@@ -1096,9 +1098,11 @@ class ThumbnailGrid(QWidget):
                 self._card_colormaps[entry.stem] = DEFAULT_CMAP_KEY
             card.clicked.connect(self._on_card_click)
             card.double_clicked.connect(self._on_card_dbl)
-            row, col = divmod(i, cols)
-            self._grid.addWidget(card, row, col, Qt.AlignTop | Qt.AlignLeft)
             self._cards[entry.stem] = card
+
+        # Populate the grid honouring the current filter (fresh loads default
+        # to the filter previously set via apply_filter()).
+        self._relayout_filtered()
 
         # load all thumbnails
         token = self._load_token
@@ -1276,13 +1280,53 @@ class ThumbnailGrid(QWidget):
         if new_cols == self._current_cols:
             return
         self._current_cols = new_cols
+        self._relayout_filtered()
+
+    def apply_filter(self, mode: str):
+        """Switch between showing all entries, only images, or only spectra.
+
+        Does not clear the selection or re-scan the folder; it only re-lays
+        out the grid so hidden cards don't leave empty slots.
+        """
+        if mode not in ("all", "images", "spectra"):
+            mode = "all"
+        self._filter_mode = mode
+        self._relayout_filtered()
+
+    def _is_entry_visible(self, entry) -> bool:
+        mode = self._filter_mode
+        if mode == "images":
+            return isinstance(entry, SxmFile)
+        if mode == "spectra":
+            return isinstance(entry, VertFile)
+        return True  # "all"
+
+    def _relayout_filtered(self):
+        """Re-populate the grid with only cards matching the current filter.
+
+        Selections are preserved on the cards themselves; we merely remove
+        all widgets from the QGridLayout and re-add visible ones in row/col
+        order, which avoids gaps caused by ``setVisible(False)``.
+        """
+        if not self._entries:
+            return
+        # Remove every card from the layout (do not delete the widgets).
         for card in self._cards.values():
             self._grid.removeWidget(card)
-        for i, entry in enumerate(self._entries):
+            card.setVisible(False)
+
+        cols = self._calc_cols()
+        self._current_cols = cols
+
+        i = 0
+        for entry in self._entries:
             card = self._cards.get(entry.stem)
-            if card:
-                row, col = divmod(i, new_cols)
-                self._grid.addWidget(card, row, col, Qt.AlignTop | Qt.AlignLeft)
+            if not card or not self._is_entry_visible(entry):
+                continue
+            row, col = divmod(i, cols)
+            self._grid.addWidget(card, row, col, Qt.AlignTop | Qt.AlignLeft)
+            card.setVisible(True)
+            i += 1
 
 
 # ── Full-size image viewer dialog ─────────────────────────────────────────────
@@ -1864,12 +1908,14 @@ class BrowseToolPanel(QWidget):
     measure_requested          = Signal()
     export_requested           = Signal()
     undo_requested             = Signal()
+    filter_changed             = Signal(str)   # "all" | "images" | "spectra"
 
     def __init__(self, t: dict, cfg: dict, parent=None):
         super().__init__(parent)
-        self._t         = t
-        self._clip_low  = cfg.get("clip_low",  1.0)
-        self._clip_high = cfg.get("clip_high", 99.0)
+        self._t            = t
+        self._clip_low     = cfg.get("clip_low",  1.0)
+        self._clip_high    = cfg.get("clip_high", 99.0)
+        self._filter_mode  = cfg.get("browse_filter", "all")
         self._build(cfg)
 
     def _build(self, cfg: dict):
@@ -1889,13 +1935,48 @@ class BrowseToolPanel(QWidget):
         lay.setSpacing(6)
 
         # ── Open folder button ─────────────────────────────────────────────────
-        open_btn = QPushButton("Open SXM folder…")
+        open_btn = QPushButton("Open folder…")
         open_btn.setFont(QFont("Helvetica", 9))
         open_btn.setFixedHeight(30)
         open_btn.setCursor(QCursor(Qt.PointingHandCursor))
         open_btn.setObjectName("accentBtn")
         open_btn.clicked.connect(self.open_folder_requested.emit)
         lay.addWidget(open_btn)
+
+        # ── Filter toggle (All / Images / Spectra) ─────────────────────────────
+        filter_row = QWidget()
+        filter_lay = QHBoxLayout(filter_row)
+        filter_lay.setContentsMargins(0, 0, 0, 0)
+        filter_lay.setSpacing(0)
+
+        self._filter_group = QButtonGroup(self)
+        self._filter_group.setExclusive(True)
+        self._filter_btns: dict[str, QPushButton] = {}
+        _modes = [("All", "all"), ("Images", "images"), ("Spectra", "spectra")]
+        for i, (label, mode) in enumerate(_modes):
+            btn = QPushButton(label)
+            btn.setCheckable(True)
+            btn.setFont(QFont("Helvetica", 9))
+            btn.setFixedHeight(26)
+            btn.setCursor(QCursor(Qt.PointingHandCursor))
+            # Segmented-control shape: rounded corners only on outer edges
+            if i == 0:
+                btn.setObjectName("segBtnLeft")
+            elif i == len(_modes) - 1:
+                btn.setObjectName("segBtnRight")
+            else:
+                btn.setObjectName("segBtnMid")
+            btn.clicked.connect(lambda _c=False, m=mode: self._on_filter_click(m))
+            self._filter_group.addButton(btn)
+            filter_lay.addWidget(btn, 1)
+            self._filter_btns[mode] = btn
+
+        # Set the initially checked button from config.
+        initial = self._filter_mode if self._filter_mode in self._filter_btns else "all"
+        self._filter_btns[initial].setChecked(True)
+        self._filter_mode = initial
+
+        lay.addWidget(filter_row)
         lay.addWidget(_sep())
 
         # ── Colormap ───────────────────────────────────────────────────────────
@@ -2207,7 +2288,22 @@ class BrowseToolPanel(QWidget):
         }
         self.processing_apply_requested.emit(cfg)
 
+    def _on_filter_click(self, mode: str):
+        self._filter_mode = mode
+        self.filter_changed.emit(mode)
+
     # ── Public API ─────────────────────────────────────────────────────────────
+    def get_filter_mode(self) -> str:
+        return self._filter_mode
+
+    def set_filter_mode(self, mode: str) -> None:
+        if mode not in self._filter_btns:
+            mode = "all"
+        self._filter_mode = mode
+        btn = self._filter_btns[mode]
+        if not btn.isChecked():
+            btn.setChecked(True)
+
     def get_clip_values(self) -> tuple[float, float]:
         return self._clip_low, self._clip_high
 
@@ -3067,6 +3163,10 @@ class ProbeFlowWindow(QMainWindow):
         self._browse_tools.measure_requested.connect(self._on_measure_periodicity)
         self._browse_tools.export_requested.connect(self._on_export)
         self._browse_tools.undo_requested.connect(self._on_undo)
+        self._browse_tools.filter_changed.connect(self._on_filter_changed)
+        # Sync initial filter state from the toolbar into the grid so the
+        # two agree even before the first folder is opened.
+        self._grid.apply_filter(self._browse_tools.get_filter_mode())
         self._convert_sidebar.run_btn.clicked.connect(self._run)
         self._conv_panel.input_entry.textChanged.connect(self._update_count)
 
@@ -3159,6 +3259,21 @@ class ProbeFlowWindow(QMainWindow):
 
     def _on_selection_changed(self, n_selected: int):
         self._browse_tools.update_selection_hint(n_selected)
+
+    def _on_filter_changed(self, mode: str):
+        self._grid.apply_filter(mode)
+        entries = self._grid.get_entries()
+        n_sxm  = sum(1 for e in entries if isinstance(e, SxmFile))
+        n_vert = sum(1 for e in entries if isinstance(e, VertFile))
+        img_word  = "image"    if n_sxm  == 1 else "images"
+        spec_word = "spectrum" if n_vert == 1 else "spectra"
+        if mode == "images":
+            msg = f"{n_sxm} {img_word}  ({n_vert} {spec_word} hidden)"
+        elif mode == "spectra":
+            msg = f"{n_vert} {spec_word}  ({n_sxm} {img_word} hidden)"
+        else:
+            msg = f"{n_sxm} {img_word}, {n_vert} {spec_word}"
+        self._status_bar.showMessage(msg)
 
     def _on_apply_colormap(self, cmap_key: str):
         clip_low, clip_high = self._browse_tools.get_clip_values()
@@ -3449,6 +3564,7 @@ class ProbeFlowWindow(QMainWindow):
             "clip_low":      cl,
             "clip_high":     ch,
             "colormap":      self._browse_tools.cmap_cb.currentText(),
+            "browse_filter": self._browse_tools.get_filter_mode(),
         })
         super().closeEvent(event)
 
@@ -3505,6 +3621,32 @@ QPushButton#accentBtn {{
 QPushButton#accentBtn:disabled {{
     background-color: {t['entry_bg']};
     color: {t['sub_fg']};
+}}
+QPushButton#segBtnLeft, QPushButton#segBtnMid, QPushButton#segBtnRight {{
+    background-color: {t['btn_bg']};
+    color: {t['btn_fg']};
+    border: none;
+    padding: 0px 8px;
+    margin: 0px;
+    border-radius: 0px;
+}}
+QPushButton#segBtnLeft {{
+    border-top-left-radius: 4px;
+    border-bottom-left-radius: 4px;
+}}
+QPushButton#segBtnRight {{
+    border-top-right-radius: 4px;
+    border-bottom-right-radius: 4px;
+}}
+QPushButton#segBtnLeft:hover, QPushButton#segBtnMid:hover,
+QPushButton#segBtnRight:hover {{
+    background-color: {t['sep']};
+}}
+QPushButton#segBtnLeft:checked, QPushButton#segBtnMid:checked,
+QPushButton#segBtnRight:checked {{
+    background-color: {t['accent_bg']};
+    color: {t['accent_fg']};
+    font-weight: bold;
 }}
 QPushButton#navBtn {{
     color: #ffffff;
