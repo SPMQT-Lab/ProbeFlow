@@ -60,13 +60,7 @@ def _open_url(url: str) -> None:
         pass
 
 from probeflow import processing as _proc
-from probeflow.sxm_io import (
-    parse_sxm_header,
-    sxm_dims as _sxm_dims,
-    sxm_scan_range as _sxm_scan_range,
-    orient_plane as _orient_plane,
-    read_sxm_plane as read_sxm_plane_raw,
-)
+from probeflow.scan import SUPPORTED_SUFFIXES, load_scan
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 CONFIG_PATH     = Path.home() / ".probeflow_config.json"
@@ -219,13 +213,14 @@ PLANE_NAMES = ["Z fwd", "Z bwd", "I fwd", "I bwd"]
 
 @dataclass
 class SxmFile:
-    path:       Path
-    stem:       str
-    Nx:         int            = 512
-    Ny:         int            = 512
-    bias_mv:    Optional[float] = None
-    current_pa: Optional[float] = None
-    scan_nm:    Optional[float] = None
+    path:          Path
+    stem:          str
+    Nx:            int            = 512
+    Ny:            int            = 512
+    bias_mv:       Optional[float] = None
+    current_pa:    Optional[float] = None
+    scan_nm:       Optional[float] = None
+    source_format: str            = "sxm"
 
 
 @dataclass
@@ -253,31 +248,20 @@ def _card_meta_str(entry: SxmFile) -> str:
 
 # ── SXM parsing / plane I/O live in probeflow.sxm_io (imported above). ──────
 
-def render_sxm_plane(
-    sxm_path:  Path,
+def render_scan_thumbnail(
+    scan_path: Path,
     plane_idx: int   = 0,
     colormap:  str   = "gray",
     clip_low:  float = 1.0,
     clip_high: float = 99.0,
     size:      tuple = (148, 116),
 ) -> Optional[Image.Image]:
+    """Render a thumbnail of any supported scan format via the unified reader."""
     try:
-        hdr    = parse_sxm_header(sxm_path)
-        Nx, Ny = _sxm_dims(hdr)
-        if Nx <= 0 or Ny <= 0:
+        scan = load_scan(scan_path)
+        if plane_idx >= scan.n_planes:
             return None
-
-        data_offset = int((DEFAULT_CUSHION / "data_offset.txt").read_text().strip())
-        raw = sxm_path.read_bytes()
-
-        plane_bytes = Ny * Nx * 4
-        start = data_offset + plane_idx * plane_bytes
-        if start + plane_bytes > len(raw):
-            return None
-
-        arr = np.frombuffer(raw[start: start + plane_bytes], dtype=">f4").copy()
-        arr = arr.reshape((Ny, Nx))
-        arr = _orient_plane(arr, hdr, plane_idx)
+        arr = scan.planes[plane_idx]
 
         finite = arr[np.isfinite(arr)]
         if finite.size == 0:
@@ -447,38 +431,92 @@ def render_with_processing(
         return None
 
 
-def scan_sxm_folder(root: Path) -> list[SxmFile]:
-    entries = []
-    for sxm in sorted(Path(root).rglob("*.sxm")):
-        try:
-            hdr    = parse_sxm_header(sxm)
-            Nx, Ny = _sxm_dims(hdr)
+def scan_image_folder(root: Path) -> list[SxmFile]:
+    """Find all supported scan files under root, in format preference order.
 
-            bias_mv = None
-            nums = [float(x) for x in _re.findall(
-                r"[-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?", hdr.get("BIAS", ""))]
-            if nums:
-                bias_mv = nums[0] * 1000  # V → mV
+    Iterates over :data:`SUPPORTED_SUFFIXES` in order so that when multiple
+    formats share a stem (e.g. the same scan exported as both .sxm and .dat),
+    the earlier format wins. Globbing is case-insensitive (also matches .DAT
+    etc.). Best-effort metadata extraction is format-specific.
+    """
+    root = Path(root)
+    by_stem: dict[str, SxmFile] = {}
+    ordered: list[SxmFile] = []
 
-            current_pa = None
-            sp = _re.search(
-                r"([-+]?\d+(?:\.\d+)?[eE][-+]?\d+)\s*A",
-                hdr.get("Z-CONTROLLER", ""))
-            if sp:
-                current_pa = float(sp.group(1)) * 1e12  # A → pA
+    for suffix in SUPPORTED_SUFFIXES:
+        # Case-insensitive: lowercase and uppercase variants.
+        matches: set[Path] = set()
+        matches.update(root.rglob(f"*{suffix}"))
+        matches.update(root.rglob(f"*{suffix.upper()}"))
 
-            scan_nm = None
-            rnums = [float(x) for x in _re.findall(
-                r"[-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?", hdr.get("SCAN_RANGE", ""))]
-            if rnums:
-                scan_nm = rnums[0] * 1e9  # m → nm
+        for p in sorted(matches):
+            if p.stem in by_stem:
+                continue
+            try:
+                scan = load_scan(p)
+                Nx, Ny = scan.dims
+                hdr = scan.header
+                src_fmt = scan.source_format
 
-            entries.append(SxmFile(path=sxm, stem=sxm.stem, Nx=Nx, Ny=Ny,
-                                   bias_mv=bias_mv, current_pa=current_pa,
-                                   scan_nm=scan_nm))
-        except Exception:
-            entries.append(SxmFile(path=sxm, stem=sxm.stem))
-    return entries
+                bias_mv: Optional[float]    = None
+                current_pa: Optional[float] = None
+                scan_nm: Optional[float]    = None
+
+                if src_fmt == "sxm":
+                    nums = [float(x) for x in _re.findall(
+                        r"[-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?",
+                        hdr.get("BIAS", ""))]
+                    if nums:
+                        bias_mv = nums[0] * 1000  # V → mV
+
+                    sp = _re.search(
+                        r"([-+]?\d+(?:\.\d+)?[eE][-+]?\d+)\s*A",
+                        hdr.get("Z-CONTROLLER", ""))
+                    if sp:
+                        current_pa = float(sp.group(1)) * 1e12  # A → pA
+
+                    rnums = [float(x) for x in _re.findall(
+                        r"[-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?",
+                        hdr.get("SCAN_RANGE", ""))]
+                    if rnums:
+                        scan_nm = rnums[0] * 1e9  # m → nm
+                elif src_fmt == "dat":
+                    try:
+                        bv = hdr.get("Biasvolt[mV]")
+                        if bv is not None:
+                            bias_mv = float(bv)
+                    except (TypeError, ValueError):
+                        pass
+                    try:
+                        lx = hdr.get("Length x[A]")
+                        if lx is not None:
+                            scan_nm = float(lx) * 1e-10 / 1e-9  # Å → nm
+                    except (TypeError, ValueError):
+                        pass
+                else:
+                    # Other formats: fall back to scan_range_m if available.
+                    try:
+                        w_m = scan.scan_range_m[0]
+                        if w_m and w_m > 0:
+                            scan_nm = w_m * 1e9
+                    except Exception:
+                        pass
+
+                entry = SxmFile(
+                    path=p, stem=p.stem, Nx=Nx, Ny=Ny,
+                    bias_mv=bias_mv, current_pa=current_pa,
+                    scan_nm=scan_nm, source_format=src_fmt,
+                )
+            except Exception:
+                entry = SxmFile(
+                    path=p, stem=p.stem,
+                    source_format=p.suffix.lower().lstrip("."),
+                )
+
+            by_stem[p.stem] = entry
+            ordered.append(entry)
+
+    return ordered
 
 
 def scan_vert_folder(root: Path) -> list[VertFile]:
@@ -561,7 +599,11 @@ class ThumbnailLoader(QRunnable):
     def run(self):
         if self.processing:
             # Use raw array path so processing functions receive unscaled data
-            arr = read_sxm_plane_raw(self.entry.path, 0)
+            try:
+                scan = load_scan(self.entry.path)
+                arr = scan.planes[0] if scan.n_planes > 0 else None
+            except Exception:
+                arr = None
             if arr is not None:
                 img = render_with_processing(
                     arr, self.colormap, self.clip_low, self.clip_high,
@@ -569,9 +611,9 @@ class ThumbnailLoader(QRunnable):
             else:
                 img = None
         else:
-            img = render_sxm_plane(self.entry.path, 0, self.colormap,
-                                   self.clip_low, self.clip_high,
-                                   size=(self.w, self.h))
+            img = render_scan_thumbnail(self.entry.path, 0, self.colormap,
+                                        self.clip_low, self.clip_high,
+                                        size=(self.w, self.h))
         if img is not None:
             self.signals.loaded.emit(self.entry.stem, pil_to_pixmap(img), self.token)
 
@@ -620,7 +662,11 @@ class ChannelLoader(QRunnable):
 
     def run(self):
         if self.processing:
-            arr = read_sxm_plane_raw(self.entry.path, self.idx)
+            try:
+                scan = load_scan(self.entry.path)
+                arr = scan.planes[self.idx] if self.idx < scan.n_planes else None
+            except Exception:
+                arr = None
             if arr is not None:
                 img = render_with_processing(
                     arr, self.colormap, self.clip_low, self.clip_high,
@@ -628,9 +674,9 @@ class ChannelLoader(QRunnable):
             else:
                 img = None
         else:
-            img = render_sxm_plane(self.entry.path, self.idx, self.colormap,
-                                   self.clip_low, self.clip_high,
-                                   size=(self.w, self.h))
+            img = render_scan_thumbnail(self.entry.path, self.idx, self.colormap,
+                                        self.clip_low, self.clip_high,
+                                        size=(self.w, self.h))
         if img is not None:
             self.signals.loaded.emit(self.idx, pil_to_pixmap(img), self.token)
 
@@ -659,7 +705,11 @@ class ViewerLoader(QRunnable):
 
     def run(self):
         if self.processing:
-            arr = read_sxm_plane_raw(self.entry.path, self.plane_idx)
+            try:
+                scan = load_scan(self.entry.path)
+                arr = scan.planes[self.plane_idx] if self.plane_idx < scan.n_planes else None
+            except Exception:
+                arr = None
             if arr is not None:
                 img = render_with_processing(arr, self.colormap,
                                              self.clip_low, self.clip_high,
@@ -668,9 +718,9 @@ class ViewerLoader(QRunnable):
             else:
                 img = None
         else:
-            img = render_sxm_plane(self.entry.path, self.plane_idx,
-                                   self.colormap, self.clip_low, self.clip_high,
-                                   size=(self.w, self.h))
+            img = render_scan_thumbnail(self.entry.path, self.plane_idx,
+                                        self.colormap, self.clip_low, self.clip_high,
+                                        size=(self.w, self.h))
         if img is not None:
             self.signals.loaded.emit(pil_to_pixmap(img), self.token)
 
@@ -1606,7 +1656,12 @@ class ImageViewerDialog(QDialog):
         self._zoom_lbl.setText("Loading…")
         self._zoom_lbl.setPixmap(QPixmap())
         # load raw array for histogram
-        self._raw_arr = read_sxm_plane_raw(entry.path, self._ch_cb.currentIndex())
+        try:
+            _scan = load_scan(entry.path)
+            idx = self._ch_cb.currentIndex()
+            self._raw_arr = _scan.planes[idx] if idx < _scan.n_planes else None
+        except Exception:
+            self._raw_arr = None
         self._update_histogram()
         # load rendered image
         self._token = object()
@@ -1783,8 +1838,10 @@ class ImageViewerDialog(QDialog):
             self._status_lbl.setText("No data to save.")
             return
         try:
-            hdr = parse_sxm_header(entry.path)
-            w_m, h_m = _sxm_scan_range(hdr)
+            try:
+                w_m, h_m = load_scan(entry.path).scan_range_m
+            except Exception:
+                w_m = h_m = 0.0
             _proc.export_png(
                 arr, out_path, self._colormap,
                 self._clip_low, self._clip_high,
@@ -2361,7 +2418,10 @@ class BrowseInfoPanel(QWidget):
                                     Qt.KeepAspectRatio, Qt.SmoothTransformation))
 
     def _load_metadata(self, entry: SxmFile):
-        hdr      = parse_sxm_header(entry.path)
+        try:
+            hdr = load_scan(entry.path).header
+        except Exception:
+            hdr = {}
         priority = [
             "REC_DATE", "REC_TIME", "SCAN_PIXELS", "SCAN_RANGE",
             "SCAN_OFFSET", "SCAN_ANGLE", "SCAN_DIR", "BIAS",
@@ -2370,12 +2430,19 @@ class BrowseInfoPanel(QWidget):
         rows: list[tuple[str, str]] = []
         seen: set[str]              = set()
         for k in priority:
-            if k in hdr and hdr[k].strip():
-                rows.append((k, hdr[k].strip()))
+            v = hdr.get(k)
+            if isinstance(v, str) and v.strip():
+                rows.append((k, v.strip()))
                 seen.add(k)
         for k, v in hdr.items():
-            if k not in seen and v.strip():
+            if k in seen:
+                continue
+            if isinstance(v, str) and v.strip():
                 rows.append((k, v.strip()))
+            elif v is not None and not isinstance(v, (bytes, bytearray)):
+                s = str(v).strip()
+                if s:
+                    rows.append((k, s))
         self._meta_rows = rows
         self._filter_meta()
 
@@ -3052,11 +3119,11 @@ class ProbeFlowWindow(QMainWindow):
 
     # ── Browse ─────────────────────────────────────────────────────────────────
     def _open_browse_folder(self):
-        d = QFileDialog.getExistingDirectory(self, "Open folder containing .sxm / .VERT files")
+        d = QFileDialog.getExistingDirectory(self, "Open folder containing scan / .VERT files")
         if not d:
             return
         self._switch_mode("browse")
-        sxm_entries  = scan_sxm_folder(Path(d))
+        sxm_entries  = scan_image_folder(Path(d))
         vert_entries = scan_vert_folder(Path(d))
         entries = sorted(sxm_entries + vert_entries, key=lambda e: e.stem)
         self._grid.load(entries, folder_path=d)
@@ -3172,7 +3239,11 @@ class ProbeFlowWindow(QMainWindow):
         entry = next((e for e in self._grid.get_entries() if e.stem == primary), None)
         if not entry:
             return
-        arr = read_sxm_plane_raw(entry.path, 0)
+        try:
+            _scan = load_scan(entry.path)
+            arr = _scan.planes[0] if _scan.n_planes > 0 else None
+        except Exception:
+            arr = None
         if arr is None:
             self._status_bar.showMessage("Could not read scan data for auto clip")
             return
@@ -3204,12 +3275,16 @@ class ProbeFlowWindow(QMainWindow):
         entry = next((e for e in self._grid.get_entries() if e.stem == primary), None)
         if not entry:
             return
-        arr = read_sxm_plane_raw(entry.path, 0)
+        try:
+            _scan = load_scan(entry.path)
+            arr = _scan.planes[0] if _scan.n_planes > 0 else None
+            w_m, h_m = _scan.scan_range_m
+        except Exception:
+            arr = None
+            w_m = h_m = 0.0
         if arr is None:
             self._status_bar.showMessage("Could not read scan data")
             return
-        hdr = parse_sxm_header(entry.path)
-        w_m, h_m = _sxm_scan_range(hdr)
         Ny, Nx = arr.shape
         px_x = w_m / Nx if Nx > 0 and w_m > 0 else 1e-10
         px_y = h_m / Ny if Ny > 0 and h_m > 0 else 1e-10
@@ -3243,13 +3318,17 @@ class ProbeFlowWindow(QMainWindow):
         if not out_path:
             return
 
-        arr = read_sxm_plane_raw(entry.path, 0)
+        try:
+            _scan = load_scan(entry.path)
+            arr = _scan.planes[0] if _scan.n_planes > 0 else None
+            w_m, h_m = _scan.scan_range_m
+        except Exception:
+            arr = None
+            w_m = h_m = 0.0
         if arr is None:
             self._status_bar.showMessage("Could not read scan data")
             return
 
-        hdr = parse_sxm_header(entry.path)
-        w_m, h_m = _sxm_scan_range(hdr)
         clip_low, clip_high = self._browse_tools.get_clip_values()
         cmap_key = self._grid._card_colormaps.get(entry.stem, DEFAULT_CMAP_KEY)
 
@@ -3325,7 +3404,7 @@ class ProbeFlowWindow(QMainWindow):
         self._convert_sidebar.run_btn.setText("  RUN  ")
         self._convert_sidebar.run_btn.setEnabled(True)
         sxm_dir = Path(out_dir) / "sxm"
-        entries = scan_sxm_folder(sxm_dir) if sxm_dir.exists() else []
+        entries = scan_image_folder(sxm_dir) if sxm_dir.exists() else []
         if entries:
             self._grid.load(entries, folder_path=str(sxm_dir))
             self._n_loaded = len(entries)
