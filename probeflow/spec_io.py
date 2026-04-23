@@ -156,13 +156,16 @@ def read_spec_file(
     is_time_trace = _detect_time_trace(hdr, bias_mv, time_trace_threshold_mv)
 
     # Unit conversion using calibration constants from the header.
+    # The DAC spans ±10 V (full range 20 V), so the step size is 20/2^bits V/count,
+    # which is 2× the value returned by v_per_dac (which uses a 10 V reference).
     bits = get_dac_bits(hdr)
-    vpd = v_per_dac(bits)
+    vpd = v_per_dac(bits) * 2
     zs = z_scale_m_per_dac(hdr, vpd)
-    is_ = i_scale_a_per_dac(hdr, vpd, negative=True)  # A/DAC, sign per Nanonis convention
+    is_ = i_scale_a_per_dac(hdr, vpd, negative=False)  # raw DAC already carries sign
 
-    current_a = arr[:, 2] * is_
-    z_m = arr[:, 3] * zs
+    # Column layout: 0=index, 1=bias_mV, 2=Z_DAC, 3=I_DAC
+    z_m = arr[:, 2] * zs
+    current_a = arr[:, 3] * is_
 
     channels: dict[str, np.ndarray] = {
         "I": current_a,

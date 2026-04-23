@@ -11,8 +11,10 @@ from probeflow.spec_io import SpecData, parse_spec_header, read_spec_file
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
-VERT_TIME_TRACE = DATA_DIR / "A180201.152542.M0001.VERT"
-VERT_BIAS_SWEEP = DATA_DIR / "A180201.151737.M0001.VERT"
+VERT_TIME_TRACE  = DATA_DIR / "A180201.152542.M0001.VERT"
+VERT_BIAS_SWEEP  = DATA_DIR / "A180201.151737.M0001.VERT"
+VERT_TT_50MV     = DATA_DIR / "A180201.124928.VERT"       # time trace, -50 mV
+VERT_TT_450MV    = DATA_DIR / "A180208.194656.M0003.VERT"  # time trace, -450 mV
 
 
 # ─── Fixtures ────────────────────────────────────────────────────────────────
@@ -25,6 +27,16 @@ def time_trace_spec():
 @pytest.fixture(scope="module")
 def bias_sweep_spec():
     return read_spec_file(VERT_BIAS_SWEEP)
+
+
+@pytest.fixture(scope="module")
+def tt_50mv_spec():
+    return read_spec_file(VERT_TT_50MV)
+
+
+@pytest.fixture(scope="module")
+def tt_450mv_spec():
+    return read_spec_file(VERT_TT_450MV)
 
 
 # ─── parse_spec_header ───────────────────────────────────────────────────────
@@ -146,9 +158,10 @@ class TestReadSpecFileBiasSweep:
         for ch in ("I", "Z", "V"):
             assert ch in bias_sweep_spec.channels
 
-    def test_z_varies(self, bias_sweep_spec):
-        z = bias_sweep_spec.channels["Z"]
-        assert float(z.max() - z.min()) > 0
+    def test_i_varies(self, bias_sweep_spec):
+        # For a real I(V) sweep the current must change across the voltage range.
+        i = bias_sweep_spec.channels["I"]
+        assert float(i.max() - i.min()) > 0
 
 
 # ─── error handling ──────────────────────────────────────────────────────────
@@ -200,3 +213,67 @@ class TestReadSpecFileErrors:
         # With tighter threshold (0.1 mV) it's a sweep
         spec_tight = read_spec_file(f, time_trace_threshold_mv=0.1)
         assert spec_tight.metadata["sweep_type"] == "bias_sweep"
+
+
+# ─── unit-conversion validation against real instrument files ─────────────────
+
+class TestUnitConversionTT50mV:
+    """A180201.124928.VERT — time trace at -50 mV, 1 kHz, feedback off."""
+
+    def test_sweep_type(self, tt_50mv_spec):
+        assert tt_50mv_spec.metadata["sweep_type"] == "time_trace"
+
+    def test_n_points(self, tt_50mv_spec):
+        assert tt_50mv_spec.metadata["n_points"] == 5000
+
+    def test_x_array_seconds(self, tt_50mv_spec):
+        assert tt_50mv_spec.x_array[0] == pytest.approx(0.0)
+        assert tt_50mv_spec.x_array[-1] == pytest.approx(4.999, rel=1e-3)
+
+    def test_bias_constant_50mv(self, tt_50mv_spec):
+        v = tt_50mv_spec.channels["V"]
+        assert v.mean() == pytest.approx(-0.050, abs=1e-4)
+        assert v.max() - v.min() < 1e-6
+
+    def test_z_channel_zero(self, tt_50mv_spec):
+        # Feedback off during time trace — Z should be essentially zero.
+        z = tt_50mv_spec.channels["Z"]
+        assert np.all(z == pytest.approx(0.0, abs=1e-15))
+
+    def test_current_magnitude(self, tt_50mv_spec):
+        # Expected ~-80 pA; allow 5% tolerance.
+        i = tt_50mv_spec.channels["I"]
+        assert i.mean() == pytest.approx(-8.0e-11, rel=0.05)
+
+    def test_current_negative(self, tt_50mv_spec):
+        assert np.all(tt_50mv_spec.channels["I"] < 0)
+
+
+class TestUnitConversionTT450mV:
+    """A180208.194656.M0003.VERT — time trace at -450 mV, 1 kHz, feedback off."""
+
+    def test_sweep_type(self, tt_450mv_spec):
+        assert tt_450mv_spec.metadata["sweep_type"] == "time_trace"
+
+    def test_bias_constant_450mv(self, tt_450mv_spec):
+        v = tt_450mv_spec.channels["V"]
+        assert v.mean() == pytest.approx(-0.450, abs=1e-4)
+        assert v.max() - v.min() < 1e-6
+
+    def test_z_channel_zero(self, tt_450mv_spec):
+        z = tt_450mv_spec.channels["Z"]
+        assert np.all(z == pytest.approx(0.0, abs=1e-15))
+
+    def test_current_mean(self, tt_450mv_spec):
+        # Expected ~-340 pA mean; allow 5% tolerance.
+        i = tt_450mv_spec.channels["I"]
+        assert i.mean() == pytest.approx(-3.4e-10, rel=0.05)
+
+    def test_current_range(self, tt_450mv_spec):
+        # Data spans roughly -356 pA to -240 pA (telegraph noise).
+        i = tt_450mv_spec.channels["I"]
+        assert i.min() < -3.0e-10
+        assert i.max() > -2.8e-10
+
+    def test_current_negative(self, tt_450mv_spec):
+        assert np.all(tt_450mv_spec.channels["I"] < 0)
