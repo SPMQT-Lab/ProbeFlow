@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import io
 import json
 import re as _re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Union
 
 import numpy as np
 from PIL import Image
@@ -227,6 +228,16 @@ class SxmFile:
     scan_nm:    Optional[float] = None
 
 
+@dataclass
+class VertFile:
+    path:         Path
+    stem:         str
+    sweep_type:   str            = "unknown"
+    n_points:     int            = 0
+    bias_mv:      Optional[float] = None
+    spec_freq_hz: Optional[float] = None
+
+
 def _card_meta_str(entry: SxmFile) -> str:
     """Format key physical parameters for the thumbnail card label."""
     line1 = "  |  ".join(filter(None, [
@@ -283,6 +294,47 @@ def render_sxm_plane(
         colored = _get_lut(colormap)[u8]
         img     = Image.fromarray(colored, mode="RGB")
         img.thumbnail(size, Image.LANCZOS)
+        return img
+    except Exception:
+        return None
+
+
+def render_spec_thumbnail(
+    vert_path: Path,
+    size: tuple = (148, 116),
+    dark: bool = True,
+) -> Optional[Image.Image]:
+    """Render a small matplotlib plot of a .VERT file as a PIL Image."""
+    try:
+        from .spec_io import read_spec_file
+        from matplotlib.figure import Figure
+        from matplotlib.backends.backend_agg import FigureCanvasAgg
+
+        spec = read_spec_file(vert_path)
+        ch   = "I"
+        y    = spec.channels.get(ch)
+        if y is None or len(y) == 0:
+            return None
+        x = spec.x_array
+
+        bg   = "#1e1e2e" if dark else "#ffffff"
+        line = "#89b4fa" if dark else "#1e66f5"
+
+        fig = Figure(figsize=(size[0] / 80, size[1] / 80), dpi=80)
+        FigureCanvasAgg(fig)
+        ax = fig.add_axes([0.0, 0.0, 1.0, 1.0])
+        ax.plot(x, y, linewidth=0.9, color=line)
+        ax.set_facecolor(bg)
+        fig.patch.set_facecolor(bg)
+        ax.tick_params(left=False, bottom=False, labelleft=False, labelbottom=False)
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", dpi=80, bbox_inches="tight", pad_inches=0)
+        buf.seek(0)
+        img = Image.open(buf).convert("RGB").copy()
+        img = img.resize(size, Image.LANCZOS)
         return img
     except Exception:
         return None
@@ -429,6 +481,26 @@ def scan_sxm_folder(root: Path) -> list[SxmFile]:
     return entries
 
 
+def scan_vert_folder(root: Path) -> list[VertFile]:
+    """Find all .VERT spectroscopy files under root and return lightweight metadata."""
+    from .spec_io import read_spec_file
+    entries: list[VertFile] = []
+    for vert in sorted(Path(root).rglob("*.VERT")):
+        try:
+            spec = read_spec_file(vert)
+            entries.append(VertFile(
+                path=vert,
+                stem=vert.stem,
+                sweep_type=spec.metadata["sweep_type"],
+                n_points=spec.metadata["n_points"],
+                bias_mv=spec.metadata.get("bias_mv"),
+                spec_freq_hz=spec.metadata.get("spec_freq_hz"),
+            ))
+        except Exception:
+            entries.append(VertFile(path=vert, stem=vert.stem))
+    return entries
+
+
 # ── Config ────────────────────────────────────────────────────────────────────
 def load_config() -> dict:
     defaults = {
@@ -500,6 +572,25 @@ class ThumbnailLoader(QRunnable):
             img = render_sxm_plane(self.entry.path, 0, self.colormap,
                                    self.clip_low, self.clip_high,
                                    size=(self.w, self.h))
+        if img is not None:
+            self.signals.loaded.emit(self.entry.stem, pil_to_pixmap(img), self.token)
+
+
+# ── Worker: spec thumbnail ────────────────────────────────────────────────────
+class SpecThumbnailLoader(QRunnable):
+    def __init__(self, entry: VertFile, token, w: int, h: int, dark: bool = True):
+        super().__init__()
+        self.setAutoDelete(True)
+        self.signals = ThumbnailSignals()
+        self.entry   = entry
+        self.token   = token
+        self.w       = w
+        self.h       = h
+        self.dark    = dark
+
+    def run(self):
+        img = render_spec_thumbnail(self.entry.path, size=(self.w, self.h),
+                                    dark=self.dark)
         if img is not None:
             self.signals.loaded.emit(self.entry.stem, pil_to_pixmap(img), self.token)
 
@@ -743,6 +834,98 @@ class ScanCard(QFrame):
         super().mouseDoubleClickEvent(event)
 
 
+# ── SpecCard ──────────────────────────────────────────────────────────────────
+class SpecCard(QFrame):
+    """Thumbnail card for a .VERT spectroscopy file."""
+    clicked        = Signal(object, bool)
+    double_clicked = Signal(object)
+
+    CARD_W = 200
+    CARD_H = 220
+    IMG_W  = 180
+    IMG_H  = 150
+
+    def __init__(self, entry: VertFile, t: dict, parent=None):
+        super().__init__(parent)
+        self.entry = entry
+        self._t    = t
+        self._sel  = False
+
+        self.setFixedSize(self.CARD_W, self.CARD_H)
+        self.setCursor(QCursor(Qt.PointingHandCursor))
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(8, 8, 8, 6)
+        lay.setSpacing(3)
+
+        self.img_lbl = QLabel()
+        self.img_lbl.setFixedSize(self.IMG_W, self.IMG_H)
+        self.img_lbl.setAlignment(Qt.AlignCenter)
+        self.img_lbl.setText("…")
+
+        lbl_text = entry.stem if len(entry.stem) <= 22 else entry.stem[:20] + ".."
+        self.name_lbl = QLabel(lbl_text)
+        self.name_lbl.setAlignment(Qt.AlignCenter)
+        self.name_lbl.setFont(QFont("Helvetica", 10))
+
+        sweep = entry.sweep_type.replace("_", " ") if entry.sweep_type != "unknown" else "VERT"
+        pts   = f"{entry.n_points} pts" if entry.n_points else ""
+        meta  = "  |  ".join(filter(None, [sweep, pts]))
+        self.meta_lbl = QLabel(meta)
+        self.meta_lbl.setAlignment(Qt.AlignCenter)
+        self.meta_lbl.setFont(QFont("Helvetica", 9))
+
+        lay.addWidget(self.img_lbl)
+        lay.addWidget(self.name_lbl)
+        lay.addWidget(self.meta_lbl)
+        self._refresh_style()
+
+    def set_pixmap(self, pixmap: QPixmap):
+        self.img_lbl.setPixmap(
+            pixmap.scaled(self.IMG_W, self.IMG_H,
+                          Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        self.img_lbl.setText("")
+
+    def set_selected(self, val: bool):
+        self._sel = val
+        self._refresh_style()
+
+    def apply_theme(self, t: dict):
+        self._t = t
+        self._refresh_style()
+
+    def _refresh_style(self):
+        t = self._t
+        if self._sel:
+            bg, border, bw, fg = t["card_sel"], t["accent_bg"], 3, t["accent_bg"]
+        else:
+            bg, border, bw, fg = t["card_bg"], t["sep"], 1, t["card_fg"]
+        self.setStyleSheet(f"""
+            SpecCard {{
+                background-color: {bg};
+                border: {bw}px solid {border};
+                border-radius: 6px;
+            }}
+            SpecCard:hover {{
+                border: {bw}px solid {t["accent_bg"]};
+            }}
+        """)
+        self.name_lbl.setStyleSheet(f"color: {fg}; background: transparent;")
+        self.meta_lbl.setStyleSheet(f"color: {t['sub_fg']}; background: transparent;")
+        self.img_lbl.setStyleSheet(f"color: {t['sub_fg']}; background: transparent;")
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            ctrl = bool(event.modifiers() & Qt.ControlModifier)
+            self.clicked.emit(self.entry, ctrl)
+        super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.double_clicked.emit(self.entry)
+        super().mouseDoubleClickEvent(event)
+
+
 # ── ThumbnailGrid ─────────────────────────────────────────────────────────────
 class ThumbnailGrid(QWidget):
     """
@@ -798,8 +981,8 @@ class ThumbnailGrid(QWidget):
         outer.addWidget(self._scroll, 1)
 
         # state
-        self._cards:          dict[str, ScanCard]              = {}
-        self._entries:        list[SxmFile]                    = []
+        self._cards:          dict[str, Union[ScanCard, SpecCard]] = {}
+        self._entries:        list[Union[SxmFile, VertFile]]       = []
         self._selected:       set[str]                         = set()
         self._primary:        Optional[str]                    = None
         self._card_colormaps: dict[str, str]                   = {}
@@ -829,7 +1012,14 @@ class ThumbnailGrid(QWidget):
 
         if folder_path:
             p = Path(folder_path)
-            self._path_lbl.setText(f"{p.name}  ({len(entries)} scan{'s' if len(entries)!=1 else ''})")
+            n_sxm  = sum(1 for e in entries if isinstance(e, SxmFile))
+            n_vert = sum(1 for e in entries if isinstance(e, VertFile))
+            parts = []
+            if n_sxm:
+                parts.append(f"{n_sxm} scan{'s' if n_sxm != 1 else ''}")
+            if n_vert:
+                parts.append(f"{n_vert} spec{'s' if n_vert != 1 else ''}")
+            self._path_lbl.setText(f"{p.name}  ({', '.join(parts) if parts else '0 files'})")
 
         # clear grid
         while self._grid.count():
@@ -839,7 +1029,7 @@ class ThumbnailGrid(QWidget):
         self._cards = {}
 
         if not entries:
-            self._empty_lbl = QLabel("No .sxm files found in this folder")
+            self._empty_lbl = QLabel("No .sxm or .VERT files found in this folder")
             self._empty_lbl.setAlignment(Qt.AlignCenter)
             self._empty_lbl.setFont(QFont("Helvetica", 12))
             self._grid.addWidget(self._empty_lbl, 0, 0)
@@ -847,20 +1037,28 @@ class ThumbnailGrid(QWidget):
 
         cols = self._calc_cols()
         self._current_cols = cols
+        dark = True  # will be updated via apply_theme if needed
         for i, entry in enumerate(entries):
-            card = ScanCard(entry, self._t)
+            if isinstance(entry, VertFile):
+                card = SpecCard(entry, self._t)
+            else:
+                card = ScanCard(entry, self._t)
+                self._card_colormaps[entry.stem] = DEFAULT_CMAP_KEY
             card.clicked.connect(self._on_card_click)
             card.double_clicked.connect(self._on_card_dbl)
-            self._card_colormaps[entry.stem] = DEFAULT_CMAP_KEY
             row, col = divmod(i, cols)
             self._grid.addWidget(card, row, col, Qt.AlignTop | Qt.AlignLeft)
             self._cards[entry.stem] = card
 
-        # load all thumbnails as grayscale
+        # load all thumbnails
         token = self._load_token
         for entry in entries:
-            loader = ThumbnailLoader(entry, DEFAULT_CMAP_KEY, token,
-                                     ScanCard.IMG_W, ScanCard.IMG_H)
+            if isinstance(entry, VertFile):
+                loader = SpecThumbnailLoader(entry, token,
+                                             SpecCard.IMG_W, SpecCard.IMG_H)
+            else:
+                loader = ThumbnailLoader(entry, DEFAULT_CMAP_KEY, token,
+                                         ScanCard.IMG_W, ScanCard.IMG_H)
             loader.signals.loaded.connect(self._on_thumb)
             self._pool.start(loader)
 
@@ -878,7 +1076,7 @@ class ThumbnailGrid(QWidget):
         for stem in self._selected:
             entry = next((e for e in self._entries if e.stem == stem), None)
             card  = self._cards.get(stem)
-            if entry and card:
+            if entry and card and isinstance(entry, SxmFile):
                 if push_history:
                     prev_cmap = self._card_colormaps.get(stem, DEFAULT_CMAP_KEY)
                     prev_clip = self._card_clip.get(stem, (1.0, 99.0))
@@ -909,7 +1107,7 @@ class ThumbnailGrid(QWidget):
         for stem in self._selected:
             entry = next((e for e in self._entries if e.stem == stem), None)
             card  = self._cards.get(stem)
-            if entry and card:
+            if entry and card and isinstance(entry, SxmFile):
                 cmap = self._card_colormaps.get(stem, DEFAULT_CMAP_KEY)
                 proc = self._card_processing.get(stem, {})
                 self._card_clip[stem] = (clip_low, clip_high)
@@ -939,7 +1137,7 @@ class ThumbnailGrid(QWidget):
             prev_cmap, prev_low, prev_high, prev_proc = stack.pop()
             entry = next((e for e in self._entries if e.stem == stem), None)
             card  = self._cards.get(stem)
-            if entry and card:
+            if entry and card and isinstance(entry, SxmFile):
                 self._card_colormaps[stem]  = prev_cmap
                 self._card_clip[stem]       = (prev_low, prev_high)
                 self._card_processing[stem] = prev_proc
@@ -952,7 +1150,7 @@ class ThumbnailGrid(QWidget):
                 count += 1
         return count
 
-    def get_entries(self) -> list[SxmFile]:
+    def get_entries(self) -> list[Union[SxmFile, VertFile]]:
         return self._entries
 
     def get_selected(self) -> set[str]:
@@ -2086,6 +2284,40 @@ class BrowseInfoPanel(QWidget):
         self.load_channels(entry, colormap_key, processing)
         self._load_metadata(entry)
 
+    def show_vert_entry(self, entry: VertFile):
+        self.name_lbl.setText(entry.stem)
+        sweep = entry.sweep_type.replace("_", " ") if entry.sweep_type != "unknown" else "—"
+        self._qi["pixels"].setText(sweep)
+        self._qi["size"].setText(f"{entry.n_points} pts" if entry.n_points else "—")
+        self._qi["bias"].setText(f"{entry.bias_mv:.0f} mV" if entry.bias_mv is not None else "—")
+        freq = entry.spec_freq_hz
+        self._qi["setp"].setText(f"{freq:.0f} Hz" if freq is not None else "—")
+        for lbl in self._ch_img_lbls:
+            lbl.clear()
+            lbl.setText("—")
+        self._load_vert_metadata(entry)
+
+    def _load_vert_metadata(self, entry: VertFile):
+        from .spec_io import parse_spec_header
+        try:
+            hdr = parse_spec_header(entry.path)
+        except Exception:
+            hdr = {}
+        rows: list[tuple[str, str]] = [
+            ("Sweep type", entry.sweep_type.replace("_", " ")),
+            ("Points", str(entry.n_points)),
+        ]
+        if entry.bias_mv is not None:
+            rows.append(("Bias", f"{entry.bias_mv:.1f} mV"))
+        if entry.spec_freq_hz is not None:
+            rows.append(("Freq", f"{entry.spec_freq_hz:.0f} Hz"))
+        seen = {"sweep_type", "n_points", "bias_mv", "spec_freq_hz"}
+        for k, v in hdr.items():
+            if k not in seen and v.strip():
+                rows.append((k, v.strip()))
+        self._meta_rows = rows
+        self._filter_meta()
+
     def clear(self):
         self.name_lbl.setText("No scan selected")
         for v in self._qi.values():
@@ -2161,6 +2393,93 @@ class BrowseInfoPanel(QWidget):
                 v_item.setForeground(QColor(t["fg"]))
                 self.meta_table.setItem(row, 0, p_item)
                 self.meta_table.setItem(row, 1, v_item)
+
+
+# ── Spec viewer dialog ───────────────────────────────────────────────────────
+class SpecViewerDialog(QDialog):
+    """Full-size viewer for a .VERT spectroscopy file."""
+
+    def __init__(self, entry: VertFile, t: dict, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(entry.stem)
+        self.setMinimumSize(760, 520)
+        self.resize(900, 580)
+        self._entry = entry
+        self._t     = t
+        self._build()
+        self._load()
+
+    def _build(self):
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(10, 10, 10, 10)
+        lay.setSpacing(6)
+
+        self._title = QLabel(self._entry.stem)
+        self._title.setFont(QFont("Helvetica", 12, QFont.Bold))
+        self._title.setAlignment(Qt.AlignCenter)
+        lay.addWidget(self._title)
+
+        self._canvas_widget = QWidget()
+        self._canvas_lay    = QVBoxLayout(self._canvas_widget)
+        self._canvas_lay.setContentsMargins(0, 0, 0, 0)
+        lay.addWidget(self._canvas_widget, 1)
+
+        self._status = QLabel("Loading…")
+        self._status.setFont(QFont("Helvetica", 9))
+        lay.addWidget(self._status)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        close_btn = QPushButton("Close")
+        close_btn.setFixedWidth(80)
+        close_btn.clicked.connect(self.accept)
+        btn_row.addWidget(close_btn)
+        lay.addLayout(btn_row)
+
+    def _load(self):
+        from .spec_io import read_spec_file
+
+        dark = True
+        bg   = "#1e1e2e" if dark else "#ffffff"
+        fg   = "#cdd6f4" if dark else "#1e1e2e"
+
+        try:
+            spec = read_spec_file(self._entry.path)
+        except Exception as exc:
+            self._status.setText(f"Error: {exc}")
+            return
+
+        channels = [(ch, spec.channels[ch], spec.y_units.get(ch, ""))
+                    for ch in ("I", "Z", "V") if ch in spec.channels]
+        n = len(channels)
+        if n == 0:
+            self._status.setText("No channels found.")
+            return
+
+        colors = ["#89b4fa", "#a6e3a1", "#fab387"]
+        fig = Figure(figsize=(8.5, 4.5), tight_layout=True)
+        fig.patch.set_facecolor(bg)
+        FigureCanvasQTAgg(fig)
+
+        for i, (ch, y, unit) in enumerate(channels):
+            ax = fig.add_subplot(1, n, i + 1)
+            ax.set_facecolor(bg)
+            ax.plot(spec.x_array, y, linewidth=1.0, color=colors[i % len(colors)])
+            ax.set_xlabel(spec.x_label, color=fg, fontsize=8)
+            ax.set_ylabel(f"{ch} ({unit})" if unit else ch, color=fg, fontsize=8)
+            ax.tick_params(colors=fg, labelsize=7)
+            for spine in ax.spines.values():
+                spine.set_edgecolor(fg)
+                spine.set_linewidth(0.6)
+
+        canvas = FigureCanvasQTAgg(fig)
+        self._canvas_lay.addWidget(canvas)
+
+        sweep = spec.metadata.get("sweep_type", "").replace("_", " ")
+        n_pts = spec.metadata.get("n_points", 0)
+        self._status.setText(f"{sweep}  |  {n_pts} points  |  "
+                              f"pos ({spec.position[0]*1e9:.2f}, "
+                              f"{spec.position[1]*1e9:.2f}) nm")
 
 
 # ── Export dialog ────────────────────────────────────────────────────────────
@@ -2733,25 +3052,43 @@ class ProbeFlowWindow(QMainWindow):
 
     # ── Browse ─────────────────────────────────────────────────────────────────
     def _open_browse_folder(self):
-        d = QFileDialog.getExistingDirectory(self, "Open folder containing .sxm files")
+        d = QFileDialog.getExistingDirectory(self, "Open folder containing .sxm / .VERT files")
         if not d:
             return
         self._switch_mode("browse")
-        entries = scan_sxm_folder(Path(d))
+        sxm_entries  = scan_sxm_folder(Path(d))
+        vert_entries = scan_vert_folder(Path(d))
+        entries = sorted(sxm_entries + vert_entries, key=lambda e: e.stem)
         self._grid.load(entries, folder_path=d)
         self._n_loaded = len(entries)
+        n_sxm  = len(sxm_entries)
+        n_vert = len(vert_entries)
+        parts  = []
+        if n_sxm:
+            parts.append(f"{n_sxm} scan{'s' if n_sxm != 1 else ''}")
+        if n_vert:
+            parts.append(f"{n_vert} spec{'s' if n_vert != 1 else ''}")
+        desc = ", ".join(parts) if parts else "0 files"
         self._status_bar.showMessage(
-            f"Loaded {self._n_loaded} scan(s) — grayscale by default | "
-            "Select + Apply to colorize  |  Double-click to view full size")
+            f"Loaded {desc} — Double-click to view  |  "
+            "Select scans + Apply to colorize")
         self._browse_info.clear()
 
-    def _on_entry_select(self, entry: SxmFile):
-        cmap_key, _, proc = self._grid.get_card_state(entry.stem)
-        self._browse_info.show_entry(entry, cmap_key, proc)
-        n_sel = len(self._grid.get_selected())
-        self._status_bar.showMessage(
-            f"{entry.stem}  |  {entry.Nx}×{entry.Ny} px  |  "
-            f"{n_sel} selected / {self._n_loaded} total  |  Double-click to view full size")
+    def _on_entry_select(self, entry):
+        if isinstance(entry, VertFile):
+            self._browse_info.show_vert_entry(entry)
+            n_sel = len(self._grid.get_selected())
+            sweep = entry.sweep_type.replace("_", " ")
+            self._status_bar.showMessage(
+                f"{entry.stem}  |  {sweep}  |  {entry.n_points} pts  |  "
+                f"{n_sel} selected / {self._n_loaded} total  |  Double-click to view")
+        else:
+            cmap_key, _, proc = self._grid.get_card_state(entry.stem)
+            self._browse_info.show_entry(entry, cmap_key, proc)
+            n_sel = len(self._grid.get_selected())
+            self._status_bar.showMessage(
+                f"{entry.stem}  |  {entry.Nx}×{entry.Ny} px  |  "
+                f"{n_sel} selected / {self._n_loaded} total  |  Double-click to view full size")
 
     def _on_selection_changed(self, n_selected: int):
         self._browse_tools.update_selection_hint(n_selected)
@@ -2929,16 +3266,20 @@ class ProbeFlowWindow(QMainWindow):
         except Exception as exc:
             self._status_bar.showMessage(f"Export error: {exc}")
 
-    def _open_viewer(self, entry: SxmFile):
-        t        = THEMES["dark" if self._dark else "light"]
-        cmap_key, clip, proc = self._grid.get_card_state(entry.stem)
-        # fall back to the current slider values if the card has never been styled
-        if entry.stem not in self._grid._card_clip:
-            clip = self._browse_tools.get_clip_values()
-        dlg = ImageViewerDialog(entry, self._grid.get_entries(), cmap_key, t, self,
-                                clip_low=clip[0], clip_high=clip[1],
-                                processing=proc)
-        dlg.exec()
+    def _open_viewer(self, entry):
+        t = THEMES["dark" if self._dark else "light"]
+        if isinstance(entry, VertFile):
+            dlg = SpecViewerDialog(entry, t, self)
+            dlg.exec()
+        else:
+            cmap_key, clip, proc = self._grid.get_card_state(entry.stem)
+            if entry.stem not in self._grid._card_clip:
+                clip = self._browse_tools.get_clip_values()
+            sxm_entries = [e for e in self._grid.get_entries() if isinstance(e, SxmFile)]
+            dlg = ImageViewerDialog(entry, sxm_entries, cmap_key, t, self,
+                                    clip_low=clip[0], clip_high=clip[1],
+                                    processing=proc)
+            dlg.exec()
 
     # ── Convert ────────────────────────────────────────────────────────────────
     def _update_count(self, text: str = ""):
