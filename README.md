@@ -20,11 +20,13 @@
 
 Everything is available as a CLI subcommand, so corrections and conversions can be scripted across hundreds of files or wired into a processing pipeline.
 
-Since **v1.4** all topography commands (`plane-bg`, `align-rows`, `smooth`, `sxm2png`, `pipeline`, `info`, `grains`, `autoclip`, `periodicity` …) accept **either** `.sxm` **or** `.dat` inputs transparently — the format is auto-detected, so conversion is no longer a mandatory first step before analysis.
+> **Status: beta.** The on-disk formats, the CLI surface, and the Python API are still subject to change between commits. Pin a commit hash if you depend on the current shape.
 
-Since **v1.5** ProbeFlow also reads **Gwyddion `.gwy`**, **RHK `.sm4`**, and **Omicron Matrix `.mtrx`** (via optional extras), and writes **PDF**, **TIFF**, **GWY**, and **CSV** in addition to `.sxm` / `.png`.  The `probeflow convert` subcommand is a one-shot any-in/any-out converter driven purely by file suffixes.
+All topography commands (`plane-bg`, `align-rows`, `smooth`, `sxm2png`, `pipeline`, `info`, `grains`, `autoclip`, `periodicity`, `tv-denoise`, `profile` …) accept **either** `.sxm` **or** `.dat` inputs transparently — the format is auto-detected, so conversion is not a mandatory first step before analysis.
 
-Since **v1.6** ProbeFlow adds a **Features tab** (and CLI counterparts) for discrete-object STM analysis: particle / molecule **segmentation**, **template-match counting**, few-shot **classification**, **SIFT lattice extraction**, **unit-cell averaging**, **line profiles**, and **TV denoising**. When the `gwyddion` system binary is on `PATH`, an automatic **Gwyddion bridge** falls back to its converter for any vendor format Gwyddion knows (Bruker, Park, NTEGRA, Nanoscope, …) — no extra Python dependency required.
+ProbeFlow reads **Createc `.dat`**, **Nanonis `.sxm`**, **Gwyddion `.gwy`**, **RHK `.sm4`**, and **Omicron Matrix `.mtrx`** (via optional extras), and writes **`.sxm`**, **PNG**, **PDF**, **TIFF**, **GWY**, **CSV**, and **JSON**. The `probeflow convert` subcommand is a one-shot any-in/any-out converter driven purely by file suffixes. When the `gwyddion` system binary is on `PATH`, an automatic **Gwyddion bridge** falls back to its converter for any other vendor format Gwyddion knows (Bruker, Park, NTEGRA, Nanoscope, JPK, …) — no extra Python dependency required.
+
+A dedicated **Features tab** (mirrored as CLI subcommands) covers discrete-object STM analysis: particle / molecule **segmentation**, **template-match counting**, few-shot **classification**, **SIFT lattice extraction**, **unit-cell averaging**, **line profiles**, and edge-preserving **TV denoising** — all preserving SI units throughout.
 
 ---
 
@@ -258,7 +260,13 @@ ax = plot_spectra(specs, channel="Z", offset=5e-10)
 probeflow gui
 ```
 
-Opens the browser view with thumbnail grid, colormap gallery, live clip sliders, per-scan undo, an image viewer with interactive histogram, processing panel, and PNG export dialog. Preferences (folders, theme, clip values) are saved to `~/.probeflow_config.json`.
+Three tabs:
+
+* **Browse** — point at a folder; the grid auto-detects every supported scan and spectrum format (`.sxm` / `.dat` / `.gwy` / `.sm4` / `.mtrx` / `.VERT`) and renders thumbnails for each. An *All / Images / Spectra* toggle filters the visible cards. Per-card colormap gallery, live clip sliders, per-scan undo, full-size viewer with interactive histogram, processing panel, and PNG export dialog.
+* **Convert** — folder-in / folder-out batch dat→sxm and dat→png with PNG / SXM checkboxes and clip-percentile controls.
+* **Features** — load the currently-selected Browse scan, choose a mode (*Particles* / *Template* / *Lattice*), tune parameters, hit *Run*. Results overlay on the canvas (contours, detection markers, primitive vectors + unit cell) and populate a sortable table. *Export JSON…* writes results with full scan provenance via `probeflow.writers.json`. Heavy analyses run on a background thread so the UI stays responsive.
+
+Preferences (folders, theme, clip values) are saved to `~/.probeflow_config.json`.
 
 ---
 
@@ -372,10 +380,15 @@ pytest
 Covers:
 
 * Conversion (`.dat` → `.sxm` and `.dat` → PNG) against the bundled sample scans.
-* All ten functions in `probeflow.processing`.
+* Every public function in `probeflow.processing` (incl. `tv_denoise`, `line_profile`).
 * `.sxm` header parsing, plane reading, and write-then-read round-trip.
 * `.VERT` header parsing, unit conversion, sweep-type detection, and error handling.
-* All six functions in `probeflow.spec_processing`.
+* Every public function in `probeflow.spec_processing`.
+* Phase-2 readers / writers (`gwy`, `sm4`, `mtrx`, `pdf`, `tiff`, `csv`).
+* Feature-detection: `segment_particles`, `count_features`, `classify_particles`.
+* SIFT lattice extraction and `average_unit_cell`.
+* Line-profile sampling with sub-pixel interpolation and swath averaging.
+* Gwyddion-bridge availability and graceful-failure semantics.
 
 ---
 

@@ -18,7 +18,7 @@ Launch the GUI via ``probeflow gui`` (see ``pyproject.toml`` for the
 console-script wiring) or programmatically via ``probeflow.gui.main()``.
 """
 
-__version__ = "1.5.0"
+__version__ = "beta"
 
 # Public API: the vendor-agnostic Scan abstraction + dispatcher.
 # Importing these does not pull in PySide6 / matplotlib.

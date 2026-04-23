@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "probeflow"
-version = "1.5.0"
+version = "0.0.0b0"  # beta — surfaces and on-disk formats may change
 description = "ProbeFlow — STM scan browser, processor, and Createc↔Nanonis toolkit. Browse .sxm scans with colormaps, apply line corrections / background subtraction / smoothing / FFT / grain detection, and convert Createc .dat files to Nanonis .sxm + PNG from either a GUI or a bash-friendly CLI."
 readme = "README.md"
 requires-python = ">=3.11"
