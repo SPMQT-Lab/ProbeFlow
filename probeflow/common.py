@@ -169,3 +169,10 @@ def _i(x, default=None):
         return int(float(str(x).replace(",", ".")))
     except (TypeError, ValueError):
         return default
+
+
+def mark_processed_stem(stem: str) -> str:
+    """Return stem with _processed appended, unless already present."""
+    if stem.endswith("_processed"):
+        return stem
+    return f"{stem}_processed"

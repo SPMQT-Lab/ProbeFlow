@@ -11,6 +11,7 @@ from probeflow.common import (
     find_hdr,
     get_dac_bits,
     i_scale_a_per_dac,
+    mark_processed_stem,
     parse_header,
     percentile_clip,
     sanitize,
@@ -272,3 +273,13 @@ class TestToUint8:
         arr = np.linspace(0, 1, 50)
         u8 = to_uint8(arr, 0.0, 1.0)
         assert u8.dtype == np.uint8
+
+
+# ─── mark_processed_stem ──────────────────────────────────────────────────────
+
+class TestMarkProcessedStem:
+    def test_adds_marker_when_absent(self):
+        assert mark_processed_stem("scan001") == "scan001_processed"
+
+    def test_does_not_duplicate_marker(self):
+        assert mark_processed_stem("scan001_processed") == "scan001_processed"
