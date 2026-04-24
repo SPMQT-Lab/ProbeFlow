@@ -151,55 +151,56 @@ SUPPORTED_SUFFIXES: tuple[str, ...] = (
 
 
 def load_scan(path) -> Scan:
-    """Load an STM scan file, dispatching on its suffix.
+    """Load an STM scan file, dispatching on its content signature.
 
     Supported formats:
-      * ``.sxm``    — Nanonis (always available)
-      * ``.dat``    — Createc (always available)
-      * ``.gwy``    — Gwyddion (install ``probeflow[gwyddion]``)
-      * ``.sm4``    — RHK     (install ``probeflow[rhk]``)
-      * ``.mtrx`` / ``.Z_mtrx`` / ``.I_mtrx`` — Omicron Matrix
-        (install ``probeflow[omicron]``)
+      * ``.sxm`` — Nanonis topography
+      * ``.dat`` — Createc topography
 
-    Point-spectroscopy ``.VERT`` files are not scans — use
-    :func:`probeflow.spec_io.read_spec_file` instead.
+    Point-spectroscopy files (Createc ``.VERT`` and Nanonis ``.dat`` spec)
+    are not scans — use :func:`probeflow.spec_io.read_spec_file` instead.
     """
-    p = Path(path)
-    # Match the final suffix, lowercased; for Matrix payloads the suffix is
-    # ``.Z_mtrx`` etc. so we also accept the substring ``_mtrx``.
-    suffix = p.suffix.lower()
+    from probeflow.file_type import FileType, sniff_file_type
 
-    if suffix == ".sxm":
+    p = Path(path)
+    ft = sniff_file_type(p)
+
+    if ft == FileType.NANONIS_IMAGE:
         from probeflow.readers.sxm import read_sxm
         return read_sxm(p)
-    if suffix == ".dat":
+    if ft == FileType.CREATEC_IMAGE:
         from probeflow.readers.dat import read_dat
         return read_dat(p)
-    if suffix == ".gwy":
-        from probeflow.readers.gwy import read_gwy
-        return read_gwy(p)
-    if suffix == ".sm4":
-        from probeflow.readers.sm4 import read_sm4
-        return read_sm4(p)
-    if suffix == ".mtrx" or "_mtrx" in suffix:
-        from probeflow.readers.mtrx import read_mtrx
-        return read_mtrx(p)
+    if ft == FileType.NANONIS_SPEC:
+        raise ValueError(
+            f"{p.name}: this is a Nanonis spectroscopy file — "
+            "use probeflow.spec_io.read_spec_file to load it."
+        )
+    if ft == FileType.CREATEC_SPEC:
+        raise ValueError(
+            f"{p.name}: this is a Createc .VERT spectroscopy file — "
+            "use probeflow.spec_io.read_spec_file to load it."
+        )
 
     # Last-resort fallback: ask Gwyddion (if installed) to convert the file to
     # .gwy, then read that. This unlocks every vendor format Gwyddion knows
     # about (Bruker, Park, NTEGRA, Nanoscope, …) for ~30 lines of code.
-    from probeflow.readers.gwy_bridge import gwyddion_convert_to_gwy
-    bridged = gwyddion_convert_to_gwy(p)
-    if bridged is not None:
-        from probeflow.readers.gwy import read_gwy
-        scan = read_gwy(bridged)
-        # Restore provenance to the original file (the .gwy is a tmp artefact).
-        scan.source_path = p
-        scan.source_format = f"gwyddion-bridge:{suffix.lstrip('.')}"
-        return scan
+    try:
+        from probeflow.readers.gwy_bridge import gwyddion_convert_to_gwy
+    except ImportError:
+        gwyddion_convert_to_gwy = None  # type: ignore[assignment]
+    if gwyddion_convert_to_gwy is not None:
+        bridged = gwyddion_convert_to_gwy(p)
+        if bridged is not None:
+            from probeflow.readers.gwy import read_gwy
+            scan = read_gwy(bridged)
+            # Restore provenance to the original file (the .gwy is tmp).
+            scan.source_path = p
+            scan.source_format = f"gwyddion-bridge:{p.suffix.lstrip('.')}"
+            return scan
 
     raise ValueError(
-        f"Unsupported scan format {suffix!r} for {p}. "
+        f"Unsupported or unrecognised scan file: {p}. "
         f"Supported natively: {', '.join(SUPPORTED_SUFFIXES)}. "
         f"Install the `gwyddion` system package to enable the auto-bridge "
         f"for additional vendor formats."

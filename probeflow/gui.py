@@ -520,10 +520,24 @@ def scan_image_folder(root: Path) -> list[SxmFile]:
 
 
 def scan_vert_folder(root: Path) -> list[VertFile]:
-    """Find all .VERT spectroscopy files under root and return lightweight metadata."""
+    """Find all spectroscopy files under root and return lightweight metadata.
+
+    Picks up both Createc ``.VERT`` files and Nanonis ``.dat`` spec files by
+    sniffing each file's content signature.
+    """
+    from .file_type import FileType, sniff_file_type
     from .spec_io import read_spec_file
+
     entries: list[VertFile] = []
-    for vert in sorted(Path(root).rglob("*.VERT")):
+    spec_types = (FileType.CREATEC_SPEC, FileType.NANONIS_SPEC)
+    candidates: list[Path] = []
+    for f in sorted(Path(root).rglob("*")):
+        if not f.is_file():
+            continue
+        if sniff_file_type(f) in spec_types:
+            candidates.append(f)
+
+    for vert in candidates:
         try:
             spec = read_spec_file(vert)
             entries.append(VertFile(
