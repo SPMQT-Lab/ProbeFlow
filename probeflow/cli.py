@@ -422,6 +422,9 @@ def _cmd_pipeline(args) -> int:
             ops.append(_op_remove_bad_lines(mad))
         elif name == "plane-bg":
             order = int(parts[0]) if parts else 1
+            if order not in (1, 2, 3, 4):
+                log.error("plane-bg order must be 1-4, got %d", order)
+                return 2
             ops.append(_op_plane_bg(order))
         elif name == "facet-level":
             deg = float(parts[0]) if parts else 3.0
@@ -1084,8 +1087,8 @@ def _build_parser() -> argparse.ArgumentParser:
     plane_bg = sub.add_parser("plane-bg",
         help="Subtract a polynomial plane background")
     _add_common_io(plane_bg, out_suffix="_bg.sxm")
-    plane_bg.add_argument("--order", type=int, default=1, choices=(1, 2),
-        help="Polynomial order (1=plane, 2=quadratic)")
+    plane_bg.add_argument("--order", type=int, default=1, choices=(1, 2, 3, 4),
+        help="Polynomial order (1=plane, 2=quadratic, 3=cubic, 4=quartic)")
     plane_bg.set_defaults(func=lambda a: _cmd_single_op(a, _op_plane_bg(a.order)))
 
     align = sub.add_parser("align-rows",

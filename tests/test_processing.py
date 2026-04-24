@@ -18,6 +18,7 @@ from probeflow.processing import (
     remove_bad_lines,
     subtract_background,
 )
+from probeflow.cli import main as cli_main
 
 
 # ─── Fixtures ────────────────────────────────────────────────────────────────
@@ -79,16 +80,92 @@ class TestRemoveBadLines:
 # ─── subtract_background ────────────────────────────────────────────────────
 
 class TestSubtractBackground:
+    # ── normalised coordinate grid shared by higher-order tests ──────────────
+    @staticmethod
+    def _grid():
+        return np.mgrid[-1:1:64j, -1:1:64j]  # yy, xx each (64, 64)
+
     def test_order1_removes_tilt(self, tilted_image):
         out = subtract_background(tilted_image, order=1)
         assert abs(float(np.mean(out))) < 1e-6
         assert float(np.ptp(out)) < 1e-6  # flat after plane fit
+
+    def test_order1_removes_normalised_plane(self):
+        yy, xx = self._grid()
+        bg = 1.5 + 0.2 * xx - 0.4 * yy
+        signal = np.zeros_like(xx)
+        out = subtract_background(bg + signal, order=1)
+        assert float(np.ptp(out)) < 1e-8
 
     def test_order2_removes_quadratic(self):
         Y, X = np.mgrid[:20, :20]
         quad = (0.01 * X**2 + 0.02 * Y**2 + 0.1 * X + 3.0).astype(np.float64)
         out = subtract_background(quad, order=2)
         assert float(np.ptp(out)) < 1e-6
+
+    def test_order2_removes_full_quadratic_surface(self):
+        yy, xx = self._grid()
+        bg = 1.0 + 0.2 * xx - 0.4 * yy + 0.1 * xx**2 + 0.05 * xx * yy - 0.08 * yy**2
+        out = subtract_background(bg, order=2)
+        assert float(np.ptp(out)) < 1e-8
+
+    def test_order3_removes_cubic_background(self):
+        yy, xx = self._grid()
+        bg = (1.0 + 0.2 * xx - 0.4 * yy
+              + 0.1 * xx**2 - 0.08 * yy**2
+              + 0.03 * xx**3 - 0.02 * xx**2 * yy + 0.01 * xx * yy**2)
+        out = subtract_background(bg, order=3)
+        assert float(np.ptp(out)) < 1e-8
+
+    def test_order3_removes_linear_background(self):
+        yy, xx = self._grid()
+        bg = 1.0 + 0.2 * xx - 0.4 * yy  # purely linear
+        out = subtract_background(bg, order=3)
+        # A cubic fit should still remove a purely linear background exactly
+        assert float(np.ptp(out)) < 1e-8
+
+    def test_order4_removes_quartic_background(self):
+        yy, xx = self._grid()
+        bg = (1.0 + 0.2 * xx - 0.4 * yy
+              + 0.1 * xx**2 - 0.08 * yy**2
+              + 0.03 * xx**3
+              + 0.02 * xx**4 - 0.015 * xx**2 * yy**2)
+        out = subtract_background(bg, order=4)
+        assert float(np.ptp(out)) < 1e-7
+
+    def test_invalid_order_raises(self):
+        arr = np.ones((8, 8))
+        with pytest.raises(ValueError, match="order must be 1..4"):
+            subtract_background(arr, order=5)
+
+    def test_order_zero_raises(self):
+        arr = np.ones((8, 8))
+        with pytest.raises(ValueError):
+            subtract_background(arr, order=0)
+
+    def test_negative_order_raises(self):
+        arr = np.ones((8, 8))
+        with pytest.raises(ValueError):
+            subtract_background(arr, order=-1)
+
+    def test_nan_preserved_in_output(self):
+        yy, xx = self._grid()
+        bg = 0.2 * xx - 0.4 * yy
+        arr = bg.copy()
+        arr[10:20, 10:20] = np.nan  # NaN patch
+        out = subtract_background(arr, order=1)
+        assert np.all(np.isnan(out[10:20, 10:20]))
+        assert np.all(np.isfinite(out[:10, :]))
+
+    def test_nan_fit_uses_finite_pixels_only(self):
+        yy, xx = self._grid()
+        bg = 0.5 * xx - 0.3 * yy
+        arr = bg.copy()
+        arr[30:, :] = np.nan  # mask half the image
+        out = subtract_background(arr, order=1)
+        # Finite half should be nearly flat
+        finite_out = out[:30, :]
+        assert float(np.ptp(finite_out)) < 1e-7
 
     def test_preserves_shape(self, tilted_image):
         assert subtract_background(tilted_image).shape == tilted_image.shape
@@ -292,3 +369,50 @@ class TestExportPng:
         with pytest.raises(ValueError):
             export_png(arr, tmp_path / "x.png", "gray", 1.0, 99.0,
                        lut_fn=_lut, scan_range_m=(0.0, 0.0))
+
+
+# ─── CLI: plane-bg order extension ───────────────────────────────────────────
+
+class TestPlaneBgCli:
+    def test_order3_via_cli(self, first_sample_dat, tmp_path):
+        out = tmp_path / "out.sxm"
+        rc = cli_main(["plane-bg", str(first_sample_dat),
+                       "--order", "3", "-o", str(out)])
+        assert rc == 0
+        assert out.exists()
+
+    def test_order4_via_cli(self, first_sample_dat, tmp_path):
+        out = tmp_path / "out.sxm"
+        rc = cli_main(["plane-bg", str(first_sample_dat),
+                       "--order", "4", "-o", str(out)])
+        assert rc == 0
+        assert out.exists()
+
+    def test_order3_records_history(self, first_sample_dat, tmp_path):
+        from unittest.mock import patch
+        captured = []
+
+        def _capture(args, scan, default_suffix):
+            captured.append(scan)
+            return tmp_path / "out.sxm"
+
+        with patch("probeflow.cli._write_output", side_effect=_capture):
+            cli_main(["plane-bg", str(first_sample_dat), "--order", "3"])
+        assert captured[0].processing_history[0]["params"]["order"] == 3
+
+    def test_order5_via_cli_rejected(self, first_sample_dat, tmp_path):
+        import sys
+        with pytest.raises(SystemExit):
+            cli_main(["plane-bg", str(first_sample_dat), "--order", "5"])
+
+    def test_pipeline_order4_accepted(self, first_sample_dat, tmp_path):
+        out = tmp_path / "out.sxm"
+        rc = cli_main(["pipeline", str(first_sample_dat),
+                       "-o", str(out), "--steps", "plane-bg:4"])
+        assert rc == 0
+        assert out.exists()
+
+    def test_pipeline_order5_rejected(self, first_sample_dat, tmp_path):
+        rc = cli_main(["pipeline", str(first_sample_dat),
+                       "--steps", "plane-bg:5"])
+        assert rc == 2

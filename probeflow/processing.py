@@ -86,16 +86,41 @@ def remove_bad_lines(arr: np.ndarray, threshold_mad: float = 5.0) -> np.ndarray:
 # 2.  subtract_background
 # ═════════════════════════════════════════════════════════════════════════════
 
-def subtract_background(arr: np.ndarray, order: int = 1) -> np.ndarray:
-    """
-    Fit and subtract a polynomial background.
+def _poly_terms(x: np.ndarray, y: np.ndarray, order: int) -> np.ndarray:
+    """Return an (N, M) design matrix for a 2D polynomial up to total degree `order`.
 
-    order=1  → plane    (ax + by + c)
-    order=2  → full 2nd-degree (ax² + by² + cxy + dx + ey + f)
+    All terms x^i * y^j where i + j <= order, ordered by total degree then by
+    increasing power of x.  The exact column order is deterministic and used
+    consistently in both fitting and reconstruction.
+    """
+    cols = []
+    for total in range(order + 1):
+        for i in range(total + 1):
+            j = total - i
+            cols.append((x ** i) * (y ** j))
+    return np.column_stack(cols)
+
+
+def subtract_background(arr: np.ndarray, order: int = 1) -> np.ndarray:
+    """Fit and subtract a 2D polynomial background from an image.
+
+    Parameters
+    ----------
+    arr:
+        2D image array.
+    order:
+        Total polynomial order.  Supported values are 1, 2, 3, and 4.
+        order=1 fits a plane (3 terms), order=2 fits a quadratic surface
+        (6 terms), order=3 fits cubic (10 terms), order=4 fits quartic
+        (15 terms).
 
     Coordinates are normalised to [-1, 1] for numerical stability.
     Only finite pixels participate in the least-squares fit.
+    NaNs in the input are preserved in the output.
     """
+    if order < 1 or order > 4:
+        raise ValueError(f"order must be 1..4, got {order}")
+
     arr = arr.astype(np.float64, copy=True)
     Ny, Nx = arr.shape
 
@@ -108,27 +133,15 @@ def subtract_background(arr: np.ndarray, order: int = 1) -> np.ndarray:
     flat_z = arr.ravel()
 
     finite = np.isfinite(flat_z)
-    if finite.sum() < (3 if order == 1 else 6):
+    n_terms = (order + 1) * (order + 2) // 2
+    if finite.sum() < n_terms:
         return arr
 
-    if order == 1:
-        A = np.column_stack([flat_x[finite], flat_y[finite],
-                             np.ones(finite.sum())])
-    else:
-        fx, fy = flat_x[finite], flat_y[finite]
-        A = np.column_stack([fx**2, fy**2, fx*fy, fx, fy,
-                             np.ones(finite.sum())])
-
+    A = _poly_terms(flat_x[finite], flat_y[finite], order)
     b = flat_z[finite]
     coeffs, _, _, _ = np.linalg.lstsq(A, b, rcond=None)
 
-    if order == 1:
-        bg = coeffs[0]*Xg + coeffs[1]*Yg + coeffs[2]
-    else:
-        bg = (coeffs[0]*Xg**2 + coeffs[1]*Yg**2 +
-              coeffs[2]*Xg*Yg  + coeffs[3]*Xg    +
-              coeffs[4]*Yg     + coeffs[5])
-
+    bg = (_poly_terms(flat_x, flat_y, order) @ coeffs).reshape(Ny, Nx)
     return arr - bg
 
 
