@@ -166,3 +166,35 @@ class TestSavePng:
         scan = load_scan(first_sample_dat)
         with pytest.raises(ValueError):
             scan.save_png(tmp_path / "x.png", plane_idx=99)
+
+
+# ─── processing_history field ────────────────────────────────────────────────
+
+class TestProcessingHistory:
+    def _make_scan(self, **kwargs):
+        return Scan(
+            planes=[np.zeros((4, 4))],
+            plane_names=["Z forward"],
+            plane_units=["m"],
+            plane_synthetic=[False],
+            header={},
+            scan_range_m=(1e-8, 1e-8),
+            source_path=Path("/fake/file.sxm"),
+            source_format="sxm",
+            **kwargs,
+        )
+
+    def test_default_is_empty_list(self):
+        scan = self._make_scan()
+        assert scan.processing_history == []
+
+    def test_instances_do_not_share_history(self):
+        a = self._make_scan()
+        b = self._make_scan()
+        a.processing_history.append({"op": "plane_bg"})
+        assert b.processing_history == []
+
+    def test_accepts_list_of_dicts(self):
+        entry = {"op": "align_rows", "method": "median"}
+        scan = self._make_scan(processing_history=[entry])
+        assert scan.processing_history == [entry]

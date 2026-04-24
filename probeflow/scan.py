@@ -66,6 +66,7 @@ class Scan:
     scan_range_m: Tuple[float, float]
     source_path: Path
     source_format: str
+    processing_history: List[dict] = field(default_factory=list)
 
     # ── Derived properties ──────────────────────────────────────────────────
 
