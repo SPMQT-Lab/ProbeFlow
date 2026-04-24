@@ -3212,20 +3212,53 @@ class SpecViewerDialog(QDialog):
 
 
 # ── Export dialog ────────────────────────────────────────────────────────────
+_EXPORT_FORMATS: list[tuple[str, str, str]] = [
+    # (label, suffix without dot, QFileDialog filter string)
+    ("PNG image",         "png",  "PNG images (*.png)"),
+    ("PDF figure",        "pdf",  "PDF figures (*.pdf)"),
+    ("TIFF (float32)",    "tif",  "TIFF images (*.tif *.tiff)"),
+    ("TIFF (uint16)",     "tif",  "TIFF images (*.tif *.tiff)"),
+    ("Gwyddion .gwy",     "gwy",  "Gwyddion files (*.gwy)"),
+    ("CSV grid",          "csv",  "CSV grids (*.csv)"),
+    ("Nanonis .sxm",      "sxm",  "Nanonis files (*.sxm)"),
+]
+
+
 class ExportDialog(QDialog):
+    """Pick an output format and per-format options before saving."""
+
     def __init__(self, t: dict, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Export PNG")
-        self.setFixedSize(340, 240)
+        self.setWindowTitle("Export scan")
+        self.setFixedSize(380, 360)
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(18, 14, 18, 14)
         lay.setSpacing(8)
 
+        # ── Format picker ───────────────────────────────────────────────────
+        fmt_row = QHBoxLayout()
+        fmt_lbl = QLabel("Format:")
+        fmt_lbl.setFixedWidth(70)
+        self._fmt_cb = QComboBox()
+        for label, _suffix, _filt in _EXPORT_FORMATS:
+            self._fmt_cb.addItem(label)
+        self._fmt_cb.currentIndexChanged.connect(self._update_visible_options)
+        fmt_row.addWidget(fmt_lbl)
+        fmt_row.addWidget(self._fmt_cb, 1)
+        lay.addLayout(fmt_row)
+        lay.addWidget(_sep())
+
+        # ── PNG / PDF options: scale bar toggle + unit + position ───────────
+        self._sb_group = QWidget()
+        sb_outer = QVBoxLayout(self._sb_group)
+        sb_outer.setContentsMargins(0, 0, 0, 0)
+        sb_outer.setSpacing(4)
+
         self._scalebar_cb = QCheckBox("Add scale bar")
         self._scalebar_cb.setChecked(True)
         self._scalebar_cb.toggled.connect(self._on_scalebar_toggled)
-        lay.addWidget(self._scalebar_cb)
+        sb_outer.addWidget(self._scalebar_cb)
 
         self._sb_opts = QWidget()
         sb_lay = QVBoxLayout(self._sb_opts)
@@ -3256,9 +3289,20 @@ class ExportDialog(QDialog):
         pos_row.addWidget(self._pos_cb, 1)
         sb_lay.addLayout(pos_row)
 
-        lay.addWidget(self._sb_opts)
-        lay.addWidget(_sep())
+        sb_outer.addWidget(self._sb_opts)
+        lay.addWidget(self._sb_group)
 
+        # ── "No extra options" note for formats that don't need one ─────────
+        self._nooptions_lbl = QLabel(
+            "No extra options — the file will be written as-is."
+        )
+        self._nooptions_lbl.setWordWrap(True)
+        self._nooptions_lbl.setStyleSheet("color: gray; font-style: italic;")
+        lay.addWidget(self._nooptions_lbl)
+
+        lay.addStretch()
+
+        # ── Buttons ─────────────────────────────────────────────────────────
         btn_row = QHBoxLayout()
         cancel_btn = QPushButton("Cancel")
         cancel_btn.clicked.connect(self.reject)
@@ -3269,21 +3313,48 @@ class ExportDialog(QDialog):
         btn_row.addStretch()
         btn_row.addWidget(ok_btn)
         lay.addLayout(btn_row)
-        lay.addStretch()
+
+        self._update_visible_options()
 
     def _on_scalebar_toggled(self, checked: bool):
         self._sb_opts.setEnabled(checked)
 
+    def _update_visible_options(self):
+        label = self._fmt_cb.currentText()
+        scalebar_fmts = ("PNG image", "PDF figure")
+        show_sb = label in scalebar_fmts
+        self._sb_group.setVisible(show_sb)
+        self._nooptions_lbl.setVisible(not show_sb)
+
     def get_settings(self) -> dict:
+        """Return everything the caller needs to route to writers.save_scan.
+
+        Keys:
+            format_label : str    — human-readable dropdown entry
+            suffix       : str    — lower-case extension (no leading dot)
+            file_filter  : str    — QFileDialog filter pattern
+            add_scalebar / scalebar_unit / scalebar_pos  — only meaningful for PNG/PDF
+            tiff_mode    : 'float' | 'uint16'            — only for TIFF
+        """
+        idx = self._fmt_cb.currentIndex()
+        label, suffix, filt = _EXPORT_FORMATS[idx]
+
         unit = "nm"
         if self._ang_rb.isChecked():
             unit = "Å"
         elif self._pm_rb.isChecked():
             unit = "pm"
+
+        tiff_mode = "uint16" if label == "TIFF (uint16)" else "float"
+
         return {
-            'add_scalebar':  self._scalebar_cb.isChecked(),
-            'scalebar_unit': unit,
-            'scalebar_pos':  self._pos_cb.currentText(),
+            "format_label":  label,
+            "suffix":        suffix,
+            "file_filter":   filt,
+            "add_scalebar":  self._scalebar_cb.isChecked(),
+            "scalebar_unit": unit,
+            "scalebar_pos":  self._pos_cb.currentText(),
+            "tiff_mode":     tiff_mode,
         }
 
 
@@ -4013,6 +4084,15 @@ class ProbeFlowWindow(QMainWindow):
         if not entry:
             return
 
+        # Only topography entries are exportable through this dialog; spec
+        # entries are handled by the spec viewer.
+        if not hasattr(entry, "path") or entry.path.suffix.lower() == ".vert":
+            self._status_bar.showMessage(
+                "Selected entry isn't a topography scan — exporting .VERT "
+                "spectra uses the spec viewer."
+            )
+            return
+
         t   = THEMES["dark" if self._dark else "light"]
         dlg = ExportDialog(t, self)
         dlg.setStyleSheet(QApplication.instance().styleSheet())
@@ -4020,35 +4100,49 @@ class ProbeFlowWindow(QMainWindow):
             return
         settings = dlg.get_settings()
 
+        suffix     = settings["suffix"]
+        filt       = settings["file_filter"]
+        label      = settings["format_label"]
+        suggested  = str(Path.home() / f"{entry.stem}.{suffix}")
         out_path, _ = QFileDialog.getSaveFileName(
-            self, "Save PNG", str(Path.home() / f"{entry.stem}.png"),
-            "PNG images (*.png)")
+            self, f"Save as {label}", suggested, filt)
         if not out_path:
             return
 
         try:
-            _scan = load_scan(entry.path)
-            arr = _scan.planes[0] if _scan.n_planes > 0 else None
-            w_m, h_m = _scan.scan_range_m
-        except Exception:
-            arr = None
-            w_m = h_m = 0.0
-        if arr is None:
+            scan = load_scan(entry.path)
+        except Exception as exc:
+            self._status_bar.showMessage(f"Could not read scan: {exc}")
+            return
+        if scan.n_planes == 0:
             self._status_bar.showMessage("Could not read scan data")
             return
 
         clip_low, clip_high = self._browse_tools.get_clip_values()
         cmap_key = self._grid._card_colormaps.get(entry.stem, DEFAULT_CMAP_KEY)
 
-        try:
-            _proc.export_png(
-                arr, out_path, cmap_key, clip_low, clip_high,
-                lut_fn=lambda key: _get_lut(key),
-                scan_range_m=(w_m, h_m),
-                add_scalebar=settings['add_scalebar'],
-                scalebar_unit=settings['scalebar_unit'],
-                scalebar_pos=settings['scalebar_pos'],
+        # Per-format kwargs forwarded to writers.save_scan.
+        kwargs: dict = {}
+        if suffix in ("png", "pdf"):
+            kwargs.update(
+                colormap=cmap_key,
+                clip_low=clip_low,
+                clip_high=clip_high,
             )
+        if suffix == "png":
+            kwargs.update(
+                add_scalebar=settings["add_scalebar"],
+                scalebar_unit=settings["scalebar_unit"],
+                scalebar_pos=settings["scalebar_pos"],
+            )
+        if suffix == "tif":
+            kwargs["mode"] = settings["tiff_mode"]
+            if settings["tiff_mode"] == "uint16":
+                kwargs["clip_low"]  = clip_low
+                kwargs["clip_high"] = clip_high
+
+        try:
+            scan.save(out_path, plane_idx=0, **kwargs)
             self._status_bar.showMessage(f"Exported → {out_path}")
         except Exception as exc:
             self._status_bar.showMessage(f"Export error: {exc}")

@@ -3,30 +3,35 @@
 </p>
 
 <h1 align="center">ProbeFlow</h1>
-<p align="center"><em>A scanning-tunneling-microscopy toolkit — browse, process, convert.</em></p>
+<p align="center"><em>An imaging-lab workflow tool for scanning-probe microscopy.</em></p>
 
 ---
 
-## What It Is
+## Why It Exists
 
-**ProbeFlow** is a scanning-tunneling-microscopy (STM) toolkit built around three everyday lab needs:
+A scanning-probe lab generates data faster than it can look at it.  A week of STM imaging leaves you with hundreds of scans scattered across four vendor formats, a stack of spectroscopy curves tied to unknown tip positions, a handful of notebooks half-analysed in Gwyddion, and no routine way to go from raw file to a paper figure without manual clicking through five tools.  The interesting science — *did the molecules organise?  did the lattice shift?  how clean is the step?* — gets buried in file-format juggling.
 
-1. **Getting scans out of Createc and into Nanonis.**
-   Createc `.dat` files are decoded, scaled to SI units, and repackaged as Nanonis-compatible `.sxm` files or PNG previews.
-2. **Looking at and cleaning up the scans.**
-   Browse a folder of `.sxm` files in a thumbnail grid, switch colormaps, flatten with plane / facet levelling, fix bad scan lines, smooth, FFT-filter, detect grains, measure lattice periodicities, and export publication-ready PNGs with scale bars — **from a GUI *or* from the shell.**
-3. **Reading and processing point-measurement spectroscopy.**
-   Createc `.VERT` files (bias sweeps, time traces, Z spectroscopy) are read into a unit-aware data model, smoothed, differentiated, overlaid, and plotted — with tip positions optionally shown as markers on a topography image.
+**ProbeFlow collapses that pipeline.**  Point it at a folder; it reads every scan and spectrum file it recognises, renders thumbnails, lets you flatten / smooth / filter / measure in a GUI *or* from bash, runs feature detection (particles, lattices, unit cells, line profiles, grain counts), and exports to whatever format the next step of your workflow wants — publication PDF, Gwyddion `.gwy`, TIFF for ImageJ, or CSV for a plot.  Every operation preserves physical units.  Every corrective operation is a one-liner you can script across a dataset.
 
-Everything is available as a CLI subcommand, so corrections and conversions can be scripted across hundreds of files or wired into a processing pipeline.
+It's not another viewer — it's the glue between your microscope, your analysis habits, and the figures you put in a paper.
+
+## What's In It
+
+* **Browse** — a thumbnail grid over an entire imaging session.  Recognises **Createc `.dat`**, **Nanonis `.sxm`**, **Gwyddion `.gwy`**, **RHK `.sm4`**, **Omicron Matrix `.mtrx`**, and **Createc `.VERT`** spectroscopy in a single folder.  Live clip sliders, per-card colormaps, per-scan undo, full-size viewer with interactive histogram, and side-by-side metadata — designed to make "did anything happen in this scan?" a one-second answer.
+* **Process** — plane / facet flattening, row-offset alignment, bad-line interpolation, Gaussian / FFT / edge / TV denoising, grain detection, periodicity measurement.  All usable from the GUI, chainable as bash pipelines, and importable as plain Python functions (no Qt needed).
+* **Analyse features** — particle / molecule segmentation, template-match counting, few-shot classification, SIFT lattice extraction, unit-cell averaging, line profiles.  Built for *discrete-object* STM work: molecular adsorbates, defect sites, coverage statistics.  Exports per-object JSON so your counts live alongside your raw scans in git or a lab notebook.
+* **Read any, write what's useful** — ProbeFlow reads the five main STM vendor formats natively (with the optional `access2thematrix` / `spym` / `gwyfile` extras installed); anything else falls through to the system `gwyddion` binary if it's on `PATH`, which adds Bruker, Park, NTEGRA, Nanoscope, JPK and ~30 more.  On the output side it writes **`.sxm`**, **PNG**, **PDF**, **TIFF** (float or uint16), **GWY**, **CSV**, and **JSON** — driven purely by the suffix you pick.
+* **Point-measurement spectroscopy** — `.VERT` bias sweeps, time traces and Z spectroscopy read into a unit-aware model you can smooth, differentiate, overlay, waterfall, and map back onto a topography image to show *where* each spectrum came from.
+
+## Why It Matters in the Lab
+
+* **Fewer clicks per figure.**  "Open dat, flatten, apply colormap, add scale bar, save PNG" becomes `probeflow pipeline scan.dat --steps plane-bg:1 align-rows:median --png`.  When you're doing this for 200 scans, the difference is *hours*.
+* **Consistent corrections across a dataset.**  Processing is parameterised in a way you can commit to git.  Two people analysing the same growth series apply the same flattening the same way.
+* **Units aren't lost.**  Scale bars, colour-bar ticks, JSON exports — all carry metres / amperes / volts throughout, so a grain area in nm² today can be re-verified in a year.
+* **Format is no longer a gatekeeper.**  A `.dat` straight off Createc is as analysable as a polished `.sxm`.  An Omicron file from a collaborator can go straight into a pipeline.  Conversion happens only when another tool (or a journal) asks for it — and it's one CLI call away.
+* **Reproducibility by default.**  Every CLI invocation is a command you can paste into a methods section.  Every Python function has no Qt dependency, so lab notebooks run without PySide6 installed.
 
 > **Status: beta.** The on-disk formats, the CLI surface, and the Python API are still subject to change between commits. Pin a commit hash if you depend on the current shape.
-
-All topography commands (`plane-bg`, `align-rows`, `smooth`, `sxm2png`, `pipeline`, `info`, `grains`, `autoclip`, `periodicity`, `tv-denoise`, `profile` …) accept **either** `.sxm` **or** `.dat` inputs transparently — the format is auto-detected, so conversion is not a mandatory first step before analysis.
-
-ProbeFlow reads **Createc `.dat`**, **Nanonis `.sxm`**, **Gwyddion `.gwy`**, **RHK `.sm4`**, and **Omicron Matrix `.mtrx`** (via optional extras), and writes **`.sxm`**, **PNG**, **PDF**, **TIFF**, **GWY**, **CSV**, and **JSON**. The `probeflow convert` subcommand is a one-shot any-in/any-out converter driven purely by file suffixes. When the `gwyddion` system binary is on `PATH`, an automatic **Gwyddion bridge** falls back to its converter for any other vendor format Gwyddion knows (Bruker, Park, NTEGRA, Nanoscope, JPK, …) — no extra Python dependency required.
-
-A dedicated **Features tab** (mirrored as CLI subcommands) covers discrete-object STM analysis: particle / molecule **segmentation**, **template-match counting**, few-shot **classification**, **SIFT lattice extraction**, **unit-cell averaging**, **line profiles**, and edge-preserving **TV denoising** — all preserving SI units throughout.
 
 ---
 
@@ -65,19 +70,27 @@ probeflow gui
 ### One-shot from the shell
 
 ```bash
-# Convert a folder of Createc .dat scans into .sxm
-probeflow dat2sxm -- --input-dir data/scans --output-dir out/sxm
+# Look up what's in a scan (works for .dat, .sxm, .gwy, .sm4, .mtrx)
+probeflow info some_scan.dat
 
-# Export a single .sxm plane as a colour PNG with an auto-sized nm scale bar
-probeflow sxm2png scan.sxm --colormap inferno --clip-low 2 --clip-high 98
+# Flatten a scan straight off the microscope and export a publication-ready PDF
+probeflow pipeline some_scan.dat \
+    --steps align-rows:median plane-bg:1 smooth:1.2 \
+    -o clean.sxm
+probeflow convert clean.sxm figure.pdf --colormap inferno
 
-# Flatten with a linear plane background, write a new .sxm
-probeflow plane-bg scan.sxm --order 1 -o scan_flat.sxm
-
-# Chain three corrections and write a PNG straight out
-probeflow pipeline scan.sxm \
-    --steps align-rows:median plane-bg:1 smooth:1.5 \
+# Or chain correction + image export in one go
+probeflow pipeline some_scan.dat \
+    --steps align-rows:median plane-bg:1 \
     --png --colormap viridis -o scan_clean.png
+
+# Suggest a contrast window automatically
+probeflow autoclip some_scan.sxm --json
+
+# Convert between vendor formats when another tool asks for it
+probeflow convert some_scan.dat some_scan.sxm      # Createc → Nanonis
+probeflow convert some_scan.sm4 some_scan.gwy      # RHK → Gwyddion
+probeflow convert some_scan.sxm some_scan.tif --tiff-mode float
 ```
 
 ---
@@ -114,9 +127,9 @@ probeflow convert default_0001.Z_mtrx scan.sxm                    # Omicron Matr
 probeflow convert scan.dat line0.csv --plane 0                    # single plane → CSV grid
 ```
 
-### Processing (`.sxm` in → `.sxm` or `.png` out)
+### Processing (scan in → `.sxm` or `.png` out)
 
-Each of these reads an `.sxm`, applies a single operation to the selected plane (0 = Z forward by default), and writes a new `.sxm` — or a PNG with `--png`.
+Each of these reads a scan (`.sxm`, `.dat`, `.gwy`, `.sm4`, `.mtrx` — auto-detected), applies a single operation to the selected plane (0 = Z forward by default), and writes a new `.sxm` — or a PNG with `--png`.
 
 | Command            | Operation                                                         |
 |--------------------|-------------------------------------------------------------------|
@@ -282,15 +295,25 @@ for f in data/sxm/*.sxm; do
 done
 ```
 
-### Convert → flatten → export for publication
+### Raw-to-figure: flatten a session and export for publication
+
+Works on raw `.dat`, `.sxm`, or any other supported format — no pre-conversion step required:
 
 ```bash
-probeflow dat2sxm -- --input-dir raw --output-dir sxm
-for s in sxm/*.sxm; do
+for s in data/session/*.{dat,sxm,gwy}; do
+    [ -e "$s" ] || continue
     probeflow pipeline "$s" \
         --steps remove-bad-lines align-rows:median plane-bg:1 smooth:1.0 \
         --png --colormap inferno --scalebar-unit nm \
-        -o "figures/${s##*/}.png"
+        -o "figures/$(basename "${s%.*}").png"
+done
+```
+
+If a journal or collaborator specifically asks for `.sxm`:
+
+```bash
+for d in raw/*.dat; do
+    probeflow convert "$d" "sxm/$(basename "${d%.dat}").sxm"
 done
 ```
 
@@ -314,21 +337,34 @@ probeflow periodicity scan.sxm --n-peaks 3 --json \
 
 ## Programmatic use
 
-The package is importable without pulling in the GUI:
+The package is importable without pulling in the GUI.  The primary entry point is `load_scan`, which returns a format-agnostic `Scan` object:
 
 ```python
-# Topographic image processing
-from probeflow import processing
-from probeflow.sxm_io import (
-    read_sxm_plane, write_sxm_with_planes, read_all_sxm_planes,
-    parse_sxm_header, sxm_dims, sxm_scan_range,
-)
+from probeflow import load_scan, processing
 
-arr = read_sxm_plane("scan.sxm", plane_idx=0)
-arr = processing.align_rows(arr, method="median")
-arr = processing.subtract_background(arr, order=1)
+# Works for any supported format — same API whether the input is
+# Createc, Nanonis, Gwyddion, RHK, or Omicron.
+scan = load_scan("raw_scan.dat")
 
-# Spectroscopy
+scan.planes[0] = processing.align_rows(scan.planes[0], method="median")
+scan.planes[0] = processing.subtract_background(scan.planes[0], order=1)
+
+# Export by file suffix — sxm / png / pdf / tiff / gwy / csv.
+scan.save("figure.pdf", colormap="inferno")
+scan.save("archive.sxm")
+```
+
+Lower-level primitives for when you need the full vendor header or raw byte layout:
+
+```python
+from probeflow.sxm_io import parse_sxm_header, read_all_sxm_planes
+
+hdr, planes = read_all_sxm_planes("scan.sxm")
+```
+
+Spectroscopy is a different shape of data, so it has its own module:
+
+```python
 from probeflow.spec_io import read_spec_file
 from probeflow.spec_processing import smooth_spectrum, numeric_derivative
 
@@ -344,18 +380,19 @@ dzdv = numeric_derivative(spec.x_array, z_smooth)
 ```
 probeflow/              # installable package
 ├── __init__.py
-├── common.py           # DAC / header utilities used by both conversion paths
-├── dat_sxm.py          # Createc .dat → Nanonis .sxm
-├── dat_png.py          # Createc .dat → PNG previews
-├── sxm_io.py           # .sxm read / write (GUI-free)
+├── scan.py             # Scan dataclass + load_scan dispatcher (main entry point)
+├── readers/            # vendor format readers (sxm, dat, gwy, sm4, mtrx, gwy_bridge)
+├── writers/            # output formats (sxm, png, pdf, tiff, gwy, csv, json)
 ├── processing.py       # image-processing pipeline (GUI-free) — incl. tv_denoise, line_profile
 ├── features.py         # particle segmentation / template counting / few-shot classify (GUI-free)
 ├── lattice.py          # SIFT lattice extraction + unit-cell averaging (GUI-free)
 ├── spec_io.py          # Createc .VERT reader → SpecData (GUI-free)
 ├── spec_processing.py  # spectroscopy processing functions (GUI-free)
 ├── spec_plot.py        # spectroscopy matplotlib plots (GUI-free)
-├── readers/            # vendor format readers (sxm, dat, gwy, sm4, mtrx, gwy_bridge)
-├── writers/            # output writers (sxm, png, pdf, tiff, gwy, csv, json)
+├── sxm_io.py           # low-level .sxm byte layout (used by readers/writers)
+├── common.py           # DAC / header utilities shared by Createc / Nanonis paths
+├── dat_sxm.py          # Createc .dat → Nanonis .sxm (legacy CLI: `dat-sxm`)
+├── dat_png.py          # Createc .dat → PNG previews (legacy CLI: `dat-png`)
 ├── gui.py              # PySide6 desktop interface (Browse / Convert / Features tabs)
 └── cli.py              # unified "probeflow" command
 
