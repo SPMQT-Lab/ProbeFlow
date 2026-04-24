@@ -18,10 +18,11 @@ from matplotlib.figure import Figure
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 
 from PySide6.QtCore import (
-    Qt, QObject, QRunnable, QThreadPool, QTimer, QSize, Signal, Slot,
+    Qt, QObject, QRect, QRunnable, QThreadPool, QTimer, QSize, Signal, Slot,
 )
 from PySide6.QtGui import (
-    QColor, QCursor, QFont, QImage, QMovie, QPixmap, QWheelEvent,
+    QBrush, QColor, QCursor, QFont, QImage, QMovie, QPainter, QPen,
+    QPixmap, QWheelEvent,
 )
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QComboBox,
@@ -29,7 +30,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton,
     QRadioButton, QScrollArea, QSlider, QSplitter, QStackedWidget,
     QStatusBar, QTableWidget, QTableWidgetItem, QHeaderView, QTextEdit,
-    QVBoxLayout, QWidget,
+    QToolTip, QVBoxLayout, QWidget,
 )
 import shutil
 import subprocess
@@ -1347,12 +1348,18 @@ class ThumbnailGrid(QWidget):
 
 # ── Full-size image viewer dialog ─────────────────────────────────────────────
 class _ZoomLabel(QLabel):
-    """QLabel inside a scroll area that supports Ctrl+Wheel zoom."""
+    """QLabel inside a scroll area that supports Ctrl+Wheel zoom and spec-position markers."""
+
+    marker_clicked = Signal(object)  # emits VertFile when user clicks a marker
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAlignment(Qt.AlignCenter)
         self._pixmap_orig: Optional[QPixmap] = None
         self._zoom = 1.0
+        self._markers: list[dict] = []   # each: {frac_x, frac_y, entry}
+        self._show_markers: bool = True
+        self.setMouseTracking(True)
 
     def set_source(self, pixmap: QPixmap):
         self._pixmap_orig = pixmap
@@ -1366,6 +1373,14 @@ class _ZoomLabel(QLabel):
         self._zoom = 1.0
         self._apply_zoom()
 
+    def set_markers(self, markers: list[dict]):
+        self._markers = markers
+        self.update()
+
+    def set_show_markers(self, visible: bool):
+        self._show_markers = visible
+        self.update()
+
     def _apply_zoom(self):
         if self._pixmap_orig is None:
             return
@@ -1375,6 +1390,58 @@ class _ZoomLabel(QLabel):
                                            Qt.SmoothTransformation)
         self.setPixmap(scaled)
         self.resize(scaled.size())
+        self.update()
+
+    def _marker_px(self, frac_x: float, frac_y: float) -> tuple[int, int]:
+        """Fractional image coords → label pixel coords."""
+        return int(frac_x * self.width()), int(frac_y * self.height())
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if not self._show_markers or not self._markers or self._pixmap_orig is None:
+            return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        r = 7
+        for i, m in enumerate(self._markers):
+            sx, sy = self._marker_px(m["frac_x"], m["frac_y"])
+            painter.setBrush(QBrush(QColor("#FFD700")))
+            painter.setPen(QPen(QColor("black"), 1.5))
+            painter.drawEllipse(sx - r, sy - r, 2 * r, 2 * r)
+            painter.setFont(QFont("Helvetica", 6, QFont.Bold))
+            painter.setPen(QPen(QColor("black")))
+            painter.drawText(QRect(sx - r, sy - r, 2 * r, 2 * r),
+                             Qt.AlignCenter, str(i + 1))
+        painter.end()
+
+    def mouseMoveEvent(self, event):
+        if self._show_markers and self._markers and self._pixmap_orig is not None:
+            pos = event.pos()
+            for m in self._markers:
+                sx, sy = self._marker_px(m["frac_x"], m["frac_y"])
+                if abs(pos.x() - sx) <= 10 and abs(pos.y() - sy) <= 10:
+                    entry = m["entry"]
+                    lines = [entry.stem]
+                    if entry.sweep_type and entry.sweep_type != "unknown":
+                        lines.append(entry.sweep_type)
+                    if entry.bias_mv is not None:
+                        lines.append(f"Bias: {entry.bias_mv:.0f} mV")
+                    QToolTip.showText(event.globalPosition().toPoint(),
+                                      "\n".join(lines), self)
+                    return
+            QToolTip.hideText()
+        super().mouseMoveEvent(event)
+
+    def mousePressEvent(self, event):
+        if (event.button() == Qt.LeftButton and self._show_markers
+                and self._markers and self._pixmap_orig is not None):
+            pos = event.pos()
+            for m in self._markers:
+                sx, sy = self._marker_px(m["frac_x"], m["frac_y"])
+                if abs(pos.x() - sx) <= 12 and abs(pos.y() - sy) <= 12:
+                    self.marker_clicked.emit(m["entry"])
+                    return
+        super().mousePressEvent(event)
 
     def wheelEvent(self, event: QWheelEvent):
         if event.modifiers() & Qt.ControlModifier:
@@ -1407,6 +1474,11 @@ class ImageViewerDialog(QDialog):
         self._clip_high  = clip_high
         self._processing = dict(processing) if processing else {}
         self._raw_arr: Optional[np.ndarray] = None  # for histogram
+        self._spec_markers: list[dict] = []
+        self._scan_header: dict = {}
+        self._scan_range_m: Optional[tuple] = None
+        self._scan_shape: Optional[tuple] = None
+        self._scan_format: str = ""
 
         self._build()
         self._sync_qproc_from_state()
@@ -1633,6 +1705,17 @@ class ImageViewerDialog(QDialog):
 
         right_lay.addWidget(_sep())
 
+        # spec position overlay toggle
+        self._spec_show_cb = QCheckBox("Show spec positions")
+        self._spec_show_cb.setFont(QFont("Helvetica", 8))
+        self._spec_show_cb.setChecked(True)
+        self._spec_show_cb.toggled.connect(self._on_spec_show_toggled)
+        right_lay.addWidget(self._spec_show_cb)
+
+        self._zoom_lbl.marker_clicked.connect(self._on_marker_clicked)
+
+        right_lay.addWidget(_sep())
+
         # save PNG copy
         save_btn = QPushButton("⬇ Save PNG copy…")
         save_btn.setFont(QFont("Helvetica", 8, QFont.Bold))
@@ -1715,14 +1798,24 @@ class ImageViewerDialog(QDialog):
         self._next_btn.setEnabled(self._idx < len(self._entries) - 1)
         self._zoom_lbl.setText("Loading…")
         self._zoom_lbl.setPixmap(QPixmap())
-        # load raw array for histogram
+        self._zoom_lbl.set_markers([])
+        # load raw array for histogram and capture scan geometry for spec overlay
         try:
             _scan = load_scan(entry.path)
             idx = self._ch_cb.currentIndex()
             self._raw_arr = _scan.planes[idx] if idx < _scan.n_planes else None
+            self._scan_header  = _scan.header or {}
+            self._scan_range_m = _scan.scan_range_m
+            self._scan_shape   = _scan.planes[0].shape if _scan.planes else None
+            self._scan_format  = entry.source_format
         except Exception:
-            self._raw_arr = None
+            self._raw_arr      = None
+            self._scan_header  = {}
+            self._scan_range_m = None
+            self._scan_shape   = None
+            self._scan_format  = ""
         self._update_histogram()
+        self._load_spec_markers(entry)
         # load rendered image
         self._token = object()
         loader = ViewerLoader(entry, self._colormap, self._token, 900, 800,
@@ -1769,9 +1862,20 @@ class ImageViewerDialog(QDialog):
         self._fig.patch.set_facecolor(bg)
         self._ax.set_facecolor(bg)
 
-        self._ax.hist(flat_phys, bins=128,
-                      color=self._t.get("accent_bg", "#89b4fa"),
-                      alpha=0.85, linewidth=0)
+        counts, edges = np.histogram(flat_phys, bins=128)
+        counts = np.maximum(counts, 1)
+        centers = (edges[:-1] + edges[1:]) / 2.0
+        widths = np.diff(edges)
+        self._ax.bar(centers, counts, width=widths,
+                     color=self._t.get("accent_bg", "#89b4fa"),
+                     alpha=0.85, linewidth=0)
+        self._ax.set_yscale("log")
+        # Robust x-axis: 0.1–99.9th percentile to suppress outlier spikes
+        if flat_phys.size >= 10:
+            x_min = float(np.percentile(flat_phys, 0.1))
+            x_max = float(np.percentile(flat_phys, 99.9))
+            if np.isfinite(x_min) and np.isfinite(x_max) and x_max > x_min:
+                self._ax.set_xlim(x_min, x_max)
         self._low_line  = self._ax.axvline(lo_phys, color="#f38ba8",
                                             linewidth=1.6, picker=6)
         self._high_line = self._ax.axvline(hi_phys, color="#a6e3a1",
@@ -1788,6 +1892,82 @@ class ImageViewerDialog(QDialog):
 
         self._clip_val_lbl.setText(
             f"{lo_phys:.3g} {unit}  →  {hi_phys:.3g} {unit}")
+
+    # ── Spec position overlay ─────────────────────────────────────────────────
+    def _load_spec_markers(self, entry):
+        """Scan the image's parent folder for spec files and set markers."""
+        from probeflow.file_type import FileType, sniff_file_type
+        from probeflow.spec_io import read_spec_file
+        from probeflow.spec_plot import spec_position_to_pixel, _parse_sxm_offset
+
+        self._spec_markers = []
+        self._zoom_lbl.set_markers([])
+
+        if self._scan_range_m is None or self._scan_shape is None:
+            return
+
+        try:
+            folder = entry.path.parent
+            spec_types = (FileType.CREATEC_SPEC, FileType.NANONIS_SPEC)
+            candidates = [
+                f for f in sorted(folder.iterdir())
+                if f.is_file() and sniff_file_type(f) in spec_types
+            ]
+
+            if self._scan_format == "sxm" and self._scan_header:
+                scan_offset_m = _parse_sxm_offset(self._scan_header)
+                raw_angle = self._scan_header.get("SCAN_ANGLE", "0").strip()
+                try:
+                    scan_angle_deg = float(raw_angle) if raw_angle else 0.0
+                except ValueError:
+                    scan_angle_deg = 0.0
+            else:
+                scan_offset_m = (0.0, 0.0)
+                scan_angle_deg = 0.0
+
+            markers = []
+            for spec_path in candidates:
+                try:
+                    spec = read_spec_file(spec_path)
+                    x_m, y_m = spec.position
+                    result = spec_position_to_pixel(
+                        x_m, y_m,
+                        scan_shape=self._scan_shape,
+                        scan_range_m=self._scan_range_m,
+                        scan_offset_m=scan_offset_m,
+                        scan_angle_deg=scan_angle_deg,
+                    )
+                    if result is None:
+                        continue
+                    frac_x, frac_y = result
+                    markers.append({
+                        "frac_x": frac_x,
+                        "frac_y": frac_y,
+                        "entry": VertFile(
+                            path=spec_path,
+                            stem=spec_path.stem,
+                            sweep_type=spec.metadata.get("sweep_type", "unknown"),
+                            bias_mv=spec.metadata.get("bias_mv"),
+                        ),
+                    })
+                except Exception:
+                    continue
+
+            self._spec_markers = markers
+            if self._spec_show_cb.isChecked():
+                self._zoom_lbl.set_markers(markers)
+        except Exception:
+            pass
+
+    def _on_spec_show_toggled(self, checked: bool):
+        if checked:
+            self._zoom_lbl.set_markers(self._spec_markers)
+        else:
+            self._zoom_lbl.set_markers([])
+
+    def _on_marker_clicked(self, entry):
+        dlg = SpecViewerDialog(entry, self._t, self)
+        dlg.exec()
 
     # ── Histogram drag handlers ────────────────────────────────────────────────
     def _on_hist_press(self, event):
