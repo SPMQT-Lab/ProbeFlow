@@ -190,6 +190,58 @@ class TestGuiConversion:
         assert abs(step.params["cutoff"] - 0.15) < 1e-12
         assert step.params["window"] == "hanning"
 
+    def test_bg_step_tolerance_captured(self):
+        gui = {"bg_order": 2, "bg_step_tolerance": True}
+        state = processing_state_from_gui(gui)
+        assert len(state.steps) == 1
+        step = state.steps[0]
+        assert step.op == "plane_bg"
+        assert step.params == {"order": 2, "step_tolerance": True}
+
+    def test_bg_step_tolerance_defaults_false(self):
+        state = processing_state_from_gui({"bg_order": 1})
+        assert state.steps[0].params["step_tolerance"] is False
+
+    def test_fft_soft_border_params_captured(self):
+        gui = {
+            "fft_soft_border":      True,
+            "fft_soft_mode":        "high_pass",
+            "fft_soft_cutoff":      0.20,
+            "fft_soft_border_frac": 0.05,
+        }
+        state = processing_state_from_gui(gui)
+        assert len(state.steps) == 1
+        step = state.steps[0]
+        assert step.op == "fft_soft_border"
+        assert step.params["mode"] == "high_pass"
+        assert abs(step.params["cutoff"]      - 0.20) < 1e-12
+        assert abs(step.params["border_frac"] - 0.05) < 1e-12
+
+    def test_linear_undistort_emitted_only_if_nondefault(self):
+        # Both defaults → no step
+        state = processing_state_from_gui({"linear_undistort": True})
+        assert len(state.steps) == 0
+        # Non-default shear → step emitted
+        state = processing_state_from_gui({
+            "linear_undistort": True, "undistort_shear_x": 1.5,
+        })
+        assert len(state.steps) == 1
+        assert state.steps[0].op == "linear_undistort"
+        assert abs(state.steps[0].params["shear_x"] - 1.5) < 1e-12
+
+    def test_set_zero_point_params_captured(self):
+        gui = {"set_zero_xy": (10, 20), "set_zero_patch": 3}
+        state = processing_state_from_gui(gui)
+        assert len(state.steps) == 1
+        step = state.steps[0]
+        assert step.op == "set_zero_point"
+        assert step.params == {"x_px": 10, "y_px": 20, "patch": 3}
+
+    def test_set_zero_point_bad_input_skipped(self):
+        # Malformed coordinate must not crash; just no step emitted.
+        state = processing_state_from_gui({"set_zero_xy": "not-a-tuple"})
+        assert len(state.steps) == 0
+
     def test_empty_gui_state(self):
         state = processing_state_from_gui({})
         assert len(state.steps) == 0
@@ -296,3 +348,45 @@ class TestApplyKnownSteps:
         original = arr.copy()
         apply_processing_state(arr, state)
         np.testing.assert_array_equal(arr, original)
+
+    def test_plane_bg_step_tolerance_runs(self):
+        # Tilted plane with a sharp step edge superimposed.
+        x = np.linspace(0, 1, 40)
+        arr = np.outer(np.ones(40), x).copy()
+        arr[:, 25:] += 0.5  # step
+        state = ProcessingState(steps=[
+            ProcessingStep("plane_bg", {"order": 1, "step_tolerance": True}),
+        ])
+        result = apply_processing_state(arr, state)
+        assert result.shape == arr.shape
+        assert result.dtype == np.float64
+
+    def test_fft_soft_border_runs_and_preserves_shape(self):
+        rng = np.random.default_rng(2)
+        arr = rng.normal(size=(32, 32))
+        state = ProcessingState(steps=[ProcessingStep("fft_soft_border", {
+            "mode": "low_pass", "cutoff": 0.20, "border_frac": 0.10,
+        })])
+        result = apply_processing_state(arr, state)
+        assert result.shape == arr.shape
+        # Low-pass should reduce variance vs raw noise.
+        assert float(np.std(result)) < float(np.std(arr))
+
+    def test_linear_undistort_preserves_shape(self):
+        arr = np.ones((20, 20)) * 3.0
+        state = ProcessingState(steps=[ProcessingStep("linear_undistort", {
+            "shear_x": 1.0, "scale_y": 0.95,
+        })])
+        result = apply_processing_state(arr, state)
+        assert result.shape == arr.shape
+
+    def test_set_zero_point_anchors_pixel_to_zero(self):
+        arr = np.full((10, 10), 42.0)
+        state = ProcessingState(steps=[ProcessingStep("set_zero_point", {
+            "x_px": 4, "y_px": 5, "patch": 1,
+        })])
+        result = apply_processing_state(arr, state)
+        # Anchored pixel must now read zero (within fp tolerance).
+        assert abs(float(result[5, 4])) < 1e-12
+        # And every other pixel shifts by the same offset (-42.0).
+        np.testing.assert_array_almost_equal(result, arr - 42.0)
