@@ -9,12 +9,14 @@ so processing pipelines can operate on them the same way they operate on a
 Createc channel layout:
   * 4-channel files contain [FT, FC, BT, BC] = [Z fwd, I fwd, Z bwd, I bwd].
   * 2-channel files contain only [FT, FC]; the backward planes are
-    synthesised (mirrored forward) and flagged in ``scan.plane_synthetic``.
+    synthesised as copies of the forward planes and flagged in
+    ``scan.plane_synthetic``.
 
 Orientation:
-  * backward planes (Z bwd, I bwd) are flipped left-to-right so all planes
-    share the same forward-scan direction (matches what ``orient_plane`` in
-    ``probeflow.sxm_io`` does on reads of a ``.sxm``).
+  * Createc stores backward scan rows in left-to-right display order already
+    (unlike Nanonis .sxm, where backward rows are stored right-to-left).  No
+    horizontal flip is applied here; the planes are returned as-is in display
+    orientation.
   * Vertical origin is kept as Createc stores it (Y flip is not applied
     here).  This matches the current ``dat→sxm`` conversion convention so
     that ``load_scan(dat)`` and ``load_scan(sxm_from_dat)`` give identical
@@ -96,25 +98,22 @@ def read_dat(path) -> Scan:
         synthetic = [False, False, False, False]
     elif num_chan == 2:
         FT, FC = stack[0], stack[1]
-        BT = np.fliplr(FT).copy()
-        BC = np.fliplr(FC).copy()
+        BT = FT.copy()
+        BC = FC.copy()
         synthetic = [False, True, False, True]
     else:
         raise ValueError(
             f"{path.name}: unexpected channel count {num_chan} (expected 2 or 4)"
         )
 
-    def _orient(arr: np.ndarray, is_backward: bool) -> np.ndarray:
-        # Only the backward planes are mirrored here, to match the behaviour
-        # of ``orient_plane`` in ``probeflow.sxm_io`` on a .sxm read.
-        out = np.fliplr(arr) if is_backward else arr
-        return np.asarray(out, dtype=np.float64)
+    def _orient(arr: np.ndarray) -> np.ndarray:
+        return np.asarray(arr, dtype=np.float64)
 
     planes: List[np.ndarray] = [
-        _orient(FT, False),
-        _orient(BT, True),
-        _orient(FC, False),
-        _orient(BC, True),
+        _orient(FT),
+        _orient(BT),
+        _orient(FC),
+        _orient(BC),
     ]
 
     lx_a = _f(hdr.get("Length x[A]", "0"), 0.0)

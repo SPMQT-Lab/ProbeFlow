@@ -79,8 +79,9 @@ def _write_from_dat(scan: Scan, out_path: Path) -> None:
 
     hdr = scan.header
 
-    # Invert the orientation applied in probeflow.readers.dat.read_dat, which
-    # only mirrors the backward planes left-to-right.
+    # Nanonis .sxm stores backward planes right-to-left; fliplr converts
+    # display-oriented backward planes into that native storage order so that
+    # orient_plane restores them correctly on the next read.
     def _undo_orient(arr: np.ndarray, is_backward: bool) -> np.ndarray:
         out = np.fliplr(arr) if is_backward else arr
         return np.ascontiguousarray(out, dtype=np.float32)

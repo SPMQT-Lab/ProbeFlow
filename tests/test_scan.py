@@ -12,6 +12,11 @@ from probeflow.dat_sxm import convert_dat_to_sxm
 from probeflow.scan import Scan
 
 
+TESTDATA = Path(__file__).resolve().parents[1] / "anonymised_testdata"
+_CREATEC_4CH = TESTDATA / "createc_scan_terrace_109nm.dat"
+_NANONIS_SXM = TESTDATA / "sxm_moire_10nm.sxm"
+
+
 # ─── Fixtures ────────────────────────────────────────────────────────────────
 
 @pytest.fixture
@@ -198,3 +203,75 @@ class TestProcessingHistory:
         entry = {"op": "align_rows", "method": "median"}
         scan = self._make_scan(processing_history=[entry])
         assert scan.processing_history == [entry]
+
+
+# ─── Backward-plane orientation ──────────────────────────────────────────────
+
+def _fwd_bwd_corrs(scan: Scan) -> tuple[float, float]:
+    """Return (corr_direct, corr_flipped) for the Z fwd/bwd pair."""
+    fwd = scan.planes[0].ravel()
+    bwd = scan.planes[1].ravel()
+    corr_direct  = float(np.corrcoef(fwd, bwd)[0, 1])
+    corr_flipped = float(np.corrcoef(fwd, np.fliplr(scan.planes[1]).ravel())[0, 1])
+    return corr_direct, corr_flipped
+
+
+class TestBackwardOrientation:
+    """Regression suite for Createc backward-plane orientation.
+
+    The core invariant: after reading, Z bwd must be in the same display
+    orientation as Z fwd (same surface, same left-right order).  If the plane
+    were mirrored, corr(fwd, fliplr(bwd)) would exceed corr(fwd, bwd).
+    """
+
+    def test_createc_backward_not_mirrored(self):
+        if not _CREATEC_4CH.exists():
+            pytest.skip(f"missing fixture: {_CREATEC_4CH.name}")
+        scan = load_scan(_CREATEC_4CH)
+        assert not any(scan.plane_synthetic), "expected a 4-channel file"
+        direct, flipped = _fwd_bwd_corrs(scan)
+        assert direct > flipped, (
+            f"Z bwd appears mirrored: corr(fwd,bwd)={direct:.3f} "
+            f"< corr(fwd,fliplr(bwd))={flipped:.3f}"
+        )
+
+    def test_createc_backward_high_correlation(self):
+        if not _CREATEC_4CH.exists():
+            pytest.skip(f"missing fixture: {_CREATEC_4CH.name}")
+        scan = load_scan(_CREATEC_4CH)
+        direct, _ = _fwd_bwd_corrs(scan)
+        assert direct > 0.85, (
+            f"Z fwd/bwd correlation too low ({direct:.3f}); "
+            "expected both to show the same surface"
+        )
+
+    def test_nanonis_sxm_backward_not_mirrored(self):
+        if not _NANONIS_SXM.exists():
+            pytest.skip(f"missing fixture: {_NANONIS_SXM.name}")
+        scan = load_scan(_NANONIS_SXM)
+        if scan.n_planes < 2:
+            pytest.skip("sxm fixture has only one plane")
+        direct, flipped = _fwd_bwd_corrs(scan)
+        assert direct > flipped, (
+            f"Nanonis Z bwd appears mirrored: corr(fwd,bwd)={direct:.3f} "
+            f"< corr(fwd,fliplr(bwd))={flipped:.3f}"
+        )
+
+    def test_dat_to_sxm_roundtrip_preserves_orientation(self, sample_dat_files, tmp_path):
+        """Z fwd/bwd orientation must be identical after save_sxm() + load_scan()."""
+        four_ch = [f for f in sample_dat_files
+                   if not any(load_scan(f).plane_synthetic)]
+        if not four_ch:
+            pytest.skip("no 4-channel .dat found in sample_dat_files")
+        scan = load_scan(four_ch[0])
+        direct_dat, _ = _fwd_bwd_corrs(scan)
+
+        out = tmp_path / "rt.sxm"
+        scan.save_sxm(out)
+        scan_rt = load_scan(out)
+        direct_sxm, _ = _fwd_bwd_corrs(scan_rt)
+
+        assert abs(direct_dat - direct_sxm) < 0.02, (
+            f"Round-trip changed Z fwd/bwd correlation: "
+            f".dat={direct_dat:.4f}, .sxm={direct_sxm:.4f}"
+        )
