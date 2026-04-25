@@ -67,6 +67,7 @@ from probeflow.display import (
     clip_range_from_array as _clip_range_from_array,
     histogram_from_array as _histogram_from_array,
 )
+from probeflow.display_state import DisplayRangeState
 from probeflow.gui_processing import NUMERIC_PROC_KEYS, apply_processing_state_to_scan
 from probeflow.scan import SUPPORTED_SUFFIXES, load_scan
 
@@ -322,20 +323,27 @@ def _apply_processing(
 
 def render_scan_thumbnail(
     scan_path: Path,
-    plane_idx: int   = 0,
-    colormap:  str   = "gray",
-    clip_low:  float = 1.0,
-    clip_high: float = 99.0,
-    size:      tuple = (148, 116),
+    plane_idx: int            = 0,
+    colormap:  str            = "gray",
+    clip_low:  float          = 1.0,
+    clip_high: float          = 99.0,
+    size:      tuple          = (148, 116),
+    vmin:      Optional[float] = None,
+    vmax:      Optional[float] = None,
 ) -> Optional[Image.Image]:
-    """Render a thumbnail of any supported scan format via the unified reader."""
+    """Render a thumbnail of any supported scan format via the unified reader.
+
+    If *vmin* and *vmax* are provided, they are used directly (manual mode).
+    Otherwise *clip_low*/*clip_high* percentiles are applied (percentile mode).
+    """
     try:
         scan = load_scan(scan_path)
         if plane_idx >= scan.n_planes:
             return None
         arr = scan.planes[plane_idx]
 
-        vmin, vmax = clip_range_from_arr(arr, clip_low, clip_high)
+        if vmin is None or vmax is None:
+            vmin, vmax = clip_range_from_arr(arr, clip_low, clip_high)
         if vmin is None:
             return None
 
@@ -403,6 +411,8 @@ def render_with_processing(
     clip_high:  float,
     processing: dict,
     size:       Optional[tuple] = None,
+    vmin:       Optional[float] = None,
+    vmax:       Optional[float] = None,
 ) -> Optional[Image.Image]:
     """Apply the full processing pipeline to *arr* then render to a PIL Image.
 
@@ -426,7 +436,8 @@ def render_with_processing(
     try:
         a = _apply_processing(arr, processing)
 
-        vmin, vmax = clip_range_from_arr(a, clip_low, clip_high)
+        if vmin is None or vmax is None:
+            vmin, vmax = clip_range_from_arr(a, clip_low, clip_high)
         if vmin is None:
             return None
 
@@ -682,7 +693,8 @@ class ViewerSignals(QObject):
 class ViewerLoader(QRunnable):
     def __init__(self, entry: SxmFile, colormap: str, token, w: int, h: int,
                  plane_idx: int = 0, clip_low: float = 1.0,
-                 clip_high: float = 99.0, processing: dict = None):
+                 clip_high: float = 99.0, processing: dict = None,
+                 vmin: Optional[float] = None, vmax: Optional[float] = None):
         super().__init__()
         self.setAutoDelete(True)
         self.signals    = ViewerSignals()
@@ -695,6 +707,8 @@ class ViewerLoader(QRunnable):
         self.clip_low   = clip_low
         self.clip_high  = clip_high
         self.processing = processing or {}
+        self.vmin       = vmin
+        self.vmax       = vmax
 
     def run(self):
         if self.processing:
@@ -707,13 +721,15 @@ class ViewerLoader(QRunnable):
                 img = render_with_processing(arr, self.colormap,
                                              self.clip_low, self.clip_high,
                                              self.processing,
-                                             size=(self.w, self.h))
+                                             size=(self.w, self.h),
+                                             vmin=self.vmin, vmax=self.vmax)
             else:
                 img = None
         else:
             img = render_scan_thumbnail(self.entry.path, self.plane_idx,
                                         self.colormap, self.clip_low, self.clip_high,
-                                        size=(self.w, self.h))
+                                        size=(self.w, self.h),
+                                        vmin=self.vmin, vmax=self.vmax)
         if img is not None:
             self.signals.loaded.emit(pil_to_pixmap(img), self.token)
 
@@ -1447,6 +1463,7 @@ class ImageViewerDialog(QDialog):
         self._token      = object()
         self._clip_low   = clip_low
         self._clip_high  = clip_high
+        self._drs        = DisplayRangeState(low_pct=clip_low, high_pct=clip_high)
         self._processing = dict(processing) if processing else {}
         self._raw_arr: Optional[np.ndarray] = None
         self._display_arr: Optional[np.ndarray] = None  # raw or processed, for histogram/export
@@ -1604,6 +1621,17 @@ class ImageViewerDialog(QDialog):
         # live update on release (avoid re-rendering on every intermediate tick)
         self._low_sl.sliderReleased.connect(self._on_slider_clip)
         self._high_sl.sliderReleased.connect(self._on_slider_clip)
+
+        # Auto-reset button
+        auto_row = QHBoxLayout()
+        auto_btn = QPushButton("Auto")
+        auto_btn.setFont(QFont("Helvetica", 8))
+        auto_btn.setFixedHeight(22)
+        auto_btn.setToolTip("Reset to 1%–99% percentile autoscale")
+        auto_btn.clicked.connect(self._on_auto_clip)
+        auto_row.addStretch()
+        auto_row.addWidget(auto_btn)
+        right_lay.addLayout(auto_row)
 
         # Å / pA value readout for current clip
         self._clip_val_lbl = QLabel("")
@@ -1800,12 +1828,15 @@ class ImageViewerDialog(QDialog):
             self._display_arr = self._raw_arr
         self._update_histogram()
         self._load_spec_markers(entry)
+        # Resolve display limits (percentile or manual) from current array
+        vmin, vmax = self._drs.resolve(self._display_arr) if self._display_arr is not None else (None, None)
         # load rendered image
         self._token = object()
         loader = ViewerLoader(entry, self._colormap, self._token, 900, 800,
                               self._ch_cb.currentIndex(),
                               self._clip_low, self._clip_high,
-                              self._processing or None)
+                              self._processing or None,
+                              vmin=vmin, vmax=vmax)
         loader.signals.loaded.connect(self._on_loaded)
         self._pool.start(loader)
 
@@ -1839,9 +1870,13 @@ class ImageViewerDialog(QDialog):
         self._hist_flat_phys = flat_phys
         self._hist_unit = unit
 
-        # Clip lines: percentiles applied to flat_phys (already in display units)
-        lo_phys, hi_phys = clip_range_from_arr(flat_phys, self._clip_low, self._clip_high)
-        if lo_phys is None:
+        # Clip lines: position from resolved display range (manual or percentile).
+        # arr is in SI; convert to physical display units for the histogram.
+        vmin_si, vmax_si = self._drs.resolve(arr)
+        if vmin_si is not None:
+            lo_phys = float(vmin_si) * scale
+            hi_phys = float(vmax_si) * scale
+        else:
             lo_phys, hi_phys = float(flat_phys.min()), float(flat_phys.max())
 
         bg = self._t.get("bg", "#1e1e2e")
@@ -2008,35 +2043,38 @@ class ImageViewerDialog(QDialog):
         if self._dragging is None or self._hist_flat_phys is None:
             self._dragging = None
             return
-        flat = self._hist_flat_phys
-        n = flat.size
         lo_x = float(self._low_line.get_xdata()[0])
         hi_x = float(self._high_line.get_xdata()[0])
-        # convert value → percentile via rank
-        low_pct  = float((flat <= lo_x).sum()) / n * 100.0
-        high_pct = float((flat <= hi_x).sum()) / n * 100.0
-        # clamp to slider ranges
-        low_pct  = max(0.0,  min(low_pct,  20.0))
-        high_pct = max(80.0, min(high_pct, 100.0))
-        if high_pct <= low_pct:
-            high_pct = min(100.0, low_pct + 1.0)
-        self._clip_low  = low_pct
-        self._clip_high = high_pct
-        self._low_sl.blockSignals(True)
-        self._high_sl.blockSignals(True)
-        self._low_sl.setValue(int(round(low_pct)))
-        self._high_sl.setValue(int(round(high_pct)))
-        self._low_sl.blockSignals(False)
-        self._high_sl.blockSignals(False)
+        # Convert physical display units (Å or pA) back to SI array units.
+        scale, _, _ = self._channel_unit()
+        vmin_si = lo_x / scale
+        vmax_si = hi_x / scale
+        self._drs.set_manual(vmin_si, vmax_si)
         self._dragging = None
         self._load_current()
 
     def _on_slider_clip(self):
         self._clip_low  = float(self._low_sl.value())
         self._clip_high = float(self._high_sl.value())
+        self._drs.set_percentile(self._clip_low, self._clip_high)
+        self._load_current()
+
+    def _on_auto_clip(self):
+        """Reset to 1%–99% percentile autoscale."""
+        self._drs.reset()
+        self._clip_low  = 1.0
+        self._clip_high = 99.0
+        self._low_sl.blockSignals(True)
+        self._high_sl.blockSignals(True)
+        self._low_sl.setValue(1)
+        self._high_sl.setValue(99)
+        self._low_sl.blockSignals(False)
+        self._high_sl.blockSignals(False)
         self._load_current()
 
     def _on_channel_changed(self, _: int):
+        # Different channels have different physical units — reset manual limits.
+        self._drs.reset(self._clip_low, self._clip_high)
         self._load_current()
 
     @Slot(QPixmap, object)
@@ -2076,11 +2114,13 @@ class ImageViewerDialog(QDialog):
                 w_m, h_m = load_scan(entry.path).scan_range_m
             except Exception:
                 w_m = h_m = 0.0
+            vmin, vmax = self._drs.resolve(arr)
             _proc.export_png(
                 arr, out_path, self._colormap,
                 self._clip_low, self._clip_high,
                 lut_fn=lambda key: _get_lut(key),
                 scan_range_m=(w_m, h_m),
+                vmin=vmin, vmax=vmax,
             )
             self._status_lbl.setText(f"Saved → {Path(out_path).name}")
         except Exception as exc:

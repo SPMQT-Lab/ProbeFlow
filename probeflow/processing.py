@@ -670,22 +670,26 @@ def export_png(
     clip_high:     float,
     lut_fn,
     scan_range_m:  tuple,
-    add_scalebar:  bool  = True,
-    scalebar_unit: str   = 'nm',
-    scalebar_pos:  str   = 'bottom-right',
+    add_scalebar:  bool          = True,
+    scalebar_unit: str           = 'nm',
+    scalebar_pos:  str           = 'bottom-right',
+    vmin:          float | None  = None,
+    vmax:          float | None  = None,
 ) -> None:
     """
     Export a full-resolution colourised image with an optional scale bar.
 
     lut_fn(colormap_key) must return a (256, 3) uint8 LUT array.
     scan_range_m  — (width_m, height_m); scale bar is skipped when width ≤ 0.
+    If *vmin*/*vmax* are provided, they override the percentile clip.
     """
     from PIL import Image as _Image, ImageDraw as _IDraw, ImageFont as _IFont
 
     from probeflow.display import array_to_uint8 as _array_to_uint8, clip_range_from_array as _clip_range
 
     arr = arr.astype(np.float64, copy=True)
-    vmin, vmax = _clip_range(arr, clip_low, clip_high)  # raises ValueError if no finite values
+    if vmin is None or vmax is None:
+        vmin, vmax = _clip_range(arr, clip_low, clip_high)  # raises ValueError if no finite values
 
     u8      = _array_to_uint8(arr, vmin=vmin, vmax=vmax)
     lut     = lut_fn(colormap_key)
