@@ -1134,6 +1134,38 @@ class ThumbnailGrid(QWidget):
                 self._pool.start(loader)
         return len(self._selected)
 
+    def set_processing_for_all_images(self, processing: dict,
+                                      push_history: bool = True) -> int:
+        """Apply thumbnail processing to every scan, preserving colour/clip."""
+        token = self._load_token
+        count = 0
+        for entry in self._entries:
+            if not isinstance(entry, SxmFile):
+                continue
+            card = self._cards.get(entry.stem)
+            if not card:
+                continue
+            stem = entry.stem
+            prev_cmap = self._card_colormaps.get(stem, DEFAULT_CMAP_KEY)
+            prev_clip = self._card_clip.get(stem, (1.0, 99.0))
+            prev_proc = self._card_processing.get(stem, {})
+            if push_history:
+                stack = self._history.setdefault(stem, [])
+                stack.append((prev_cmap, prev_clip[0], prev_clip[1],
+                              dict(prev_proc)))
+                if len(stack) > self.HISTORY_MAX:
+                    del stack[0:len(stack) - self.HISTORY_MAX]
+
+            self._card_processing[stem] = dict(processing) if processing else {}
+            loader = ThumbnailLoader(entry, prev_cmap, token,
+                                     ScanCard.IMG_W, ScanCard.IMG_H,
+                                     prev_clip[0], prev_clip[1],
+                                     processing=processing or None)
+            loader.signals.loaded.connect(self._on_thumb)
+            self._pool.start(loader)
+            count += 1
+        return count
+
     def update_clip_for_selection(self, clip_low: float, clip_high: float) -> int:
         """Re-render selected cards with new clip, preserving their colormap and
         processing. Does NOT push to undo history (used by live scale slider)."""
@@ -2330,8 +2362,8 @@ class BrowseToolPanel(QWidget):
     colormap_apply_requested   = Signal(str)
     scale_changed              = Signal(float, float)
     processing_apply_requested = Signal(dict)
+    processing_apply_all_requested = Signal(dict)
     autoclip_requested         = Signal()
-    measure_requested          = Signal()
     export_requested           = Signal()
     undo_requested             = Signal()
     filter_changed             = Signal(str)   # "all" | "images" | "spectra"
@@ -2476,7 +2508,7 @@ class BrowseToolPanel(QWidget):
         self._processing_panel = ProcessingControlPanel("browse_quick")
         proc_lay.addWidget(self._processing_panel)
 
-        # ── Apply + Auto-clip + Measure ────────────────────────────────────────
+        # ── Apply + Auto-clip ──────────────────────────────────────────────────
         proc_lay.addWidget(_sep())
 
         self._autoclip_btn = QPushButton("Auto clip (GMM)")
@@ -2494,27 +2526,19 @@ class BrowseToolPanel(QWidget):
         self._proc_apply_btn.clicked.connect(self._on_proc_apply)
         proc_lay.addWidget(self._proc_apply_btn)
 
+        self._proc_apply_all_btn = QPushButton("Apply to all thumbnails")
+        self._proc_apply_all_btn.setFont(QFont("Helvetica", 8))
+        self._proc_apply_all_btn.setFixedHeight(26)
+        self._proc_apply_all_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self._proc_apply_all_btn.clicked.connect(self._on_proc_apply_all)
+        proc_lay.addWidget(self._proc_apply_all_btn)
+
         self._undo_btn = QPushButton("↩ Undo last thumbnail change")
         self._undo_btn.setFont(QFont("Helvetica", 8))
         self._undo_btn.setFixedHeight(26)
         self._undo_btn.setCursor(QCursor(Qt.PointingHandCursor))
         self._undo_btn.clicked.connect(self.undo_requested.emit)
         proc_lay.addWidget(self._undo_btn)
-
-        proc_lay.addWidget(_sep())
-
-        self._meas_btn = QPushButton("Measure Periodicity")
-        self._meas_btn.setFont(QFont("Helvetica", 8))
-        self._meas_btn.setFixedHeight(26)
-        self._meas_btn.setCursor(QCursor(Qt.PointingHandCursor))
-        self._meas_btn.clicked.connect(self.measure_requested.emit)
-        proc_lay.addWidget(self._meas_btn)
-
-        self._meas_result = QLabel("")
-        self._meas_result.setFont(QFont("Courier", 8))
-        self._meas_result.setWordWrap(True)
-        self._meas_result.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        proc_lay.addWidget(self._meas_result)
 
         lay.addWidget(self._proc_widget)
         self._proc_widget.setVisible(False)
@@ -2555,6 +2579,9 @@ class BrowseToolPanel(QWidget):
     def _on_proc_apply(self):
         self.processing_apply_requested.emit(self._processing_panel.state())
 
+    def _on_proc_apply_all(self):
+        self.processing_apply_all_requested.emit(self._processing_panel.state())
+
     def _on_filter_click(self, mode: str):
         self._filter_mode = mode
         self.filter_changed.emit(mode)
@@ -2581,14 +2608,6 @@ class BrowseToolPanel(QWidget):
             self._sel_hint.setText("1 image selected")
         else:
             self._sel_hint.setText(f"{n} images selected")
-
-    def show_periodicity_result(self, results: list):
-        if not results:
-            self._meas_result.setText("No peaks found.")
-            return
-        lines = [f"Peak {i}: {r['period_m']*1e9:.3f} nm  {r['angle_deg']:.1f}°"
-                 for i, r in enumerate(results, 1)]
-        self._meas_result.setText("\n".join(lines))
 
     def apply_theme(self, t: dict):
         self._t = t
@@ -4259,8 +4278,8 @@ class ProbeFlowWindow(QMainWindow):
         self._browse_tools.colormap_apply_requested.connect(self._on_apply_colormap)
         self._browse_tools.scale_changed.connect(self._on_scale_changed)
         self._browse_tools.processing_apply_requested.connect(self._on_processing_apply)
+        self._browse_tools.processing_apply_all_requested.connect(self._on_processing_apply_all)
         self._browse_tools.autoclip_requested.connect(self._on_autoclip)
-        self._browse_tools.measure_requested.connect(self._on_measure_periodicity)
         self._browse_tools.export_requested.connect(self._on_export)
         self._browse_tools.undo_requested.connect(self._on_undo)
         self._browse_tools.filter_changed.connect(self._on_filter_changed)
@@ -4453,6 +4472,27 @@ class ProbeFlowWindow(QMainWindow):
                 if entry:
                     self._browse_info.load_channels(entry, cmap_key, cfg)
 
+    def _on_processing_apply_all(self, cfg: dict):
+        n = self._grid.set_processing_for_all_images(cfg)
+        if n == 0:
+            self._status_bar.showMessage("No scan thumbnails to update")
+            return
+
+        steps = []
+        if cfg.get('align_rows'):
+            steps.append(f"align({cfg['align_rows']})")
+        desc = ", ".join(steps) if steps else "none"
+        self._status_bar.showMessage(
+            f"Queued quick corrections [{desc}] for {n} thumbnail{'s' if n > 1 else ''}")
+
+        primary = self._grid.get_primary()
+        if primary:
+            entry = next((e for e in self._grid.get_entries()
+                          if e.stem == primary), None)
+            if entry:
+                cmap_key, _, proc = self._grid.get_card_state(primary)
+                self._browse_info.load_channels(entry, cmap_key, proc)
+
     def _on_autoclip(self):
         primary = self._grid.get_primary()
         if not primary:
@@ -4488,35 +4528,6 @@ class ProbeFlowWindow(QMainWindow):
             self._status_bar.showMessage("Nothing to undo — no history for current selection")
         else:
             self._status_bar.showMessage(f"Undo applied to {n} image{'s' if n > 1 else ''}")
-
-    def _on_measure_periodicity(self):
-        primary = self._grid.get_primary()
-        if not primary:
-            self._status_bar.showMessage("Select an image first")
-            return
-        entry = next((e for e in self._grid.get_entries() if e.stem == primary), None)
-        if not entry:
-            return
-        try:
-            _scan = load_scan(entry.path)
-            arr = _scan.planes[0] if _scan.n_planes > 0 else None
-            w_m, h_m = _scan.scan_range_m
-        except Exception:
-            arr = None
-            w_m = h_m = 0.0
-        if arr is None:
-            self._status_bar.showMessage("Could not read scan data")
-            return
-        Ny, Nx = arr.shape
-        px_x = w_m / Nx if Nx > 0 and w_m > 0 else 1e-10
-        px_y = h_m / Ny if Ny > 0 and h_m > 0 else 1e-10
-        try:
-            results = _proc.measure_periodicity(arr, px_x, px_y)
-            self._browse_tools.show_periodicity_result(results)
-            self._status_bar.showMessage(
-                f"Periodicity: {len(results)} peak(s) found")
-        except Exception as exc:
-            self._status_bar.showMessage(f"Periodicity error: {exc}")
 
     def _on_export(self):
         primary = self._grid.get_primary()
