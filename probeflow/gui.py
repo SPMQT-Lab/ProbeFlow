@@ -1620,6 +1620,17 @@ class ProcessingControlPanel(QWidget):
         self._smooth_combo.currentIndexChanged.connect(
             lambda i: self._smooth_sigma_w.setVisible(i != 0))
 
+        self._highpass_combo = _combo_row("High-pass:", ["None", "Gaussian"])
+        self._highpass_sigma_w, self._highpass_sigma_sl, _ = _sub_slider(
+            "sigma (px):", 1, 80, 8, "{v}")
+        lay.addWidget(self._highpass_sigma_w)
+        self._highpass_sigma_w.setVisible(False)
+        self._highpass_combo.setToolTip(
+            "ImageJ-like high-pass: subtracts a broad Gaussian-blurred background."
+        )
+        self._highpass_combo.currentIndexChanged.connect(
+            lambda i: self._highpass_sigma_w.setVisible(i != 0))
+
         self._edge_combo = _combo_row("Edge detect:", ["None", "Laplacian", "LoG", "DoG"])
         self._edge_sigma_w, self._edge_sigma_sl, _ = _sub_slider(
             "sigma (px):", 1, 20, 1, "{v}")
@@ -1677,6 +1688,7 @@ class ProcessingControlPanel(QWidget):
         fft_map = {0: None, 1: "low_pass", 2: "high_pass"}
         edge_map = {0: None, 1: "laplacian", 2: "log", 3: "dog"}
         smooth_i = self._smooth_combo.currentIndex()
+        highpass_i = self._highpass_combo.currentIndex()
         edge_i = self._edge_combo.currentIndex()
         fft_idx = self._fft_combo.currentIndex()
         shear_x = float(self._undistort_shear_sl.value())
@@ -1691,6 +1703,7 @@ class ProcessingControlPanel(QWidget):
             ),
             "facet_level": self._facet_cb.isChecked(),
             "smooth_sigma": self._smooth_sigma_sl.value() if smooth_i != 0 else None,
+            "highpass_sigma": self._highpass_sigma_sl.value() if highpass_i != 0 else None,
             "edge_method": edge_map[edge_i],
             "edge_sigma": self._edge_sigma_sl.value(),
             "edge_sigma2": self._edge_sigma_sl.value() * 2,
@@ -1728,6 +1741,13 @@ class ProcessingControlPanel(QWidget):
         else:
             self._smooth_combo.setCurrentIndex(0)
 
+        highpass = state.get("highpass_sigma")
+        if highpass:
+            self._highpass_combo.setCurrentIndex(1)
+            self._highpass_sigma_sl.setValue(int(highpass))
+        else:
+            self._highpass_combo.setCurrentIndex(0)
+
         edge = state.get("edge_method")
         self._edge_combo.setCurrentIndex(
             {None: 0, "laplacian": 1, "log": 2, "dog": 3}.get(edge, 0))
@@ -1742,6 +1762,131 @@ class ProcessingControlPanel(QWidget):
         self._undistort_shear_sl.setValue(int(state.get("undistort_shear_x", 0)))
         self._undistort_scale_sl.setValue(
             int(round(float(state.get("undistort_scale_y", 1.0)) * 100)))
+
+
+class PeriodicFilterDialog(QDialog):
+    """Interactive centred-FFT peak picker for periodic notch filtering."""
+
+    def __init__(self, arr: np.ndarray, peaks=None, radius_px: float = 3.0, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Periodic FFT filter")
+        self.resize(680, 620)
+        self._arr = arr.astype(np.float64, copy=True)
+        self._peaks: list[tuple[int, int]] = [
+            (int(p[0]), int(p[1])) for p in (peaks or [])
+        ]
+
+        lay = QVBoxLayout(self)
+        help_lbl = QLabel(
+            "Click bright periodic peaks in the FFT power spectrum. "
+            "Each click suppresses that peak and its conjugate in the processed image."
+        )
+        help_lbl.setWordWrap(True)
+        help_lbl.setFont(QFont("Helvetica", 9))
+        lay.addWidget(help_lbl)
+
+        self._fig = Figure(figsize=(6.0, 5.0), dpi=90)
+        self._canvas = FigureCanvasQTAgg(self._fig)
+        self._ax = self._fig.add_subplot(111)
+        lay.addWidget(self._canvas, 1)
+
+        radius_row = QHBoxLayout()
+        radius_lbl = QLabel("Notch radius:")
+        radius_lbl.setFont(QFont("Helvetica", 8))
+        self._radius_sl = QSlider(Qt.Horizontal)
+        self._radius_sl.setRange(1, 20)
+        self._radius_sl.setValue(max(1, min(20, int(round(radius_px)))))
+        self._radius_val = QLabel(f"{self._radius_sl.value()} px")
+        self._radius_val.setFont(QFont("Helvetica", 8))
+        self._radius_sl.valueChanged.connect(
+            lambda v: self._radius_val.setText(f"{v} px"))
+        radius_row.addWidget(radius_lbl)
+        radius_row.addWidget(self._radius_sl, 1)
+        radius_row.addWidget(self._radius_val)
+        lay.addLayout(radius_row)
+
+        self._selected_lbl = QLabel("")
+        self._selected_lbl.setWordWrap(True)
+        self._selected_lbl.setFont(QFont("Helvetica", 8))
+        lay.addWidget(self._selected_lbl)
+
+        btn_row = QHBoxLayout()
+        clear_btn = QPushButton("Clear peaks")
+        clear_btn.clicked.connect(self._clear)
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(self.reject)
+        apply_btn = QPushButton("Use selected peaks")
+        apply_btn.setObjectName("accentBtn")
+        apply_btn.clicked.connect(self.accept)
+        btn_row.addWidget(clear_btn)
+        btn_row.addStretch()
+        btn_row.addWidget(cancel_btn)
+        btn_row.addWidget(apply_btn)
+        lay.addLayout(btn_row)
+
+        self._canvas.mpl_connect("button_press_event", self._on_click)
+        self._draw()
+
+    def selected_peaks(self) -> list[tuple[int, int]]:
+        return list(self._peaks)
+
+    def radius_px(self) -> float:
+        return float(self._radius_sl.value())
+
+    def _spectrum(self) -> np.ndarray:
+        a = self._arr
+        nan_mask = ~np.isfinite(a)
+        fill = float(np.nanmean(a)) if (~nan_mask).any() else 0.0
+        centered = np.where(nan_mask, fill, a) - fill
+        win = np.outer(np.hanning(a.shape[0]), np.hanning(a.shape[1]))
+        F = np.fft.fftshift(np.fft.fft2(centered * win))
+        return np.log1p(np.abs(F) ** 2)
+
+    def _draw(self):
+        power = self._spectrum()
+        Ny, Nx = power.shape
+        cx, cy = Nx // 2, Ny // 2
+        self._ax.clear()
+        self._ax.imshow(power, cmap="magma", origin="upper")
+        self._ax.set_title("FFT power spectrum")
+        self._ax.set_xlabel("kx")
+        self._ax.set_ylabel("ky")
+        self._ax.axvline(cx, color="white", alpha=0.25, linewidth=0.8)
+        self._ax.axhline(cy, color="white", alpha=0.25, linewidth=0.8)
+        for dx, dy in self._peaks:
+            for sx, sy in ((dx, dy), (-dx, -dy)):
+                self._ax.plot(cx + sx, cy + sy, "o", color="#89b4fa",
+                              markerfacecolor="none", markersize=9, markeredgewidth=1.8)
+        self._fig.tight_layout()
+        self._canvas.draw_idle()
+        if self._peaks:
+            text = ", ".join(f"({dx:+d}, {dy:+d})" for dx, dy in self._peaks)
+            self._selected_lbl.setText(f"Selected peaks: {text}")
+        else:
+            self._selected_lbl.setText("Selected peaks: none")
+
+    def _on_click(self, event):
+        if event.inaxes is not self._ax or event.xdata is None or event.ydata is None:
+            return
+        Ny, Nx = self._arr.shape
+        cx, cy = Nx // 2, Ny // 2
+        dx = int(round(event.xdata)) - cx
+        dy = int(round(event.ydata)) - cy
+        if dx == 0 and dy == 0:
+            return
+        canonical = (dx, dy)
+        conjugate = (-dx, -dy)
+        if conjugate in self._peaks:
+            canonical = conjugate
+        if canonical in self._peaks:
+            self._peaks.remove(canonical)
+        else:
+            self._peaks.append(canonical)
+        self._draw()
+
+    def _clear(self):
+        self._peaks.clear()
+        self._draw()
 
 
 class ImageViewerDialog(QDialog):
@@ -1966,6 +2111,14 @@ class ImageViewerDialog(QDialog):
         )
         right_lay.addWidget(self._bg_fit_roi_cb)
 
+        self._patch_roi_cb = QCheckBox("Patch-interpolate selection")
+        self._patch_roi_cb.setFont(QFont("Helvetica", 8))
+        self._patch_roi_cb.setToolTip(
+            "Fills the selected rectangle by Laplace patch interpolation. "
+            "Use for local scan defects before FFT/correlation work."
+        )
+        right_lay.addWidget(self._patch_roi_cb)
+
         self._roi_status_lbl = QLabel("Selection: none")
         self._roi_status_lbl.setFont(QFont("Helvetica", 8))
         self._roi_status_lbl.setWordWrap(True)
@@ -1987,6 +2140,12 @@ class ImageViewerDialog(QDialog):
 
         self._processing_panel = ProcessingControlPanel("viewer_full")
         processing_lay.addWidget(self._processing_panel)
+
+        periodic_btn = QPushButton("Periodic FFT filter...")
+        periodic_btn.setFont(QFont("Helvetica", 8))
+        periodic_btn.setFixedHeight(24)
+        periodic_btn.clicked.connect(self._on_periodic_filter)
+        processing_lay.addWidget(periodic_btn)
 
         proc_apply_btn = QPushButton("Apply processing")
         proc_apply_btn.setFont(QFont("Helvetica", 8))
@@ -2349,11 +2508,14 @@ class ImageViewerDialog(QDialog):
         self._processing.pop("processing_scope", None)
         self._processing.pop("roi_rect", None)
         self._processing.pop("background_fit_rect", None)
+        self._processing.pop("patch_interpolate_rect", None)
+        self._processing.pop("patch_interpolate_iterations", None)
         self._zoom_lbl.clear_roi()
         if self._roi_btn.isChecked():
             self._roi_btn.setChecked(False)
         self._scope_cb.setCurrentIndex(0)
         self._bg_fit_roi_cb.setChecked(False)
+        self._patch_roi_cb.setChecked(False)
         self._roi_status_lbl.setText("Selection: none")
 
     def _on_set_zero_pick(self, frac_x: float, frac_y: float):
@@ -2468,19 +2630,49 @@ class ImageViewerDialog(QDialog):
         self._zoom_lbl.set_source(pixmap)
 
     # ── Controls ───────────────────────────────────────────────────────────────
+    def _on_periodic_filter(self):
+        arr = self._display_arr if self._display_arr is not None else self._raw_arr
+        if arr is None:
+            self._status_lbl.setText("No image data available for FFT filtering.")
+            return
+        dlg = PeriodicFilterDialog(
+            arr,
+            peaks=self._processing.get("periodic_notches", []),
+            radius_px=float(self._processing.get("periodic_notch_radius", 3.0)),
+            parent=self,
+        )
+        if dlg.exec() != QDialog.Accepted:
+            return
+        peaks = dlg.selected_peaks()
+        if peaks:
+            self._processing["periodic_notches"] = peaks
+            self._processing["periodic_notch_radius"] = dlg.radius_px()
+            self._status_lbl.setText(f"Periodic FFT filter: {len(peaks)} peak(s) selected.")
+        else:
+            self._processing.pop("periodic_notches", None)
+            self._processing.pop("periodic_notch_radius", None)
+            self._status_lbl.setText("Periodic FFT filter cleared.")
+        self._load_current()
+
     def _on_apply_processing(self):
         wants_filter_roi = self._scope_cb.currentIndex() == 1
         wants_bg_fit_roi = self._bg_fit_roi_cb.isChecked()
-        if (wants_filter_roi or wants_bg_fit_roi) and self._roi_rect_px is None:
+        wants_patch_roi = self._patch_roi_cb.isChecked()
+        if (wants_filter_roi or wants_bg_fit_roi or wants_patch_roi) and self._roi_rect_px is None:
             self._status_lbl.setText("Select a region before using selection-based processing.")
             return
-        set_zero = {
+        preserve = {
             key: self._processing[key]
-            for key in ("set_zero_xy", "set_zero_patch")
+            for key in (
+                "set_zero_xy",
+                "set_zero_patch",
+                "periodic_notches",
+                "periodic_notch_radius",
+            )
             if key in self._processing
         }
         self._processing = self._processing_panel.state()
-        self._processing.update(set_zero)
+        self._processing.update(preserve)
         if wants_filter_roi:
             self._processing["processing_scope"] = "roi"
             self._processing["roi_rect"] = self._roi_rect_px
@@ -2491,6 +2683,12 @@ class ImageViewerDialog(QDialog):
             self._processing["background_fit_rect"] = self._roi_rect_px
         else:
             self._processing.pop("background_fit_rect", None)
+        if wants_patch_roi:
+            self._processing["patch_interpolate_rect"] = self._roi_rect_px
+            self._processing["patch_interpolate_iterations"] = 200
+        else:
+            self._processing.pop("patch_interpolate_rect", None)
+            self._processing.pop("patch_interpolate_iterations", None)
         self._load_current()
 
     def _on_save_png(self):

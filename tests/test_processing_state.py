@@ -273,6 +273,36 @@ class TestGuiConversion:
         assert len(state.steps) == 1
         assert state.steps[0].op == "smooth"
 
+    def test_highpass_gui_state_captured(self):
+        state = processing_state_from_gui({"highpass_sigma": 12})
+        assert len(state.steps) == 1
+        assert state.steps[0].op == "gaussian_high_pass"
+        assert state.steps[0].params == {"sigma_px": 12.0}
+
+    def test_periodic_notches_gui_state_captured(self):
+        state = processing_state_from_gui({
+            "periodic_notches": [(8, 0), ("bad", 2), (0, -6)],
+            "periodic_notch_radius": 4,
+        })
+        assert len(state.steps) == 1
+        assert state.steps[0].op == "periodic_notch_filter"
+        assert state.steps[0].params == {
+            "peaks": [(8, 0), (0, -6)],
+            "radius_px": 4.0,
+        }
+
+    def test_patch_interpolate_gui_state_captured(self):
+        state = processing_state_from_gui({
+            "patch_interpolate_rect": (3, 4, 8, 9),
+            "patch_interpolate_iterations": 50,
+        })
+        assert len(state.steps) == 1
+        assert state.steps[0].op == "patch_interpolate"
+        assert state.steps[0].params == {
+            "rect": (3, 4, 8, 9),
+            "iterations": 50,
+        }
+
     def test_roi_scope_wraps_soft_border_fft(self):
         gui = {
             "processing_scope": "roi",
@@ -509,6 +539,40 @@ class TestApplyKnownSteps:
         assert result.shape == arr.shape
         # Low-pass should reduce variance vs raw noise.
         assert float(np.std(result)) < float(np.std(arr))
+
+    def test_gaussian_high_pass_runs(self):
+        Y, X = np.mgrid[:32, :32]
+        arr = 10.0 + 0.1 * X + np.sin(2 * np.pi * X / 4.0)
+        state = ProcessingState(steps=[
+            ProcessingStep("gaussian_high_pass", {"sigma_px": 8.0}),
+        ])
+        result = apply_processing_state(arr, state)
+        assert result.shape == arr.shape
+        assert abs(float(np.mean(result))) < 0.5
+
+    def test_periodic_notch_filter_runs(self):
+        Y, X = np.mgrid[:64, :64]
+        arr = np.sin(2 * np.pi * X / 8.0)
+        state = ProcessingState(steps=[
+            ProcessingStep("periodic_notch_filter", {
+                "peaks": [(8, 0)],
+                "radius_px": 2.0,
+            }),
+        ])
+        result = apply_processing_state(arr, state)
+        assert float(np.std(result)) < float(np.std(arr)) * 0.35
+
+    def test_patch_interpolate_rect_runs(self):
+        arr = np.ones((16, 16), dtype=float)
+        arr[6:10, 6:10] = 20.0
+        state = ProcessingState(steps=[
+            ProcessingStep("patch_interpolate", {
+                "rect": (6, 6, 9, 9),
+                "iterations": 80,
+            }),
+        ])
+        result = apply_processing_state(arr, state)
+        assert float(np.mean(result[6:10, 6:10])) < 5.0
 
     def test_linear_undistort_preserves_shape(self):
         arr = np.ones((20, 20)) * 3.0

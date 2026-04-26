@@ -419,6 +419,68 @@ def fourier_filter(
     return result
 
 
+def gaussian_high_pass(arr: np.ndarray, sigma_px: float = 8.0) -> np.ndarray:
+    """Subtract a broad Gaussian-blurred background from an image.
+
+    This mirrors the common ImageJ-style high-pass workflow: estimate large
+    structures with a Gaussian blur, then subtract that smooth component while
+    preserving high-frequency detail.
+    """
+    a = arr.astype(np.float64, copy=True)
+    nan_mask = ~np.isfinite(a)
+    fill = float(np.nanmean(a)) if (~nan_mask).any() else 0.0
+    filled = np.where(nan_mask, fill, a)
+    bg = gaussian_filter(filled, sigma=max(float(sigma_px), 0.1), mode="reflect")
+    out = filled - bg
+    out[nan_mask] = np.nan
+    return out
+
+
+def periodic_notch_filter(
+    arr: np.ndarray,
+    peaks: list[tuple[int, int]] | tuple[tuple[int, int], ...],
+    *,
+    radius_px: float = 3.0,
+) -> np.ndarray:
+    """Suppress selected periodic FFT peaks and their conjugates.
+
+    ``peaks`` are integer ``(dx, dy)`` offsets from the centred FFT origin in
+    pixels. A Gaussian notch is applied at each offset and its conjugate.
+    """
+    a = arr.astype(np.float64, copy=True)
+    Ny, Nx = a.shape
+    if Ny < 2 or Nx < 2 or not peaks:
+        return a
+
+    nan_mask = ~np.isfinite(a)
+    mean_val = float(np.nanmean(a)) if (~nan_mask).any() else 0.0
+    filled = np.where(nan_mask, mean_val, a)
+    F = np.fft.fftshift(np.fft.fft2(filled - mean_val))
+
+    cy, cx = Ny // 2, Nx // 2
+    yy, xx = np.mgrid[:Ny, :Nx]
+    notch = np.ones((Ny, Nx), dtype=np.float64)
+    sigma = max(float(radius_px), 0.5)
+
+    for peak in peaks:
+        try:
+            dx, dy = int(peak[0]), int(peak[1])
+        except (TypeError, ValueError, IndexError):
+            continue
+        if dx == 0 and dy == 0:
+            continue
+        for sx, sy in ((dx, dy), (-dx, -dy)):
+            px = cx + sx
+            py = cy + sy
+            if 0 <= px < Nx and 0 <= py < Ny:
+                r2 = (xx - px) ** 2 + (yy - py) ** 2
+                notch *= 1.0 - np.exp(-0.5 * r2 / (sigma ** 2))
+
+    out = np.fft.ifft2(np.fft.ifftshift(F * notch)).real + mean_val
+    out[nan_mask] = np.nan
+    return out
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # 6.  gaussian_smooth  (Gwyddion: "Gaussian filter")
 # ═════════════════════════════════════════════════════════════════════════════

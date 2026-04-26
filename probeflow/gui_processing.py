@@ -23,9 +23,14 @@ NUMERIC_PROC_KEYS: tuple[str, ...] = (
     "stm_line_bg",
     "facet_level",
     "smooth_sigma",
+    "highpass_sigma",
     "edge_method",
     "fft_mode",
     "fft_soft_border",
+    "periodic_notches",
+    "periodic_notch_radius",
+    "patch_interpolate_rect",
+    "patch_interpolate_iterations",
     "linear_undistort",
     "set_zero_xy",
     "processing_scope",
@@ -47,7 +52,13 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
     steps = []
 
     roi_scope = gui_state.get("processing_scope") == "roi"
-    roi_eligible = {"smooth", "edge_detect", "fourier_filter", "fft_soft_border"}
+    roi_eligible = {
+        "smooth",
+        "gaussian_high_pass",
+        "edge_detect",
+        "fourier_filter",
+        "fft_soft_border",
+    }
     roi_rect = None
     if roi_scope:
         try:
@@ -99,6 +110,12 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
     if smooth_sigma:
         _append_step(ProcessingStep("smooth", {"sigma_px": float(smooth_sigma)}))
 
+    highpass_sigma = gui_state.get("highpass_sigma")
+    if highpass_sigma:
+        _append_step(ProcessingStep("gaussian_high_pass", {
+            "sigma_px": float(highpass_sigma),
+        }))
+
     edge_method = gui_state.get("edge_method")
     if edge_method:
         _append_step(ProcessingStep("edge_detect", {
@@ -106,6 +123,18 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
             "sigma":  float(gui_state.get("edge_sigma",  1.0)),
             "sigma2": float(gui_state.get("edge_sigma2", 2.0)),
         }))
+
+    patch_rect = gui_state.get("patch_interpolate_rect")
+    if patch_rect is not None:
+        try:
+            patch_rect_tuple = tuple(int(v) for v in patch_rect)
+        except (TypeError, ValueError):
+            patch_rect_tuple = ()
+        if len(patch_rect_tuple) == 4:
+            _append_step(ProcessingStep("patch_interpolate", {
+                "rect": patch_rect_tuple,
+                "iterations": int(gui_state.get("patch_interpolate_iterations", 200)),
+            }))
 
     fft_mode = gui_state.get("fft_mode")
     if fft_mode is not None:
@@ -121,6 +150,20 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
             "cutoff":      float(gui_state.get("fft_soft_cutoff",      0.10)),
             "border_frac": float(gui_state.get("fft_soft_border_frac", 0.12)),
         }))
+
+    notches = gui_state.get("periodic_notches")
+    if notches:
+        peaks = []
+        for peak in notches:
+            try:
+                peaks.append((int(peak[0]), int(peak[1])))
+            except (TypeError, ValueError, IndexError):
+                continue
+        if peaks:
+            _append_step(ProcessingStep("periodic_notch_filter", {
+                "peaks": peaks,
+                "radius_px": float(gui_state.get("periodic_notch_radius", 3.0)),
+            }))
 
     if gui_state.get("linear_undistort"):
         shear_x = float(gui_state.get("undistort_shear_x", 0.0))

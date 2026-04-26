@@ -31,9 +31,12 @@ _SUPPORTED_OPS: frozenset[str] = frozenset({
     "stm_line_bg",
     "facet_level",
     "smooth",
+    "gaussian_high_pass",
     "edge_detect",
     "fourier_filter",
     "fft_soft_border",
+    "periodic_notch_filter",
+    "patch_interpolate",
     "linear_undistort",
     "set_zero_point",
     "roi",
@@ -41,6 +44,7 @@ _SUPPORTED_OPS: frozenset[str] = frozenset({
 
 _ROI_ELIGIBLE_OPS: frozenset[str] = frozenset({
     "smooth",
+    "gaussian_high_pass",
     "edge_detect",
     "fourier_filter",
     "fft_soft_border",
@@ -156,6 +160,11 @@ def apply_processing_state(arr: np.ndarray, state: ProcessingState) -> np.ndarra
             a = _proc.facet_level(a)
         elif step.op == "smooth":
             a = _proc.gaussian_smooth(a, sigma_px=float(p.get("sigma_px", 1.0)))
+        elif step.op == "gaussian_high_pass":
+            a = _proc.gaussian_high_pass(
+                a,
+                sigma_px=float(p.get("sigma_px", 8.0)),
+            )
         elif step.op == "edge_detect":
             a = _proc.edge_detect(
                 a,
@@ -176,6 +185,32 @@ def apply_processing_state(arr: np.ndarray, state: ProcessingState) -> np.ndarra
                 mode=str(p.get("mode", "low_pass")),
                 cutoff=float(p.get("cutoff", 0.10)),
                 border_frac=float(p.get("border_frac", 0.12)),
+            )
+        elif step.op == "periodic_notch_filter":
+            a = _proc.periodic_notch_filter(
+                a,
+                p.get("peaks", ()),
+                radius_px=float(p.get("radius_px", 3.0)),
+            )
+        elif step.op == "patch_interpolate":
+            rect = p.get("rect", ())
+            try:
+                x0, y0, x1, y1 = [int(v) for v in rect]
+            except (TypeError, ValueError):
+                continue
+            Ny, Nx = a.shape
+            x0 = max(0, min(Nx - 1, x0))
+            x1 = max(0, min(Nx - 1, x1))
+            y0 = max(0, min(Ny - 1, y0))
+            y1 = max(0, min(Ny - 1, y1))
+            if x1 <= x0 or y1 <= y0:
+                continue
+            mask = np.zeros(a.shape, dtype=bool)
+            mask[y0:y1 + 1, x0:x1 + 1] = True
+            a = _proc.patch_interpolate(
+                a,
+                mask,
+                iterations=int(p.get("iterations", 200)),
             )
         elif step.op == "linear_undistort":
             a = _proc.linear_undistort(

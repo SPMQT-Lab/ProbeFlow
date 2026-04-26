@@ -37,6 +37,7 @@ def test_browse_quick_panel_emits_only_thumbnail_corrections(qapp):
         "stm_line_bg": "step_tolerant",
         "facet_level": True,
         "smooth_sigma": 3,
+        "highpass_sigma": 12,
         "fft_mode": "high_pass",
     })
 
@@ -54,6 +55,7 @@ def test_viewer_full_panel_round_trips_advanced_processing_state(qapp):
         "stm_line_bg": "step_tolerant",
         "facet_level": True,
         "smooth_sigma": 3,
+        "highpass_sigma": 12,
         "edge_method": "dog",
         "edge_sigma": 4,
         "fft_mode": "high_pass",
@@ -72,6 +74,7 @@ def test_viewer_full_panel_round_trips_advanced_processing_state(qapp):
     assert state["stm_line_bg"] == "step_tolerant"
     assert state["facet_level"] is True
     assert state["smooth_sigma"] == 3
+    assert state["highpass_sigma"] == 12
     assert state["edge_method"] == "dog"
     assert state["edge_sigma"] == 4
     assert state["edge_sigma2"] == 8

@@ -12,12 +12,15 @@ from probeflow.processing import (
     export_png,
     facet_level,
     fourier_filter,
+    gaussian_high_pass,
     gaussian_smooth,
     gmm_autoclip,
     measure_periodicity,
+    periodic_notch_filter,
     remove_bad_lines,
     stm_line_background,
     subtract_background,
+    patch_interpolate,
 )
 from probeflow.cli import main as cli_main
 
@@ -296,6 +299,49 @@ class TestFourierFilter:
         out = fourier_filter(arr, mode="low_pass", cutoff=0.3)
         assert out.shape == arr.shape
         assert np.all(np.isfinite(out))
+
+
+class TestGaussianHighPass:
+    def test_removes_broad_background_but_keeps_ripple(self):
+        Y, X = np.mgrid[:64, :64]
+        broad = 5.0 + 0.05 * X
+        ripple = 0.5 * np.sin(2 * np.pi * X / 4.0)
+        arr = broad + ripple
+        out = gaussian_high_pass(arr, sigma_px=10.0)
+        assert abs(float(np.mean(out))) < 0.2
+        assert float(np.std(out)) > 0.1
+
+    def test_preserves_nan_mask(self):
+        arr = np.ones((12, 12), dtype=float)
+        arr[3, 4] = np.nan
+        out = gaussian_high_pass(arr, sigma_px=4.0)
+        assert np.isnan(out[3, 4])
+
+
+class TestPeriodicNotchFilter:
+    def test_suppresses_selected_periodic_peak(self):
+        Y, X = np.mgrid[:64, :64]
+        arr = np.sin(2 * np.pi * X / 8.0)
+        out = periodic_notch_filter(arr, [(8, 0)], radius_px=2.0)
+        assert float(np.std(out)) < float(np.std(arr)) * 0.35
+
+    def test_preserves_shape_and_nan_mask(self):
+        arr = np.random.default_rng(4).normal(size=(20, 24))
+        arr[2, 3] = np.nan
+        out = periodic_notch_filter(arr, [(3, 2)], radius_px=2.0)
+        assert out.shape == arr.shape
+        assert np.isnan(out[2, 3])
+
+
+class TestPatchInterpolate:
+    def test_fills_masked_patch_from_surroundings(self):
+        arr = np.ones((16, 16), dtype=float)
+        arr[6:10, 6:10] = 20.0
+        mask = np.zeros_like(arr, dtype=bool)
+        mask[6:10, 6:10] = True
+        out = patch_interpolate(arr, mask, iterations=80)
+        assert float(np.mean(out[6:10, 6:10])) < 5.0
+        np.testing.assert_array_equal(out[~mask], arr[~mask])
 
 
 # ─── gaussian_smooth ─────────────────────────────────────────────────────────
