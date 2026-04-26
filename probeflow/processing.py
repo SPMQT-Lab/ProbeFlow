@@ -344,10 +344,13 @@ def fourier_filter(
     window: str   = 'hanning',
 ) -> np.ndarray:
     """
-    Apply a 2-D FFT filter.
+    Apply a simple global radial 2-D FFT filter.
 
     cutoff  — fraction of Nyquist [0, 1].
     mode    — 'low_pass' | 'high_pass'
+
+    This is a coarse circular frequency cutoff, not an ImageJ-style periodic
+    spot/vector filter.
     """
     arr = arr.astype(np.float64, copy=True)
     Ny, Nx = arr.shape

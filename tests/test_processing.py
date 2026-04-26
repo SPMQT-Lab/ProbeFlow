@@ -257,14 +257,14 @@ class TestFacetLevel:
 # ─── fourier_filter ──────────────────────────────────────────────────────────
 
 class TestFourierFilter:
-    def test_low_pass_kills_high_freq(self):
+    def test_radial_low_pass_reduces_high_frequency_ripple(self):
         Y, X = np.mgrid[:64, :64]
         arr = np.sin(2 * np.pi * X / 2.0)  # 2-pixel period → high freq
         out = fourier_filter(arr, mode="low_pass", cutoff=0.05)
         # Output amplitude should be much smaller
         assert float(np.std(out)) < float(np.std(arr)) * 0.5
 
-    def test_high_pass_kills_low_freq(self):
+    def test_radial_high_pass_removes_broad_dc_background(self):
         # Mostly DC + a small high-frequency ripple. After high-pass, the mean
         # should drop close to zero while the ripple amplitude survives.
         Y, X = np.mgrid[:32, :32]
@@ -273,10 +273,17 @@ class TestFourierFilter:
         assert abs(float(np.mean(out))) < 1.0
         assert float(np.mean(out)) < float(np.mean(arr))
 
-    def test_shape_preserved(self):
+    def test_shape_preserved_for_non_square_images(self):
         arr = np.random.default_rng(0).normal(size=(20, 16))
         out = fourier_filter(arr, mode="low_pass", cutoff=0.3)
         assert out.shape == arr.shape
+
+    def test_nan_input_returns_finite_filled_output(self):
+        arr = np.random.default_rng(0).normal(size=(20, 16))
+        arr[4, 5] = np.nan
+        out = fourier_filter(arr, mode="low_pass", cutoff=0.3)
+        assert out.shape == arr.shape
+        assert np.all(np.isfinite(out))
 
 
 # ─── gaussian_smooth ─────────────────────────────────────────────────────────

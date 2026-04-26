@@ -1551,7 +1551,7 @@ class ProcessingControlPanel(QWidget):
         self._facet_cb.setFont(QFont("Helvetica", 8))
         lay.addWidget(self._facet_cb)
 
-        smooth_lbl = QLabel("Smoothing / Edge detection")
+        smooth_lbl = QLabel("Generic filters")
         smooth_lbl.setFont(QFont("Helvetica", 7, QFont.Bold))
         smooth_lbl.setAlignment(Qt.AlignCenter)
         lay.addWidget(smooth_lbl)
@@ -1572,12 +1572,20 @@ class ProcessingControlPanel(QWidget):
         self._edge_combo.currentIndexChanged.connect(
             lambda i: self._edge_sigma_w.setVisible(i != 0))
 
-        fft_lbl = QLabel("FFT filter")
+        fft_lbl = QLabel("Radial FFT filter")
         fft_lbl.setFont(QFont("Helvetica", 7, QFont.Bold))
+        fft_lbl.setToolTip(
+            "Simple global radial low/high-pass filter. "
+            "This is not the ImageJ Periodic Filter workflow."
+        )
         fft_lbl.setAlignment(Qt.AlignCenter)
         lay.addWidget(fft_lbl)
 
-        self._fft_combo = _combo_row("FFT filter:", ["None", "Low-pass", "High-pass"])
+        self._fft_combo = _combo_row("Radial FFT:", ["None", "Low-pass", "High-pass"])
+        self._fft_combo.setToolTip(
+            "Applies a circular frequency cutoff to the whole image. "
+            "Use this as a coarse global filter, not as spot/period selection."
+        )
         self._fft_cutoff_widget, self._fft_sl, _ = _sub_slider(
             "Cutoff:", 1, 50, 10, "{v}%")
         lay.addWidget(self._fft_cutoff_widget)
