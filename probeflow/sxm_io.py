@@ -94,42 +94,52 @@ def _data_offset_in_file(
 # ── Header parsing ───────────────────────────────────────────────────────────
 
 def parse_sxm_header(sxm_path: Path) -> dict:
-    """Return a dict of ``:KEY:`` → value strings from the .sxm text header."""
+    """Return a dict of ``:KEY:`` → value strings from the .sxm text header.
+
+    Raises
+    ------
+    ValueError
+        If the file does not contain a complete SXM header ending in
+        ``:SCANIT_END:``.
+    """
     params: dict = {}
     current_key: Optional[str] = None
     buf: list[str] = []
+    found_end = False
 
     def _flush() -> None:
         if current_key is not None:
             params[current_key] = " ".join(buf).strip()
 
-    try:
-        with open(sxm_path, "rb") as fh:
-            for raw in fh:
-                if raw.strip() == b":SCANIT_END:":
-                    break
-                line = raw.decode("latin-1", errors="replace").rstrip("\r\n")
-                if line.startswith(":") and line.endswith(":") and len(line) > 2:
-                    _flush()
-                    current_key = line[1:-1]
-                    buf = []
-                elif current_key is not None:
-                    s = line.strip()
-                    if s:
-                        buf.append(s)
-        _flush()
-    except FileNotFoundError:
-        raise
-    except Exception:
-        # Swallow decode / partial-file errors; return what we have.
-        pass
+    with open(sxm_path, "rb") as fh:
+        for raw in fh:
+            if raw.strip() == b":SCANIT_END:":
+                found_end = True
+                break
+            line = raw.decode("latin-1", errors="replace").rstrip("\r\n")
+            if line.startswith(":") and line.endswith(":") and len(line) > 2:
+                _flush()
+                current_key = line[1:-1]
+                buf = []
+            elif current_key is not None:
+                s = line.strip()
+                if s:
+                    buf.append(s)
+    if not found_end:
+        raise ValueError(f"{sxm_path}: missing :SCANIT_END: marker")
+    _flush()
     return params
 
 
 def sxm_dims(hdr: dict) -> Tuple[int, int]:
     """Return (Nx, Ny) scanned pixel dimensions from the header."""
     nums = [int(x) for x in re.findall(r"\d+", hdr.get("SCAN_PIXELS", ""))]
-    return (nums[0], nums[1]) if len(nums) >= 2 else (512, 512)
+    if len(nums) < 2:
+        raise ValueError("SXM header is missing valid SCAN_PIXELS dimensions")
+    Nx, Ny = nums[0], nums[1]
+    if Nx <= 0 or Ny <= 0:
+        raise ValueError(f"SXM header has invalid SCAN_PIXELS dimensions: {(Nx, Ny)}")
+    return (Nx, Ny)
 
 
 def sxm_scan_range(hdr: dict) -> Tuple[float, float]:
@@ -171,25 +181,26 @@ def read_sxm_plane(
     orient: bool = True,
     cushion_dir: Optional[Path] = None,
 ) -> Optional[np.ndarray]:
-    """Return a float64 array for one plane of an SXM file (or None on error)."""
-    try:
-        hdr = parse_sxm_header(sxm_path)
-        Nx, Ny = sxm_dims(hdr)
-        if Nx <= 0 or Ny <= 0:
-            return None
-        raw = Path(sxm_path).read_bytes()
-        offset = _data_offset_in_file(raw, cushion_dir)
-        plane_bytes = Ny * Nx * 4
-        start = offset + plane_idx * plane_bytes
-        if start + plane_bytes > len(raw):
-            return None
-        arr = np.frombuffer(raw[start:start + plane_bytes], dtype=">f4").copy()
-        arr = arr.reshape((Ny, Nx))
-        if orient:
-            arr = orient_plane(arr, hdr, plane_idx)
-        return arr.astype(np.float64)
-    except Exception:
+    """Return a float64 array for one plane of an SXM file.
+
+    A missing plane index returns ``None``. Malformed headers, corrupt payload
+    offsets, and other file integrity errors raise instead of being hidden.
+    """
+    if plane_idx < 0:
         return None
+    hdr = parse_sxm_header(sxm_path)
+    Nx, Ny = sxm_dims(hdr)
+    raw = Path(sxm_path).read_bytes()
+    offset = _data_offset_in_file(raw, cushion_dir)
+    plane_bytes = Ny * Nx * 4
+    start = offset + plane_idx * plane_bytes
+    if start + plane_bytes > len(raw):
+        return None
+    arr = np.frombuffer(raw[start:start + plane_bytes], dtype=">f4").copy()
+    arr = arr.reshape((Ny, Nx))
+    if orient:
+        arr = orient_plane(arr, hdr, plane_idx)
+    return arr.astype(np.float64)
 
 
 def read_all_sxm_planes(

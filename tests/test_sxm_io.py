@@ -45,6 +45,20 @@ class TestHeader:
         w_m, h_m = sxm_scan_range(hdr)
         assert w_m > 0 and h_m > 0
 
+    def test_parse_missing_scanit_end_raises(self, tmp_path):
+        bad = tmp_path / "truncated.sxm"
+        bad.write_bytes(b":NANONIS_VERSION:\n2\n:SCAN_PIXELS:\n4 4\n")
+        with pytest.raises(ValueError, match="SCANIT_END"):
+            parse_sxm_header(bad)
+
+    def test_sxm_dims_missing_scan_pixels_raises(self):
+        with pytest.raises(ValueError, match="SCAN_PIXELS"):
+            sxm_dims({"NANONIS_VERSION": "2"})
+
+    def test_sxm_dims_nonpositive_scan_pixels_raises(self):
+        with pytest.raises(ValueError, match="invalid SCAN_PIXELS"):
+            sxm_dims({"SCAN_PIXELS": "0 4"})
+
 
 class TestReadPlanes:
     def test_read_single_plane(self, sample_sxm):
@@ -63,6 +77,18 @@ class TestReadPlanes:
     def test_missing_plane_returns_none(self, sample_sxm):
         arr = read_sxm_plane(sample_sxm, plane_idx=99)
         assert arr is None
+
+    def test_corrupt_header_raises(self, tmp_path):
+        bad = tmp_path / "corrupt.sxm"
+        bad.write_bytes(b":NANONIS_VERSION:\n2\n:SCAN_PIXELS:\n4 4\n")
+        with pytest.raises(ValueError, match="SCANIT_END"):
+            read_sxm_plane(bad, plane_idx=0)
+
+    def test_missing_scan_pixels_raises(self, tmp_path):
+        bad = tmp_path / "missing_pixels.sxm"
+        bad.write_bytes(b":NANONIS_VERSION:\n2\n:SCANIT_END:\n")
+        with pytest.raises(ValueError, match="SCAN_PIXELS"):
+            read_sxm_plane(bad, plane_idx=0)
 
 
 class TestRoundTrip:
