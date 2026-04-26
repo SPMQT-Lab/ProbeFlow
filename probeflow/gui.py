@@ -3455,6 +3455,7 @@ class SpecViewerDialog(QDialog):
         self._t = t
         self._spec = None
         self._checkboxes: dict[str, QCheckBox] = {}
+        self._channel_check_widgets: list[QCheckBox] = []
         self._canvas = None
         self._fig = None
         # Unit-override choice per base SI unit. "Auto" means use
@@ -3485,7 +3486,6 @@ class SpecViewerDialog(QDialog):
         ch_header = QLabel("Channels")
         ch_header.setFont(QFont("Helvetica", 10, QFont.Bold))
         self._channels_lay.addWidget(ch_header)
-        self._channels_lay.addStretch(1)  # placeholder; populated in _load
 
         # Unit-override selectors for height (Z) and current channels.
         unit_box = QGroupBox("Display units")
@@ -3525,7 +3525,8 @@ class SpecViewerDialog(QDialog):
         unit_lay.addWidget(v_lbl, 2, 0)
         unit_lay.addWidget(self._v_unit_cb, 2, 1)
 
-        self._channels_lay.insertWidget(self._channels_lay.count() - 1, unit_box)
+        self._channels_lay.addWidget(unit_box)
+        self._channels_lay.addStretch(1)
 
         left_scroll = QScrollArea()
         left_scroll.setWidgetResizable(True)
@@ -3576,14 +3577,12 @@ class SpecViewerDialog(QDialog):
         order = list(spec.channel_order) if spec.channel_order else list(spec.channels.keys())
         defaults = set(spec.default_channels)
 
-        # Remove the placeholder stretch from the channels layout before
-        # inserting the real rows.
-        while self._channels_lay.count() > 1:
-            item = self._channels_lay.takeAt(1)
-            w = item.widget()
-            if w is not None:
-                w.deleteLater()
-
+        # Remove only channel checkboxes from prior loads. Static controls such
+        # as the unit QGroupBox own combo boxes and must survive dialog lifetime.
+        for w in self._channel_check_widgets:
+            self._channels_lay.removeWidget(w)
+            w.deleteLater()
+        self._channel_check_widgets.clear()
         self._checkboxes.clear()
         for ch in order:
             if ch not in spec.channels:
@@ -3593,9 +3592,9 @@ class SpecViewerDialog(QDialog):
             cb = QCheckBox(label)
             cb.setChecked(ch in defaults)
             cb.toggled.connect(self._redraw)
-            self._channels_lay.addWidget(cb)
+            self._channels_lay.insertWidget(self._channels_lay.count() - 1, cb)
             self._checkboxes[ch] = cb
-        self._channels_lay.addStretch(1)
+            self._channel_check_widgets.append(cb)
 
         sweep = spec.metadata.get("sweep_type", "").replace("_", " ")
         n_pts = spec.metadata.get("n_points", 0)

@@ -247,3 +247,38 @@ class TestRealFixtureRoundTrip:
         items = index_folder(self.TESTDATA, recursive=False, include_errors=True)
         errors = [it for it in items if it.load_error]
         assert errors == []
+
+
+class TestSpecViewerLifetime:
+    TESTDATA = Path(__file__).resolve().parents[1] / "anonymised_testdata"
+
+    def test_static_unit_controls_survive_load_cleanup(self):
+        try:
+            import shiboken6
+            from PySide6.QtWidgets import QApplication
+            from probeflow.gui import SpecViewerDialog, THEMES
+        except Exception as exc:
+            pytest.skip(f"Qt unavailable: {exc}")
+
+        app = QApplication.instance()
+        if app is None:
+            try:
+                app = QApplication([])
+            except Exception as exc:
+                pytest.skip(f"QApplication unavailable: {exc}")
+
+        spec_path = self.TESTDATA / "createc_ivt_telegraph_300mv_a.VERT"
+        entry = VertFile(path=spec_path, stem=spec_path.stem)
+        dlg = SpecViewerDialog(entry, THEMES["light"])
+
+        # Process any queued deleteLater calls from _load(). The static unit
+        # group contains QComboBoxes; deleting it during channel refresh caused
+        # a native Qt crash when closing the dialog.
+        app.processEvents()
+        assert shiboken6.isValid(dlg._z_unit_cb)
+        assert shiboken6.isValid(dlg._i_unit_cb)
+        assert shiboken6.isValid(dlg._v_unit_cb)
+
+        dlg.close()
+        dlg.deleteLater()
+        app.processEvents()
