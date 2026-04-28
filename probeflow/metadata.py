@@ -90,6 +90,49 @@ def metadata_from_scan(scan) -> ScanMetadata:
     )
 
 
+def metadata_from_createc_dat_report(report) -> ScanMetadata:
+    """Build ``ScanMetadata`` from a Createc decode report without a Scan."""
+
+    hdr = dict(report.header)
+    bias, setpoint, comment, acq_dt = _extract_createc_fields(hdr)
+    plane_names, units = _createc_report_plane_metadata(report)
+
+    lx_a = _f(hdr.get("Length x[A]", "0"), 0.0)
+    ly_a = _f(hdr.get("Length y[A]", "0"), 0.0)
+    scan_range = (lx_a * 1e-10, ly_a * 1e-10)
+
+    return ScanMetadata(
+        path=Path(report.path),
+        source_format="createc_dat",
+        item_type="scan",
+        display_name=Path(report.path).stem,
+        shape=(report.decoded_Ny, report.decoded_Nx),
+        plane_names=plane_names,
+        units=units,
+        scan_range=scan_range,
+        bias=bias,
+        setpoint=setpoint,
+        comment=comment,
+        acquisition_datetime=acq_dt,
+        raw_header=hdr,
+    )
+
+
+def _createc_report_plane_metadata(report) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Return public plane names/units matching ``read_dat`` compatibility."""
+
+    num_chan = report.detected_channel_count
+    if num_chan in (2, 4):
+        return (
+            ("Z forward", "Z backward", "Current forward", "Current backward"),
+            ("m", "m", "A", "A"),
+        )
+    return (
+        tuple(info.name for info in report.channel_info),
+        tuple(info.unit for info in report.channel_info),
+    )
+
+
 def _extract_createc_fields(hdr: dict) -> tuple:
     """Extract bias, setpoint, comment, datetime from a Createc header."""
     # Bias: "BiasVolt.[mV]" or "Biasvolt[mV]" (mV → V)
@@ -138,13 +181,16 @@ def read_scan_metadata(path) -> ScanMetadata:
     """Return :class:`ScanMetadata` for a Createc DAT or Nanonis SXM image file.
 
     Spectroscopy files and unknown file types raise ``ValueError`` with a
-    descriptive message.  Currently delegates to the full image loader
-    internally, but the public API is designed so header-only parsing can be
-    substituted later without changing callers.
+    descriptive message.  Createc DAT metadata uses the low-level decode report
+    path so callers do not pay the cost of constructing a full ``Scan``.
     """
     from probeflow.loaders import identify_scan_file
     from probeflow.scan import load_scan
 
     sig = identify_scan_file(path)
+    if sig.source_format == "dat":
+        from probeflow.readers.dat import read_dat_metadata
+
+        return read_dat_metadata(sig.path)
 
     return metadata_from_scan(load_scan(sig.path))

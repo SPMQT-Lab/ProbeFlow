@@ -11,6 +11,8 @@ Createc channel layout:
   * 2-channel files contain only [FT, FC]; the backward planes are
     synthesised as copies of the forward planes and flagged in
     ``scan.plane_synthetic``.
+  * Other decoded channel counts are returned in native order with the
+    best-known names/units from the decode report.
 
 Orientation:
   * Createc stores backward scan rows in left-to-right display order already
@@ -26,23 +28,15 @@ Orientation:
 
 from __future__ import annotations
 
-import zlib
 from pathlib import Path
 from typing import List
 
 import numpy as np
 
-from probeflow.common import (
-    _f,
-    _i,
-    detect_channels,
-    find_hdr,
-    get_dac_bits,
-    i_scale_a_per_dac,
-    parse_header,
-    trim_stack,
-    v_per_dac,
-    z_scale_m_per_dac,
+from probeflow.readers.createc_dat import (
+    read_createc_dat_report,
+    scale_channels_for_scan,
+    scan_range_m_from_header,
 )
 from probeflow.scan_model import Scan
 
@@ -50,91 +44,44 @@ from probeflow.scan_model import Scan
 def read_dat(path) -> Scan:
     """Load a Createc ``.dat`` into a Scan (display-oriented, SI units)."""
     path = Path(path)
-    raw = path.read_bytes()
+    report = read_createc_dat_report(path, include_raw=True)
+    hdr = dict(report.header)
+    scaled = scale_channels_for_scan(report)
+    num_chan = report.detected_channel_count
 
-    if b"DATA" not in raw:
-        raise ValueError(
-            f"{path.name}: missing DATA marker — not a valid Createc .dat file"
-        )
-
-    hb, comp = raw.split(b"DATA", 1)
-    hdr = parse_header(hb)
-
-    Nx = _i(find_hdr(hdr, "Num.X", 0), 0)
-    Ny = _i(find_hdr(hdr, "Num.Y", 0), 0)
-    if Nx <= 0 or Ny <= 0:
-        raise ValueError(f"{path.name}: invalid dimensions Nx={Nx}, Ny={Ny}")
-
-    if _i(find_hdr(hdr, "ScanmodeSine", 0), 0) != 0:
-        raise NotImplementedError(
-            f"{path.name}: sine scan mode is not supported"
-        )
-
-    try:
-        payload = zlib.decompress(comp)
-    except zlib.error as exc:
-        raise ValueError(
-            f"{path.name}: zlib decompression failed — {exc}"
-        ) from exc
-
-    stack, num_chan = detect_channels(payload, Ny, Nx)
-    stack, Ny = trim_stack(stack)
-    # Keep the header consistent with any trim we just applied so downstream
-    # writers (e.g. dat→sxm construction) see the corrected pixel count.
-    hdr["Num.Y"] = str(Ny)
-
-    # Drop the first column from every channel.  Createc stores a DAC
-    # initialisation value of 0 at stack[:,0,0] and a systematic feedback-
-    # settling transient at stack[:,1:,0] (first pixel of every raster line).
-    # Neither is real topography, so we strip col 0 here.
-    stack = stack[:, :, 1:]
-    Nx -= 1
-    hdr["Num.X"] = str(Nx)
-
-    bits = get_dac_bits(hdr)
-    vpd = v_per_dac(bits)
-    zs = z_scale_m_per_dac(hdr, vpd)
-    is_ = i_scale_a_per_dac(hdr, vpd)
-
-    # Apply physical scaling in-place: even indices = Z (metres), odd = I (amps).
-    for k in range(num_chan):
-        stack[k] = (stack[k] * (zs if k % 2 == 0 else is_)).astype(np.float32)
-
-    # Createc native → canonical [Z fwd, Z bwd, I fwd, I bwd] ordering
+    # Createc native STM → canonical [Z fwd, Z bwd, I fwd, I bwd] ordering.
     if num_chan == 4:
-        FT, FC, BT, BC = stack[0], stack[1], stack[2], stack[3]
+        FT, FC, BT, BC = scaled[0], scaled[1], scaled[2], scaled[3]
         synthetic = [False, False, False, False]
+        plane_names = ["Z forward", "Z backward", "Current forward", "Current backward"]
+        plane_units = ["m", "m", "A", "A"]
+        planes = [FT, BT, FC, BC]
     elif num_chan == 2:
-        FT, FC = stack[0], stack[1]
+        FT, FC = scaled[0], scaled[1]
         BT = FT.copy()
         BC = FC.copy()
         synthetic = [False, True, False, True]
+        plane_names = ["Z forward", "Z backward", "Current forward", "Current backward"]
+        plane_units = ["m", "m", "A", "A"]
+        planes = [FT, BT, FC, BC]
     else:
-        raise ValueError(
-            f"{path.name}: unexpected channel count {num_chan} (expected 2 or 4)"
-        )
+        synthetic = [False] * num_chan
+        plane_names = [info.name for info in report.channel_info]
+        plane_units = [info.unit for info in report.channel_info]
+        planes = scaled
 
     def _orient(arr: np.ndarray) -> np.ndarray:
         return np.asarray(arr, dtype=np.float64)
 
-    planes: List[np.ndarray] = [
-        _orient(FT),
-        _orient(BT),
-        _orient(FC),
-        _orient(BC),
-    ]
-
-    lx_a = _f(hdr.get("Length x[A]", "0"), 0.0)
-    ly_a = _f(hdr.get("Length y[A]", "0"), 0.0)
-    scan_range_m = (lx_a * 1e-10, ly_a * 1e-10)
+    oriented_planes: List[np.ndarray] = [_orient(arr) for arr in planes]
 
     return Scan(
-        planes=planes,
-        plane_names=["Z forward", "Z backward", "Current forward", "Current backward"],
-        plane_units=["m", "m", "A", "A"],
+        planes=oriented_planes,
+        plane_names=plane_names,
+        plane_units=plane_units,
         plane_synthetic=synthetic,
         header=hdr,
-        scan_range_m=scan_range_m,
+        scan_range_m=scan_range_m_from_header(hdr),
         source_path=path,
         source_format="dat",
     )
@@ -142,5 +89,8 @@ def read_dat(path) -> Scan:
 
 def read_dat_metadata(path):
     """Return :class:`~probeflow.metadata.ScanMetadata` for a Createc ``.dat``."""
-    from probeflow.metadata import metadata_from_scan
-    return metadata_from_scan(read_dat(path))
+    from probeflow.metadata import metadata_from_createc_dat_report
+
+    return metadata_from_createc_dat_report(
+        read_createc_dat_report(path, include_raw=False)
+    )

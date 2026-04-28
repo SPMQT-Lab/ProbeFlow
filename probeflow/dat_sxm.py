@@ -8,26 +8,14 @@ import json
 import logging
 import math
 import re
-import zlib
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from .common import (
-    _f, _i,
-    detect_channels,
-    find_hdr,
-    get_dac_bits,
-    i_scale_a_per_dac,
-    parse_header,
-    percentile_clip,
-    setup_logging,
-    trim_stack,
-    v_per_dac,
-    z_scale_m_per_dac,
-)
+from .common import _f, setup_logging
+from .readers.createc_dat import read_createc_dat_report
 
 log = logging.getLogger(__name__)
 
@@ -341,43 +329,18 @@ def process_dat(
     clip_high: float = 99.0,
 ) -> Tuple[Dict[str, str], List[Tuple[str, str, str, np.ndarray]], int]:
     """Parse .dat, scale to SI, trim, clip, and return header + image planes."""
-    raw = dat.read_bytes()
-
-    if b"DATA" not in raw:
-        raise ValueError(
-            f"{dat.name}: missing DATA marker — not a valid Nanonis .dat file"
-        )
-
-    hb, comp = raw.split(b"DATA", 1)
-    dat_hdr = parse_header(hb)
-
-    Nx = _i(find_hdr(dat_hdr, "Num.X", 512), 512)
-    Ny = _i(find_hdr(dat_hdr, "Num.Y", 512), 512)
-
-    try:
-        payload = zlib.decompress(comp)
-    except zlib.error as exc:
-        raise ValueError(f"{dat.name}: zlib decompression failed — {exc}") from exc
-
-    stack, num_chan = detect_channels(payload, Ny, Nx)
+    report = read_createc_dat_report(dat, include_raw=True)
+    dat_hdr = dict(report.header)
+    stack = report.raw_channels_dac
+    if stack is None:
+        raise ValueError(f"{dat.name}: internal decode report has no image data")
+    num_chan = report.detected_channel_count
     log.info("%s: %d channels detected", dat.name, num_chan)
 
-    stack, new_Ny = trim_stack(stack)
-    dat_hdr["Num.Y"] = str(new_Ny)
-
-    # "Drop the first column from every channel.  Createc storess a DAC
-    # initialisation value of 0 at stack[:,0,0] and a systematic feedback-
-    # settling transient at stack[:,1:,0] (first pixel of every raster line).
-    # Neither is real topography, so we strip col 0 here." - probeflow/readers/dat.py L86.
-
-    stack = stack[:, :, 1:]
-    Nx -= 1
-    dat_hdr["Num.X"] = str(Nx)
-
-    bits = get_dac_bits(dat_hdr)
-    vpd  = v_per_dac(bits)
-    zs   = z_scale_m_per_dac(dat_hdr, vpd)
-    is_  = i_scale_a_per_dac(dat_hdr, vpd)
+    bits = int(report.scale_factors["dac_bits"])
+    vpd = float(report.scale_factors["v_per_dac"])
+    zs = float(report.scale_factors["z_m_per_dac"])
+    is_ = float(report.scale_factors["current_a_per_dac"])
 
     log.debug(
         "%s: DAC bits=%d, V/DAC=%.3e, Z=%.3e m/DAC, I=%.3e A/DAC",
@@ -405,9 +368,14 @@ def process_dat(
             "%s: 2-channel input — backward planes synthesised by mirroring forward",
             dat.name,
         )
-    else:
+    elif num_chan == 4:
         BT = np.fliplr(stack[2])
         BC = np.fliplr(stack[3])
+    else:
+        raise ValueError(
+            f"{dat.name}: .dat→.sxm reconstruction expects STM 2- or 4-channel "
+            f"data, got {num_chan} channel(s)"
+        )
 
     hdr = construct_hdr(dat_hdr, dat, num_chan, clip_low, clip_high)
 
