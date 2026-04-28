@@ -27,6 +27,7 @@ Commands fall into four groups:
 
   Pipeline
     pipeline          Chain several of the above steps in one invocation
+    prepare-png       Prepared PNG handoff with provenance sidecar
 
   Inspection / GUI
     info              Print header metadata of an .sxm file
@@ -275,6 +276,56 @@ def _op_fft(mode: str, cutoff: float, window: str) -> _Op:
     ))
 
 
+def _parse_processing_steps(steps_spec: list[str] | tuple[str, ...] | None) -> list[_Op]:
+    """Parse CLI ``--steps`` entries into canonical processing operations."""
+    if not steps_spec:
+        return []
+
+    ops: list[_Op] = []
+    for raw in steps_spec:
+        name, _, params = raw.partition(":")
+        name = name.strip()
+        parts = params.split(",") if params else []
+
+        if name == "align-rows":
+            method = parts[0] if parts else "median"
+            ops.append(_op_align_rows(method))
+        elif name == "remove-bad-lines":
+            mad = float(parts[0]) if parts else 5.0
+            ops.append(_op_remove_bad_lines(mad))
+        elif name == "plane-bg":
+            order = int(parts[0]) if parts else 1
+            if order not in (1, 2, 3, 4):
+                raise ValueError(f"plane-bg order must be 1-4, got {order}")
+            ops.append(_op_plane_bg(order))
+        elif name == "facet-level":
+            deg = float(parts[0]) if parts else 3.0
+            ops.append(_op_facet_level(deg))
+        elif name == "smooth":
+            sigma = float(parts[0]) if parts else 1.0
+            ops.append(_op_smooth(sigma))
+        elif name == "edge":
+            method = parts[0] if parts else "laplacian"
+            sigma = float(parts[1]) if len(parts) > 1 else 1.0
+            sigma2 = float(parts[2]) if len(parts) > 2 else 2.0
+            ops.append(_op_edge(method, sigma, sigma2))
+        elif name == "fft":
+            mode = parts[0] if parts else "low_pass"
+            cutoff = float(parts[1]) if len(parts) > 1 else 0.1
+            window = parts[2] if len(parts) > 2 else "hanning"
+            ops.append(_op_fft(mode, cutoff, window))
+        else:
+            raise ValueError(f"Unknown pipeline step: {name!r}")
+    return ops
+
+
+def _processing_state_from_ops(ops: list[_Op]) -> ProcessingState:
+    """Build the canonical state represented by parsed CLI operations."""
+    return ProcessingState(
+        steps=[ProcessingStep(op.name, dict(op.params)) for op in ops]
+    )
+
+
 # ─── Per-command runners ─────────────────────────────────────────────────────
 
 def _cmd_single_op(args, op: Callable[[np.ndarray], np.ndarray]) -> int:
@@ -448,49 +499,15 @@ def _cmd_info(args) -> int:
 def _cmd_pipeline(args) -> int:
     """Apply a sequence of processing steps in order."""
     setup_logging(args.verbose)
-    steps_spec = args.steps
-    if not steps_spec:
+    if not args.steps:
         log.error("--steps is required, e.g. "
                   "--steps align-rows:median plane-bg:1 smooth:1.5")
         return 2
-
-    ops: List[_Op] = []
-    for raw in steps_spec:
-        name, _, params = raw.partition(":")
-        name = name.strip()
-        parts = params.split(",") if params else []
-
-        if name == "align-rows":
-            method = parts[0] if parts else "median"
-            ops.append(_op_align_rows(method))
-        elif name == "remove-bad-lines":
-            mad = float(parts[0]) if parts else 5.0
-            ops.append(_op_remove_bad_lines(mad))
-        elif name == "plane-bg":
-            order = int(parts[0]) if parts else 1
-            if order not in (1, 2, 3, 4):
-                log.error("plane-bg order must be 1-4, got %d", order)
-                return 2
-            ops.append(_op_plane_bg(order))
-        elif name == "facet-level":
-            deg = float(parts[0]) if parts else 3.0
-            ops.append(_op_facet_level(deg))
-        elif name == "smooth":
-            sigma = float(parts[0]) if parts else 1.0
-            ops.append(_op_smooth(sigma))
-        elif name == "edge":
-            method = parts[0] if parts else "laplacian"
-            sigma  = float(parts[1]) if len(parts) > 1 else 1.0
-            sigma2 = float(parts[2]) if len(parts) > 2 else 2.0
-            ops.append(_op_edge(method, sigma, sigma2))
-        elif name == "fft":
-            mode   = parts[0] if parts else "low_pass"
-            cutoff = float(parts[1]) if len(parts) > 1 else 0.1
-            window = parts[2] if len(parts) > 2 else "hanning"
-            ops.append(_op_fft(mode, cutoff, window))
-        else:
-            log.error("Unknown pipeline step: %r", name)
-            return 2
+    try:
+        ops = _parse_processing_steps(args.steps)
+    except ValueError as exc:
+        log.error("%s", exc)
+        return 2
 
     scan = load_scan(args.input)
     if args.plane >= scan.n_planes:
@@ -500,6 +517,46 @@ def _cmd_pipeline(args) -> int:
         scan.planes[args.plane] = op(scan.planes[args.plane])
         _record_op(scan, op.name, op.params)
     _write_output(args, scan, default_suffix=".sxm")
+    return 0
+
+
+def _cmd_prepare_png(args) -> int:
+    """Write a downstream-analysis PNG with a provenance sidecar."""
+    setup_logging(args.verbose)
+    try:
+        ops = _parse_processing_steps(args.steps or [])
+    except ValueError as exc:
+        log.error("%s", exc)
+        return 2
+
+    try:
+        scan = load_scan(args.input)
+    except Exception as exc:
+        log.error("Could not load %s: %s", args.input, exc)
+        return 1
+    if args.plane >= scan.n_planes:
+        log.error("Plane %d not present (file has %d)", args.plane, scan.n_planes)
+        return 1
+
+    state = _processing_state_from_ops(ops)
+    if state.steps:
+        from probeflow.gui_processing import processing_history_entries_from_state
+        from probeflow.processing_state import apply_processing_state
+        scan.planes[args.plane] = apply_processing_state(scan.planes[args.plane], state)
+        scan.processing_history.extend(processing_history_entries_from_state(state))
+
+    from probeflow.prepared_export import write_prepared_png
+    write_prepared_png(
+        scan,
+        args.output,
+        plane_idx=args.plane,
+        processing_state=state,
+        colormap=args.colormap,
+        clip_low=args.clip_low,
+        clip_high=args.clip_high,
+        add_scalebar=not args.no_scalebar,
+    )
+    log.info("[OK] prepared PNG → %s", args.output)
     return 0
 
 
@@ -1386,6 +1443,26 @@ def _build_parser() -> argparse.ArgumentParser:
                       choices=("bottom-right", "bottom-left"), default="bottom-right")
     pipe.add_argument("--verbose", action="store_true")
     pipe.set_defaults(func=_cmd_pipeline)
+
+    # ── prepared downstream handoff ──
+    prep = sub.add_parser("prepare-png",
+        help="Write a downstream-analysis PNG plus provenance sidecar")
+    prep.add_argument("input", type=Path)
+    prep.add_argument("output", type=Path)
+    prep.add_argument("--plane", type=int, default=0)
+    prep.add_argument("--steps", nargs="*", default=[], metavar="STEP",
+        help=("Optional processing steps before export, using pipeline syntax. "
+              "If omitted, the sidecar warns that no background/line correction "
+              "is recorded."))
+    prep.add_argument("--colormap", default="gray")
+    prep.add_argument("--clip-low", type=float, default=1.0)
+    prep.add_argument("--clip-high", type=float, default=99.0)
+    prep.add_argument("--no-scalebar", action="store_true", default=True,
+        help="Disable scale bar on the prepared PNG (default; PNG handoffs often prefer raw image content)")
+    prep.add_argument("--with-scalebar", dest="no_scalebar", action="store_false",
+        help="Include a visual scale bar in the PNG")
+    prep.add_argument("--verbose", action="store_true")
+    prep.set_defaults(func=_cmd_prepare_png)
 
     # ── info / gui ──
     info = sub.add_parser("info", help="Print .sxm header metadata")

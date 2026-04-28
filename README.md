@@ -122,6 +122,10 @@ probeflow pipeline some_scan.dat \
     --steps align-rows:median plane-bg:1 \
     --png --colormap viridis -o scan_clean.png
 
+# Prepare a PNG handoff for AISurf-style tools, with provenance sidecar
+probeflow prepare-png some_scan.dat aisurf_input.png \
+    --steps align-rows:median plane-bg:1 --colormap gray
+
 # Suggest a contrast window automatically
 probeflow autoclip some_scan.sxm --json
 
@@ -144,6 +148,7 @@ The top-level command is `probeflow`. Every subcommand accepts `--help`.
 | `dat2sxm` | Createc `.dat` → Nanonis `.sxm` (use `--` to pass through flags)   |
 | `dat2png` | Createc `.dat` → preview PNGs                                      |
 | `sxm2png` | Nanonis `.sxm` → colorised PNG with optional scale bar             |
+| `prepare-png` | PNG handoff for downstream tools, with provenance sidecar      |
 
 Legacy shortcuts `dat-sxm` and `dat-png` remain available for backward compatibility.
 
@@ -252,6 +257,17 @@ Step syntax is `name[:param1,param2,…]`:
 | `fft`              | `mode,cutoff,window`                            | `fft:low_pass,0.08`      |
 
 Add `--png` to the `pipeline` command to skip `.sxm` output and write a colorised PNG directly.
+
+### Prepared handoff PNGs
+
+`prepare-png` is for sending a cleaned scan plane to tools that consume image files, such as AISurf-style PNG workflows. It writes the PNG plus `<name>.provenance.json`, recording the raw source, channel, scan size, units, processing state, display/export state, and a stable processing hash.
+
+```bash
+probeflow prepare-png scan.dat aisurf_input.png \
+    --steps align-rows:median plane-bg:1 --colormap gray
+```
+
+If no background or line-leveling step is recorded, the provenance sidecar includes a warning so the handoff is visibly unprepared rather than quietly becoming an untracked screenshot.
 
 ### Spectroscopy (`.VERT` and Nanonis `.dat`)
 

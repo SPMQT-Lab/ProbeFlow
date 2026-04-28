@@ -644,3 +644,46 @@ class TestPngNoRegression:
         assert data["export_kind"] == "cli_png"
         assert ops == ["align_rows", "plane_bg"]
         assert data["processing_state_hash"]
+
+    def test_cli_prepare_png_warns_without_background_processing(self, tmp_path):
+        from probeflow.cli import main as cli_main
+
+        src = (
+            Path(__file__).resolve().parents[1]
+            / "anonymised_testdata"
+            / "sxm_moire_10nm.sxm"
+        )
+        out = tmp_path / "aisurf_raw.png"
+        rc = cli_main(["prepare-png", str(src), str(out)])
+
+        assert rc == 0
+        sidecar = out.with_suffix("").with_suffix(".provenance.json")
+        data = json.loads(sidecar.read_text(encoding="utf-8"))
+        assert data["export_kind"] == "prepared_png"
+        assert data["processing_state"] == {"steps": []}
+        assert data["warnings"]
+        assert data["display_state"]["add_scalebar"] is False
+
+    def test_cli_prepare_png_records_background_processing(self, tmp_path):
+        from probeflow.cli import main as cli_main
+
+        src = (
+            Path(__file__).resolve().parents[1]
+            / "anonymised_testdata"
+            / "sxm_moire_10nm.sxm"
+        )
+        out = tmp_path / "aisurf_prepared.png"
+        rc = cli_main([
+            "prepare-png", str(src), str(out),
+            "--steps", "align-rows:median", "plane-bg:1",
+            "--colormap", "plasma",
+        ])
+
+        assert rc == 0
+        sidecar = out.with_suffix("").with_suffix(".provenance.json")
+        data = json.loads(sidecar.read_text(encoding="utf-8"))
+        ops = [step["op"] for step in data["processing_state"]["steps"]]
+        assert data["export_kind"] == "prepared_png"
+        assert ops == ["align_rows", "plane_bg"]
+        assert data["warnings"] == []
+        assert data["display_state"]["colormap"] == "plasma"
