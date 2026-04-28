@@ -20,6 +20,7 @@ from typing import Optional, Union
 
 import numpy as np
 
+from probeflow.source_identity import build_source_identity
 from probeflow.spec_io import SpecData, SpecMetadata
 
 log = logging.getLogger(__name__)
@@ -195,6 +196,12 @@ def read_nanonis_spec(path: Union[str, Path]) -> SpecData:
         "n_points": int(arr.shape[0]),
         "title": hdr.get("Experiment", ""),
         "experiment": hdr.get("Experiment", ""),
+        "source": build_source_identity(
+            path,
+            source_format="nanonis_dat_spectrum",
+            item_type="spectrum",
+            data_offset=_data_offset_bytes(path),
+        ),
     }
 
     log.info(
@@ -244,6 +251,12 @@ def read_nanonis_spec_metadata(path: Union[str, Path]) -> SpecMetadata:
         "n_points": n_points,
         "title": comment or "",
         "experiment": hdr.get("Experiment", ""),
+        "source": build_source_identity(
+            path,
+            source_format="nanonis_dat_spectrum",
+            item_type="spectrum",
+            data_offset=_data_offset_bytes(path),
+        ),
     }
     return SpecMetadata(
         path=path,
@@ -316,6 +329,20 @@ def _parse_column_header(col_header: str) -> list[tuple[str, str, str]]:
             name, unit = raw, ""
         columns.append((raw, name, unit))
     return columns
+
+
+def _data_offset_bytes(path: Path) -> int | None:
+    """Return byte offset where numeric Nanonis spectroscopy rows begin."""
+    with path.open("rb") as fh:
+        marker_seen = False
+        while True:
+            line = fh.readline()
+            if not line:
+                return None
+            if marker_seen:
+                return fh.tell()
+            if line.strip() == b"[DATA]":
+                marker_seen = True
 
 
 def _parse_header_float(hdr: dict[str, str], key: str) -> float:

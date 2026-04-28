@@ -129,3 +129,15 @@ class TestDispatcher:
         assert meta.position[0] != 0.0
         assert meta.position[1] != 0.0
         assert meta.bias == pytest.approx(-15e-3)
+
+    def test_full_and_metadata_reads_include_matching_source_fingerprint(self, sts_spec):
+        meta = read_spec_metadata(STS)
+        full_source = sts_spec.metadata["source"]
+        metadata_source = meta.metadata["source"]
+
+        assert full_source["source_format"] == "nanonis_dat_spectrum"
+        assert full_source["item_type"] == "spectrum"
+        assert metadata_source["sha256"] == full_source["sha256"]
+        assert len(metadata_source["sha256"]) == 64
+        assert metadata_source["file_size_bytes"] > 0
+        assert metadata_source["data_offset"] is not None
