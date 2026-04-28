@@ -65,11 +65,17 @@ class TestChooseDisplayUnit:
         assert scale == 1.0
         assert unit == ""
 
-    def test_all_zero_returns_no_scale(self):
+    def test_all_zero_returns_domain_friendly_default(self):
         values = np.zeros(10)
         scale, unit = choose_display_unit("A", values)
-        assert scale == 1.0
-        assert unit == "A"
+        assert scale == 1e12
+        assert unit == "pA"
+
+    def test_all_zero_metres_returns_nm(self):
+        values = np.zeros(10)
+        scale, unit = choose_display_unit("m", values)
+        assert scale == 1e9
+        assert unit == "nm"
 
     def test_empty_returns_no_scale(self):
         values = np.array([])

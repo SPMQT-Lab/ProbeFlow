@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -167,6 +168,46 @@ class TestViewerRenderSizing:
 
         assert img is not None
         assert img.size == (160, 160)
+
+
+class TestSpecViewerRawData:
+    def test_raw_data_table_shows_all_rows_with_display_units(self, qapp, monkeypatch):
+        from probeflow.gui import SpecViewerDialog, THEMES
+        from probeflow.spec_io import SpecData
+
+        monkeypatch.setattr(SpecViewerDialog, "_load", lambda self: None)
+        entry = VertFile(path=TESTDATA / "spectrum_time_trace_5k.VERT", stem="spec")
+        dlg = SpecViewerDialog(entry, THEMES["dark"])
+        x = np.arange(25, dtype=float) / 1000.0
+        dlg._spec = SpecData(
+            header={},
+            channels={
+                "I": np.full(25, -2.5e-10),
+                "Z": np.zeros(25),
+                "V": np.full(25, -0.3),
+            },
+            x_array=x,
+            x_label="Time (s)",
+            x_unit="s",
+            y_units={"I": "A", "Z": "m", "V": "V"},
+            position=(0.0, 0.0),
+            metadata={"n_points": 25, "sweep_type": "time_trace"},
+            channel_order=["I", "Z", "V"],
+            default_channels=["I"],
+        )
+
+        table = dlg._raw_data_table()
+
+        assert table.rowCount() == 25
+        assert table.horizontalHeaderItem(1).text() == "I (pA)"
+        assert table.horizontalHeaderItem(2).text() == "Z (nm)"
+        assert table.horizontalHeaderItem(3).text() == "V (mV)"
+        assert table.item(24, 1).text() == "-250"
+        assert table.item(24, 2).text() == "0"
+        assert table.item(24, 3).text() == "-300"
+
+        dlg.close()
+        dlg.deleteLater()
 
 
 # ── Test B: split_indexed_items separates scans, spectra, errors ──────────────

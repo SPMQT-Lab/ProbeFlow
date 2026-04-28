@@ -320,6 +320,12 @@ _UNIT_PREFIX_TABLE: dict[str, list[tuple[float, str]]] = {
     "V": [(1e6, "µV"), (1e3, "mV"), (1.0, "V")],
 }
 
+_ZERO_VALUE_DISPLAY_DEFAULTS: dict[str, tuple[float, str]] = {
+    "m": (1e9, "nm"),
+    "A": (1e12, "pA"),
+    "V": (1e3, "mV"),
+}
+
 
 def lookup_unit_scale(si_unit: str, label: str) -> Optional[tuple[float, str]]:
     """Return ``(scale, label)`` for an explicit user choice of display unit.
@@ -361,7 +367,7 @@ def choose_display_unit(si_unit: str, values: np.ndarray) -> tuple[float, str]:
 
     nonzero = arr[arr != 0]
     if nonzero.size == 0:
-        return 1.0, si_unit
+        return _ZERO_VALUE_DISPLAY_DEFAULTS.get(si_unit, (1.0, si_unit))
     magnitude = float(np.median(np.abs(nonzero)))
     if not np.isfinite(magnitude) or magnitude == 0.0:
         return 1.0, si_unit

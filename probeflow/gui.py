@@ -4302,7 +4302,7 @@ class SpecViewerDialog(QDialog):
         unit_lay.setContentsMargins(6, 4, 6, 4)
         unit_lay.setSpacing(2)
 
-        z_lbl = QLabel("Z (m):")
+        z_lbl = QLabel("Z:")
         z_lbl.setFont(QFont("Helvetica", 9))
         self._z_unit_cb = QComboBox()
         self._z_unit_cb.addItems(["Auto", "pm", "Å", "nm", "µm", "m"])
@@ -4310,7 +4310,7 @@ class SpecViewerDialog(QDialog):
         self._z_unit_cb.currentTextChanged.connect(
             lambda v: self._on_unit_changed("m", v))
 
-        i_lbl = QLabel("I (A):")
+        i_lbl = QLabel("I:")
         i_lbl.setFont(QFont("Helvetica", 9))
         self._i_unit_cb = QComboBox()
         self._i_unit_cb.addItems(["Auto", "fA", "pA", "nA", "µA", "A"])
@@ -4318,7 +4318,7 @@ class SpecViewerDialog(QDialog):
         self._i_unit_cb.currentTextChanged.connect(
             lambda v: self._on_unit_changed("A", v))
 
-        v_lbl = QLabel("V (V):")
+        v_lbl = QLabel("V:")
         v_lbl.setFont(QFont("Helvetica", 9))
         self._v_unit_cb = QComboBox()
         self._v_unit_cb.addItems(["Auto", "µV", "mV", "V"])
@@ -4412,9 +4412,7 @@ class SpecViewerDialog(QDialog):
         for ch in order:
             if ch not in spec.channels:
                 continue
-            unit = spec.y_units.get(ch, "")
-            label = f"{ch}  ({unit})" if unit else ch
-            cb = QCheckBox(label)
+            cb = QCheckBox(self._channel_display_label(ch))
             cb.setChecked(ch in defaults)
             cb.toggled.connect(self._redraw)
             self._channels_lay.insertWidget(self._channels_lay.count() - 1, cb)
@@ -4434,13 +4432,35 @@ class SpecViewerDialog(QDialog):
 
     def _on_unit_changed(self, base: str, label: str) -> None:
         self._unit_choice[base] = label
+        self._refresh_channel_labels()
         self._redraw()
+
+    def _display_values_for_channel(self, ch: str) -> tuple[np.ndarray, str]:
+        if self._spec is None or ch not in self._spec.channels:
+            return np.array([], dtype=float), ""
+        from .spec_plot import choose_display_unit, lookup_unit_scale
+
+        y = np.asarray(self._spec.channels[ch], dtype=float)
+        unit = self._spec.y_units.get(ch, "")
+        choice = self._unit_choice.get(unit, "Auto")
+        override = lookup_unit_scale(unit, choice) if choice != "Auto" else None
+        if override is not None:
+            scale, disp_unit = override
+        else:
+            scale, disp_unit = choose_display_unit(unit, y)
+        return y * scale, disp_unit
+
+    def _channel_display_label(self, ch: str) -> str:
+        _values, disp_unit = self._display_values_for_channel(ch)
+        return f"{ch}  ({disp_unit})" if disp_unit else ch
+
+    def _refresh_channel_labels(self) -> None:
+        for ch, cb in self._checkboxes.items():
+            cb.setText(self._channel_display_label(ch))
 
     def _redraw(self) -> None:
         if self._spec is None:
             return
-        from .spec_plot import choose_display_unit, lookup_unit_scale
-
         # Remove existing canvas if present.
         if self._canvas is not None:
             self._canvas_lay.removeWidget(self._canvas)
@@ -4467,15 +4487,7 @@ class SpecViewerDialog(QDialog):
 
         spec = self._spec
         for i, (ch, ax) in enumerate(zip(selected, axes)):
-            y = np.asarray(spec.channels[ch], dtype=float)
-            unit = spec.y_units.get(ch, "")
-            choice = self._unit_choice.get(unit, "Auto")
-            override = lookup_unit_scale(unit, choice) if choice != "Auto" else None
-            if override is not None:
-                scale, disp_unit = override
-            else:
-                scale, disp_unit = choose_display_unit(unit, y)
-            y_disp = y * scale
+            y_disp, disp_unit = self._display_values_for_channel(ch)
 
             ax.set_facecolor(self._BG)
             ax.plot(spec.x_array, y_disp, linewidth=1.0,
@@ -4504,23 +4516,14 @@ class SpecViewerDialog(QDialog):
         Applies the user's unit override (or auto-pick) so the exported
         values match what's currently shown in the plot.
         """
-        from .spec_plot import choose_display_unit, lookup_unit_scale
-
         spec = self._spec
         if spec is None:
             return
         for ch, cb in self._checkboxes.items():
             if not cb.isChecked() or ch not in spec.channels:
                 continue
-            y = np.asarray(spec.channels[ch], dtype=float)
-            unit = spec.y_units.get(ch, "")
-            choice = self._unit_choice.get(unit, "Auto")
-            override = lookup_unit_scale(unit, choice) if choice != "Auto" else None
-            if override is not None:
-                scale, disp_unit = override
-            else:
-                scale, disp_unit = choose_display_unit(unit, y)
-            yield ch, y * scale, disp_unit
+            y_disp, disp_unit = self._display_values_for_channel(ch)
+            yield ch, y_disp, disp_unit
 
     def _export_csv(self) -> None:
         if self._spec is None:
@@ -4611,26 +4614,7 @@ class SpecViewerDialog(QDialog):
         v = QVBoxLayout(dlg)
         v.setContentsMargins(8, 8, 8, 8)
 
-        spec = self._spec
-        order = [ch for ch in spec.channel_order if ch in spec.channels]
-        if not order:
-            order = list(spec.channels.keys())
-        n_rows = min(20, len(spec.x_array))
-        n_cols = 1 + len(order)  # + 1 for x axis column
-
-        table = QTableWidget(n_rows, n_cols)
-        headers = [spec.x_label] + [
-            f"{ch} ({spec.y_units.get(ch, '')})" if spec.y_units.get(ch) else ch
-            for ch in order
-        ]
-        table.setHorizontalHeaderLabels(headers)
-
-        for r in range(n_rows):
-            table.setItem(r, 0, QTableWidgetItem(f"{spec.x_array[r]:.6g}"))
-            for c, ch in enumerate(order, start=1):
-                val = spec.channels[ch][r]
-                table.setItem(r, c, QTableWidgetItem(f"{val:.6g}"))
-        table.horizontalHeader().setStretchLastSection(True)
+        table = self._raw_data_table()
         v.addWidget(table)
 
         close_btn = QPushButton("Close")
@@ -4641,6 +4625,34 @@ class SpecViewerDialog(QDialog):
         v.addLayout(btn_row)
 
         dlg.exec()
+
+    def _raw_data_table(self) -> QTableWidget:
+        spec = self._spec
+        if spec is None:
+            return QTableWidget(0, 0)
+        order = [ch for ch in spec.channel_order if ch in spec.channels]
+        if not order:
+            order = list(spec.channels.keys())
+        n_rows = len(spec.x_array)
+        n_cols = 1 + len(order)
+
+        table = QTableWidget(n_rows, n_cols)
+        display_rows = [
+            (ch, *self._display_values_for_channel(ch))
+            for ch in order
+        ]
+        headers = [spec.x_label] + [
+            f"{ch} ({unit})" if unit else ch
+            for ch, _values, unit in display_rows
+        ]
+        table.setHorizontalHeaderLabels(headers)
+
+        for r in range(n_rows):
+            table.setItem(r, 0, QTableWidgetItem(f"{spec.x_array[r]:.6g}"))
+            for c, (_ch, values, _unit) in enumerate(display_rows, start=1):
+                table.setItem(r, c, QTableWidgetItem(f"{values[r]:.6g}"))
+        table.horizontalHeader().setStretchLastSection(True)
+        return table
 
 
 # ── Export dialog ────────────────────────────────────────────────────────────
