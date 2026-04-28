@@ -263,6 +263,12 @@ def _channel_info(
 ) -> tuple[CreatecChannelInfo, ...]:
     """Return best-known Createc channel metadata in native channel order."""
 
+    # Future Createc AFM support should replace these positional fallbacks with
+    # metadata derived from real AFM .dat headers.  The intended shape is:
+    # (1) identify any header keys that describe saved channel names/order,
+    # (2) map known AFM signals such as frequency shift, amplitude, drive, and
+    #     dissipation to conservative units/scales,
+    # (3) preserve unknown planes as raw DAC channels with decode warnings.
     known = [
         ("Z forward", "m", "forward", z_scale, "z"),
         ("Current forward", "A", "forward", current_scale, "current"),
