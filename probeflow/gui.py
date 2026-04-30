@@ -397,18 +397,6 @@ class ProcessingControlPanel(QWidget):
         self._fft_soft_cb.setFont(QFont("Helvetica", 8))
         lay.addWidget(self._fft_soft_cb)
 
-        undistort_lbl = QLabel("Linear undistort (drift)")
-        undistort_lbl.setFont(QFont("Helvetica", 7, QFont.Bold))
-        undistort_lbl.setAlignment(Qt.AlignCenter)
-        lay.addWidget(undistort_lbl)
-
-        self._undistort_shear_w, self._undistort_shear_sl, _ = _sub_slider(
-            "Shear x:", -20, 20, 0, "{v}px")
-        lay.addWidget(self._undistort_shear_w)
-        self._undistort_scale_w, self._undistort_scale_sl, _ = _sub_slider(
-            "Scale y:", 80, 120, 100, "{v}%")
-        lay.addWidget(self._undistort_scale_w)
-
     def state(self) -> dict:
         align_map = {0: None, 1: "median", 2: "mean"}
         cfg = {
@@ -424,8 +412,6 @@ class ProcessingControlPanel(QWidget):
         highpass_i = self._highpass_combo.currentIndex()
         edge_i = self._edge_combo.currentIndex()
         fft_idx = self._fft_combo.currentIndex()
-        shear_x = float(self._undistort_shear_sl.value())
-        scale_y = self._undistort_scale_sl.value() / 100.0
         cfg.update({
             "bg_order": bg_map[self._bg_combo.currentIndex()],
             "bg_step_tolerance": self._bg_step_cb.isChecked(),
@@ -447,9 +433,6 @@ class ProcessingControlPanel(QWidget):
             "fft_soft_mode": fft_map.get(fft_idx) or "low_pass",
             "fft_soft_cutoff": self._fft_sl.value() / 100.0,
             "fft_soft_border_frac": 0.12,
-            "linear_undistort": (shear_x != 0.0 or scale_y != 1.0),
-            "undistort_shear_x": shear_x,
-            "undistort_scale_y": scale_y,
         })
         return cfg
 
@@ -491,10 +474,6 @@ class ProcessingControlPanel(QWidget):
             {None: 0, "low_pass": 1, "high_pass": 2}.get(fft_mode, 0))
         self._fft_sl.setValue(int(round(float(state.get("fft_cutoff", 0.10)) * 100)))
         self._fft_soft_cb.setChecked(bool(state.get("fft_soft_border", False)))
-
-        self._undistort_shear_sl.setValue(int(state.get("undistort_shear_x", 0)))
-        self._undistort_scale_sl.setValue(
-            int(round(float(state.get("undistort_scale_y", 1.0)) * 100)))
 
 
 class PeriodicFilterDialog(QDialog):
@@ -623,7 +602,7 @@ class PeriodicFilterDialog(QDialog):
 
 
 class ImageViewerDialog(QDialog):
-    """Double-click viewer with scroll/zoom, histogram, clip sliders, processing, export."""
+    """Double-click viewer with scroll/zoom, histogram display, processing, export."""
 
     def __init__(self, entry: SxmFile, entries: list[SxmFile],
                  colormap: str, t: dict, parent=None,
@@ -659,13 +638,14 @@ class ImageViewerDialog(QDialog):
         self._scan_plane_names: list[str] = list(PLANE_NAMES)
         self._scan_plane_units: list[str] = ["m", "m", "A", "A"]
         self._roi_rect_px: Optional[tuple[int, int, int, int]] = None
-        self._zero_pick_mode: str = "offset"
+        self._zero_pick_mode: str = "plane"
         self._zero_plane_points_px: list[tuple[int, int]] = []
         self._pending_initial_plane_idx: Optional[int] = max(0, int(initial_plane_idx))
         self._reset_zoom_on_next_pixmap = True
 
         self._build()
         self._processing_panel.set_state(self._processing)
+        self._set_advanced_processing_state(self._processing)
         self._load_current()
 
     # ── Build ──────────────────────────────────────────────────────────────────
@@ -696,6 +676,64 @@ class ImageViewerDialog(QDialog):
         self._zoom_lbl = _ZoomLabel()
         self._zoom_lbl.setText("Loading…")
 
+        toolbar = QHBoxLayout()
+        toolbar.setSpacing(4)
+
+        self._zoom_out_btn = QPushButton("−")
+        self._zoom_out_btn.setFixedSize(28, 24)
+        self._zoom_out_btn.setFont(QFont("Helvetica", 11))
+        self._zoom_out_btn.setToolTip("Zoom out")
+        self._zoom_out_btn.clicked.connect(lambda: self._zoom_lbl.zoom_by(1 / 1.25))
+        toolbar.addWidget(self._zoom_out_btn)
+
+        self._zoom_reset_btn = QPushButton("1:1")
+        self._zoom_reset_btn.setFixedSize(36, 24)
+        self._zoom_reset_btn.setFont(QFont("Helvetica", 9))
+        self._zoom_reset_btn.setToolTip("Reset to native raster size")
+        self._zoom_reset_btn.clicked.connect(self._zoom_lbl.reset_zoom)
+        toolbar.addWidget(self._zoom_reset_btn)
+
+        self._zoom_in_btn = QPushButton("+")
+        self._zoom_in_btn.setFixedSize(28, 24)
+        self._zoom_in_btn.setFont(QFont("Helvetica", 11))
+        self._zoom_in_btn.setToolTip("Zoom in")
+        self._zoom_in_btn.clicked.connect(lambda: self._zoom_lbl.zoom_by(1.25))
+        toolbar.addWidget(self._zoom_in_btn)
+
+        channel_lbl = QLabel("Channel")
+        channel_lbl.setFont(QFont("Helvetica", 8, QFont.Bold))
+        toolbar.addSpacing(8)
+        toolbar.addWidget(channel_lbl)
+
+        self._ch_cb = QComboBox()
+        self._ch_cb.addItems(PLANE_NAMES)
+        self._ch_cb.setFont(QFont("Helvetica", 8))
+        self._ch_cb.setMinimumWidth(170)
+        self._ch_cb.currentIndexChanged.connect(self._on_channel_changed)
+        toolbar.addWidget(self._ch_cb)
+
+        self._auto_clip_btn = QPushButton("Auto")
+        self._auto_clip_btn.setFont(QFont("Helvetica", 8))
+        self._auto_clip_btn.setFixedHeight(24)
+        self._auto_clip_btn.setToolTip(
+            "Autoscale display bounds to the current image's 1%–99% percentiles.")
+        self._auto_clip_btn.clicked.connect(self._on_auto_clip)
+        toolbar.addWidget(self._auto_clip_btn)
+
+        self._hist_export_btn = QPushButton("Export histogram…")
+        self._hist_export_btn.setFont(QFont("Helvetica", 8))
+        self._hist_export_btn.setFixedHeight(24)
+        self._hist_export_btn.setToolTip(
+            "Save the current histogram (bin centres + counts) as a tab-separated text file.")
+        self._hist_export_btn.clicked.connect(self._on_export_histogram)
+        toolbar.addWidget(self._hist_export_btn)
+
+        zoom_hint = QLabel("Ctrl+scroll to zoom")
+        zoom_hint.setFont(QFont("Helvetica", 8))
+        toolbar.addWidget(zoom_hint)
+        toolbar.addStretch()
+        left_lay.addLayout(toolbar)
+
         # Rulers scroll together with the image (placed in the same scroll
         # viewport via a small grid container).
         self._ruler_top  = RulerWidget("horizontal")
@@ -716,28 +754,6 @@ class ImageViewerDialog(QDialog):
         self._scale_bar = ScaleBarWidget()
         left_lay.addWidget(self._scale_bar)
 
-        zoom_row = QHBoxLayout()
-        zoom_out_btn = QPushButton("−")
-        zoom_out_btn.setFixedSize(28, 24)
-        zoom_out_btn.setFont(QFont("Helvetica", 11))
-        zoom_out_btn.clicked.connect(lambda: self._zoom_lbl.zoom_by(1 / 1.25))
-        zoom_reset_btn = QPushButton("1:1")
-        zoom_reset_btn.setFixedSize(36, 24)
-        zoom_reset_btn.setFont(QFont("Helvetica", 9))
-        zoom_reset_btn.clicked.connect(self._zoom_lbl.reset_zoom)
-        zoom_in_btn = QPushButton("+")
-        zoom_in_btn.setFixedSize(28, 24)
-        zoom_in_btn.setFont(QFont("Helvetica", 11))
-        zoom_in_btn.clicked.connect(lambda: self._zoom_lbl.zoom_by(1.25))
-        zoom_hint = QLabel("Ctrl+scroll to zoom")
-        zoom_hint.setFont(QFont("Helvetica", 8))
-        zoom_row.addWidget(zoom_out_btn)
-        zoom_row.addWidget(zoom_reset_btn)
-        zoom_row.addWidget(zoom_in_btn)
-        zoom_row.addWidget(zoom_hint)
-        zoom_row.addStretch()
-        left_lay.addLayout(zoom_row)
-
         splitter.addWidget(left)
 
         # ── Right: control panel ───────────────────────────────────────────────
@@ -752,16 +768,49 @@ class ImageViewerDialog(QDialog):
         right_lay.setContentsMargins(8, 4, 8, 4)
         right_lay.setSpacing(6)
 
-        # channel selector
-        ch_lbl = QLabel("Channel")
-        ch_lbl.setFont(QFont("Helvetica", 9, QFont.Bold))
-        right_lay.addWidget(ch_lbl)
-        self._ch_cb = QComboBox()
-        self._ch_cb.addItems(PLANE_NAMES)
-        self._ch_cb.setFont(QFont("Helvetica", 9))
-        self._ch_cb.currentIndexChanged.connect(self._on_channel_changed)
-        right_lay.addWidget(self._ch_cb)
-        right_lay.addWidget(_sep())
+        def _collapsible_section(title: str, expanded: bool = False):
+            btn = QPushButton(("[−] " if expanded else "[+] ") + title)
+            btn.setCheckable(True)
+            btn.setChecked(expanded)
+            btn.setFlat(True)
+            btn.setFont(QFont("Helvetica", 9, QFont.Bold))
+            btn.setCursor(QCursor(Qt.PointingHandCursor))
+            right_lay.addWidget(btn)
+
+            body = QWidget()
+            body_lay = QVBoxLayout(body)
+            body_lay.setContentsMargins(2, 2, 0, 2)
+            body_lay.setSpacing(4)
+            body.setVisible(expanded)
+            right_lay.addWidget(body)
+
+            def _sync(checked: bool):
+                body.setVisible(bool(checked))
+                btn.setText(("[−] " if checked else "[+] ") + title)
+
+            btn.toggled.connect(_sync)
+            return btn, body, body_lay
+
+        def _small_slider(label: str, mn: int, mx: int, init: int,
+                          fmt="{v}") -> tuple[QWidget, QSlider, QLabel]:
+            w = QWidget()
+            row = QHBoxLayout(w)
+            row.setContentsMargins(0, 0, 0, 0)
+            lbl = QLabel(label)
+            lbl.setFont(QFont("Helvetica", 8))
+            lbl.setFixedWidth(56)
+            sl = QSlider(Qt.Horizontal)
+            sl.setRange(mn, mx)
+            sl.setValue(init)
+            val_lbl = QLabel(fmt.format(v=init))
+            val_lbl.setFont(QFont("Helvetica", 8))
+            val_lbl.setFixedWidth(34)
+            sl.valueChanged.connect(
+                lambda v, vl=val_lbl, f=fmt: vl.setText(f.format(v=v)))
+            row.addWidget(lbl)
+            row.addWidget(sl, 1)
+            row.addWidget(val_lbl)
+            return w, sl, val_lbl
 
         # histogram
         hist_lbl = QLabel("Histogram — drag the red/green lines to clip")
@@ -786,25 +835,6 @@ class ImageViewerDialog(QDialog):
         self._canvas.mpl_connect("motion_notify_event",  self._on_hist_motion)
         self._canvas.mpl_connect("button_release_event", self._on_hist_release)
 
-        # Histogram actions
-        auto_row = QHBoxLayout()
-        auto_btn = QPushButton("Auto")
-        auto_btn.setFont(QFont("Helvetica", 8))
-        auto_btn.setFixedHeight(22)
-        auto_btn.setToolTip(
-            "Autoscale display bounds to the current image's 1%–99% percentiles.")
-        auto_btn.clicked.connect(self._on_auto_clip)
-        hist_export_btn = QPushButton("Export histogram…")
-        hist_export_btn.setFont(QFont("Helvetica", 8))
-        hist_export_btn.setFixedHeight(22)
-        hist_export_btn.setToolTip(
-            "Save the current histogram (bin centres + counts) as a tab-separated text file.")
-        hist_export_btn.clicked.connect(self._on_export_histogram)
-        auto_row.addStretch()
-        auto_row.addWidget(hist_export_btn)
-        auto_row.addWidget(auto_btn)
-        right_lay.addLayout(auto_row)
-
         # Å / pA value readout for current display bounds
         self._clip_val_lbl = QLabel("")
         self._clip_val_lbl.setFont(QFont("Helvetica", 8))
@@ -813,11 +843,36 @@ class ImageViewerDialog(QDialog):
 
         right_lay.addWidget(_sep())
 
+        standard_lbl = QLabel("Standard processing")
+        standard_lbl.setFont(QFont("Helvetica", 9, QFont.Bold))
+        right_lay.addWidget(standard_lbl)
+
+        self._processing_panel = ProcessingControlPanel("viewer_full")
+        right_lay.addWidget(self._processing_panel)
+
+        proc_apply_btn = QPushButton("Apply processing")
+        proc_apply_btn.setFont(QFont("Helvetica", 8))
+        proc_apply_btn.setFixedHeight(24)
+        proc_apply_btn.setObjectName("accentBtn")
+        proc_apply_btn.clicked.connect(self._on_apply_processing)
+        right_lay.addWidget(proc_apply_btn)
+
+        proc_reset_btn = QPushButton("Reset to original")
+        proc_reset_btn.setFont(QFont("Helvetica", 8))
+        proc_reset_btn.setFixedHeight(24)
+        proc_reset_btn.setToolTip(
+            "Discard all processing (background, FFT, smoothing, set-zero, …) "
+            "and reload the raw on-disk data for the current image.")
+        proc_reset_btn.clicked.connect(self._on_reset_processing)
+        right_lay.addWidget(proc_reset_btn)
+
+        right_lay.addWidget(_sep())
+
         # ROI selection plumbing for local image filters; global/background
         # corrections still run against the whole image.
-        roi_lbl = QLabel("Selection")
-        roi_lbl.setFont(QFont("Helvetica", 9, QFont.Bold))
-        right_lay.addWidget(roi_lbl)
+        self._selection_toggle, self._selection_widget, selection_lay = (
+            _collapsible_section("Selection tools", expanded=False)
+        )
 
         roi_row = QHBoxLayout()
         self._roi_btn = QPushButton("Select region")
@@ -832,7 +887,7 @@ class ImageViewerDialog(QDialog):
         self._roi_clear_btn.setFixedHeight(24)
         self._roi_clear_btn.clicked.connect(self._on_clear_roi)
         roi_row.addWidget(self._roi_clear_btn)
-        right_lay.addLayout(roi_row)
+        selection_lay.addLayout(roi_row)
 
         self._scope_cb = QComboBox()
         self._scope_cb.addItems(["Whole image", "Selected region only"])
@@ -840,7 +895,7 @@ class ImageViewerDialog(QDialog):
         self._scope_cb.setToolTip(
             "Selected-region processing applies local filters only; backgrounds and scan-line tools remain whole-image operations."
         )
-        right_lay.addWidget(self._scope_cb)
+        selection_lay.addWidget(self._scope_cb)
 
         self._bg_fit_roi_cb = QCheckBox("Fit surface background from selection")
         self._bg_fit_roi_cb.setFont(QFont("Helvetica", 8))
@@ -848,7 +903,7 @@ class ImageViewerDialog(QDialog):
             "Fits Plane/Quadratic/Cubic/Quartic background using the selected pixels, "
             "then subtracts that fitted surface from the whole image."
         )
-        right_lay.addWidget(self._bg_fit_roi_cb)
+        selection_lay.addWidget(self._bg_fit_roi_cb)
 
         self._patch_roi_cb = QCheckBox("Patch-interpolate selection")
         self._patch_roi_cb.setFont(QFont("Helvetica", 8))
@@ -856,103 +911,62 @@ class ImageViewerDialog(QDialog):
             "Fills the selected rectangle by Laplace patch interpolation. "
             "Use for local scan defects before FFT/correlation work."
         )
-        right_lay.addWidget(self._patch_roi_cb)
+        selection_lay.addWidget(self._patch_roi_cb)
 
         self._roi_status_lbl = QLabel("Selection: none")
         self._roi_status_lbl.setFont(QFont("Helvetica", 8))
         self._roi_status_lbl.setWordWrap(True)
-        right_lay.addWidget(self._roi_status_lbl)
+        selection_lay.addWidget(self._roi_status_lbl)
 
         right_lay.addWidget(_sep())
 
-        # processing
-        proc_toggle = QPushButton("[+] Processing")
-        proc_toggle.setFlat(True)
-        proc_toggle.setFont(QFont("Helvetica", 9, QFont.Bold))
-        proc_toggle.setCursor(QCursor(Qt.PointingHandCursor))
-        right_lay.addWidget(proc_toggle)
-
-        self._processing_widget = QWidget()
-        processing_lay = QVBoxLayout(self._processing_widget)
-        processing_lay.setContentsMargins(2, 2, 0, 2)
-        processing_lay.setSpacing(4)
-
-        self._processing_panel = ProcessingControlPanel("viewer_full")
-        processing_lay.addWidget(self._processing_panel)
+        self._advanced_toggle, self._advanced_widget, advanced_lay = (
+            _collapsible_section("Advanced tools", expanded=False)
+        )
 
         periodic_btn = QPushButton("Periodic FFT filter...")
         periodic_btn.setFont(QFont("Helvetica", 8))
         periodic_btn.setFixedHeight(24)
         periodic_btn.clicked.connect(self._on_periodic_filter)
-        processing_lay.addWidget(periodic_btn)
+        advanced_lay.addWidget(periodic_btn)
 
-        proc_apply_btn = QPushButton("Apply processing")
-        proc_apply_btn.setFont(QFont("Helvetica", 8))
-        proc_apply_btn.setFixedHeight(24)
-        proc_apply_btn.setObjectName("accentBtn")
-        proc_apply_btn.clicked.connect(self._on_apply_processing)
-        processing_lay.addWidget(proc_apply_btn)
+        undistort_lbl = QLabel("Linear undistort (drift)")
+        undistort_lbl.setFont(QFont("Helvetica", 7, QFont.Bold))
+        undistort_lbl.setAlignment(Qt.AlignCenter)
+        advanced_lay.addWidget(undistort_lbl)
 
-        proc_reset_btn = QPushButton("Reset to original")
-        proc_reset_btn.setFont(QFont("Helvetica", 8))
-        proc_reset_btn.setFixedHeight(24)
-        proc_reset_btn.setToolTip(
-            "Discard all processing (background, FFT, smoothing, set-zero, …) "
-            "and reload the raw on-disk data for the current image.")
-        proc_reset_btn.clicked.connect(self._on_reset_processing)
-        processing_lay.addWidget(proc_reset_btn)
+        self._undistort_shear_w, self._undistort_shear_sl, _ = _small_slider(
+            "Shear x:", -20, 20, 0, "{v}px")
+        advanced_lay.addWidget(self._undistort_shear_w)
+        self._undistort_scale_w, self._undistort_scale_sl, _ = _small_slider(
+            "Scale y:", 80, 120, 100, "{v}%")
+        advanced_lay.addWidget(self._undistort_scale_w)
 
-        self._processing_widget.setVisible(False)
-        right_lay.addWidget(self._processing_widget)
+        self._set_zero_plane_btn = QPushButton("Set zero plane (3 clicks)")
+        self._set_zero_plane_btn.setCheckable(True)
+        self._set_zero_plane_btn.setFont(QFont("Helvetica", 8))
+        self._set_zero_plane_btn.setFixedHeight(24)
+        self._set_zero_plane_btn.toggled.connect(self._on_set_zero_plane_mode_toggled)
+        advanced_lay.addWidget(self._set_zero_plane_btn)
 
-        proc_toggle.clicked.connect(lambda: (
-            self._processing_widget.setVisible(not self._processing_widget.isVisible()),
-            proc_toggle.setText(
-                "[-] Processing" if self._processing_widget.isVisible()
-                else "[+] Processing")
-        ))
-
-        right_lay.addWidget(_sep())
-
-        # ── Scale bar (drawn under the image, not on it) ───────────────────────
-        sb_lbl = QLabel("Scale bar")
-        sb_lbl.setFont(QFont("Helvetica", 9, QFont.Bold))
-        right_lay.addWidget(sb_lbl)
-
-        self._scale_bar_cb = QCheckBox("Show scale bar")
-        self._scale_bar_cb.setFont(QFont("Helvetica", 8))
-        self._scale_bar_cb.setChecked(False)
-        self._scale_bar_cb.toggled.connect(self._on_scale_bar_toggled)
-        right_lay.addWidget(self._scale_bar_cb)
-
-        sb_custom_row = QHBoxLayout()
-        self._sb_custom_cb = QCheckBox("Custom length (nm):")
-        self._sb_custom_cb.setFont(QFont("Helvetica", 8))
-        self._sb_custom_cb.setToolTip(
-            "Override the auto integer-nm length with a custom value. "
-            "Leave unchecked for an automatically chosen integer length.")
-        self._sb_custom_cb.toggled.connect(self._on_sb_custom_toggled)
-        self._sb_custom_spin = QDoubleSpinBox()
-        self._sb_custom_spin.setRange(0.01, 100000.0)
-        self._sb_custom_spin.setDecimals(2)
-        self._sb_custom_spin.setSingleStep(1.0)
-        self._sb_custom_spin.setValue(1.0)
-        self._sb_custom_spin.setFixedWidth(80)
-        self._sb_custom_spin.setEnabled(False)
-        self._sb_custom_spin.valueChanged.connect(self._on_sb_custom_value_changed)
-        sb_custom_row.addWidget(self._sb_custom_cb)
-        sb_custom_row.addWidget(self._sb_custom_spin)
-        sb_custom_row.addStretch()
-        right_lay.addLayout(sb_custom_row)
+        self._set_zero_clear_btn = QPushButton("Clear zero references")
+        self._set_zero_clear_btn.setFont(QFont("Helvetica", 8))
+        self._set_zero_clear_btn.setFixedHeight(22)
+        self._set_zero_clear_btn.clicked.connect(self._on_clear_set_zero)
+        advanced_lay.addWidget(self._set_zero_clear_btn)
 
         right_lay.addWidget(_sep())
 
         # spec position overlay toggle
+        self._spec_overlay_toggle, self._spec_overlay_widget, spec_lay = (
+            _collapsible_section("Spectroscopy overlay", expanded=False)
+        )
+
         self._spec_show_cb = QCheckBox("Show spec positions")
         self._spec_show_cb.setFont(QFont("Helvetica", 8))
         self._spec_show_cb.setChecked(True)
         self._spec_show_cb.toggled.connect(self._on_spec_show_toggled)
-        right_lay.addWidget(self._spec_show_cb)
+        spec_lay.addWidget(self._spec_show_cb)
 
         self._map_spectra_here_btn = QPushButton("Map spectra to this image…")
         self._map_spectra_here_btn.setFont(QFont("Helvetica", 8))
@@ -962,31 +976,7 @@ class ImageViewerDialog(QDialog):
             "currently displayed image. Markers are drawn at each spectrum's "
             "recorded (x,y) position.")
         self._map_spectra_here_btn.clicked.connect(self._on_map_spectra_here)
-        right_lay.addWidget(self._map_spectra_here_btn)
-
-        # Manual zeroing lives outside the automatic background controls on
-        # purpose. Future background/plane tools may offer an explicit
-        # "zero after subtraction" option, but should not silently change the
-        # user's height reference as a side effect of fitting a background.
-        self._set_zero_btn = QPushButton("Set zero offset (1 click)")
-        self._set_zero_btn.setCheckable(True)
-        self._set_zero_btn.setFont(QFont("Helvetica", 8))
-        self._set_zero_btn.setFixedHeight(24)
-        self._set_zero_btn.toggled.connect(self._on_set_zero_mode_toggled)
-        right_lay.addWidget(self._set_zero_btn)
-
-        self._set_zero_plane_btn = QPushButton("Set zero plane (3 clicks)")
-        self._set_zero_plane_btn.setCheckable(True)
-        self._set_zero_plane_btn.setFont(QFont("Helvetica", 8))
-        self._set_zero_plane_btn.setFixedHeight(24)
-        self._set_zero_plane_btn.toggled.connect(self._on_set_zero_plane_mode_toggled)
-        right_lay.addWidget(self._set_zero_plane_btn)
-
-        self._set_zero_clear_btn = QPushButton("Clear zero references")
-        self._set_zero_clear_btn.setFont(QFont("Helvetica", 8))
-        self._set_zero_clear_btn.setFixedHeight(22)
-        self._set_zero_clear_btn.clicked.connect(self._on_clear_set_zero)
-        right_lay.addWidget(self._set_zero_clear_btn)
+        spec_lay.addWidget(self._map_spectra_here_btn)
 
         self._zoom_lbl.marker_clicked.connect(self._on_marker_clicked)
         self._zoom_lbl.pixel_clicked.connect(self._on_set_zero_pick)
@@ -996,12 +986,15 @@ class ImageViewerDialog(QDialog):
         right_lay.addWidget(_sep())
 
         # save PNG copy
+        self._export_toggle, self._export_widget, export_lay = (
+            _collapsible_section("Export", expanded=False)
+        )
         save_btn = QPushButton("⬇ Save PNG copy…")
         save_btn.setFont(QFont("Helvetica", 8, QFont.Bold))
         save_btn.setFixedHeight(26)
         save_btn.setObjectName("accentBtn")
         save_btn.clicked.connect(self._on_save_png)
-        right_lay.addWidget(save_btn)
+        export_lay.addWidget(save_btn)
 
         self._status_lbl = QLabel("")
         self._status_lbl.setFont(QFont("Helvetica", 8))
@@ -1390,35 +1383,21 @@ class ImageViewerDialog(QDialog):
         dlg.exec()
 
     def _on_roi_mode_toggled(self, checked: bool):
-        if checked and self._set_zero_btn.isChecked():
-            self._set_zero_btn.setChecked(False)
         if checked and self._set_zero_plane_btn.isChecked():
             self._set_zero_plane_btn.setChecked(False)
         self._zoom_lbl.set_roi_mode(checked)
         self._roi_btn.setText("Selecting..." if checked else "Select region")
 
-    def _on_set_zero_mode_toggled(self, checked: bool):
-        if checked and self._roi_btn.isChecked():
-            self._roi_btn.setChecked(False)
-        if checked and self._set_zero_plane_btn.isChecked():
-            self._set_zero_plane_btn.setChecked(False)
-        if checked:
-            self._zero_pick_mode = "offset"
-            self._status_lbl.setText("Click one reference point to set zero offset.")
-        self._zoom_lbl.set_set_zero_mode(checked or self._set_zero_plane_btn.isChecked())
-
     def _on_set_zero_plane_mode_toggled(self, checked: bool):
         if checked and self._roi_btn.isChecked():
             self._roi_btn.setChecked(False)
-        if checked and self._set_zero_btn.isChecked():
-            self._set_zero_btn.setChecked(False)
         if checked:
             self._zero_pick_mode = "plane"
             self._zero_plane_points_px = []
             self._status_lbl.setText("Click 3 reference points to define the zero plane.")
         elif self._zero_pick_mode == "plane" and len(self._zero_plane_points_px) < 3:
             self._zero_plane_points_px = []
-        self._zoom_lbl.set_set_zero_mode(checked or self._set_zero_btn.isChecked())
+        self._zoom_lbl.set_set_zero_mode(checked)
 
     def _on_roi_selected(self, x0f: float, y0f: float, x1f: float, y1f: float):
         arr = self._raw_arr if self._raw_arr is not None else self._display_arr
@@ -1458,7 +1437,7 @@ class ImageViewerDialog(QDialog):
         self._roi_status_lbl.setText("Selection: none")
 
     def _on_set_zero_pick(self, frac_x: float, frac_y: float):
-        """Handle image clicks while manual zero-offset/zero-plane mode is active."""
+        """Handle image clicks while manual zero-plane mode is active."""
         if self._raw_arr is None:
             return
         Ny, Nx = self._raw_arr.shape
@@ -1485,14 +1464,7 @@ class ImageViewerDialog(QDialog):
             self._refresh_processing_display()
             return
 
-        self._processing['set_zero_xy'] = (x_px, y_px)
-        self._processing['set_zero_patch'] = 1
-        self._processing.pop('set_zero_plane_points', None)
-        self._zero_plane_points_px = []
-        if self._set_zero_btn.isChecked():
-            self._set_zero_btn.setChecked(False)
-        self._status_lbl.setText(f"Zero offset set at pixel ({x_px}, {y_px})")
-        self._refresh_processing_display()
+        return
 
     def _refresh_zero_markers(self):
         """Push the current set-zero pick state into _ZoomLabel for drawing.
@@ -1500,7 +1472,7 @@ class ImageViewerDialog(QDialog):
         Sources, in order of priority:
           1. In-progress plane picks (``self._zero_plane_points_px``).
           2. Committed plane points (``processing['set_zero_plane_points']``).
-          3. Committed single-point zero (``processing['set_zero_xy']``).
+          3. Legacy committed single-point zero (``processing['set_zero_xy']``).
         """
         if self._raw_arr is None:
             self._zoom_lbl.set_zero_markers([])
@@ -1534,8 +1506,6 @@ class ImageViewerDialog(QDialog):
         self._processing.pop('set_zero_plane_points', None)
         self._processing.pop('set_zero_patch', None)
         self._zero_plane_points_px = []
-        if self._set_zero_btn.isChecked():
-            self._set_zero_btn.setChecked(False)
         if self._set_zero_plane_btn.isChecked():
             self._set_zero_plane_btn.setChecked(False)
         self._status_lbl.setText("Zero references cleared")
@@ -1656,21 +1626,6 @@ class ImageViewerDialog(QDialog):
         self._refresh_zero_markers()
         self._refresh_scale_bar()
 
-    # ── Scale-bar slots ────────────────────────────────────────────────────────
-    def _on_scale_bar_toggled(self, on: bool):
-        self._scale_bar.set_visible(bool(on))
-
-    def _on_sb_custom_toggled(self, on: bool):
-        self._sb_custom_spin.setEnabled(bool(on))
-        if on:
-            self._scale_bar.set_custom_length_nm(self._sb_custom_spin.value())
-        else:
-            self._scale_bar.set_custom_length_nm(None)
-
-    def _on_sb_custom_value_changed(self, v: float):
-        if self._sb_custom_cb.isChecked():
-            self._scale_bar.set_custom_length_nm(float(v))
-
     def _scan_extent_nm(self) -> tuple[float, float]:
         """Return (width_nm, height_nm) for the current scan, or (0,0)."""
         if self._scan_range_m is None:
@@ -1711,6 +1666,25 @@ class ImageViewerDialog(QDialog):
         self._ruler_container.adjustSize()
 
     # ── Controls ───────────────────────────────────────────────────────────────
+    def _advanced_processing_state(self) -> dict:
+        if not hasattr(self, "_undistort_shear_sl"):
+            return {}
+        shear_x = float(self._undistort_shear_sl.value())
+        scale_y = self._undistort_scale_sl.value() / 100.0
+        return {
+            "linear_undistort": (shear_x != 0.0 or scale_y != 1.0),
+            "undistort_shear_x": shear_x,
+            "undistort_scale_y": scale_y,
+        }
+
+    def _set_advanced_processing_state(self, state: dict | None) -> None:
+        if not hasattr(self, "_undistort_shear_sl"):
+            return
+        state = state or {}
+        self._undistort_shear_sl.setValue(int(state.get("undistort_shear_x", 0)))
+        self._undistort_scale_sl.setValue(
+            int(round(float(state.get("undistort_scale_y", 1.0)) * 100)))
+
     def _on_periodic_filter(self):
         arr = self._display_arr if self._display_arr is not None else self._raw_arr
         if arr is None:
@@ -1754,6 +1728,7 @@ class ImageViewerDialog(QDialog):
             if key in self._processing
         }
         self._processing = self._processing_panel.state()
+        self._processing.update(self._advanced_processing_state())
         self._processing.update(preserve)
         if wants_filter_roi:
             self._processing["processing_scope"] = "roi"
@@ -1780,9 +1755,8 @@ class ImageViewerDialog(QDialog):
             return
         self._processing = {}
         self._processing_panel.set_state({})
+        self._set_advanced_processing_state({})
         # Untoggle any active set-zero pick modes so we don't re-pick on reload.
-        if self._set_zero_btn.isChecked():
-            self._set_zero_btn.setChecked(False)
         if self._set_zero_plane_btn.isChecked():
             self._set_zero_plane_btn.setChecked(False)
         self._zero_plane_points_px = []
