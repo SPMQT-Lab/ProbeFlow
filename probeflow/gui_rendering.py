@@ -65,8 +65,8 @@ DEFAULT_CMAP_KEY   = "gray"
 
 def _make_lut(mpl_name: str) -> np.ndarray:
     try:
-        import matplotlib.cm as _mcm
-        cmap = _mcm.get_cmap(mpl_name)
+        import matplotlib
+        cmap = matplotlib.colormaps[mpl_name]
         x    = np.linspace(0, 1, 256)
         rgba = cmap(x)
         return (rgba[:, :3] * 255).astype(np.uint8)

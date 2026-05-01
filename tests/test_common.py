@@ -147,11 +147,11 @@ class TestZScale:
         zs = z_scale_m_per_dac(hdr, vpd)
         assert zs == pytest.approx(5.0 * 1e-9)
 
-    def test_fallback_uses_gainz_zpiezoconst(self):
+    def test_fallback_uses_zpiezoconst_without_gainz(self):
         hdr = {"GainZ": "10.0", "ZPiezoconst": "19.2"}
         vpd = v_per_dac(20)
         zs = z_scale_m_per_dac(hdr, vpd)
-        expected = vpd * 10.0 * 19.2 * 1e-9
+        expected = 2.0 * vpd * 19.2 * 1e-9
         assert zs == pytest.approx(expected, rel=1e-6)
 
     def test_returns_metres(self):

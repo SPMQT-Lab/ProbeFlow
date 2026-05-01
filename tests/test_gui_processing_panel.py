@@ -104,11 +104,11 @@ def test_viewer_dialog_keeps_standard_processing_visible(qapp, monkeypatch):
         "polygon": "Polygon",
         "line": "Line",
     }
-    assert dlg._set_zero_plane_btn.isVisible() is True
-    assert dlg._advanced_widget.isVisible() is False
-    assert dlg._spec_overlay_widget.isVisible() is False
+    assert dlg._set_zero_plane_btn.isHidden() is False
+    assert dlg._advanced_widget.isHidden() is True
+    assert dlg._spec_overlay_widget.isHidden() is True
     assert dlg._spec_show_cb.isChecked() is False
-    assert dlg._export_widget.isVisible() is False
+    assert dlg._export_widget.isHidden() is True
 
     dlg.close()
     dlg.deleteLater()

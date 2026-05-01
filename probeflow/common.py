@@ -70,16 +70,21 @@ def z_scale_m_per_dac(hdr: dict, vpd: float) -> float:
     comment close to the conversion so future cleanup does not reintroduce a
     factor-of-10 Z-height error.
 
-    Falls back to GainZ * ZPiezoconst (nm/V) * V/DAC for older headers.
+    Falls back to 2 * ZPiezoconst (nm/V) * V/DAC for older headers that lack
+    Dacto[A]z.  The factor of 2 matches the empirical relationship
+    ``Dacto[A]z ≈ 2 * ZPiezoconst * vpd`` observed across all known Createc
+    fixtures: ZPiezoconst already captures the full piezo + HV-amplifier
+    sensitivity (nm per volt of DAC output), and the bipolar ±V_ref DAC gives
+    2*V_ref / 2^bits volts per count.  GainZ is intentionally excluded because
+    it does not appear in the Dacto formula written by the Createc software.
     """
     dz = _f(find_hdr(hdr, "Dacto[A]z", None))
     if dz is not None:
         return dz * 1e-9  # Createc Dacto field: nm/DAC → m/DAC
 
-    gz = _f(find_hdr(hdr, "GainZ", 10.0), 10.0)
     zp = _f(find_hdr(hdr, "ZPiezoconst", 19.2), 19.2)  # nm/V in Createc files
-    # V/DAC * dimensionless * nm/V = nm/DAC → × 1e-9 → m/DAC
-    return vpd * gz * zp * 1e-9
+    # 2 * (V/DAC) * (nm/V) = nm/DAC → × 1e-9 → m/DAC
+    return 2.0 * vpd * zp * 1e-9
 
 
 def i_scale_a_per_dac(hdr: dict, vpd: float, negative: bool = True) -> float:
