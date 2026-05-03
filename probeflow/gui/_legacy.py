@@ -37,8 +37,8 @@ from PySide6.QtWidgets import (
     QDialog, QDoubleSpinBox, QFileDialog, QFrame, QGridLayout, QGroupBox,
     QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMenu, QPushButton,
     QScrollArea, QSizePolicy, QSlider, QSplitter, QStackedWidget,
-    QStatusBar, QTableWidget, QTableWidgetItem, QHeaderView, QTextEdit,
-    QToolTip, QVBoxLayout, QWidget,
+    QStatusBar, QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView,
+    QTextEdit, QToolTip, QVBoxLayout, QWidget,
 )
 import shutil
 import subprocess
@@ -571,7 +571,7 @@ class FFTViewerDialog(QDialog):
     ):
         super().__init__(parent)
         self.setWindowTitle("FFT Viewer")
-        self.resize(1000, 540)
+        self.resize(1000, 700)
         self.setAttribute(Qt.WA_DeleteOnClose, False)
 
         self._arr = arr.astype(np.float64, copy=True)
@@ -595,6 +595,7 @@ class FFTViewerDialog(QDialog):
 
         self._build()
         self._recompute_fft()
+        self._update_info_panel()
         self._redraw()
 
     # ── layout ─────────────────────────────────────────────────────────────────
@@ -607,7 +608,7 @@ class FFTViewerDialog(QDialog):
         lay.setSpacing(4)
         lay.setContentsMargins(6, 6, 6, 4)
 
-        # toolbar
+        # ── toolbar ───────────────────────────────────────────────────────────
         tb = QHBoxLayout()
         tb.setSpacing(6)
 
@@ -636,7 +637,7 @@ class FFTViewerDialog(QDialog):
 
         tb.addWidget(_lbl("DC:"))
         self._dc_combo = _combo(["Zero DC", "Keep DC", "Mask DC"], 88)
-        self._dc_combo.setCurrentIndex(1)  # default: Keep DC — show full data
+        self._dc_combo.setCurrentIndex(1)
         self._dc_combo.currentIndexChanged.connect(self._on_dc_changed)
         tb.addWidget(self._dc_combo)
 
@@ -664,34 +665,72 @@ class FFTViewerDialog(QDialog):
 
         lay.addLayout(tb)
 
-        # main figure
-        self._fig = Figure(figsize=(10.0, 4.8), dpi=90)
-        self._fig.patch.set_facecolor(bg)
-        self._canvas = FigureCanvasQTAgg(self._fig)
-        lay.addWidget(self._canvas, 1)
+        # ── body row: left column | right column ──────────────────────────────
+        body_row = QHBoxLayout()
+        body_row.setSpacing(4)
 
-        self._ax_real = self._fig.add_subplot(121)
-        self._ax_fft  = self._fig.add_subplot(122)
-        for ax in (self._ax_real, self._ax_fft):
-            ax.set_facecolor(bg)
-            for spine in ax.spines.values():
-                spine.set_color(fg)
-            ax.tick_params(colors=fg, labelsize=7)
+        # ── left column: real-space image + info panel ────────────────────────
+        left_col = QVBoxLayout()
+        left_col.setSpacing(2)
 
-        self._fig.subplots_adjust(left=0.07, right=0.97, top=0.95, bottom=0.10, wspace=0.30)
+        self._fig_real = Figure(figsize=(4.8, 4.5), dpi=90)
+        self._fig_real.patch.set_facecolor(bg)
+        self._canvas_real = FigureCanvasQTAgg(self._fig_real)
+        self._ax_real = self._fig_real.add_subplot(111)
+        self._ax_real.set_facecolor(bg)
+        for sp in self._ax_real.spines.values():
+            sp.set_color(fg)
+        self._ax_real.tick_params(colors=fg, labelsize=8)
+        self._fig_real.subplots_adjust(left=0.13, right=0.97, top=0.93, bottom=0.13)
+        left_col.addWidget(self._canvas_real, 1)
 
-        # intensity histogram panel — stacked: histogram then compact slider rows
-        hist_panel = QVBoxLayout()
-        hist_panel.setSpacing(2)
-        hist_panel.setContentsMargins(0, 2, 0, 2)
+        info_frame = QFrame()
+        info_frame.setFixedHeight(190)
+        info_lay = QVBoxLayout(info_frame)
+        info_lay.setContentsMargins(8, 6, 8, 4)
+        info_lay.setSpacing(2)
+        self._info_lbl = QLabel("")
+        self._info_lbl.setFont(QFont("Courier", 8))
+        self._info_lbl.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        info_lay.addWidget(self._info_lbl)
+        info_lay.addStretch(1)
+        left_col.addWidget(info_frame)
+
+        body_row.addLayout(left_col, 1)
+
+        # ── right column: FFT image + tab panel ───────────────────────────────
+        right_col = QVBoxLayout()
+        right_col.setSpacing(2)
+
+        self._fig_fft = Figure(figsize=(4.8, 4.5), dpi=90)
+        self._fig_fft.patch.set_facecolor(bg)
+        self._canvas_fft = FigureCanvasQTAgg(self._fig_fft)
+        self._ax_fft = self._fig_fft.add_subplot(111)
+        self._ax_fft.set_facecolor(bg)
+        for sp in self._ax_fft.spines.values():
+            sp.set_color(fg)
+        self._ax_fft.tick_params(colors=fg, labelsize=8)
+        self._fig_fft.subplots_adjust(left=0.13, right=0.97, top=0.93, bottom=0.13)
+        right_col.addWidget(self._canvas_fft, 1)
+
+        # tab panel (fixed height, aligned with info_frame)
+        self._tab_widget = QTabWidget()
+        self._tab_widget.setFixedHeight(190)
+        self._tab_widget.setFont(QFont("Helvetica", 8))
+
+        # ── Intensity tab ─────────────────────────────────────────────────────
+        intensity_tab = QWidget()
+        int_lay = QVBoxLayout(intensity_tab)
+        int_lay.setSpacing(2)
+        int_lay.setContentsMargins(4, 2, 4, 2)
 
         self._hist_fig = Figure(figsize=(1, 1), dpi=90)
         self._hist_fig.patch.set_facecolor(bg)
         self._hist_canvas = FigureCanvasQTAgg(self._hist_fig)
-        self._hist_canvas.setFixedHeight(110)
+        self._hist_canvas.setFixedHeight(95)
         self._hist_ax = self._hist_fig.add_axes([0.05, 0.18, 0.92, 0.76])
         self._hist_ax.set_facecolor(bg)
-        hist_panel.addWidget(self._hist_canvas)
+        int_lay.addWidget(self._hist_canvas)
 
         def _ctrl_row(label_text, slider_val):
             row = QHBoxLayout()
@@ -716,12 +755,12 @@ class FFTViewerDialog(QDialog):
         min_row, self._vmin_slider, self._vmin_edit = _ctrl_row("Min:", 0)
         self._vmin_slider.valueChanged.connect(self._on_vmin_slider_changed)
         self._vmin_edit.editingFinished.connect(self._on_vmin_edit_changed)
-        hist_panel.addLayout(min_row)
+        int_lay.addLayout(min_row)
 
         max_row, self._vmax_slider, self._vmax_edit = _ctrl_row("Max:", 1000)
         self._vmax_slider.valueChanged.connect(self._on_vmax_slider_changed)
         self._vmax_edit.editingFinished.connect(self._on_vmax_edit_changed)
-        hist_panel.addLayout(max_row)
+        int_lay.addLayout(max_row)
 
         reset_row = QHBoxLayout()
         reset_row.addStretch(1)
@@ -731,20 +770,42 @@ class FFTViewerDialog(QDialog):
         reset_intensity_btn.setToolTip("Reset intensity to full range")
         reset_intensity_btn.clicked.connect(self._reset_intensity)
         reset_row.addWidget(reset_intensity_btn)
-        hist_panel.addLayout(reset_row)
+        int_lay.addLayout(reset_row)
 
-        lay.addLayout(hist_panel)
+        self._tab_widget.addTab(intensity_tab, "Intensity")
 
-        # status bar
+        # ── Radial profile tab ────────────────────────────────────────────────
+        radial_tab = QWidget()
+        rad_lay = QVBoxLayout(radial_tab)
+        rad_lay.setSpacing(0)
+        rad_lay.setContentsMargins(2, 2, 2, 2)
+
+        self._radial_fig = Figure(figsize=(1, 1), dpi=90)
+        self._radial_fig.patch.set_facecolor(bg)
+        self._radial_canvas = FigureCanvasQTAgg(self._radial_fig)
+        self._radial_ax = self._radial_fig.add_axes([0.11, 0.24, 0.85, 0.66])
+        self._radial_ax.set_facecolor(bg)
+        rad_lay.addWidget(self._radial_canvas)
+
+        self._tab_widget.addTab(radial_tab, "Radial profile")
+
+        right_col.addWidget(self._tab_widget)
+        body_row.addLayout(right_col, 1)
+
+        lay.addLayout(body_row, 1)
+
+        # ── status bar ────────────────────────────────────────────────────────
         self._status_lbl = QLabel("")
         self._status_lbl.setFont(QFont("Helvetica", 7))
         self._status_lbl.setAlignment(Qt.AlignLeft)
         lay.addWidget(self._status_lbl)
 
-        self._canvas.mpl_connect("scroll_event",         self._on_scroll)
-        self._canvas.mpl_connect("button_press_event",   self._on_press)
-        self._canvas.mpl_connect("button_release_event", self._on_release)
-        self._canvas.mpl_connect("motion_notify_event",  self._on_motion)
+        # ── canvas event connections ──────────────────────────────────────────
+        self._canvas_fft.mpl_connect("scroll_event",         self._on_scroll)
+        self._canvas_fft.mpl_connect("button_press_event",   self._on_press)
+        self._canvas_fft.mpl_connect("button_release_event", self._on_release)
+        self._canvas_fft.mpl_connect("motion_notify_event",  self._on_motion)
+        self._canvas_real.mpl_connect("motion_notify_event", self._on_motion)
 
     # ── FFT computation ────────────────────────────────────────────────────────
 
@@ -864,8 +925,10 @@ class FFTViewerDialog(QDialog):
         ax.axvline(0, color=fg, lw=0.4, alpha=0.35)
 
         self._update_histogram(disp)
+        self._update_radial_profile(disp)
         self._sync_intensity_labels()
-        self._canvas.draw_idle()
+        self._canvas_real.draw_idle()
+        self._canvas_fft.draw_idle()
 
     # ── zoom / pan ─────────────────────────────────────────────────────────────
 
@@ -874,7 +937,7 @@ class FFTViewerDialog(QDialog):
         self._fft_ylim = (float(self._qy[-1]), float(self._qy[0]))
         self._ax_fft.set_xlim(*self._fft_xlim)
         self._ax_fft.set_ylim(*self._fft_ylim)
-        self._canvas.draw_idle()
+        self._canvas_fft.draw_idle()
 
     def _zoom_centre(self):
         qx_half = (float(self._qx[-1]) - float(self._qx[0])) * 0.25
@@ -883,7 +946,7 @@ class FFTViewerDialog(QDialog):
         self._fft_ylim = (-qy_half, qy_half)
         self._ax_fft.set_xlim(*self._fft_xlim)
         self._ax_fft.set_ylim(*self._fft_ylim)
-        self._canvas.draw_idle()
+        self._canvas_fft.draw_idle()
 
     def _zoom_by(self, factor: float, cx: float | None = None, cy: float | None = None):
         xl, xr = self._fft_xlim
@@ -894,7 +957,7 @@ class FFTViewerDialog(QDialog):
         self._fft_ylim = (yc + (yb - yc) * factor, yc + (yt - yc) * factor)
         self._ax_fft.set_xlim(*self._fft_xlim)
         self._ax_fft.set_ylim(*self._fft_ylim)
-        self._canvas.draw_idle()
+        self._canvas_fft.draw_idle()
 
     # ── canvas events ──────────────────────────────────────────────────────────
 
@@ -923,7 +986,7 @@ class FFTViewerDialog(QDialog):
             self._fft_ylim = (ylim0[0] + dy, ylim0[1] + dy)
             self._ax_fft.set_xlim(*self._fft_xlim)
             self._ax_fft.set_ylim(*self._fft_ylim)
-            self._canvas.draw_idle()
+            self._canvas_fft.draw_idle()
 
         if event.inaxes is self._ax_fft and event.xdata is not None:
             qx, qy = event.xdata, event.ydata
@@ -1049,13 +1112,72 @@ class FFTViewerDialog(QDialog):
         self._vmax_slider.blockSignals(False)
         self._redraw()
 
+    def _update_info_panel(self):
+        Ny, Nx = self._arr.shape
+        try:
+            w_nm = float(self._scan_range_m[0]) * 1e9
+            h_nm = float(self._scan_range_m[1]) * 1e9
+            dx_nm = w_nm / Nx if Nx > 0 else 1.0
+            dy_nm = h_nm / Ny if Ny > 0 else 1.0
+        except Exception:
+            w_nm = h_nm = float(Nx)
+            dx_nm = dy_nm = 1.0
+        dqx = 1.0 / w_nm if w_nm > 0 else 0.0
+        q_ny = 1.0 / (2.0 * dx_nm) if dx_nm > 0 else 0.0
+        self._info_lbl.setText(
+            f"Image:    {Nx} × {Ny} px\n"
+            f"Size:     {w_nm:.3g} × {h_nm:.3g} nm\n"
+            f"px size:  {dx_nm:.4g} nm\n"
+            f"q-res:    {dqx:.4g} nm⁻¹\n"
+            f"Nyquist:  {q_ny:.3g} nm⁻¹"
+        )
+
+    def _update_radial_profile(self, disp: np.ndarray):
+        fg = self._theme.get("fg", "#dddddd")
+        bg = self._theme.get("bg", "#1e1e1e")
+        ax = self._radial_ax
+        ax.cla()
+        ax.set_facecolor(bg)
+        if self._qx is None or self._qy is None:
+            self._radial_canvas.draw_idle()
+            return
+        qx_2d = self._qx[np.newaxis, :]
+        qy_2d = self._qy[:, np.newaxis]
+        q_map = np.sqrt(qx_2d ** 2 + qy_2d ** 2)
+        Ny, Nx = disp.shape
+        n_bins = min(Nx, Ny) // 2
+        q_max = float(q_map.max())
+        q_bins = np.linspace(0.0, q_max, n_bins + 1)
+        q_centers = 0.5 * (q_bins[:-1] + q_bins[1:])
+        flat_q = q_map.ravel()
+        flat_d = disp.ravel()
+        valid = np.isfinite(flat_d)
+        idx = np.clip(np.digitize(flat_q, q_bins) - 1, 0, n_bins - 1)
+        profile = np.zeros(n_bins)
+        counts  = np.zeros(n_bins, dtype=np.int64)
+        np.add.at(profile, idx[valid], flat_d[valid])
+        np.add.at(counts,  idx[valid], 1)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            profile = np.where(counts > 0, profile / counts, np.nan)
+        good = np.isfinite(profile)
+        if good.any():
+            ax.plot(q_centers[good], profile[good], color="#88bbee", lw=1.0)
+        scale_lbl = "log|FFT|" if self._scale_mode == "log" else "|FFT|"
+        ax.set_xlabel("q  (nm⁻¹)", fontsize=7, color=fg)
+        ax.set_ylabel(f"⟨{scale_lbl}⟩", fontsize=7, color=fg)
+        ax.tick_params(colors=fg, labelsize=6, length=2)
+        for sp in ax.spines.values():
+            sp.set_color(fg)
+        self._radial_fig.tight_layout(pad=0.3)
+        self._radial_canvas.draw_idle()
+
     def _on_export(self):
         path, _ = QFileDialog.getSaveFileName(
             self, "Export FFT view", "fft_view.png",
             "PNG image (*.png);;All files (*)"
         )
         if path:
-            self._fig.savefig(path, dpi=150, bbox_inches="tight")
+            self._fig_fft.savefig(path, dpi=150, bbox_inches="tight")
 
 
 class PeriodicFilterDialog(QDialog):
