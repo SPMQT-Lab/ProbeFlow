@@ -287,6 +287,7 @@ def apply_processing_state(arr: np.ndarray, state: ProcessingState) -> np.ndarra
             a = _proc.remove_bad_lines(
                 a,
                 threshold_mad=float(p.get("threshold_mad", 5.0)),
+                method=str(p.get("method", "mad")),
             )
         elif step.op == "align_rows":
             a = _proc.align_rows(a, method=p.get("method", "median"))
@@ -360,6 +361,8 @@ def apply_processing_state(arr: np.ndarray, state: ProcessingState) -> np.ndarra
             a = _proc.patch_interpolate(
                 a,
                 mask,
+                method=str(p.get("method", "line_fit")),
+                rim_px=int(p.get("rim_px", 20)),
                 iterations=int(p.get("iterations", 200)),
             )
         elif step.op == "linear_undistort":

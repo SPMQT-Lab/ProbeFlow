@@ -68,16 +68,40 @@ def _nan_normalized_gaussian(arr: np.ndarray, sigma: float) -> np.ndarray:
 # 1.  remove_bad_lines
 # ═════════════════════════════════════════════════════════════════════════════
 
-def remove_bad_lines(arr: np.ndarray, threshold_mad: float = 5.0) -> np.ndarray:
-    """
-    Replace outlier scan lines via weighted interpolation from neighbours.
+def remove_bad_lines(
+    arr: np.ndarray,
+    threshold_mad: float = 5.0,
+    *,
+    method: str = "mad",
+) -> np.ndarray:
+    """Replace scan-line artefacts via interpolation from neighbours.
 
-    A row is "bad" when |row_median − overall_median| > threshold_mad × MAD,
-    where MAD is the median absolute deviation of per-row medians.
-    Bad rows are replaced by a distance-weighted blend of the nearest good
-    rows above and below (falls back to the single nearest good row when
-    only one side is available).
+    Two detection strategies are available:
+
+    ``method="mad"`` (default)
+        Detects *entire bad rows* by their median height.  A row is flagged
+        when ``|row_median − overall_median| > threshold_mad × MAD``, where
+        MAD is the median absolute deviation of all per-row medians.  Bad rows
+        are replaced by a distance-weighted column-wise blend of the nearest
+        good rows above and below.  Self-calibrating — no physical unit
+        threshold needed.  Works best when the bad line shifts the entire row
+        by a systematic offset (tip crash, vibration burst).
+
+    ``method="step"``
+        Detects bad pixels *per column* by looking for abrupt step
+        transitions that exceed an auto-computed threshold
+        (``threshold_mad × MAD`` of all column-wise row differences).  For
+        each column, the region between a positive crossing and the following
+        negative crossing is marked bad and interpolated linearly from the
+        nearest good pixels above and below.  Handles *partial* bad lines
+        (only some columns affected) and isolated pixel artefacts that a
+        row-level detector would miss.
     """
+    if method not in {"mad", "step"}:
+        raise ValueError(f"method must be 'mad' or 'step', got {method!r}")
+    if method == "step":
+        return _remove_bad_lines_step(arr, threshold_mad)
+
     threshold_mad = _nonnegative_finite(threshold_mad, "threshold_mad")
     arr = arr.astype(np.float64, copy=True)
     Ny, Nx = arr.shape
@@ -124,6 +148,71 @@ def remove_bad_lines(arr: np.ndarray, threshold_mad: float = 5.0) -> np.ndarray:
             arr[r] = arr[int(below[0])]
 
     return arr
+
+
+def _remove_bad_lines_step(arr: np.ndarray, threshold_factor: float) -> np.ndarray:
+    """Column-level step detection and per-column linear interpolation.
+
+    For each column the algorithm scans rows top-to-bottom looking for
+    abrupt transitions.  A "bright line" begins at the row where the
+    column value jumps up by more than *threshold*, and ends at the row
+    where it jumps back down.  The flagged pixels are replaced by linear
+    interpolation between the nearest good pixels above and below in the
+    same column.
+
+    The threshold is ``threshold_factor × MAD`` of all finite column-wise
+    row differences, computed automatically from the image data.
+    """
+    threshold_factor = _nonnegative_finite(threshold_factor, "threshold_mad")
+    a = arr.astype(np.float64, copy=True)
+    Ny, Nx = a.shape
+
+    # Auto-threshold from the distribution of row-to-row column differences
+    diffs_raw = np.diff(a, axis=0)
+    finite_diffs = np.abs(diffs_raw[np.isfinite(diffs_raw)])
+    if finite_diffs.size == 0:
+        return a
+    mad = float(np.median(np.abs(finite_diffs - np.median(finite_diffs))))
+    if mad == 0.0:
+        mad = max(float(np.median(finite_diffs)) * 1e-3, 1e-15)
+    threshold = threshold_factor * mad
+
+    bad = np.zeros((Ny, Nx), dtype=bool)
+    for c in range(Nx):
+        col = a[:, c]
+        in_bad = False
+        for r in range(1, Ny):
+            if not (np.isfinite(col[r]) and np.isfinite(col[r - 1])):
+                continue
+            step = col[r] - col[r - 1]
+            if step > threshold:
+                in_bad = True
+            elif step < -threshold:
+                in_bad = False
+            if in_bad:
+                bad[r, c] = True
+
+    # Per-column linear interpolation of flagged pixels
+    for c in range(Nx):
+        bad_rows = np.where(bad[:, c])[0]
+        if bad_rows.size == 0:
+            continue
+        good_rows = np.where(~bad[:, c] & np.isfinite(a[:, c]))[0]
+        if good_rows.size == 0:
+            continue
+        for r in bad_rows:
+            above = good_rows[good_rows < r]
+            below = good_rows[good_rows > r]
+            if above.size and below.size:
+                ra, rb = int(above[-1]), int(below[0])
+                da, db = r - ra, rb - r
+                a[r, c] = (db * a[ra, c] + da * a[rb, c]) / (da + db)
+            elif above.size:
+                a[r, c] = a[int(above[-1]), c]
+            else:
+                a[r, c] = a[int(below[0]), c]
+
+    return a
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1470,12 +1559,30 @@ def patch_interpolate(
     arr: np.ndarray,
     mask: np.ndarray,
     *,
+    method: str = "line_fit",
+    rim_px: int = 20,
     iterations: int = 200,
 ) -> np.ndarray:
-    """Fill masked pixels by Jacobi-iteration of the discrete Laplace equation.
+    """Fill masked pixels by interpolation from surrounding data.
 
-    Useful for hiding scan artefacts (tip jumps, single-line glitches) without
-    biasing later FFT/correlation analyses.
+    Two interpolation strategies are available:
+
+    ``method="line_fit"`` (default)
+        For each masked row, fits a linear function (offset + slope × x) to
+        the non-masked pixels within *rim_px* columns of the masked boundary,
+        then extrapolates that line through the masked columns.  This
+        preserves the local surface tilt — physically correct for repairing
+        STM scan lines, where nearby scan lines share the same slope.
+        Algorithm after Schmid's ImageJ ``Patch_Interpolation`` plugin
+        (mode: "lines with individual slopes").  Rows where no rim data is
+        available fall back to row-blended interpolation from neighbours.
+
+    ``method="laplace"``
+        Iterative Jacobi relaxation of the discrete Laplace equation: each
+        masked pixel converges to the average of its four neighbours.
+        Isotropic and smooth, but does not preserve scan-line slope.  Use
+        for non-directional patches or when the masked region spans most of
+        the image.
 
     Parameters
     ----------
@@ -1483,11 +1590,91 @@ def patch_interpolate(
         2-D image.
     mask
         Boolean array; True for pixels to interpolate.
+    method
+        ``"line_fit"`` (default) or ``"laplace"``.
+    rim_px
+        Half-width (in columns) of the fitting region on each side of the
+        masked boundary.  Used only by ``"line_fit"``.
     iterations
-        Number of relaxation passes. 100–400 is normally enough.
+        Number of Jacobi relaxation passes.  Used only by ``"laplace"``.
+        100–400 is normally enough.
     """
     if arr.shape != mask.shape:
         raise ValueError("arr and mask must have the same shape")
+    if method not in {"line_fit", "laplace"}:
+        raise ValueError(f"method must be 'line_fit' or 'laplace', got {method!r}")
+    if method == "line_fit":
+        return _patch_line_fit(arr, mask, rim_px=max(1, int(rim_px)))
+    return _patch_laplace(arr, mask, iterations=max(1, int(iterations)))
+
+
+def _patch_line_fit(arr: np.ndarray, mask: np.ndarray, rim_px: int) -> np.ndarray:
+    """Per-row linear extrapolation from rim pixels (ImageJ Patch_Interpolation style)."""
+    a = arr.astype(np.float64, copy=True)
+    m = mask.astype(bool)
+    if not m.any():
+        return a
+
+    Ny, Nx = a.shape
+    xs = np.arange(Nx, dtype=np.float64)
+
+    fill = float(np.nanmean(a[~m & np.isfinite(a)])) if (~m).any() else 0.0
+    a[m | ~np.isfinite(a)] = fill
+
+    deferred_rows: list[int] = []
+
+    for r in range(Ny):
+        row_mask = m[r]
+        if not row_mask.any():
+            continue
+
+        orig_row = arr[r].astype(np.float64)
+        good = ~m[r] & np.isfinite(orig_row)
+
+        if not good.any():
+            deferred_rows.append(r)
+            continue
+
+        masked_xs = xs[row_mask]
+        col_lo = float(masked_xs.min())
+        col_hi = float(masked_xs.max())
+
+        rim_left  = good & (xs <= col_lo) & (xs >= max(0.0, col_lo - rim_px))
+        rim_right = good & (xs >= col_hi) & (xs <= min(float(Nx - 1), col_hi + rim_px))
+        rim = rim_left | rim_right
+
+        if rim.sum() >= 2:
+            fx, fz = xs[rim], orig_row[rim]
+        elif good.sum() >= 2:
+            fx, fz = xs[good], orig_row[good]
+        else:
+            a[r][row_mask] = float(orig_row[good].mean())
+            continue
+
+        if fx.size == 1:
+            a[r][row_mask] = float(fz[0])
+        else:
+            coeffs = np.polyfit(fx, fz, 1)
+            slope, intercept = float(coeffs[0]), float(coeffs[1])
+            a[r][row_mask] = slope * xs[row_mask] + intercept
+
+    for r in deferred_rows:
+        above = [rr for rr in range(r - 1, -1, -1) if not m[rr].all()]
+        below = [rr for rr in range(r + 1, Ny) if not m[rr].all()]
+        if above and below:
+            ra, rb = above[0], below[0]
+            da, db = r - ra, rb - r
+            a[r] = (db * a[ra] + da * a[rb]) / (da + db)
+        elif above:
+            a[r] = a[above[0]]
+        elif below:
+            a[r] = a[below[0]]
+
+    return a
+
+
+def _patch_laplace(arr: np.ndarray, mask: np.ndarray, iterations: int) -> np.ndarray:
+    """Jacobi relaxation of the Laplace equation over masked pixels."""
     a = arr.astype(np.float64, copy=True)
     m = mask.astype(bool)
     if not m.any():
@@ -1496,7 +1683,7 @@ def patch_interpolate(
     fill = float(np.nanmean(a[~m & np.isfinite(a)])) if (~m).any() else 0.0
     a[m | ~np.isfinite(a)] = fill
     Ny, Nx = a.shape
-    for _ in range(max(1, int(iterations))):
+    for _ in range(iterations):
         nb = np.zeros_like(a)
         nb[1:-1, 1:-1] = 0.25 * (
             a[:-2, 1:-1] + a[2:, 1:-1] + a[1:-1, :-2] + a[1:-1, 2:]
