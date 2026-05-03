@@ -160,6 +160,18 @@ class TestZScale:
         zs = z_scale_m_per_dac(hdr, vpd)
         assert zs == pytest.approx(1e-9)
 
+    def test_dacto_z_uses_gainz_reference_10(self):
+        hdr = {"Dacto[A]z": "5.0", "GainZ": "10"}
+        vpd = v_per_dac(20)
+        zs = z_scale_m_per_dac(hdr, vpd)
+        assert zs == pytest.approx(5.0 * 1e-9)
+
+    def test_dacto_z_scales_legacy_gainz_three(self):
+        hdr = {"Dacto[A]z": "5.0", "GainZ": "3"}
+        vpd = v_per_dac(20)
+        zs = z_scale_m_per_dac(hdr, vpd)
+        assert zs == pytest.approx(5.0 * 0.3 * 1e-9)
+
 
 # ─── i_scale_a_per_dac ────────────────────────────────────────────────────────
 
