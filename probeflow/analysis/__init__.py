@@ -15,3 +15,39 @@ Keep measurement algorithms here, not graph models. Do not define
 place parser/writer boundaries, CLI routing, GUI widgets, or raw ``Scan`` model
 ownership here.
 """
+
+from probeflow.analysis.features import (
+    Classification,
+    Detection,
+    Particle,
+    classify_particles,
+    count_features,
+    segment_particles,
+)
+from probeflow.analysis.lattice import (
+    LatticeParams,
+    LatticeResult,
+    UnitCellResult,
+    average_unit_cell,
+    extract_lattice,
+    write_lattice_pdf,
+)
+from probeflow.analysis.xmgrace_export import Curve, build_agr, export_bundle
+
+__all__ = [
+    "Classification",
+    "Curve",
+    "Detection",
+    "LatticeParams",
+    "LatticeResult",
+    "Particle",
+    "UnitCellResult",
+    "average_unit_cell",
+    "build_agr",
+    "classify_particles",
+    "count_features",
+    "export_bundle",
+    "extract_lattice",
+    "segment_particles",
+    "write_lattice_pdf",
+]

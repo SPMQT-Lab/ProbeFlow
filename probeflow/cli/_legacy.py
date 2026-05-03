@@ -1010,8 +1010,8 @@ def _cmd_unit_cell(args) -> int:
 
 def _cmd_diag_z(args) -> int:
     """Diagnose Z-scale interpretation for a Createc .dat file."""
-    from probeflow.readers.createc_dat import read_createc_dat_report
-    from probeflow.common import _f, find_hdr, get_dac_bits, v_per_dac, z_scale_m_per_dac
+    from probeflow.io.readers.createc_dat import read_createc_dat_report
+    from probeflow.io.common import _f, find_hdr, get_dac_bits, v_per_dac, z_scale_m_per_dac
 
     path = args.input
     try:

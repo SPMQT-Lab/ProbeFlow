@@ -54,19 +54,24 @@ OLD_WRAPPER_MODULES = tuple(
 
 
 def test_backend_imports_do_not_require_qt():
-    import probeflow
-    from probeflow import processing
-    from probeflow.core.scan_loader import load_scan
-    from probeflow.core.scan_model import Scan
-    from probeflow.processing import align_rows
-    from probeflow.processing.state import ProcessingState
-
-    assert probeflow.Scan is Scan
-    assert callable(load_scan)
-    assert callable(align_rows)
-    assert ProcessingState.__name__ == "ProcessingState"
-    assert processing.align_rows is align_rows
-    assert "PySide6" not in sys.modules
+    import subprocess
+    script = ";".join([
+        "import sys",
+        "import probeflow",
+        "from probeflow import processing",
+        "from probeflow.core.scan_loader import load_scan",
+        "from probeflow.core.scan_model import Scan",
+        "from probeflow.processing import align_rows",
+        "from probeflow.processing.state import ProcessingState",
+        "assert probeflow.Scan is Scan",
+        "assert callable(load_scan)",
+        "assert callable(align_rows)",
+        "assert ProcessingState.__name__ == 'ProcessingState'",
+        "assert processing.align_rows is align_rows",
+        "assert 'PySide6' not in sys.modules, 'unexpected PySide6 import'",
+    ])
+    result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
 
 
 def test_canonical_io_and_analysis_imports_are_available():
@@ -88,13 +93,18 @@ def test_canonical_io_and_analysis_imports_are_available():
 
 
 def test_pure_gui_helpers_import_without_qt():
-    from probeflow.gui import models, rendering
-    from probeflow.processing import gui_adapter
-
-    assert callable(gui_adapter.processing_state_from_gui)
-    assert models.SxmFile.__name__ == "SxmFile"
-    assert callable(rendering.resolve_thumbnail_plane_index)
-    assert "PySide6" not in sys.modules
+    import subprocess
+    script = ";".join([
+        "import sys",
+        "from probeflow.gui import models, rendering",
+        "from probeflow.processing import gui_adapter",
+        "assert callable(gui_adapter.processing_state_from_gui)",
+        "assert models.SxmFile.__name__ == 'SxmFile'",
+        "assert callable(rendering.resolve_thumbnail_plane_index)",
+        "assert 'PySide6' not in sys.modules, 'unexpected PySide6 import'",
+    ])
+    result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
 
 
 def test_gui_entrypoint_import_when_qt_available():
