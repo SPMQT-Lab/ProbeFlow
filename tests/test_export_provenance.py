@@ -21,16 +21,16 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
-from probeflow.display_state import DisplayRangeState
-from probeflow.export_provenance import (
+from probeflow.processing.display_state import DisplayRangeState
+from probeflow.provenance.export import (
     ExportProvenance,
     background_processing_warnings,
     build_scan_export_provenance,
     png_display_state,
     processing_state_hash,
 )
-from probeflow.processing_state import ProcessingState, ProcessingStep
-from probeflow.writers.json import write_json
+from probeflow.processing.state import ProcessingState, ProcessingStep
+from probeflow.io.writers.json import write_json
 
 
 # ── Synthetic scan helper ─────────────────────────────────────────────────────
@@ -43,7 +43,7 @@ def _make_scan(
     source_path=None,
 ):
     """Return a minimal Scan-like object for testing."""
-    from probeflow.scan import Scan
+    from probeflow.core.scan_model import Scan
     rng = np.random.default_rng(42)
     planes = [rng.standard_normal(shape) for _ in range(n_planes)]
     plane_names = [f"Z fwd", "Z bwd"][:n_planes]
@@ -525,7 +525,7 @@ class TestPngNoRegression:
 
     def test_write_png_passes_provenance_to_export_png(self, tmp_path):
         """write_png with provenance= writes a sidecar alongside the PNG."""
-        from probeflow.writers.png import write_png
+        from probeflow.io.writers.png import write_png
         scan = _make_scan()
         out = tmp_path / "scan.png"
         prov = ExportProvenance.from_scan_export(scan, channel_index=0)
@@ -535,7 +535,7 @@ class TestPngNoRegression:
         assert sidecar.exists(), "Sidecar not written via write_png"
 
     def test_write_png_builds_standard_provenance_by_default(self, tmp_path):
-        from probeflow.writers.png import write_png
+        from probeflow.io.writers.png import write_png
 
         scan = _make_scan()
         scan.processing_history = [
@@ -561,7 +561,7 @@ class TestPngNoRegression:
         assert data["artifact_id"]
 
     def test_prepared_png_export_writes_handoff_sidecar_warning(self, tmp_path):
-        from probeflow.prepared_export import write_prepared_png
+        from probeflow.provenance.prepared_export import write_prepared_png
 
         scan = _make_scan()
         out = tmp_path / "aisurf_input.png"
@@ -581,7 +581,7 @@ class TestPngNoRegression:
         assert data["processing_state"]["steps"][0]["op"] == "smooth"
 
     def test_prepared_png_export_omits_warning_after_background(self, tmp_path):
-        from probeflow.prepared_export import write_prepared_png
+        from probeflow.provenance.prepared_export import write_prepared_png
 
         scan = _make_scan()
         out = tmp_path / "aisurf_input.png"

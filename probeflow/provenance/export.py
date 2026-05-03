@@ -16,9 +16,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from probeflow.display_state import DisplayRangeState
-    from probeflow.processing_state import ProcessingState
-    from probeflow.scan_model import Scan
+    from probeflow.processing.display_state import DisplayRangeState
+    from probeflow.processing.state import ProcessingState
+    from probeflow.core.scan_model import Scan
 
 
 def _get_version() -> str | None:
@@ -300,7 +300,7 @@ def png_display_state(
     numerical processing.
     """
     if display_state is None:
-        from probeflow.display_state import DisplayRangeState
+        from probeflow.processing.display_state import DisplayRangeState
         data: dict[str, Any] = DisplayRangeState(
             low_pct=float(clip_low),
             high_pct=float(clip_high),

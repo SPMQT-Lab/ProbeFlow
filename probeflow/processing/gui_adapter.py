@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from probeflow.scan_model import Scan
+    from probeflow.core.scan_model import Scan
 
 # Keys in the GUI processing state dict that correspond to numeric data
 # transforms (as opposed to display-only settings like grain overlays,
@@ -52,7 +52,7 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
 
     Operation order matches the existing GUI application order.
     """
-    from probeflow.processing_state import ProcessingState, ProcessingStep
+    from probeflow.processing.state import ProcessingState, ProcessingStep
 
     steps = []
 
@@ -282,13 +282,13 @@ def apply_processing_state_to_scan(
     """Apply GUI processing state to a Scan before export.
 
     Converts *proc_state* to a canonical :class:`ProcessingState`, applies it
-    via :func:`~probeflow.processing_state.apply_processing_state`, and
+    via :func:`~probeflow.processing.state.apply_processing_state`, and
     records each step in ``scan.processing_history``.
 
     Updates ``scan.planes[plane_idx]`` in place and returns *scan*.
     Display-only settings (grain overlay, colormap, clip percentiles) are ignored.
     """
-    from probeflow.processing_state import apply_processing_state
+    from probeflow.processing.state import apply_processing_state
 
     if plane_idx < 0 or plane_idx >= len(scan.planes):
         raise ValueError(

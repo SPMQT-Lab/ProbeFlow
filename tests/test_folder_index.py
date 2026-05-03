@@ -1,4 +1,4 @@
-"""Tests for probeflow.indexing — ProbeFlowItem and index_folder()."""
+"""Tests for probeflow.core.indexing — ProbeFlowItem and index_folder()."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from probeflow.indexing import ProbeFlowItem, index_folder
+from probeflow.core.indexing import ProbeFlowItem, index_folder
 
 
 TESTDATA = Path(__file__).resolve().parents[1] / "anonymised_testdata"
@@ -251,7 +251,7 @@ class TestProbeFlowItemContract:
         def fail_full_reader(*_args, **_kwargs):
             raise AssertionError("index_folder should use read_spec_metadata")
 
-        monkeypatch.setattr("probeflow.spec_io.read_spec_file", fail_full_reader)
+        monkeypatch.setattr("probeflow.io.spectroscopy.read_spec_file", fail_full_reader)
         items = index_folder(tmp_path)
         spectra = [it for it in items if it.item_type == "spectrum"]
         assert len(spectra) == 2

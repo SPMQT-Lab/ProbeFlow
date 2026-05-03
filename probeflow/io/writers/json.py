@@ -45,12 +45,12 @@ def write_json(
         Short identifier stored under ``meta.kind`` — e.g. ``"particles"``,
         ``"detections"``, ``"classifications"``, ``"lattice"``.
     scan
-        Optional :class:`probeflow.scan.Scan` whose identity is recorded in
+        Optional :class:`probeflow.core.scan_model.Scan` whose identity is recorded in
         the ``meta`` block.
     extra_meta
         Additional metadata merged into the ``meta`` block.
     provenance
-        Optional :class:`probeflow.export_provenance.ExportProvenance`.
+        Optional :class:`probeflow.provenance.export.ExportProvenance`.
         When provided, ``export_provenance``, ``processing_state``, and
         ``display_state`` are added as top-level keys.
     """

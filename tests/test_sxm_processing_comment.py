@@ -7,16 +7,16 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from probeflow.scan import load_scan
-from probeflow.sxm_io import _patch_comment_in_header, parse_sxm_header
-from probeflow.writers.sxm import _build_comment
+from probeflow.core.scan_loader import load_scan
+from probeflow.io.sxm_io import _patch_comment_in_header, parse_sxm_header
+from probeflow.io.writers.sxm import _build_comment
 
 
 # ─── _build_comment ──────────────────────────────────────────────────────────
 
 class TestBuildComment:
     def _scan_stub(self, source_name: str, history=None):
-        from probeflow.scan import Scan
+        from probeflow.core.scan_model import Scan
         return Scan(
             planes=[np.zeros((4, 4))],
             plane_names=["Z forward"],

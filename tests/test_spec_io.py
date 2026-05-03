@@ -1,4 +1,4 @@
-"""Tests for probeflow.spec_io — Createc .VERT file reader."""
+"""Tests for probeflow.io.spectroscopy — Createc .VERT file reader."""
 
 from __future__ import annotations
 
@@ -9,8 +9,8 @@ import json
 import numpy as np
 import pytest
 
-from probeflow.readers.createc_vert import read_createc_vert_report
-from probeflow.spec_io import SpecData, SpecMetadata, parse_spec_header, read_spec_file, read_spec_metadata
+from probeflow.io.readers.createc_vert import read_createc_vert_report
+from probeflow.io.spectroscopy import SpecData, SpecMetadata, parse_spec_header, read_spec_file, read_spec_metadata
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 

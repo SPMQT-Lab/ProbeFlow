@@ -7,15 +7,16 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from probeflow.gui_processing import (
+from probeflow.processing.gui_adapter import (
     NUMERIC_PROC_KEYS,
     apply_processing_state_to_scan,
     gui_state_has_numeric_processing,
     processing_history_entries_from_state,
 )
-from probeflow.processing_state import ProcessingState, ProcessingStep
-from probeflow.scan import Scan, load_scan
-from probeflow.sxm_io import parse_sxm_header
+from probeflow.processing.state import ProcessingState, ProcessingStep
+from probeflow.core.scan_model import Scan
+from probeflow.core.scan_loader import load_scan
+from probeflow.io.sxm_io import parse_sxm_header
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────

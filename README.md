@@ -298,9 +298,9 @@ Available channels per file: `I` (current, A), `Z` (tip-sample distance, m), `V`
 **Programmatic API:**
 
 ```python
-from probeflow.spec_io import read_spec_file
-from probeflow.spec_processing import smooth_spectrum, numeric_derivative, crop
-from probeflow.spec_plot import plot_spectrum, plot_spectra
+from probeflow.io.spectroscopy import read_spec_file
+from probeflow.processing.spectroscopy import smooth_spectrum, numeric_derivative, crop
+from probeflow.analysis.spec_plot import plot_spectrum, plot_spectra
 
 spec = read_spec_file("spectrum.VERT")
 print(spec.metadata["sweep_type"])  # "bias_sweep" or "time_trace"
@@ -328,7 +328,7 @@ Three tabs:
 
 * **Browse** — point at a folder; the grid auto-detects supported Createc/Nanonis scan and spectroscopy files and renders thumbnails. An *All / Images / Spectra* toggle filters the visible cards. The full-size viewer has an interactive histogram with Auto percentile contrast and manual red/green display-limit bars, similar in spirit to ImageJ brightness/contrast controls. PNG export uses the same display limits as the viewer and writes provenance when available.
 * **Convert** — folder-in / folder-out batch dat→sxm and dat→png with PNG / SXM checkboxes and clip-percentile controls.
-* **Features** — load the currently-selected Browse scan, choose a mode (*Particles* / *Template* / *Lattice*), tune parameters, hit *Run*. Results overlay on the canvas (contours, detection markers, primitive vectors + unit cell) and populate a sortable table. *Export JSON…* writes results with full scan provenance via `probeflow.writers.json`. Heavy analyses run on a background thread so the UI stays responsive.
+* **Features** — load the currently-selected Browse scan, choose a mode (*Particles* / *Template* / *Lattice*), tune parameters, hit *Run*. Results overlay on the canvas (contours, detection markers, primitive vectors + unit cell) and populate a sortable table. *Export JSON…* writes results with full scan provenance via `probeflow.io.writers.json`. Heavy analyses run on a background thread so the UI stays responsive.
 
 Preferences (folders, theme, clip values) are saved to `~/.probeflow_config.json`.
 
@@ -407,7 +407,7 @@ scan.save("archive.sxm")
 Lower-level primitives for when you need the full vendor header or raw byte layout:
 
 ```python
-from probeflow.sxm_io import parse_sxm_header, read_all_sxm_planes
+from probeflow.io.sxm_io import parse_sxm_header, read_all_sxm_planes
 
 hdr, planes = read_all_sxm_planes("scan.sxm")
 ```
@@ -415,8 +415,8 @@ hdr, planes = read_all_sxm_planes("scan.sxm")
 Spectroscopy is a different shape of data, so it has its own module:
 
 ```python
-from probeflow.spec_io import read_spec_file
-from probeflow.spec_processing import smooth_spectrum, numeric_derivative
+from probeflow.io.spectroscopy import read_spec_file
+from probeflow.processing.spectroscopy import smooth_spectrum, numeric_derivative
 
 spec = read_spec_file("spectrum.VERT")
 z_smooth = smooth_spectrum(spec.channels["Z"], method="savgol")
@@ -469,12 +469,12 @@ Covers:
 * Every public function in `probeflow.processing` (incl. `tv_denoise`, `line_profile`).
 * `.sxm` header parsing, plane reading, and write-then-read round-trip.
 * `.VERT` and Nanonis `.dat` spectroscopy header parsing, unit conversion, sweep-type detection, and error handling.
-* Every public function in `probeflow.spec_processing`.
+* Every public function in `probeflow.processing.spectroscopy`.
 * Readers / writers (`sxm`, `dat`, `pdf`, `csv`).
 * Feature-detection: `segment_particles`, `count_features`, `classify_particles`.
 * SIFT lattice extraction and `average_unit_cell`.
 * Line-profile sampling with sub-pixel interpolation and swath averaging.
-* Content-sniffing file-type dispatcher (`probeflow.file_type`).
+* Content-sniffing file-type dispatcher (`probeflow.io.file_type`).
 * Loading/indexing/display-state/export-provenance contracts for the Createc/Nanonis backend path.
 
 ---

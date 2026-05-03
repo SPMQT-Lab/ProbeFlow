@@ -4,7 +4,7 @@ ProbeFlow's loading contract is intentionally small:
 
 ``sniff -> read_metadata -> read_full``
 
-The low-level content sniffing lives in :mod:`probeflow.file_type`.  This
+The low-level content sniffing lives in :mod:`probeflow.io.file_type`.  This
 module adds a slightly higher-level identification step that resolves a path
 into a concrete supported scan or spectroscopy source format before metadata
 or full-data readers are dispatched.
@@ -15,7 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from probeflow.file_type import FileType, sniff_file_type
+from probeflow.io.file_type import FileType, sniff_file_type
 
 
 @dataclass(frozen=True)
@@ -49,12 +49,12 @@ def identify_scan_file(path) -> LoadSignature:
     if ft == FileType.NANONIS_SPEC:
         raise ValueError(
             f"{p.name}: identified as spectroscopy during scan sniff stage; "
-            "use probeflow.spec_io.read_spec_file or read_spec_metadata."
+            "use probeflow.io.spectroscopy.read_spec_file or read_spec_metadata."
         )
     if ft == FileType.CREATEC_SPEC:
         raise ValueError(
             f"{p.name}: identified as Createc .VERT spectroscopy during "
-            "scan sniff stage; use probeflow.spec_io.read_spec_file or "
+            "scan sniff stage; use probeflow.io.spectroscopy.read_spec_file or "
             "read_spec_metadata."
         )
     raise ValueError(
@@ -84,12 +84,12 @@ def identify_spectrum_file(path) -> LoadSignature:
     if ft == FileType.NANONIS_IMAGE:
         raise ValueError(
             f"{p.name}: identified as Nanonis scan image during spectroscopy "
-            "sniff stage; use probeflow.scan.load_scan or read_scan_metadata."
+            "sniff stage; use probeflow.core.scan_loader.load_scan or read_scan_metadata."
         )
     if ft == FileType.CREATEC_IMAGE:
         raise ValueError(
             f"{p.name}: identified as Createc scan image during spectroscopy "
-            "sniff stage; use probeflow.scan.load_scan or read_scan_metadata."
+            "sniff stage; use probeflow.core.scan_loader.load_scan or read_scan_metadata."
         )
     raise ValueError(
         f"{p.name}: sniff stage could not identify a supported spectroscopy file."

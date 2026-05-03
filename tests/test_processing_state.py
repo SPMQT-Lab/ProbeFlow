@@ -1,16 +1,16 @@
-"""Tests for probeflow.processing_state and the GUI processing bridge."""
+"""Tests for probeflow.processing.state and the GUI processing bridge."""
 
 from __future__ import annotations
 
 import numpy as np
 import pytest
 
-from probeflow.processing_state import (
+from probeflow.processing.state import (
     ProcessingState,
     ProcessingStep,
     apply_processing_state,
 )
-from probeflow.gui_processing import processing_state_from_gui
+from probeflow.processing.gui_adapter import processing_state_from_gui
 
 
 # ── Test A: empty state is identity ──────────────────────────────────────────
@@ -461,7 +461,7 @@ class TestGuiExportEquivalence:
     def test_apply_processing_state_to_scan_uses_same_path(self):
         """apply_processing_state_to_scan and apply_processing_state agree."""
         from unittest.mock import MagicMock
-        from probeflow.gui_processing import apply_processing_state_to_scan
+        from probeflow.processing.gui_adapter import apply_processing_state_to_scan
 
         arr = self._make_arr()
         gui = {"align_rows": "mean", "bg_order": 2}
@@ -613,14 +613,14 @@ class TestApplyKnownSteps:
         ])
         result = apply_processing_state(arr, state)
 
-        from probeflow.processing_state import roi_geometry_mask
+        from probeflow.processing.state import roi_geometry_mask
         mask = roi_geometry_mask(arr.shape, geometry)
         assert mask is not None
         np.testing.assert_array_equal(result[~mask], arr[~mask])
         assert not np.allclose(result[mask], arr[mask])
 
     def test_roi_geometry_mask_accepts_fractional_geometry(self):
-        from probeflow.processing_state import roi_geometry_mask
+        from probeflow.processing.state import roi_geometry_mask
 
         rect_mask = roi_geometry_mask((10, 10), {
             "kind": "rectangle",
@@ -642,7 +642,7 @@ class TestApplyKnownSteps:
             "kind": "polygon",
             "points_px": [(5, 5), (11, 5), (8, 11)],
         }
-        from probeflow.processing_state import roi_geometry_mask
+        from probeflow.processing.state import roi_geometry_mask
         mask = roi_geometry_mask(arr.shape, geometry)
         assert mask is not None
         arr[mask] = 20.0

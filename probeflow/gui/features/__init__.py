@@ -47,7 +47,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from probeflow.display import clip_range_from_array as _clip_range_from_array
+from probeflow.processing.display import clip_range_from_array as _clip_range_from_array
 
 
 PLANE_NAMES = ["Z fwd", "Z bwd", "I fwd", "I bwd"]
@@ -86,7 +86,7 @@ class _FeaturesWorker(QRunnable):
     def run(self):
         try:
             if self._mode == "particles":
-                from probeflow.features import segment_particles
+                from probeflow.analysis.features import segment_particles
                 res = segment_particles(
                     self._arr, self._px,
                     threshold=self._params["threshold"],
@@ -97,14 +97,14 @@ class _FeaturesWorker(QRunnable):
                     size_sigma_clip=self._params.get("size_sigma_clip", 2.0),
                 )
             elif self._mode == "template":
-                from probeflow.features import count_features
+                from probeflow.analysis.features import count_features
                 res = count_features(
                     self._arr, self._params["template"], self._px,
                     min_correlation=self._params.get("min_correlation", 0.5),
                     min_distance_m=self._params.get("min_distance_m"),
                 )
             elif self._mode == "lattice":
-                from probeflow.lattice import extract_lattice, LatticeParams
+                from probeflow.analysis.lattice import extract_lattice, LatticeParams
                 res = extract_lattice(self._arr, self._px,
                                       params=LatticeParams())
             else:

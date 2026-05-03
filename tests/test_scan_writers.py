@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 
 from probeflow import load_scan
-from probeflow.writers import (
+from probeflow.io.writers import (
     SUPPORTED_OUTPUT_SUFFIXES,
     save_scan,
     write_csv,

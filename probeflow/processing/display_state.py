@@ -78,7 +78,7 @@ class DisplayRangeState:
 
         In *manual* mode: return the stored limits directly.
         In *percentile* mode: compute from *arr* using
-        :func:`probeflow.display.clip_range_from_array`.
+        :func:`probeflow.processing.display.clip_range_from_array`.
 
         Returns ``(None, None)`` if limits cannot be determined (e.g. all-NaN
         array in percentile mode).
@@ -93,7 +93,7 @@ class DisplayRangeState:
                 return self.vmin, self.vmax
             # fall through to percentile if manual state is incomplete
         # percentile mode (or manual fallback)
-        from probeflow.display import clip_range_from_array
+        from probeflow.processing.display import clip_range_from_array
         try:
             return clip_range_from_array(arr, self.low_pct, self.high_pct)
         except ValueError:

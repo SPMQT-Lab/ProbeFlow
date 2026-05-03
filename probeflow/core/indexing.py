@@ -17,8 +17,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
-from probeflow.common import _f
-from probeflow.file_type import FileType, sniff_file_type
+from probeflow.io.common import _f
+from probeflow.io.file_type import FileType, sniff_file_type
 
 # Folder names to always skip when walking.
 _SKIP_DIRS: frozenset[str] = frozenset({
@@ -163,7 +163,7 @@ def _item_from_scan(
     mtime_ns: Optional[int],
     size_bytes: Optional[int],
 ) -> ProbeFlowItem:
-    from probeflow.metadata import read_scan_metadata
+    from probeflow.core.metadata import read_scan_metadata
     meta = read_scan_metadata(path)
     extra = dict(meta.raw_header)
     extra["experiment_metadata"] = dict(meta.experiment_metadata)
@@ -192,7 +192,7 @@ def _item_from_spec(
     mtime_ns: Optional[int],
     size_bytes: Optional[int],
 ) -> ProbeFlowItem:
-    from probeflow.spec_io import read_spec_metadata, spec_channel_to_dict
+    from probeflow.io.spectroscopy import read_spec_metadata, spec_channel_to_dict
     meta = read_spec_metadata(path)
     n_pts = meta.metadata.get("n_points")
     extra: dict[str, Any] = {

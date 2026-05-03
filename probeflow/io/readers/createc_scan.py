@@ -1,7 +1,7 @@
-"""Reader for Createc ``.dat`` scan files — returns a :class:`probeflow.scan.Scan`.
+"""Reader for Createc ``.dat`` scan files — returns a :class:`probeflow.core.scan_model.Scan`.
 
 This loads a Createc raw scan directly into the Scan abstraction without the
-lossy percentile clipping that ``probeflow.dat_sxm.process_dat`` applies.  The
+lossy percentile clipping that ``probeflow.io.converters.createc_dat_to_sxm.process_dat`` applies.  The
 returned planes carry true physical units (metres for Z, amperes for current)
 so processing pipelines can operate on them the same way they operate on a
 ``.sxm``-sourced Scan.
@@ -33,14 +33,14 @@ from pathlib import Path
 import numpy as np
 
 from probeflow.io.createc_interpretation import createc_dat_experiment_metadata
-from probeflow.readers.createc_dat import (
+from probeflow.io.readers.createc_dat import (
     has_canonical_stm_four_channel_layout,
     has_legacy_stm_two_channel_layout,
     read_createc_dat_report,
     scale_channels_for_scan,
     scan_range_m_from_header,
 )
-from probeflow.scan_model import Scan
+from probeflow.core.scan_model import Scan
 
 
 def read_dat(path) -> Scan:
@@ -93,8 +93,8 @@ def read_dat(path) -> Scan:
 
 
 def read_dat_metadata(path):
-    """Return :class:`~probeflow.metadata.ScanMetadata` for a Createc ``.dat``."""
-    from probeflow.metadata import metadata_from_createc_dat_report
+    """Return :class:`~probeflow.core.metadata.ScanMetadata` for a Createc ``.dat``."""
+    from probeflow.core.metadata import metadata_from_createc_dat_report
 
     return metadata_from_createc_dat_report(
         read_createc_dat_report(path, include_raw=False)

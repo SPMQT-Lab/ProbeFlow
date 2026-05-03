@@ -11,7 +11,7 @@ from typing import Any
 
 import numpy as np
 
-from probeflow.common import (
+from probeflow.io.common import (
     _f,
     find_hdr,
     get_dac_bits,
@@ -19,7 +19,7 @@ from probeflow.common import (
     v_per_dac,
     z_scale_m_per_dac,
 )
-from probeflow.source_identity import build_source_identity
+from probeflow.core.source_identity import build_source_identity
 
 log = logging.getLogger(__name__)
 

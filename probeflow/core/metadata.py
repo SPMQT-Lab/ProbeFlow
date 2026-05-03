@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
-from probeflow.common import _f
+from probeflow.io.common import _f
 from probeflow.io.createc_interpretation import createc_dat_experiment_metadata
 
 
@@ -129,7 +129,7 @@ def metadata_from_createc_dat_report(report) -> ScanMetadata:
 def metadata_from_sxm_header(path, hdr: dict, n_planes: int) -> ScanMetadata:
     """Build ``ScanMetadata`` from a Nanonis SXM header and payload summary."""
 
-    from probeflow.sxm_io import sxm_dims, sxm_plane_metadata, sxm_scan_range
+    from probeflow.io.sxm_io import sxm_dims, sxm_plane_metadata, sxm_scan_range
 
     path = Path(path)
     Nx, Ny = sxm_dims(hdr)
@@ -157,7 +157,7 @@ def metadata_from_sxm_header(path, hdr: dict, n_planes: int) -> ScanMetadata:
 def _createc_report_plane_metadata(report) -> tuple[tuple[str, ...], tuple[str, ...]]:
     """Return public plane names/units matching ``read_dat`` compatibility."""
 
-    from probeflow.readers.createc_dat import (
+    from probeflow.io.readers.createc_dat import (
         has_canonical_stm_four_channel_layout,
         has_legacy_stm_two_channel_layout,
     )
@@ -240,15 +240,15 @@ def read_scan_metadata(path) -> ScanMetadata:
     descriptive message.  Createc DAT metadata uses the low-level decode report
     path so callers do not pay the cost of constructing a full ``Scan``.
     """
-    from probeflow.loaders import identify_scan_file
+    from probeflow.core.loaders import identify_scan_file
 
     sig = identify_scan_file(path)
     if sig.source_format == "dat":
-        from probeflow.readers.dat import read_dat_metadata
+        from probeflow.io.readers.createc_scan import read_dat_metadata
 
         return read_dat_metadata(sig.path)
     if sig.source_format == "sxm":
-        from probeflow.readers.sxm import read_sxm_metadata
+        from probeflow.io.readers.nanonis_sxm import read_sxm_metadata
 
         return read_sxm_metadata(sig.path)
 

@@ -54,12 +54,12 @@ import numpy as np
 from PIL import Image
 
 from probeflow import processing as _proc
-from probeflow.common import setup_logging
+from probeflow.io.common import setup_logging
 from probeflow.processing.gui_adapter import processing_history_entries_from_state
-from probeflow.processing_state import ProcessingState, ProcessingStep
-from probeflow.scan import load_scan
-from probeflow.scan_model import Scan
-from probeflow.sxm_io import (
+from probeflow.processing.state import ProcessingState, ProcessingStep
+from probeflow.core.scan_loader import load_scan
+from probeflow.core.scan_model import Scan
+from probeflow.io.sxm_io import (
     parse_sxm_header,
     read_all_sxm_planes,
     read_sxm_plane,
@@ -100,7 +100,7 @@ class _Op:
 
     def __call__(self, arr: np.ndarray) -> np.ndarray:
         if self.state is not None:
-            from probeflow.processing_state import apply_processing_state
+            from probeflow.processing.state import apply_processing_state
             return apply_processing_state(arr, self.state)
         if self._fn is None:
             raise TypeError(f"Processing operation {self.name!r} has no executor")
@@ -202,7 +202,7 @@ def _write_output(
 
 def _cli_png_provenance(scan: Scan, plane_idx: int, args, out_path, export_kind: str):
     """Build standard provenance for CLI PNG-style exports."""
-    from probeflow.export_provenance import build_scan_export_provenance, png_display_state
+    from probeflow.provenance.export import build_scan_export_provenance, png_display_state
 
     clip_low = getattr(args, "clip_low", 1.0)
     clip_high = getattr(args, "clip_high", 99.0)
@@ -530,11 +530,11 @@ def _cmd_prepare_png(args) -> int:
     state = _processing_state_from_ops(ops)
     if state.steps:
         from probeflow.processing.gui_adapter import processing_history_entries_from_state
-        from probeflow.processing_state import apply_processing_state
+        from probeflow.processing.state import apply_processing_state
         scan.planes[args.plane] = apply_processing_state(scan.planes[args.plane], state)
         scan.processing_history.extend(processing_history_entries_from_state(state))
 
-    from probeflow.prepared_export import write_prepared_png
+    from probeflow.provenance.prepared_export import write_prepared_png
     write_prepared_png(
         scan,
         args.output,
@@ -612,7 +612,7 @@ def _cmd_particles(args) -> int:
         log.error("Scan has no physical pixel size — cannot segment.")
         return 1
 
-    from probeflow.features import segment_particles
+    from probeflow.analysis.features import segment_particles
     particles = segment_particles(
         scan.planes[args.plane],
         pixel_size_m=px_m,
@@ -627,7 +627,7 @@ def _cmd_particles(args) -> int:
     )
 
     if args.output:
-        from probeflow.writers.json import write_json
+        from probeflow.io.writers.json import write_json
         write_json(args.output, particles, kind="particles", scan=scan,
                    extra_meta={"plane": args.plane, "threshold": args.threshold})
         log.info("[OK] %d particles → %s", len(particles), args.output)
@@ -671,7 +671,7 @@ def _cmd_count(args) -> int:
         tscan = load_scan(args.template)
         tmpl = tscan.planes[0]
 
-    from probeflow.features import count_features
+    from probeflow.analysis.features import count_features
     dets = count_features(
         scan.planes[args.plane], tmpl,
         pixel_size_m=px_m,
@@ -682,7 +682,7 @@ def _cmd_count(args) -> int:
     )
 
     if args.output:
-        from probeflow.writers.json import write_json
+        from probeflow.io.writers.json import write_json
         write_json(args.output, dets, kind="detections", scan=scan,
                    extra_meta={"template": str(args.template),
                                "min_correlation": args.min_corr})
@@ -743,7 +743,7 @@ def _cmd_lattice(args) -> int:
         log.error("Scan has no physical pixel size.")
         return 1
 
-    from probeflow.lattice import (
+    from probeflow.analysis.lattice import (
         LatticeParams, extract_lattice, write_lattice_pdf,
     )
     params = LatticeParams(
@@ -768,7 +768,7 @@ def _cmd_lattice(args) -> int:
                               colormap=args.colormap,
                               clip_low=args.clip_low, clip_high=args.clip_high)
         else:
-            from probeflow.writers.json import write_json
+            from probeflow.io.writers.json import write_json
             write_json(args.output, [res], kind="lattice", scan=scan,
                        extra_meta={"plane": args.plane})
         log.info("[OK] lattice result → %s", args.output)
@@ -802,7 +802,7 @@ def _cmd_classify(args) -> int:
         log.error("Scan has no physical pixel size.")
         return 1
 
-    from probeflow.features import (
+    from probeflow.analysis.features import (
         Particle, segment_particles, classify_particles,
     )
     arr = scan.planes[args.plane]
@@ -832,7 +832,7 @@ def _cmd_classify(args) -> int:
     )
 
     if args.output:
-        from probeflow.writers.json import write_json
+        from probeflow.io.writers.json import write_json
         write_json(args.output, classifs, kind="classifications", scan=scan,
                    extra_meta={"encoder": args.encoder,
                                "threshold_method": args.threshold_method})
@@ -900,7 +900,7 @@ def _cmd_profile(args) -> int:
             for s, zi in zip(s_m, z):
                 f.write(f"{s:.6e}\t{zi:.6e}\n")
     elif suffix == ".json":
-        from probeflow.writers.json import write_json
+        from probeflow.io.writers.json import write_json
 
         class _Sample:
             __dataclass_fields__ = {"distance_m": None, "z": None}
@@ -954,7 +954,7 @@ def _cmd_unit_cell(args) -> int:
         log.error("Scan has no physical pixel size.")
         return 1
 
-    from probeflow.lattice import (
+    from probeflow.analysis.lattice import (
         LatticeParams, extract_lattice, average_unit_cell,
     )
     arr = scan.planes[args.plane]
@@ -1009,7 +1009,7 @@ def _cmd_unit_cell(args) -> int:
 
 
 def _cmd_dat2sxm(args) -> int:
-    from probeflow.dat_sxm import main as _main
+    from probeflow.io.converters.createc_dat_to_sxm import main as _main
     forwarded = args.rest[1:] if args.rest and args.rest[0] == "--" else args.rest
     sys.argv = ["dat-sxm"] + forwarded
     _main()
@@ -1017,7 +1017,7 @@ def _cmd_dat2sxm(args) -> int:
 
 
 def _cmd_dat2png(args) -> int:
-    from probeflow.dat_png import main as _main
+    from probeflow.io.converters.createc_dat_to_png import main as _main
     forwarded = args.rest[1:] if args.rest and args.rest[0] == "--" else args.rest
     sys.argv = ["dat-png"] + forwarded
     _main()
@@ -1028,7 +1028,7 @@ def _cmd_dat2png(args) -> int:
 
 def _cmd_spec_info(args) -> int:
     setup_logging(args.verbose)
-    from probeflow.spec_io import read_spec_file, spec_channel_to_dict
+    from probeflow.io.spectroscopy import read_spec_file, spec_channel_to_dict
     spec = read_spec_file(args.input)
     channels = list(spec.channel_order) if spec.channel_order else list(spec.channels.keys())
     if args.json:
@@ -1081,8 +1081,8 @@ def _cmd_spec_plot(args) -> int:
     import matplotlib
     matplotlib.use("Agg" if args.output else "TkAgg", force=False)
     import matplotlib.pyplot as plt
-    from probeflow.spec_io import read_spec_file
-    from probeflow.spec_plot import plot_spectrum
+    from probeflow.io.spectroscopy import read_spec_file
+    from probeflow.analysis.spec_plot import plot_spectrum
 
     spec = read_spec_file(args.input)
     fig, ax = plt.subplots()
@@ -1102,9 +1102,9 @@ def _cmd_spec_overlay(args) -> int:
     import matplotlib
     matplotlib.use("Agg" if args.output else "TkAgg", force=False)
     import matplotlib.pyplot as plt
-    from probeflow.spec_io import read_spec_file
-    from probeflow.spec_plot import plot_spectra
-    from probeflow.spec_processing import average_spectra
+    from probeflow.io.spectroscopy import read_spec_file
+    from probeflow.analysis.spec_plot import plot_spectra
+    from probeflow.processing.spectroscopy import average_spectra
 
     specs = [read_spec_file(p) for p in args.inputs]
     fig, ax = plt.subplots()
@@ -1130,8 +1130,8 @@ def _cmd_spec_positions(args) -> int:
     import matplotlib
     matplotlib.use("Agg" if args.output else "TkAgg", force=False)
     import matplotlib.pyplot as plt
-    from probeflow.spec_io import read_spec_file
-    from probeflow.spec_plot import plot_spec_positions
+    from probeflow.io.spectroscopy import read_spec_file
+    from probeflow.analysis.spec_plot import plot_spec_positions
 
     specs = [read_spec_file(p) for p in args.inputs]
     fig, ax = plt.subplots()

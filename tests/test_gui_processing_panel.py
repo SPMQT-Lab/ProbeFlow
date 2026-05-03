@@ -274,7 +274,7 @@ def test_viewer_clear_zero_references_keeps_leveling_processing(qapp, monkeypatc
 
 def test_zoom_label_shift_constrains_area_selection_to_square(qapp):
     from PySide6.QtCore import Qt
-    from probeflow.gui_viewer_widgets import _ZoomLabel
+    from probeflow.gui.viewer.widgets import _ZoomLabel
 
     label = _ZoomLabel()
     label.resize(200, 100)
@@ -287,7 +287,7 @@ def test_zoom_label_shift_constrains_area_selection_to_square(qapp):
 
 
 def test_zoom_label_endpoint_drag_updates_existing_selection(qapp):
-    from probeflow.gui_viewer_widgets import _ZoomLabel
+    from probeflow.gui.viewer.widgets import _ZoomLabel
 
     label = _ZoomLabel()
     label.resize(200, 100)
@@ -305,7 +305,7 @@ def test_zoom_label_endpoint_drag_updates_existing_selection(qapp):
 
 
 def test_zoom_label_line_nudge_moves_one_image_pixel_and_emits(qapp):
-    from probeflow.gui_viewer_widgets import _ZoomLabel
+    from probeflow.gui.viewer.widgets import _ZoomLabel
 
     label = _ZoomLabel()
     label.resize(200, 100)

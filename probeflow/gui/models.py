@@ -134,11 +134,11 @@ def _spec_items_to_vert(items) -> list[VertFile]:
 def scan_image_folder(root: Path) -> list[SxmFile]:
     """Find all supported scan files under root and return lightweight SxmFile entries.
 
-    Delegates to :func:`~probeflow.indexing.index_folder` for discovery and
-    sniffing, then converts the resulting :class:`~probeflow.indexing.ProbeFlowItem`
+    Delegates to :func:`~probeflow.core.indexing.index_folder` for discovery and
+    sniffing, then converts the resulting :class:`~probeflow.core.indexing.ProbeFlowItem`
     objects to the GUI-internal :class:`SxmFile` type.
     """
-    from probeflow.indexing import index_folder
+    from probeflow.core.indexing import index_folder
     items = index_folder(Path(root), recursive=True, include_errors=True)
     return _scan_items_to_sxm(items)
 
@@ -146,10 +146,10 @@ def scan_image_folder(root: Path) -> list[SxmFile]:
 def scan_vert_folder(root: Path) -> list[VertFile]:
     """Find all spectroscopy files under root and return lightweight VertFile entries.
 
-    Delegates to :func:`~probeflow.indexing.index_folder` for discovery and
-    sniffing, then converts the resulting :class:`~probeflow.indexing.ProbeFlowItem`
+    Delegates to :func:`~probeflow.core.indexing.index_folder` for discovery and
+    sniffing, then converts the resulting :class:`~probeflow.core.indexing.ProbeFlowItem`
     objects to the GUI-internal :class:`VertFile` type.
     """
-    from probeflow.indexing import index_folder
+    from probeflow.core.indexing import index_folder
     items = index_folder(Path(root), recursive=True, include_errors=True)
     return _spec_items_to_vert(items)

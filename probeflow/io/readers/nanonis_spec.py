@@ -6,7 +6,7 @@ File format:
     * After a ``[DATA]`` line: one header row ``Name (Unit)<TAB>Name (Unit)...``
       followed by numeric rows.
 
-We parse into :class:`probeflow.spec_io.SpecData` — the same container used
+We parse into :class:`probeflow.io.spectroscopy.SpecData` — the same container used
 for Createc .VERT files, so downstream code is vendor-agnostic.
 """
 
@@ -20,8 +20,8 @@ from typing import Optional, Union
 
 import numpy as np
 
-from probeflow.source_identity import build_source_identity
-from probeflow.spec_io import (
+from probeflow.core.source_identity import build_source_identity
+from probeflow.io.spectroscopy import (
     SpecChannel,
     SpecData,
     SpecMetadata,

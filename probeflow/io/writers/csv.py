@@ -1,4 +1,4 @@
-"""Export a :class:`probeflow.scan.Scan` plane as a 2-D CSV grid.
+"""Export a :class:`probeflow.core.scan_model.Scan` plane as a 2-D CSV grid.
 
 The file holds the raw array values in their physical units, one row per
 scan line.  Two header-comment lines are prepended (starting with ``#``) to
@@ -12,7 +12,7 @@ from pathlib import Path
 
 import numpy as np
 
-from probeflow.common import check_overwrite
+from probeflow.io.common import check_overwrite
 
 
 def write_csv(

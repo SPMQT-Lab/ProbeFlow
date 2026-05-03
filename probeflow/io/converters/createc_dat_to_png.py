@@ -7,7 +7,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from probeflow.common import (
+from probeflow.io.common import (
     get_dac_bits,
     i_scale_a_per_dac,
     sanitize,
@@ -15,8 +15,8 @@ from probeflow.common import (
     v_per_dac,
     z_scale_m_per_dac,
 )
-from probeflow.display import array_to_uint8
-from probeflow.scan import load_scan
+from probeflow.processing.display import array_to_uint8
+from probeflow.core.scan_loader import load_scan
 
 log = logging.getLogger(__name__)
 

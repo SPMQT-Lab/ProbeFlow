@@ -1,4 +1,4 @@
-"""Tests for probeflow.metadata — ScanMetadata and read_scan_metadata()."""
+"""Tests for probeflow.core.metadata — ScanMetadata and read_scan_metadata()."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ from pathlib import Path
 import pytest
 
 from probeflow import read_scan_metadata
-from probeflow.metadata import _extract_createc_fields, metadata_from_scan, ScanMetadata
-from probeflow.scan import load_scan
+from probeflow.core.metadata import _extract_createc_fields, metadata_from_scan, ScanMetadata
+from probeflow.core.scan_loader import load_scan
 
 
 TESTDATA = Path(__file__).resolve().parents[1] / "anonymised_testdata"
@@ -176,8 +176,8 @@ class TestScanMetadataContract:
         assert len(meta.raw_header) > 0
 
     def test_reader_specific_functions(self):
-        from probeflow.readers.dat import read_dat_metadata
-        from probeflow.readers.sxm import read_sxm_metadata
+        from probeflow.io.readers.createc_scan import read_dat_metadata
+        from probeflow.io.readers.nanonis_sxm import read_sxm_metadata
         meta_dat = read_dat_metadata(_CREATEC_STEP)
         meta_sxm = read_sxm_metadata(_NANONIS_SXM)
         assert isinstance(meta_dat, ScanMetadata)
@@ -192,8 +192,8 @@ class TestScanMetadataContract:
         def fail_read_planes(*_args, **_kwargs):
             raise AssertionError("SXM metadata should not decode image planes")
 
-        monkeypatch.setattr("probeflow.scan.load_scan", fail_load_scan)
-        monkeypatch.setattr("probeflow.readers.sxm.read_all_sxm_planes", fail_read_planes)
+        monkeypatch.setattr("probeflow.core.scan_loader.load_scan", fail_load_scan)
+        monkeypatch.setattr("probeflow.io.readers.nanonis_sxm.read_all_sxm_planes", fail_read_planes)
 
         meta = read_scan_metadata(_NANONIS_SXM)
 

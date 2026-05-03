@@ -1,16 +1,16 @@
-"""Write a :class:`probeflow.scan.Scan` to a Nanonis ``.sxm`` file.
+"""Write a :class:`probeflow.core.scan_model.Scan` to a Nanonis ``.sxm`` file.
 
 Two code paths depending on where the Scan came from:
 
 * ``source_format == "sxm"`` — fast path that reuses the source file's header
-  and binary layout verbatim via :func:`probeflow.sxm_io.write_sxm_with_planes`.
+  and binary layout verbatim via :func:`probeflow.io.sxm_io.write_sxm_with_planes`.
   Only the float payload is rewritten with the Scan's (possibly processed)
   planes.
 
 * ``source_format == "dat"`` — full reconstruction path.  We build a Nanonis
   header from the original Createc metadata via
-  :func:`probeflow.dat_sxm.construct_hdr` and emit a brand-new ``.sxm`` binary
-  via :func:`probeflow.dat_sxm.reconstruct_from_hdr_imgs`.  This is what
+  :func:`probeflow.io.converters.createc_dat_to_sxm.construct_hdr` and emit a brand-new ``.sxm`` binary
+  via :func:`probeflow.io.converters.createc_dat_to_sxm.reconstruct_from_hdr_imgs`.  This is what
   ``probeflow dat2sxm`` did before, but it now takes the *processed* planes
   from the Scan instead of re-decoding the raw ``.dat`` file.
 """
@@ -21,10 +21,10 @@ from pathlib import Path
 
 import numpy as np
 
-from probeflow.common import check_overwrite
-from probeflow.export_provenance import build_scan_export_provenance
-from probeflow.scan_model import PLANE_CANON_NAMES, PLANE_CANON_UNITS, Scan
-from probeflow.sxm_io import write_sxm_with_planes
+from probeflow.io.common import check_overwrite
+from probeflow.provenance.export import build_scan_export_provenance
+from probeflow.core.scan_model import PLANE_CANON_NAMES, PLANE_CANON_UNITS, Scan
+from probeflow.io.sxm_io import write_sxm_with_planes
 
 
 def _build_comment(scan: Scan, out_path=None) -> str:
@@ -100,8 +100,8 @@ def _write_from_dat(
     clip_high: float = 99.0,
 ) -> None:
     # Lazy-import to avoid pulling in the full dat_sxm machinery on every
-    # probeflow.scan import — dat_sxm has heavy top-level imports.
-    from probeflow.dat_sxm import (
+    # probeflow.core.scan_loader import — dat_sxm has heavy top-level imports.
+    from probeflow.io.converters.createc_dat_to_sxm import (
         DEFAULT_CUSHION_DIR,
         construct_hdr,
         load_layout_and_format,

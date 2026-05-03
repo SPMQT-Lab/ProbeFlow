@@ -4,7 +4,7 @@ ProbeFlow — feature detection, counting, and classification.
 Layered on top of :mod:`probeflow.processing` to extract *discrete objects*
 from an STM scan plane: particles / molecules, atoms (template matching), and
 classifications. All functions return SI-unit dataclasses that serialise
-cleanly to JSON via :mod:`probeflow.writers.json`.
+cleanly to JSON via :mod:`probeflow.io.writers.json`.
 
 Design notes
 ------------
@@ -35,7 +35,7 @@ from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
 
-from probeflow._analysis_helpers import (
+from probeflow.analysis.helpers import (
     cv2_module,
     missing_extra_message as _missing_extra_message,
     to_uint8_for_cv as _to_uint8,

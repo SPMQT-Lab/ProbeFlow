@@ -8,14 +8,14 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from probeflow.dat_sxm import convert_dat_to_sxm
-from probeflow.createc_interpretation import createc_dat_experiment_metadata
-from probeflow.metadata import read_scan_metadata
-from probeflow.readers.createc_dat import (
+from probeflow.io.converters.createc_dat_to_sxm import convert_dat_to_sxm
+from probeflow.io.createc_interpretation import createc_dat_experiment_metadata
+from probeflow.core.metadata import read_scan_metadata
+from probeflow.io.readers.createc_dat import (
     read_createc_dat_report,
     scale_channels_for_scan,
 )
-from probeflow.scan import load_scan
+from probeflow.core.scan_loader import load_scan
 
 TESTDATA = Path(__file__).resolve().parents[1] / "anonymised_testdata"
 QPLUS_10CH_DAT = TESTDATA / "createc_scan_qplus_10ch_afm.dat"
@@ -248,7 +248,7 @@ def test_metadata_uses_createc_report_without_constructing_scan(
     def fail_load_scan(_path):
         raise AssertionError("DAT metadata should not construct a full Scan")
 
-    monkeypatch.setattr("probeflow.scan.load_scan", fail_load_scan)
+    monkeypatch.setattr("probeflow.core.scan_loader.load_scan", fail_load_scan)
     meta = read_scan_metadata(first_sample_dat)
 
     assert meta.source_format == "createc_dat"

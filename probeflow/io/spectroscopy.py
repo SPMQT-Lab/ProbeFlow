@@ -9,12 +9,12 @@ from typing import Any, Union
 
 import numpy as np
 
-from probeflow.common import _f, find_hdr
+from probeflow.io.common import _f, find_hdr
 from probeflow.io.createc_interpretation import (
     createc_vert_measurement_metadata,
     normalize_measurement_mode,
 )
-from probeflow.readers.createc_vert import (
+from probeflow.io.readers.createc_vert import (
     CreatecVertDecodeReport,
     detect_createc_vert_time_trace,
     parse_createc_vert_header,
@@ -155,11 +155,11 @@ def read_spec_file(
     The file type is identified from its content signature, so callers can
     pass either vendor format without worrying about extensions.
     """
-    from probeflow.loaders import identify_spectrum_file
+    from probeflow.core.loaders import identify_spectrum_file
 
     sig = identify_spectrum_file(path)
     if sig.source_format == "nanonis_dat_spectrum":
-        from probeflow.readers.nanonis_spec import read_nanonis_spec
+        from probeflow.io.readers.nanonis_spec import read_nanonis_spec
         spec = read_nanonis_spec(sig.path)
         _apply_measurement_override(spec.metadata, measurement_mode)
         return spec
@@ -177,11 +177,11 @@ def read_spec_metadata(
     measurement_mode: str | None = None,
 ) -> SpecMetadata:
     """Read spectroscopy metadata without loading full numeric arrays."""
-    from probeflow.loaders import identify_spectrum_file
+    from probeflow.core.loaders import identify_spectrum_file
 
     sig = identify_spectrum_file(path)
     if sig.source_format == "nanonis_dat_spectrum":
-        from probeflow.readers.nanonis_spec import read_nanonis_spec_metadata
+        from probeflow.io.readers.nanonis_spec import read_nanonis_spec_metadata
         meta = read_nanonis_spec_metadata(sig.path)
         _apply_measurement_override(meta.metadata, measurement_mode)
         return meta

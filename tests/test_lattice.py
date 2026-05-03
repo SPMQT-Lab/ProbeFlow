@@ -1,4 +1,4 @@
-"""Tests for probeflow.lattice — SIFT-based lattice extraction."""
+"""Tests for probeflow.analysis.lattice — SIFT-based lattice extraction."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import pytest
 pytest.importorskip("cv2")
 pytest.importorskip("sklearn")
 
-from probeflow.lattice import LatticeParams, extract_lattice
+from probeflow.analysis.lattice import LatticeParams, extract_lattice
 
 
 def _synthetic_lattice(a_px, b_px, shape=(256, 256), sigma_px=2.0, amp=5.0):

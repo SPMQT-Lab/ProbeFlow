@@ -1,11 +1,11 @@
-"""Tests for probeflow.spec_plot helpers that don't need a Qt event loop."""
+"""Tests for probeflow.analysis.spec_plot helpers that don't need a Qt event loop."""
 
 from __future__ import annotations
 
 import numpy as np
 import pytest
 
-from probeflow.spec_plot import choose_display_unit, spec_position_to_pixel
+from probeflow.analysis.spec_plot import choose_display_unit, spec_position_to_pixel
 
 
 class TestChooseDisplayUnit:

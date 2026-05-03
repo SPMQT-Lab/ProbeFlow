@@ -69,13 +69,13 @@ def _open_url(url: str) -> None:
         pass
 
 from probeflow import processing as _proc
-from probeflow.display import (
+from probeflow.processing.display import (
     array_to_uint8 as _array_to_uint8,
     clip_range_from_array as _clip_range_from_array,
     histogram_from_array as _histogram_from_array,
 )
-from probeflow.display_state import DisplayRangeState
-from probeflow.export_provenance import build_scan_export_provenance, png_display_state
+from probeflow.processing.display_state import DisplayRangeState
+from probeflow.provenance.export import build_scan_export_provenance, png_display_state
 from probeflow.processing.gui_adapter import (
     processing_state_from_gui,
 )
@@ -91,7 +91,7 @@ from probeflow.gui.features.tv import (
     _TVWorker,
     _TVWorkerSignals,
 )
-from probeflow.scan import SUPPORTED_SUFFIXES, load_scan
+from probeflow.core.scan_loader import SUPPORTED_SUFFIXES, load_scan
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 CONFIG_PATH     = Path.home() / ".probeflow_config.json"
@@ -1664,7 +1664,7 @@ class ImageViewerDialog(QDialog):
         unit = self._scan_plane_units[idx] if idx < len(self._scan_plane_units) else ""
         name = self._scan_plane_names[idx] if idx < len(self._scan_plane_names) else self._ch_cb.currentText()
         arr = self._display_arr if self._display_arr is not None else self._raw_arr
-        from probeflow.spec_plot import choose_display_unit
+        from probeflow.analysis.spec_plot import choose_display_unit
         scale, unit_label = choose_display_unit(unit, arr)
         axis_label = name.rsplit(" ", 1)[0] if name.endswith((" forward", " backward")) else name
         return scale, unit_label, axis_label
@@ -1778,9 +1778,9 @@ class ImageViewerDialog(QDialog):
 
         # Walk the spec→image mapping; only specs assigned to this stem are
         # candidates. We still need their coordinates to position the marker.
-        from probeflow.file_type import FileType, sniff_file_type
-        from probeflow.spec_io import read_spec_file
-        from probeflow.spec_plot import spec_position_to_pixel, _parse_sxm_offset
+        from probeflow.io.file_type import FileType, sniff_file_type
+        from probeflow.io.spectroscopy import read_spec_file
+        from probeflow.analysis.spec_plot import spec_position_to_pixel, _parse_sxm_offset
 
         try:
             folder = entry.path.parent
@@ -1858,7 +1858,7 @@ class ImageViewerDialog(QDialog):
         """Open the per-image spec→this-image mapping dialog."""
         entry = self._entries[self._idx]
         # Find sibling .VERT files in the same folder.
-        from probeflow.file_type import FileType, sniff_file_type
+        from probeflow.io.file_type import FileType, sniff_file_type
         try:
             spec_paths = sorted(
                 f for f in entry.path.parent.iterdir()
@@ -2084,7 +2084,7 @@ class ImageViewerDialog(QDialog):
             )
             scale, unit, axis_label = self._channel_unit()
             y_label = f"{axis_label} [{unit}]" if unit else axis_label
-            from probeflow.spec_plot import choose_display_unit
+            from probeflow.analysis.spec_plot import choose_display_unit
             x_scale, x_unit = choose_display_unit("m", s_m)
             x_label = f"Distance [{x_unit}]"
             self._line_profile_panel.plot_profile(
@@ -2797,8 +2797,8 @@ class SpecMappingDialog(QDialog):
         # We avoid importing this at module top because it pulls in scan I/O
         # — keeping the dialog responsive on large folders matters more
         # than saving the import here.
-        from probeflow.spec_io import read_spec_file
-        from probeflow.spec_plot import spec_position_to_pixel, _parse_sxm_offset
+        from probeflow.io.spectroscopy import read_spec_file
+        from probeflow.analysis.spec_plot import spec_position_to_pixel, _parse_sxm_offset
 
         # Pre-load image headers once (slow if many files).
         scan_info = []
@@ -3265,7 +3265,7 @@ class BrowseInfoPanel(QWidget):
         self._load_vert_metadata(entry)
 
     def _load_vert_metadata(self, entry: VertFile):
-        from probeflow.spec_io import parse_spec_header
+        from probeflow.io.spectroscopy import parse_spec_header
         try:
             hdr = parse_spec_header(entry.path)
         except Exception:
@@ -3575,7 +3575,7 @@ class SpecViewerDialog(QDialog):
     # ── Data load + channel list population ─────────────────────────────
 
     def _load(self) -> None:
-        from probeflow.spec_io import read_spec_file
+        from probeflow.io.spectroscopy import read_spec_file
 
         try:
             spec = read_spec_file(self._entry.path)
@@ -3625,7 +3625,7 @@ class SpecViewerDialog(QDialog):
     def _display_values_for_channel(self, ch: str) -> tuple[np.ndarray, str]:
         if self._spec is None or ch not in self._spec.channels:
             return np.array([], dtype=float), ""
-        from probeflow.spec_plot import choose_display_unit, lookup_unit_scale
+        from probeflow.analysis.spec_plot import choose_display_unit, lookup_unit_scale
 
         y = np.asarray(self._spec.channels[ch], dtype=float)
         unit = self._spec.y_units.get(ch, "")
@@ -3763,7 +3763,7 @@ class SpecViewerDialog(QDialog):
         if not out_dir:
             return
         try:
-            from probeflow.xmgrace_export import Curve, export_bundle
+            from probeflow.analysis.xmgrace_export import Curve, export_bundle
         except ImportError as exc:
             self._status.setText(f"xmgrace export unavailable: {exc}")
             return
@@ -4505,7 +4505,7 @@ class _DevSidebar(QWidget):
             "python3 -c \"import probeflow; print(probeflow.__file__)\"\n\n"
             "python3 scripts/my_analysis.py\n\n"
             "ls -lh *.dat\n\n"
-            "python3 -c \"from probeflow.readers.dat import read_dat; "
+            "python3 -c \"from probeflow.io.readers.createc_scan import read_dat; "
             "import numpy as np; s = read_dat('scan.dat'); "
             "print(np.nanmin(s.planes[0])*1e10, 'A')\""
         )
@@ -5105,7 +5105,7 @@ class ProbeFlowWindow(QMainWindow):
         if not d:
             return
         self._switch_mode("browse")
-        from probeflow.indexing import index_folder
+        from probeflow.core.indexing import index_folder
         all_items    = index_folder(Path(d), recursive=True, include_errors=True)
         sxm_entries  = _scan_items_to_sxm(all_items)
         vert_entries = _spec_items_to_vert(all_items)
@@ -5409,7 +5409,7 @@ class ProbeFlowWindow(QMainWindow):
         if not out_path:
             return
         try:
-            from probeflow.writers.json import write_json
+            from probeflow.io.writers.json import write_json
             write_json(out_path, items, kind=kind,
                        extra_meta={"source": str(entry.path) if entry else None})
             self._features_sidebar.set_status(f"Exported → {out_path}")
@@ -5489,7 +5489,7 @@ class ProbeFlowWindow(QMainWindow):
             return
         try:
             from probeflow.processing import export_png
-            from probeflow.writers.png import lut_from_matplotlib
+            from probeflow.io.writers.png import lut_from_matplotlib
             px_m = self._tv_panel.current_pixel_size()
             Ny, Nx = out.shape
             scan_range_m = (px_m * Nx, px_m * Ny)

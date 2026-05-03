@@ -1,4 +1,4 @@
-"""Render a :class:`probeflow.scan.Scan` plane to a publication-ready PDF.
+"""Render a :class:`probeflow.core.scan_model.Scan` plane to a publication-ready PDF.
 
 Uses matplotlib's vector backend so the output is scale-bar-ready for papers.
 Includes a colorbar with physical-unit ticks.
@@ -11,8 +11,8 @@ from typing import Optional
 
 import numpy as np
 
-from probeflow.common import check_overwrite
-from probeflow.scan_model import Scan
+from probeflow.io.common import check_overwrite
+from probeflow.core.scan_model import Scan
 
 
 def write_pdf(

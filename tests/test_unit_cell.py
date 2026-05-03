@@ -1,4 +1,4 @@
-"""Tests for probeflow.lattice.average_unit_cell."""
+"""Tests for probeflow.analysis.lattice.average_unit_cell."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import pytest
 pytest.importorskip("cv2")
 pytest.importorskip("sklearn")
 
-from probeflow.lattice import (
+from probeflow.analysis.lattice import (
     LatticeParams, average_unit_cell, extract_lattice,
 )
 
@@ -54,7 +54,7 @@ class TestAverageUnitCell:
     def test_no_interior_cells_raises(self):
         # Hand-build a LatticeResult with vectors larger than the image so no
         # interior cell fits — bypasses SIFT to test only the averaging logic.
-        from probeflow.lattice import LatticeResult
+        from probeflow.analysis.lattice import LatticeResult
         img = np.zeros((64, 64), dtype=np.float64)
         lat = LatticeResult(
             a_vector_m=(2e-8, 0.0),

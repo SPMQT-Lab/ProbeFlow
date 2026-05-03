@@ -17,7 +17,7 @@ from probeflow.gui.rendering import (
     render_spec_thumbnail,
     resolve_thumbnail_plane_index,
 )
-from probeflow.scan import load_scan
+from probeflow.core.scan_loader import load_scan
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CUSHION = REPO_ROOT / "src" / "file_cushions"
@@ -200,7 +200,7 @@ class ConversionWorker(QRunnable):
         out_path = Path(self.out_dir)
         try:
             if self.do_png:
-                from probeflow.dat_png import main as png_main
+                from probeflow.io.converters.createc_dat_to_png import main as png_main
                 _log("── PNG conversion ──", "info")
                 png_main(src=in_path, out_root=out_path / "png",
                          clip_low=self.clip_low, clip_high=self.clip_high,
@@ -208,7 +208,7 @@ class ConversionWorker(QRunnable):
                 _log("PNG done.", "ok")
 
             if self.do_sxm:
-                from probeflow.dat_sxm import convert_dat_to_sxm
+                from probeflow.io.converters.createc_dat_to_sxm import convert_dat_to_sxm
                 _log("── SXM conversion ──", "info")
                 files = sorted(in_path.glob("*.dat"))
                 if not files:

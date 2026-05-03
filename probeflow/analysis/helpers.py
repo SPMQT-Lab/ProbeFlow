@@ -34,7 +34,7 @@ def to_uint8_for_cv(
     clip_high: float = 99.0,
 ) -> np.ndarray:
     """Percentile-clip and rescale an analysis array to uint8 for OpenCV."""
-    from probeflow.display import array_to_uint8
+    from probeflow.processing.display import array_to_uint8
 
     try:
         return array_to_uint8(arr, clip_percentiles=(clip_low, clip_high))

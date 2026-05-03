@@ -1,4 +1,4 @@
-"""Tests for probeflow.features — particle segmentation, counting, classification."""
+"""Tests for probeflow.analysis.features — particle segmentation, counting, classification."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import pytest
 pytest.importorskip("cv2")
 pytest.importorskip("sklearn")
 
-from probeflow.features import (
+from probeflow.analysis.features import (
     Classification,
     Detection,
     Particle,

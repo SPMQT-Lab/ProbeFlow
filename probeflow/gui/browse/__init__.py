@@ -20,7 +20,7 @@ from probeflow.gui.rendering import (
     resolve_thumbnail_plane_index,
 )
 from probeflow.gui.workers import SpecThumbnailLoader, ThumbnailLoader
-from probeflow.scan import load_scan
+from probeflow.core.scan_loader import load_scan
 
 # ── Browse cards ──────────────────────────────────────────────────────────────
 class _BrowseCard(QFrame):

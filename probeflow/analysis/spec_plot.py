@@ -14,8 +14,8 @@ from typing import Optional
 
 import numpy as np
 
-from probeflow.spec_io import SpecData
-from probeflow.spec_processing import current_histogram as _hist
+from probeflow.io.spectroscopy import SpecData
+from probeflow.processing.spectroscopy import current_histogram as _hist
 
 log = logging.getLogger(__name__)
 
@@ -150,7 +150,7 @@ def plot_spec_positions(
     matplotlib.axes.Axes
     """
     import matplotlib.pyplot as plt
-    from probeflow.sxm_io import parse_sxm_header, read_sxm_plane, sxm_scan_range
+    from probeflow.io.sxm_io import parse_sxm_header, read_sxm_plane, sxm_scan_range
 
     if ax is None:
         _, ax = plt.subplots()

@@ -1,4 +1,4 @@
-"""Write a :class:`probeflow.scan.Scan` to a Gwyddion ``.gwy`` file.
+"""Write a :class:`probeflow.core.scan_model.Scan` to a Gwyddion ``.gwy`` file.
 
 This uses the optional ``gwyfile`` package to serialise a top-level
 ``GwyContainer`` with one ``GwyDataField`` for the requested scan plane.
@@ -11,9 +11,9 @@ import json
 
 import numpy as np
 
-from probeflow.common import check_overwrite
-from probeflow.export_provenance import build_scan_export_provenance
-from probeflow.scan_model import Scan
+from probeflow.io.common import check_overwrite
+from probeflow.provenance.export import build_scan_export_provenance
+from probeflow.core.scan_model import Scan
 
 
 def _import_gwyfile():

@@ -1,12 +1,12 @@
-"""Tests for probeflow.display_state.DisplayRangeState."""
+"""Tests for probeflow.processing.display_state.DisplayRangeState."""
 
 from __future__ import annotations
 
 import numpy as np
 import pytest
 
-from probeflow.display import clip_range_from_array
-from probeflow.display_state import DisplayRangeState
+from probeflow.processing.display import clip_range_from_array
+from probeflow.processing.display_state import DisplayRangeState
 
 
 # ── Test A: percentile mode computes limits from data ─────────────────────────
@@ -121,7 +121,7 @@ class TestModeTransitions:
 
 class TestManualLimitsAffectRendering:
     def test_different_manual_ranges_give_different_renders(self):
-        from probeflow.display import array_to_uint8
+        from probeflow.processing.display import array_to_uint8
 
         arr = np.linspace(0.0, 1.0, 100).reshape(10, 10)
 
@@ -138,7 +138,7 @@ class TestManualLimitsAffectRendering:
         assert not np.array_equal(u8_1, u8_2), "Different manual ranges must produce different renders"
 
     def test_narrow_manual_range_saturates_most_pixels(self):
-        from probeflow.display import array_to_uint8
+        from probeflow.processing.display import array_to_uint8
 
         arr = np.linspace(0.0, 10.0, 100).reshape(10, 10)
         drs = DisplayRangeState()

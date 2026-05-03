@@ -1,4 +1,4 @@
-"""Tests for probeflow.sxm_io — pure-python .sxm reader / writer."""
+"""Tests for probeflow.io.sxm_io — pure-python .sxm reader / writer."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from probeflow.dat_sxm import convert_dat_to_sxm
-from probeflow.sxm_io import (
+from probeflow.io.converters.createc_dat_to_sxm import convert_dat_to_sxm
+from probeflow.io.sxm_io import (
     parse_sxm_header,
     read_all_sxm_planes,
     read_sxm_plane,

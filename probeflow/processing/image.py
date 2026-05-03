@@ -966,7 +966,7 @@ def export_png(
     """
     from PIL import Image as _Image, ImageDraw as _IDraw, ImageFont as _IFont
 
-    from probeflow.display import array_to_uint8 as _array_to_uint8, clip_range_from_array as _clip_range
+    from probeflow.processing.display import array_to_uint8 as _array_to_uint8, clip_range_from_array as _clip_range
 
     arr = arr.astype(np.float64, copy=True)
     if vmin is None or vmax is None:

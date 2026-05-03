@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from probeflow.file_type import FileType, sniff_file_type
+from probeflow.io.file_type import FileType, sniff_file_type
 
 
 TESTDATA = Path(__file__).resolve().parents[1] / "anonymised_testdata"

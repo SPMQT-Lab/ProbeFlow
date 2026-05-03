@@ -1,4 +1,4 @@
-"""Render a :class:`probeflow.scan.Scan` plane to a colourised PNG."""
+"""Render a :class:`probeflow.core.scan_model.Scan` plane to a colourised PNG."""
 
 from __future__ import annotations
 
@@ -7,16 +7,16 @@ from typing import Callable, Optional
 
 import numpy as np
 
-from probeflow.common import check_overwrite
-from probeflow.export_provenance import build_scan_export_provenance, png_display_state
+from probeflow.io.common import check_overwrite
+from probeflow.provenance.export import build_scan_export_provenance, png_display_state
 from probeflow.processing import export_png
-from probeflow.scan_model import Scan
+from probeflow.core.scan_model import Scan
 
 
 def lut_from_matplotlib(name: str) -> np.ndarray:
     """Return a (256, 3) uint8 LUT from a matplotlib colormap name.
 
-    Shared by ``probeflow.writers.png`` and ``probeflow.cli``.  Uses the Agg
+    Shared by ``probeflow.io.writers.png`` and ``probeflow.cli``.  Uses the Agg
     backend so importing this function from a CLI context does not try to
     start a GUI.
     """

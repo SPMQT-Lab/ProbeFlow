@@ -13,7 +13,7 @@ import zlib
 
 import numpy as np
 
-from probeflow.common import (
+from probeflow.io.common import (
     _f,
     _i,
     find_hdr,

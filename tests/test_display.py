@@ -1,11 +1,11 @@
-"""Tests for probeflow.display — shared display-rendering helpers."""
+"""Tests for probeflow.processing.display — shared display-rendering helpers."""
 
 from __future__ import annotations
 
 import numpy as np
 import pytest
 
-from probeflow.display import (
+from probeflow.processing.display import (
     array_to_uint8,
     clip_range_from_array,
     finite_values,

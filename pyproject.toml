@@ -24,8 +24,8 @@ all      = ["opencv-python", "scikit-learn", "gwyfile", "pytest"]
 
 [project.scripts]
 probeflow = "probeflow.cli:main"
-dat-sxm   = "probeflow.dat_sxm:main"
-dat-png   = "probeflow.dat_png:main"
+dat-sxm   = "probeflow.io.converters.createc_dat_to_sxm:main"
+dat-png   = "probeflow.io.converters.createc_dat_to_png:main"
 
 [tool.setuptools]
 include-package-data = false

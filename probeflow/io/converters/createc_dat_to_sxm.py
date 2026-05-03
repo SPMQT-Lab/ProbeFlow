@@ -11,14 +11,14 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from probeflow.common import _f, setup_logging
-from probeflow.readers.createc_dat import (
+from probeflow.io.common import _f, setup_logging
+from probeflow.io.readers.createc_dat import (
     has_canonical_stm_four_channel_layout,
     has_legacy_stm_two_channel_layout,
     read_createc_dat_report,
 )
-from probeflow.scan import load_scan
-from probeflow.writers.sxm import write_sxm
+from probeflow.core.scan_loader import load_scan
+from probeflow.io.writers.sxm import write_sxm
 
 log = logging.getLogger(__name__)
 

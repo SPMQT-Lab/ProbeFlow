@@ -1,4 +1,4 @@
-"""Tests for probeflow.scan — the vendor-agnostic Scan abstraction."""
+"""Tests for the vendor-agnostic Scan abstraction."""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ import numpy as np
 import pytest
 
 from probeflow import load_scan
-from probeflow.dat_sxm import convert_dat_to_sxm
-from probeflow.scan import Scan
+from probeflow.io.converters.createc_dat_to_sxm import convert_dat_to_sxm
+from probeflow.core.scan_model import Scan
 
 
 TESTDATA = Path(__file__).resolve().parents[1] / "anonymised_testdata"

@@ -20,7 +20,7 @@ from typing import List, Optional, Tuple
 
 import numpy as np
 
-from probeflow._analysis_helpers import cv2_module, to_uint8_for_cv as _to_uint8
+from probeflow.analysis.helpers import cv2_module, to_uint8_for_cv as _to_uint8
 
 # ─── Lazy imports ────────────────────────────────────────────────────────────
 

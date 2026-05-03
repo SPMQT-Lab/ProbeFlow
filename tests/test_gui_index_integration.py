@@ -17,7 +17,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 pytest.importorskip("PySide6")
 
-from probeflow.indexing import (
+from probeflow.core.indexing import (
     ProbeFlowItem,
     image_browser_items,
     split_indexed_items,
@@ -85,11 +85,11 @@ SAMPLE_ITEMS = [
 
 def test_gui_extracted_modules_import_without_main_window():
     for module_name in (
-        "probeflow.gui_models",
-        "probeflow.gui_rendering",
-        "probeflow.gui_workers",
-        "probeflow.gui_browse",
-        "probeflow.gui_viewer_widgets",
+        "probeflow.gui.models",
+        "probeflow.gui.rendering",
+        "probeflow.gui.workers",
+        "probeflow.gui.browse",
+        "probeflow.gui.viewer.widgets",
     ):
         importlib.import_module(module_name)
 
@@ -106,7 +106,7 @@ def test_gui_compatibility_reexports_remain_available():
 class TestGuiWorkers:
     def test_thumbnail_loader_selects_requested_plane_and_emits(self, qapp, monkeypatch):
         from PIL import Image
-        import probeflow.gui_workers as worker_mod
+        import probeflow.gui.workers as worker_mod
 
         token = object()
         calls = {}
@@ -145,7 +145,7 @@ class TestGuiWorkers:
         assert emitted[0][2] is token
 
     def test_thumbnail_loader_suppresses_emit_when_render_fails(self, qapp, monkeypatch):
-        import probeflow.gui_workers as worker_mod
+        import probeflow.gui.workers as worker_mod
 
         emitted = []
 
@@ -171,7 +171,7 @@ class TestGuiWorkers:
         self, qapp, monkeypatch
     ):
         from PIL import Image
-        import probeflow.gui_workers as worker_mod
+        import probeflow.gui.workers as worker_mod
 
         calls = []
 
@@ -241,7 +241,7 @@ class TestGuiWorkers:
         self, qapp, monkeypatch
     ):
         from PIL import Image
-        import probeflow.gui_workers as worker_mod
+        import probeflow.gui.workers as worker_mod
 
         calls = []
         monkeypatch.setattr(
@@ -268,7 +268,7 @@ class TestGuiWorkers:
         assert emitted == []
 
     def test_conversion_worker_reports_empty_sxm_directory(self, qapp, tmp_path):
-        import probeflow.gui_workers as worker_mod
+        import probeflow.gui.workers as worker_mod
 
         logs = []
         finished = []
@@ -293,8 +293,8 @@ class TestGuiWorkers:
         self, qapp, tmp_path, monkeypatch
     ):
         import json
-        import probeflow.dat_sxm as dat_sxm_mod
-        import probeflow.gui_workers as worker_mod
+        import probeflow.io.converters.createc_dat_to_sxm as dat_sxm_mod
+        import probeflow.gui.workers as worker_mod
 
         in_dir = tmp_path / "input"
         out_dir = tmp_path / "output"
@@ -490,7 +490,7 @@ class TestViewerRenderSizing:
         dlg.deleteLater()
 
     def test_processed_viewer_render_defaults_to_native_pixel_size(self):
-        from probeflow.scan import load_scan
+        from probeflow.core.scan_loader import load_scan
 
         scan = load_scan(TESTDATA / "sxm_moire_10nm.sxm")
         img = render_scan_image(
@@ -518,7 +518,7 @@ class TestViewerRenderSizing:
     def test_scan_workers_share_render_helper(self, monkeypatch):
         from PIL import Image
         import probeflow.gui as gui_mod
-        import probeflow.gui_workers as worker_mod
+        import probeflow.gui.workers as worker_mod
 
         calls = []
 
@@ -765,7 +765,7 @@ class TestThumbnailChannelResolution:
 class TestThumbnailGridChannelSelection:
     @staticmethod
     def _patch_thumbnail_loader(monkeypatch):
-        import probeflow.gui_browse as browse_mod
+        import probeflow.gui.browse as browse_mod
 
         captured = []
 
@@ -1078,7 +1078,7 @@ class TestBrowseLayoutCleanup:
 class TestSpecViewerRawData:
     def test_raw_data_table_shows_all_rows_with_display_units(self, qapp, monkeypatch):
         from probeflow.gui import SpecViewerDialog, THEMES
-        from probeflow.spec_io import SpecChannel, SpecData
+        from probeflow.io.spectroscopy import SpecChannel, SpecData
 
         monkeypatch.setattr(SpecViewerDialog, "_load", lambda self: None)
         entry = VertFile(path=TESTDATA / "spectrum_time_trace_5k.VERT", stem="spec")
@@ -1333,7 +1333,7 @@ class TestRealFixtureRoundTrip:
     TESTDATA = Path(__file__).resolve().parents[1] / "anonymised_testdata"
 
     def test_createc_scans_appear_in_sxm_list(self):
-        from probeflow.indexing import index_folder
+        from probeflow.core.indexing import index_folder
         items = index_folder(self.TESTDATA, recursive=False, include_errors=True)
         sxm_list = _scan_items_to_sxm(items)
         names = {e.path.name for e in sxm_list}
@@ -1341,20 +1341,20 @@ class TestRealFixtureRoundTrip:
         assert "createc_scan_terrace_109nm.dat" in names
 
     def test_nanonis_sxm_appears_in_sxm_list(self):
-        from probeflow.indexing import index_folder
+        from probeflow.core.indexing import index_folder
         items = index_folder(self.TESTDATA, recursive=False, include_errors=True)
         sxm_list = _scan_items_to_sxm(items)
         names = {e.path.name for e in sxm_list}
         assert "sxm_moire_10nm.sxm" in names
 
     def test_spectra_appear_in_vert_list(self):
-        from probeflow.indexing import index_folder
+        from probeflow.core.indexing import index_folder
         items = index_folder(self.TESTDATA, recursive=False, include_errors=True)
         vert_list = _spec_items_to_vert(items)
         assert len(vert_list) >= 3
 
     def test_no_errors_on_real_fixtures(self):
-        from probeflow.indexing import index_folder
+        from probeflow.core.indexing import index_folder
         items = index_folder(self.TESTDATA, recursive=False, include_errors=True)
         errors = [it for it in items if it.load_error]
         assert errors == []

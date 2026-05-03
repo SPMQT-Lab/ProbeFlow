@@ -1,19 +1,65 @@
-"""Import compatibility checks for the package-layout cleanup."""
+"""Layout checks for the canonical ProbeFlow package tree."""
 
 from __future__ import annotations
 
 from pathlib import Path
+import re
 import sys
 
 import pytest
 
 
+PF = "probe" + "flow"
+
+OLD_WRAPPER_MODULES = tuple(
+    f"{PF}.{name}"
+    for name in (
+        "_analysis_helpers",
+        "common",
+        "createc_interpretation",
+        "dat_png",
+        "dat_sxm",
+        "display",
+        "display_state",
+        "export_provenance",
+        "features",
+        "file_type",
+        "gui_browse",
+        "gui_features",
+        "gui_models",
+        "gui_processing",
+        "gui_rendering",
+        "gui_tv",
+        "gui_viewer_widgets",
+        "gui_workers",
+        "indexing",
+        "lattice",
+        "loaders",
+        "metadata",
+        "prepared_export",
+        "processing_state",
+        "readers",
+        "scan",
+        "scan_model",
+        "source_identity",
+        "spec_io",
+        "spec_plot",
+        "spec_processing",
+        "sxm_io",
+        "validation",
+        "writers",
+        "xmgrace_export",
+    )
+)
+
+
 def test_backend_imports_do_not_require_qt():
     import probeflow
     from probeflow import processing
+    from probeflow.core.scan_loader import load_scan
+    from probeflow.core.scan_model import Scan
     from probeflow.processing import align_rows
-    from probeflow.processing_state import ProcessingState
-    from probeflow.scan import Scan, load_scan
+    from probeflow.processing.state import ProcessingState
 
     assert probeflow.Scan is Scan
     assert callable(load_scan)
@@ -23,14 +69,14 @@ def test_backend_imports_do_not_require_qt():
     assert "PySide6" not in sys.modules
 
 
-def test_legacy_io_and_analysis_imports_remain_available():
-    from probeflow.dat_png import dat_to_hdr_imgs
-    from probeflow.dat_sxm import convert_dat_to_sxm
-    from probeflow.features import segment_particles
-    from probeflow.lattice import LatticeParams
-    from probeflow.readers.dat import read_dat
-    from probeflow.readers.sxm import read_sxm
-    from probeflow.writers.json import write_json
+def test_canonical_io_and_analysis_imports_are_available():
+    from probeflow.analysis.features import segment_particles
+    from probeflow.analysis.lattice import LatticeParams
+    from probeflow.io.converters.createc_dat_to_png import dat_to_hdr_imgs
+    from probeflow.io.converters.createc_dat_to_sxm import convert_dat_to_sxm
+    from probeflow.io.readers.createc_scan import read_dat
+    from probeflow.io.readers.nanonis_sxm import read_sxm
+    from probeflow.io.writers.json import write_json
 
     assert callable(dat_to_hdr_imgs)
     assert callable(convert_dat_to_sxm)
@@ -42,17 +88,16 @@ def test_legacy_io_and_analysis_imports_remain_available():
 
 
 def test_pure_gui_helpers_import_without_qt():
-    import probeflow.gui_models as gui_models
-    import probeflow.gui_processing as gui_processing
-    import probeflow.gui_rendering as gui_rendering
+    from probeflow.gui import models, rendering
+    from probeflow.processing import gui_adapter
 
-    assert callable(gui_processing.processing_state_from_gui)
-    assert gui_models.SxmFile.__name__ == "SxmFile"
-    assert callable(gui_rendering.resolve_thumbnail_plane_index)
+    assert callable(gui_adapter.processing_state_from_gui)
+    assert models.SxmFile.__name__ == "SxmFile"
+    assert callable(rendering.resolve_thumbnail_plane_index)
     assert "PySide6" not in sys.modules
 
 
-def test_gui_compat_import_when_qt_available():
+def test_gui_entrypoint_import_when_qt_available():
     pytest.importorskip("PySide6")
 
     from probeflow.gui import ImageViewerDialog, SxmFile, main
@@ -77,59 +122,40 @@ def test_plugin_foundation_imports():
     assert registry.operations() == []
 
 
-def test_spec_plot_private_compatibility_imports_remain_available():
-    from probeflow.spec_plot import _parse_sxm_offset, spec_position_to_pixel
+def test_spec_plot_private_helpers_import_from_canonical_module():
+    from probeflow.analysis.spec_plot import _parse_sxm_offset, spec_position_to_pixel
 
     assert callable(_parse_sxm_offset)
     assert callable(spec_position_to_pixel)
 
 
-def test_top_level_modules_are_compatibility_shims():
+def test_root_contains_no_relocation_wrapper_modules():
     root = Path(__file__).resolve().parents[1] / "probeflow"
-    allowed_long_public_shims = {"__init__.py", "dat_sxm.py"}
-    too_large = []
-    for path in root.glob("*.py"):
-        if path.name in allowed_long_public_shims:
-            continue
-        line_count = len(path.read_text(encoding="utf-8").splitlines())
-        if line_count > 20:
-            too_large.append((path.name, line_count))
-
-    assert too_large == []
+    assert {path.name for path in root.glob("*.py")} == {"__init__.py"}
 
 
-def test_implementation_imports_use_canonical_package_paths():
+def test_readers_and_writers_wrapper_packages_are_removed():
     root = Path(__file__).resolve().parents[1] / "probeflow"
-    root_shims = {
-        "createc_interpretation.py",
-        "gui_browse.py",
-        "gui_features.py",
-        "gui_models.py",
-        "gui_processing.py",
-        "gui_rendering.py",
-        "gui_tv.py",
-        "gui_viewer_widgets.py",
-        "gui_workers.py",
-    }
-    forbidden = (
-        "probeflow.createc_interpretation",
-        "probeflow.gui_browse",
-        "probeflow.gui_features",
-        "probeflow.gui_models",
-        "probeflow.gui_processing",
-        "probeflow.gui_rendering",
-        "probeflow.gui_tv",
-        "probeflow.gui_viewer_widgets",
-        "probeflow.gui_workers",
-    )
-    offenders = []
-    for path in root.rglob("*.py"):
-        if path.parent == root and path.name in root_shims:
-            continue
-        text = path.read_text(encoding="utf-8", errors="ignore")
-        for pattern in forbidden:
-            if f"from {pattern}" in text or f"import {pattern}" in text:
-                offenders.append((str(path.relative_to(root)), pattern))
+    assert not (root / "readers").exists()
+    assert not (root / "writers").exists()
+
+
+def test_repo_imports_use_canonical_package_paths():
+    repo = Path(__file__).resolve().parents[1]
+    search_roots = [repo / "probeflow", repo / "tests", repo / "README.md", repo / "pyproject.toml"]
+    patterns = [
+        re.compile(rf"\b(?:from|import)\s+{re.escape(module)}(?:\b|\.| )")
+        for module in OLD_WRAPPER_MODULES
+    ]
+    offenders: list[tuple[str, str]] = []
+
+    for root in search_roots:
+        paths = [root] if root.is_file() else list(root.rglob("*.py"))
+        for path in paths:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+            for pattern in patterns:
+                if pattern.search(text):
+                    offenders.append((str(path.relative_to(repo)), pattern.pattern))
 
     assert offenders == []
 

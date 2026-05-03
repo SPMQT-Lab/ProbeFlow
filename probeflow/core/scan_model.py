@@ -6,9 +6,9 @@ and GUI can all depend on the :class:`Scan` model without creating import
 cycles. The ``save_*`` convenience methods retain lazy writer imports only for
 public API compatibility.
 
-The public compatibility import remains ``from probeflow.scan import Scan``;
+The public compatibility import remains ``from probeflow.core.scan_model import Scan``;
 new internal code that only needs the dataclass should prefer importing from
-``probeflow.scan_model``.
+``probeflow.core.scan_model``.
 """
 
 from __future__ import annotations
@@ -78,7 +78,7 @@ class Scan:
 
     def save_sxm(self, out_path) -> None:
         """Write this Scan to a Nanonis ``.sxm`` file."""
-        from probeflow.writers.sxm import write_sxm
+        from probeflow.io.writers.sxm import write_sxm
         write_sxm(self, out_path)
 
     def save_png(
@@ -95,7 +95,7 @@ class Scan:
         provenance=None,
     ) -> None:
         """Render one plane to a colourised PNG with an optional scale bar."""
-        from probeflow.writers.png import write_png
+        from probeflow.io.writers.png import write_png
         write_png(
             self, out_path, plane_idx=plane_idx,
             colormap=colormap, clip_low=clip_low, clip_high=clip_high,
@@ -106,20 +106,20 @@ class Scan:
 
     def save_pdf(self, out_path, plane_idx: int = 0, **kwargs) -> None:
         """Render one plane to a publication-ready PDF."""
-        from probeflow.writers.pdf import write_pdf
+        from probeflow.io.writers.pdf import write_pdf
         write_pdf(self, out_path, plane_idx=plane_idx, **kwargs)
 
     def save_csv(self, out_path, plane_idx: int = 0, **kwargs) -> None:
         """Dump one plane as a 2-D CSV grid."""
-        from probeflow.writers.csv import write_csv
+        from probeflow.io.writers.csv import write_csv
         write_csv(self, out_path, plane_idx=plane_idx, **kwargs)
 
     def save_gwy(self, out_path, plane_idx: int = 0, **kwargs) -> None:
         """Write this Scan to a Gwyddion ``.gwy`` file."""
-        from probeflow.writers.gwy import write_gwy
+        from probeflow.io.writers.gwy import write_gwy
         write_gwy(self, out_path, plane_idx=plane_idx, **kwargs)
 
     def save(self, out_path, plane_idx: int = 0, **kwargs) -> None:
         """Suffix-driven save: ``.sxm`` / ``.gwy`` / ``.png`` / ``.pdf`` / ``.csv``."""
-        from probeflow.writers import save_scan
+        from probeflow.io.writers import save_scan
         save_scan(self, out_path, plane_idx=plane_idx, **kwargs)

@@ -1,4 +1,4 @@
-"""Validation for loaded :class:`probeflow.scan.Scan` objects.
+"""Validation for loaded :class:`probeflow.core.scan_model.Scan` objects.
 
 Call :func:`validate_scan` immediately after loading to catch internal
 inconsistencies before they silently corrupt downstream rendering or writing.
@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from probeflow.scan_model import Scan
+from probeflow.core.scan_model import Scan
 
 _SUPPORTED_FORMATS = {"dat", "sxm"}
 

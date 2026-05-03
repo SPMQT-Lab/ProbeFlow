@@ -11,12 +11,12 @@ import numpy as np
 from PIL import Image
 
 from probeflow import processing as _proc
-from probeflow.display import (
+from probeflow.processing.display import (
     array_to_uint8 as _array_to_uint8,
     clip_range_from_array as _clip_range_from_array,
 )
 from probeflow.processing.gui_adapter import processing_state_from_gui
-from probeflow.scan import load_scan
+from probeflow.core.scan_loader import load_scan
 
 # ── Colormaps (25 — most cited in STM/SPM publications) ──────────────────────
 STM_COLORMAPS: list[tuple[str, str]] = [
@@ -91,7 +91,7 @@ def clip_range_from_arr(
 ) -> tuple[Optional[float], Optional[float]]:
     """Return (vmin, vmax) for display clipping, or (None, None) on failure.
 
-    Thin adapter over :func:`probeflow.display.clip_range_from_array` that
+    Thin adapter over :func:`probeflow.processing.display.clip_range_from_array` that
     preserves the GUI contract of returning (None, None) rather than raising.
     """
     if arr is None:
@@ -187,7 +187,7 @@ def _apply_processing(
     settings are display-only and are silently ignored.  Returns a new float64
     array; the input is never modified.
     """
-    from probeflow.processing_state import apply_processing_state
+    from probeflow.processing.state import apply_processing_state
     return apply_processing_state(arr, processing_state_from_gui(processing or {}))
 
 
@@ -289,7 +289,7 @@ def render_spec_thumbnail(
 ) -> Optional[Image.Image]:
     """Render a small matplotlib plot of a .VERT file as a PIL Image."""
     try:
-        from probeflow.spec_io import read_spec_file
+        from probeflow.io.spectroscopy import read_spec_file
         from matplotlib.figure import Figure
         from matplotlib.backends.backend_agg import FigureCanvasAgg
 

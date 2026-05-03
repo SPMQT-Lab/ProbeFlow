@@ -7,8 +7,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from probeflow.readers.nanonis_spec import read_nanonis_spec
-from probeflow.spec_io import SpecMetadata, read_spec_file, read_spec_metadata
+from probeflow.io.readers.nanonis_spec import read_nanonis_spec
+from probeflow.io.spectroscopy import SpecMetadata, read_spec_file, read_spec_metadata
 
 
 TESTDATA = Path(__file__).resolve().parents[1] / "anonymised_testdata"

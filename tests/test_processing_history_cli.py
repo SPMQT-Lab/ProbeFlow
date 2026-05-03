@@ -21,7 +21,7 @@ from probeflow.cli import (
     _record_op,
     main,
 )
-from probeflow.scan import Scan
+from probeflow.core.scan_model import Scan
 
 
 # ─── _Op class ───────────────────────────────────────────────────────────────
@@ -120,7 +120,7 @@ class TestOpFactories:
             return arr + 1
 
         monkeypatch.setattr(
-            "probeflow.processing_state.apply_processing_state",
+            "probeflow.processing.state.apply_processing_state",
             fake_apply_processing_state,
         )
 

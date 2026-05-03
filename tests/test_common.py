@@ -1,8 +1,8 @@
-"""Unit tests for probeflow.common."""
+"""Unit tests for probeflow.io.common."""
 
 import numpy as np
 import pytest
-from probeflow.common import (
+from probeflow.io.common import (
     DAC_BITS_DEFAULT,
     DAC_VOLTAGE_REF,
     _f,

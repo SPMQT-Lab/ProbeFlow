@@ -6,15 +6,15 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from probeflow.dat_png import dat_to_hdr_imgs
-from probeflow.dat_sxm import (
+from probeflow.io.converters.createc_dat_to_png import dat_to_hdr_imgs
+from probeflow.io.converters.createc_dat_to_sxm import (
     convert_dat_to_sxm,
     load_layout_and_format,
     process_dat,
     reconstruct_from_hdr_imgs,
 )
-from probeflow.metadata import read_scan_metadata
-from probeflow.scan import load_scan
+from probeflow.core.metadata import read_scan_metadata
+from probeflow.core.scan_loader import load_scan
 
 
 # ─── PNG conversion ───────────────────────────────────────────────────────────
@@ -134,7 +134,7 @@ class TestConvertDatToSxm:
         return out_path
 
     def test_uses_validated_scan_writer_path(self, tmp_path, monkeypatch):
-        import probeflow.dat_sxm as dat_sxm_mod
+        import probeflow.io.converters.createc_dat_to_sxm as dat_sxm_mod
 
         dat = tmp_path / "scan.dat"
         dat.write_bytes(b"placeholder")

@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from probeflow.display import clip_range_from_array as _clip_range_from_array
+from probeflow.processing.display import clip_range_from_array as _clip_range_from_array
 
 
 PLANE_NAMES = ["Z fwd", "Z bwd", "I fwd", "I bwd"]

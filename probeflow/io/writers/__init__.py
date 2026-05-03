@@ -1,5 +1,5 @@
 """
-Format writers that consume :class:`probeflow.scan.Scan` objects.
+Format writers that consume :class:`probeflow.core.scan_model.Scan` objects.
 
 Supported writers: ``.sxm``, ``.gwy``, ``.png``, ``.pdf``, ``.csv``.
 
@@ -26,7 +26,7 @@ SUPPORTED_OUTPUT_SUFFIXES: Tuple[str, ...] = (
 
 
 def write_gwy(scan, out_path, plane_idx: int = 0, **kwargs) -> None:
-    """Lazy wrapper for :func:`probeflow.writers.gwy.write_gwy`."""
+    """Lazy wrapper for :func:`probeflow.io.writers.gwy.write_gwy`."""
     from probeflow.io.writers.gwy import write_gwy as _write_gwy
     _write_gwy(scan, out_path, plane_idx=plane_idx, **kwargs)
 

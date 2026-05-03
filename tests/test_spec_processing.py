@@ -1,11 +1,11 @@
-"""Tests for probeflow.spec_processing — spectroscopy processing functions."""
+"""Tests for probeflow.processing.spectroscopy — spectroscopy processing functions."""
 
 from __future__ import annotations
 
 import numpy as np
 import pytest
 
-from probeflow.spec_processing import (
+from probeflow.processing.spectroscopy import (
     average_spectra,
     crop,
     current_histogram,

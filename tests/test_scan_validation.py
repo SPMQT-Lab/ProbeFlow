@@ -1,4 +1,4 @@
-"""Tests for probeflow.validation.validate_scan()."""
+"""Tests for probeflow.core.validation.validate_scan()."""
 
 from __future__ import annotations
 
@@ -7,8 +7,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from probeflow.scan import Scan, load_scan
-from probeflow.validation import validate_scan
+from probeflow.core.scan_model import Scan
+from probeflow.core.scan_loader import load_scan
+from probeflow.core.validation import validate_scan
 
 
 TESTDATA = Path(__file__).resolve().parents[1] / "anonymised_testdata"

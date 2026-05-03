@@ -156,14 +156,14 @@ def trim_stack(stack: np.ndarray) -> Tuple[np.ndarray, int]:
 
 def percentile_clip(arr: np.ndarray, low: float = 1.0, high: float = 99.0) -> Tuple[float, float]:
     """Return (vmin, vmax) from finite values using percentile clipping."""
-    from probeflow.display import clip_range_from_array
+    from probeflow.processing.display import clip_range_from_array
 
     return clip_range_from_array(arr, low, high)
 
 
 def to_uint8(arr: np.ndarray, vmin: float, vmax: float) -> np.ndarray:
     """Linearly map [vmin, vmax] → [0, 255] uint8."""
-    from probeflow.display import array_to_uint8
+    from probeflow.processing.display import array_to_uint8
 
     return array_to_uint8(arr, vmin=vmin, vmax=vmax)
 
