@@ -25,8 +25,10 @@ if TYPE_CHECKING:
 
 _PEN_INACTIVE   = QPen(QColor("#89b4fa"), 1.5)
 _PEN_ACTIVE     = QPen(QColor("#22D3EE"), 3.0, Qt.DashLine)
+_PEN_HOVER      = QPen(QColor("#f9e2af"), 2.0)
 _BRUSH_INACTIVE = QBrush(QColor(137, 180, 250, 30))
 _BRUSH_ACTIVE   = QBrush(QColor(34, 211, 238, 50))
+_BRUSH_HOVER    = QBrush(QColor(249, 226, 175, 45))
 _BRUSH_NONE     = QBrush(Qt.NoBrush)
 _LABEL_FONT     = QFont("Helvetica", 8)
 _LABEL_COLOR    = QColor("#cdd6f4")
@@ -194,15 +196,22 @@ def make_roi_item(roi: "ROI", active: bool = False) -> QGraphicsItemGroup:
     return group
 
 
-def update_roi_item_style(item: QGraphicsItemGroup, active: bool) -> None:
+def update_roi_item_style(item: QGraphicsItemGroup, active: bool,
+                          hover: bool = False) -> None:
     """Update pen/brush on the shape inside *item* without rebuilding."""
-    # Check for a PointROIItem stored in data slot 1
     point_item = item.data(1)
     if point_item is not None and isinstance(point_item, PointROIItem):
-        point_item.set_active(active)
+        point_item.set_active(active or hover)
         return
 
     for child in item.childItems():
         if isinstance(child, QGraphicsTextItem):
             continue
-        _apply_style(child, active)
+        if hover and not active:
+            pen = _PEN_HOVER
+            brush = _BRUSH_HOVER if not isinstance(child, QGraphicsLineItem) else None
+            child.setPen(pen)
+            if brush is not None and hasattr(child, "setBrush"):
+                child.setBrush(brush)
+        else:
+            _apply_style(child, active)

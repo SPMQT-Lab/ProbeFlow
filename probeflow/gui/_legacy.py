@@ -1490,19 +1490,23 @@ class ImageViewerDialog(QDialog):
         toolbar.addStretch()
         left_lay.addLayout(toolbar)
 
-        selection_bar = QHBoxLayout()
-        selection_bar.setSpacing(4)
-        selection_lbl = QLabel("Selection")
-        selection_lbl.setFont(QFont("Helvetica", 8, QFont.Bold))
-        selection_bar.addWidget(selection_lbl)
-        self._selection_group = QButtonGroup(self)
-        self._selection_group.setExclusive(True)
+        drawing_bar = QHBoxLayout()
+        drawing_bar.setSpacing(4)
+        drawing_lbl = QLabel("Draw")
+        drawing_lbl.setFont(QFont("Helvetica", 8, QFont.Bold))
+        drawing_bar.addWidget(drawing_lbl)
+        self._drawing_group = QButtonGroup(self)
+        self._drawing_group.setExclusive(True)
+        # Keep old name for backward-compat references
+        self._selection_group = self._drawing_group
         for key, label, tip in (
-            ("none", "Pointer", "Pointer / no selection tool"),
-            ("rectangle", "Rect.", "Rectangular area selection"),
-            ("ellipse", "Ellipse", "Elliptical area selection"),
-            ("polygon", "Polygon", "Polygon area selection; double-click to finish"),
-            ("line", "Line", "Line selection for display/status only"),
+            ("pan",       "✋ Pan",     "Pan (drag to scroll)"),
+            ("rectangle", "▭ Rect",    "Rectangle ROI  [R]"),
+            ("ellipse",   "◯ Ellipse", "Ellipse ROI  [E]"),
+            ("polygon",   "⬠ Poly",   "Polygon ROI — click vertices, double-click to close  [P]"),
+            ("freehand",  "〰 Free",   "Freehand ROI — drag to draw  [F]"),
+            ("line",      "— Line",    "Line ROI  [L]"),
+            ("point",     "• Point",   "Point ROI  [T]"),
         ):
             btn = QPushButton(label)
             btn.setCheckable(True)
@@ -1510,24 +1514,14 @@ class ImageViewerDialog(QDialog):
             btn.setMinimumWidth(44)
             btn.setFont(QFont("Helvetica", 8))
             btn.setToolTip(tip)
-            self._selection_group.addButton(btn)
-            btn.setProperty("selection_tool", key)
-            if key == "none":
+            self._drawing_group.addButton(btn)
+            btn.setProperty("drawing_tool", key)
+            if key == "pan":
                 btn.setChecked(True)
-            selection_bar.addWidget(btn)
-        self._selection_group.buttonClicked.connect(self._on_selection_tool_clicked)
-        # Phase 4b: canvas drawing tools not yet implemented
-        for _btn in self._selection_group.buttons():
-            if (_btn.property("selection_tool") or "none") != "none":
-                _btn.setEnabled(False)
-                _btn.setToolTip(_btn.toolTip() + " (available in Phase 4b)")
-        clear_selection_btn = QPushButton("Clear")
-        clear_selection_btn.setFont(QFont("Helvetica", 8))
-        clear_selection_btn.setFixedHeight(24)
-        clear_selection_btn.clicked.connect(self._on_clear_roi)
-        selection_bar.addWidget(clear_selection_btn)
-        selection_bar.addStretch()
-        left_lay.addLayout(selection_bar)
+            drawing_bar.addWidget(btn)
+        self._drawing_group.buttonClicked.connect(self._on_drawing_tool_clicked)
+        drawing_bar.addStretch()
+        left_lay.addLayout(drawing_bar)
 
         # Rulers scroll together with the image (placed in the same scroll
         # viewport via a small grid container).
@@ -1871,6 +1865,10 @@ class ImageViewerDialog(QDialog):
         self._zoom_lbl.pixmap_resized.connect(self._on_pixmap_resized)
         self._zoom_lbl.context_menu_requested.connect(self._on_image_context_menu)
         self._zoom_lbl.pixel_hovered.connect(self._on_pixel_hovered)
+        self._zoom_lbl.roi_created.connect(self._on_canvas_roi_created)
+        self._zoom_lbl.roi_move_requested.connect(self._on_canvas_roi_move)
+        self._zoom_lbl.tool_changed.connect(self._on_canvas_tool_changed)
+        self._zoom_lbl.roi_context_menu_requested.connect(self._on_roi_canvas_context_menu)
         self._line_profile_panel.export_csv_clicked.connect(self._on_export_line_profile_csv)
 
         self._status_lbl = QLabel("")
@@ -1943,13 +1941,62 @@ class ImageViewerDialog(QDialog):
     # ── Navigation ─────────────────────────────────────────────────────────────
     def keyPressEvent(self, event):
         k = event.key()
+
+        # ── drawing tool shortcuts ────────────────────────────────────────────
+        _tool_keys = {
+            Qt.Key_R: "rectangle",
+            Qt.Key_E: "ellipse",
+            Qt.Key_P: "polygon",
+            Qt.Key_F: "freehand",
+            Qt.Key_L: "line",
+            Qt.Key_T: "point",
+        }
+        if k in _tool_keys and not event.modifiers():
+            self._set_drawing_tool(_tool_keys[k])
+            event.accept()
+            return
+
+        # ── Escape: cancel drawing, or close dialog if idle ───────────────────
+        if k == Qt.Key_Escape:
+            canvas_tool = getattr(self._zoom_lbl, "tool", lambda: "pan")()
+            canvas_drawing = (canvas_tool != "pan" or
+                              self._zoom_lbl._draw_pts or
+                              self._zoom_lbl._draw_start is not None)
+            if canvas_drawing:
+                self._zoom_lbl.cancel_drawing()
+                self._set_drawing_tool("pan")
+                event.accept()
+                return
+            self.accept()
+            return
+
+        # Return closes the dialog (when not drawing)
+        if k == Qt.Key_Return:
+            self.accept()
+            return
+
+        # ── ROI keyboard actions ──────────────────────────────────────────────
+        if k == Qt.Key_Delete and not event.modifiers():
+            self._delete_active_image_roi()
+            event.accept()
+            return
+
+        if k == Qt.Key_I and not event.modifiers():
+            self._invert_active_image_roi()
+            event.accept()
+            return
+
+        if Qt.Key_1 <= k <= Qt.Key_9 and not event.modifiers():
+            self._select_nth_image_roi(k - Qt.Key_0)
+            event.accept()
+            return
+
+        # ── arrow keys: nudge line profile or navigate ────────────────────────
         if k in (Qt.Key_Left, Qt.Key_Right, Qt.Key_Up, Qt.Key_Down):
             if self._nudge_line_profile(k):
                 event.accept()
                 return
-        if k in (Qt.Key_Escape, Qt.Key_Return):
-            self.accept()
-        elif k == Qt.Key_Left:
+        if k == Qt.Key_Left:
             self._go_prev()
         elif k == Qt.Key_Right:
             self._go_next()
@@ -2311,6 +2358,8 @@ class ImageViewerDialog(QDialog):
     def _on_image_roi_set_changed(self) -> None:
         self._zoom_lbl.set_roi_set(self._image_roi_set)
         self._save_image_roi_set()
+        if hasattr(self, "_roi_dock"):
+            self._roi_dock.refresh(self._image_roi_set)
 
     def _on_pixel_hovered(self, col: int, row: int, val) -> None:
         if not hasattr(self, "_coord_lbl"):
@@ -2322,6 +2371,120 @@ class ImageViewerDialog(QDialog):
             val_disp = float(val) * scale
             unit_str = f" {unit}" if unit else ""
             self._coord_lbl.setText(f"({col}, {row}): {val_disp:.4g}{unit_str}")
+
+    # ── Canvas drawing-tool callbacks ─────────────────────────────────────────
+
+    def _on_canvas_roi_created(self, roi) -> None:
+        """A drawing tool completed; add the new ROI and make it active."""
+        if self._image_roi_set is None:
+            return
+        self._image_roi_set.add(roi)
+        self._image_roi_set.set_active(roi.id)
+        self._on_image_roi_set_changed()
+        # Canvas already switched to pan internally; sync toolbar
+        self._set_drawing_tool("pan")
+
+    def _on_canvas_roi_move(self, roi_id: str, dx: int, dy: int) -> None:
+        """Active ROI was drag-moved on the canvas; translate its geometry."""
+        if self._image_roi_set is None or (dx == 0 and dy == 0):
+            return
+        roi = self._image_roi_set.get(roi_id)
+        if roi is None:
+            return
+        from probeflow.core.roi import translate as _translate_roi
+        new_roi = _translate_roi(roi, float(dx), float(dy))
+        self._image_roi_set.remove(roi_id)
+        self._image_roi_set.add(new_roi)
+        self._image_roi_set.set_active(new_roi.id)
+        self._on_image_roi_set_changed()
+
+    def _on_canvas_tool_changed(self, kind: str) -> None:
+        """Canvas emitted tool_changed (e.g. after Escape or drawing completion)."""
+        for btn in self._drawing_group.buttons():
+            btn.setChecked(btn.property("drawing_tool") == kind)
+        self._sync_line_profile_visibility(kind)
+        from probeflow.gui.tool_manager import _TOOL_HINTS
+        if hasattr(self, "_status_lbl"):
+            self._status_lbl.setText(_TOOL_HINTS.get(kind, ""))
+
+    def _on_roi_canvas_context_menu(self, roi_id: str, global_pos) -> None:
+        """Right-click on a ROI in the canvas — show a small ROI action menu."""
+        from PySide6.QtWidgets import QMenu, QInputDialog
+        roi_set = self._image_roi_set
+        roi = roi_set.get(roi_id) if roi_set else None
+        if roi is None:
+            return
+        menu = QMenu(self)
+        act_active = menu.addAction("Set Active")
+        act_active.triggered.connect(lambda: self._set_active_image_roi(roi_id))
+        act_rename = menu.addAction("Rename…")
+        act_rename.triggered.connect(lambda: self._rename_image_roi(roi_id))
+        act_delete = menu.addAction("Delete")
+        act_delete.triggered.connect(lambda: self._delete_image_roi(roi_id))
+        act_invert = menu.addAction("Invert")
+        act_invert.triggered.connect(lambda: self._invert_image_roi(roi_id))
+        menu.exec(global_pos)
+
+    # ── ROI helper actions ────────────────────────────────────────────────────
+
+    def _set_active_image_roi(self, roi_id: str) -> None:
+        if self._image_roi_set is None:
+            return
+        self._image_roi_set.set_active(roi_id)
+        self._on_image_roi_set_changed()
+
+    def _rename_image_roi(self, roi_id: str) -> None:
+        from PySide6.QtWidgets import QInputDialog
+        roi_set = self._image_roi_set
+        roi = roi_set.get(roi_id) if roi_set else None
+        if roi is None:
+            return
+        new_name, ok = QInputDialog.getText(self, "Rename ROI", "New name:", text=roi.name)
+        if ok and new_name.strip():
+            roi.name = new_name.strip()
+            self._on_image_roi_set_changed()
+
+    def _delete_image_roi(self, roi_id: str) -> None:
+        if self._image_roi_set is None:
+            return
+        self._image_roi_set.remove(roi_id)
+        self._on_image_roi_set_changed()
+
+    def _delete_active_image_roi(self) -> None:
+        if self._image_roi_set is None:
+            return
+        active_id = self._image_roi_set.active_roi_id
+        if active_id is not None:
+            self._delete_image_roi(active_id)
+
+    def _invert_image_roi(self, roi_id: str) -> None:
+        roi_set = self._image_roi_set
+        roi = roi_set.get(roi_id) if roi_set else None
+        if roi is None:
+            return
+        shape = self._current_array_shape()
+        if shape is None:
+            return
+        from probeflow.core import roi as _roi_module
+        inverted = _roi_module.invert(roi, shape)
+        roi_set.add(inverted)
+        self._on_image_roi_set_changed()
+
+    def _invert_active_image_roi(self) -> None:
+        if self._image_roi_set is None:
+            return
+        active_id = self._image_roi_set.active_roi_id
+        if active_id is not None:
+            self._invert_image_roi(active_id)
+
+    def _select_nth_image_roi(self, n: int) -> None:
+        if self._image_roi_set is None:
+            return
+        rois = list(self._image_roi_set.rois)
+        if 1 <= n <= len(rois):
+            roi_id = rois[n - 1].id
+            self._image_roi_set.set_active(roi_id)
+            self._on_image_roi_set_changed()
 
     # ── ROI operation callbacks ───────────────────────────────────────────────
 
@@ -2437,20 +2600,36 @@ class ImageViewerDialog(QDialog):
         return None if arr is None else arr.shape
 
     def _set_selection_tool(self, kind: str) -> None:
-        kind = str(kind or "none")
-        for btn in self._selection_group.buttons():
-            if btn.property("selection_tool") == kind:
-                btn.setChecked(True)
-                break
-        self._zoom_lbl.set_selection_tool(kind)
+        """Compat shim: delegates to _set_drawing_tool, mapping 'none' → 'pan'."""
+        self._set_drawing_tool(kind if kind and kind != "none" else "pan")
+
+    def _set_drawing_tool(self, kind: str) -> None:
+        """Activate a drawing tool both on the canvas and in the toolbar."""
+        kind = str(kind or "pan")
+        from probeflow.gui.tool_manager import TOOLS
+        if kind not in TOOLS:
+            kind = "pan"
+        for btn in self._drawing_group.buttons():
+            btn.setChecked(btn.property("drawing_tool") == kind)
+        self._zoom_lbl.set_tool(kind)
         self._sync_line_profile_visibility(kind)
+        from probeflow.gui.tool_manager import _TOOL_HINTS
+        if hasattr(self, "_status_lbl"):
+            self._status_lbl.setText(_TOOL_HINTS.get(kind, ""))
 
     def _on_selection_tool_clicked(self, button) -> None:
+        """Compat shim kept for any lingering external references."""
+        self._on_drawing_tool_clicked(button)
+
+    def _on_drawing_tool_clicked(self, button) -> None:
         if self._set_zero_plane_btn.isChecked():
             self._set_zero_plane_btn.setChecked(False)
-        kind = button.property("selection_tool") or "none"
-        self._zoom_lbl.set_selection_tool(kind)
+        kind = button.property("drawing_tool") or "pan"
+        self._zoom_lbl.set_tool(kind)
         self._sync_line_profile_visibility(kind)
+        from probeflow.gui.tool_manager import _TOOL_HINTS
+        if hasattr(self, "_status_lbl"):
+            self._status_lbl.setText(_TOOL_HINTS.get(kind, ""))
 
     def _sync_line_profile_visibility(self, kind: str | None = None) -> None:
         if not hasattr(self, "_line_profile_panel"):

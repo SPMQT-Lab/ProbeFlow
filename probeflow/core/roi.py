@@ -864,6 +864,34 @@ def combine(
     return _shapely_to_roi(result, name=f"{mode}_{names}")
 
 
+def translate(roi: "ROI", dx: float, dy: float) -> "ROI":
+    """Return a copy of *roi* with all coordinates shifted by (dx, dy) pixels."""
+    g = roi.geometry
+    k = roi.kind
+    if k == "rectangle":
+        new_g = {**g, "x": g["x"] + dx, "y": g["y"] + dy}
+    elif k == "ellipse":
+        new_g = {**g, "cx": g["cx"] + dx, "cy": g["cy"] + dy}
+    elif k in ("polygon", "freehand"):
+        new_g = {"vertices": [[v[0] + dx, v[1] + dy] for v in g.get("vertices", [])]}
+    elif k == "line":
+        new_g = {**g, "x1": g["x1"] + dx, "y1": g["y1"] + dy,
+                 "x2": g["x2"] + dx, "y2": g["y2"] + dy}
+    elif k == "point":
+        new_g = {**g, "x": g["x"] + dx, "y": g["y"] + dy}
+    elif k == "multipolygon":
+        new_comps = []
+        for comp in g.get("components", []):
+            ext = [[v[0] + dx, v[1] + dy] for v in comp.get("exterior", [])]
+            holes = [[[v[0] + dx, v[1] + dy] for v in h] for h in comp.get("holes", [])]
+            new_comps.append({"exterior": ext, "holes": holes})
+        new_g = {"components": new_comps}
+    else:
+        new_g = dict(g)
+    return ROI(id=roi.id, name=roi.name, kind=roi.kind, geometry=new_g,
+               coord_system=roi.coord_system, linked_file=roi.linked_file)
+
+
 # ── ROISet ────────────────────────────────────────────────────────────────────
 
 @dataclass

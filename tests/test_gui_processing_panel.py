@@ -92,18 +92,16 @@ def test_viewer_dialog_keeps_standard_processing_visible(qapp, monkeypatch):
     assert dlg._processing_panel.isHidden() is False
     assert not hasattr(dlg, "_set_zero_btn")
     assert not hasattr(dlg, "_selection_widget")
-    assert hasattr(dlg, "_selection_group")
+    assert hasattr(dlg, "_drawing_group")
     labels = {
-        btn.property("selection_tool"): btn.text()
-        for btn in dlg._selection_group.buttons()
+        btn.property("drawing_tool"): btn.text()
+        for btn in dlg._drawing_group.buttons()
     }
-    assert labels == {
-        "none": "Pointer",
-        "rectangle": "Rect.",
-        "ellipse": "Ellipse",
-        "polygon": "Polygon",
-        "line": "Line",
-    }
+    assert set(labels.keys()) == {"pan", "rectangle", "ellipse", "polygon",
+                                   "freehand", "line", "point"}
+    assert labels["pan"] == "✋ Pan"
+    assert labels["rectangle"] == "▭ Rect"
+    assert labels["line"] == "— Line"
     assert dlg._set_zero_plane_btn.isHidden() is False
     assert dlg._advanced_widget.isHidden() is True
     assert dlg._spec_overlay_widget.isHidden() is True
