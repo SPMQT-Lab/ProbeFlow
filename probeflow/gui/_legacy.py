@@ -2360,6 +2360,7 @@ class ImageViewerDialog(QDialog):
         self._save_image_roi_set()
         if hasattr(self, "_roi_dock"):
             self._roi_dock.refresh(self._image_roi_set)
+        self._sync_line_profile_visibility()
 
     def _on_pixel_hovered(self, col: int, row: int, val) -> None:
         if not hasattr(self, "_coord_lbl"):
@@ -2631,13 +2632,29 @@ class ImageViewerDialog(QDialog):
         if hasattr(self, "_status_lbl"):
             self._status_lbl.setText(_TOOL_HINTS.get(kind, ""))
 
+    def _active_line_roi_id(self) -> "str | None":
+        """Return the active ROI id if it is a line ROI, else None."""
+        if not self._image_roi_set:
+            return None
+        active_id = self._image_roi_set.active_roi_id
+        if not active_id:
+            return None
+        roi = self._image_roi_set.get(active_id)
+        return active_id if (roi and roi.kind == "line") else None
+
     def _sync_line_profile_visibility(self, kind: str | None = None) -> None:
         if not hasattr(self, "_line_profile_panel"):
             return
-        is_line = (kind or self._zoom_lbl.selection_tool()) == "line"
+        tool_is_line = (kind or self._zoom_lbl.selection_tool()) == "line"
+        active_line_id = self._active_line_roi_id()
+        is_line = tool_is_line or (active_line_id is not None)
         self._line_profile_panel.setVisible(is_line)
         if is_line:
-            self._refresh_line_profile_from_selection()
+            if active_line_id is not None:
+                # Prefer the ROI-based line profile over the old selection geometry
+                self._on_roi_line_profile(active_line_id)
+            else:
+                self._refresh_line_profile_from_selection()
         else:
             self._line_profile_geometry = None
             self._line_profile_panel.show_empty(theme=self._t)
