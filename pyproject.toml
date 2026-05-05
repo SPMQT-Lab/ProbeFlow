@@ -36,3 +36,29 @@ include = ["probeflow", "probeflow.*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = [
+  "src/file_cushions",
+  "anonymised_testdata",
+  "data",
+]
+
+[tool.ruff.lint]
+# Start permissive: only catch real bugs (pyflakes). Expand the rule set
+# once the codebase has been through a format pass. See CONTRIBUTING.md.
+select = ["F"]
+ignore = [
+  "F401",  # unused-import — many compatibility shims re-export deliberately
+  "F403",  # star-import — used in compatibility shims
+  "F405",  # name may be undefined / from star-import
+]
+
+[tool.ruff.lint.per-file-ignores]
+"probeflow/__init__.py" = ["F401", "F403"]
+"probeflow/*/__init__.py" = ["F401", "F403"]
+"probeflow/cli/__init__.py" = ["F401", "F403"]
+"probeflow/gui/__init__.py" = ["F401", "F403"]
+"probeflow/gui/processing.py" = ["F401", "F403"]
