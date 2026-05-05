@@ -258,7 +258,6 @@ class ThumbnailGrid(QWidget):
 
         cols = self._calc_cols()
         self._current_cols = cols
-        dark = True  # will be updated via apply_theme if needed
         for entry in entries:
             if isinstance(entry, VertFile):
                 card = SpecCard(entry, self._t)

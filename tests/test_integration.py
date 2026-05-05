@@ -22,7 +22,7 @@ from probeflow.core.scan_loader import load_scan
 class TestDatToPng:
     def test_produces_output_files(self, first_sample_dat, tmp_path):
         out_dir = tmp_path / "out"
-        rep = dat_to_hdr_imgs(first_sample_dat, out_dir)
+        dat_to_hdr_imgs(first_sample_dat, out_dir)
 
         assert (out_dir / "hdr.txt").exists(), "hdr.txt should be created"
         assert (out_dir / "pngs").is_dir(), "pngs/ subdirectory should exist"
@@ -63,7 +63,7 @@ class TestDatToPng:
         assert not errors, f"Conversion failed for: {errors}"
 
     def test_custom_clip_levels(self, first_sample_dat, tmp_path):
-        rep = dat_to_hdr_imgs(first_sample_dat, tmp_path / "out", clip_low=5.0, clip_high=95.0)
+        dat_to_hdr_imgs(first_sample_dat, tmp_path / "out", clip_low=5.0, clip_high=95.0)
         pngs = list((tmp_path / "out" / "pngs").glob("*.png"))
         assert len(pngs) > 0
 

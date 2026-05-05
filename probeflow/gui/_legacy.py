@@ -41,7 +41,7 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import (
     QAction, QBrush, QColor, QCursor, QFont, QImage, QMovie, QPainter, QPen,
-    QPixmap, QWheelEvent,
+    QPixmap, QResizeEvent, QWheelEvent,
 )
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QComboBox,
@@ -1158,10 +1158,9 @@ class FFTViewerDialog(QDialog):
             w_nm = float(self._scan_range_m[0]) * 1e9
             h_nm = float(self._scan_range_m[1]) * 1e9
             dx_nm = w_nm / Nx if Nx > 0 else 1.0
-            dy_nm = h_nm / Ny if Ny > 0 else 1.0
         except Exception:
             w_nm = h_nm = float(Nx)
-            dx_nm = dy_nm = 1.0
+            dx_nm = 1.0
         dqx = 1.0 / w_nm if w_nm > 0 else 0.0
         q_ny = 1.0 / (2.0 * dx_nm) if dx_nm > 0 else 0.0
         self._info_lbl.setText(
@@ -2683,7 +2682,7 @@ class ImageViewerDialog(QDialog):
             counts, edges = np.histogram(flat, bins=n_bins)
             centres = 0.5 * (edges[:-1] + edges[1:])
             with open(out_path, "w", encoding="utf-8") as fh:
-                fh.write(f"# ProbeFlow histogram export\n")
+                fh.write("# ProbeFlow histogram export\n")
                 fh.write(f"# source: {entry.stem}\n")
                 fh.write(f"# channel: {self._ch_cb.currentText()}\n")
                 fh.write(f"# n_samples: {flat.size}\n")

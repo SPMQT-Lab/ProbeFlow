@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from probeflow.core.scan_model import Scan
+    from probeflow.processing.state import ProcessingState
 
 # Keys in the GUI processing state dict that correspond to numeric data
 # transforms (as opposed to display-only settings like grain overlays,

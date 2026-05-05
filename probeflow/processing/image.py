@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import numpy as np
 from PIL import Image

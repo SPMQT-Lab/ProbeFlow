@@ -46,7 +46,7 @@ def _make_scan(
     from probeflow.core.scan_model import Scan
     rng = np.random.default_rng(42)
     planes = [rng.standard_normal(shape) for _ in range(n_planes)]
-    plane_names = [f"Z fwd", "Z bwd"][:n_planes]
+    plane_names = ["Z fwd", "Z bwd"][:n_planes]
     plane_units = ["m", "m"][:n_planes]
     return Scan(
         planes=planes,

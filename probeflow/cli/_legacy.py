@@ -1211,7 +1211,7 @@ def _cmd_fft_spectrum(args) -> int:
         # Print the top-5 peaks by magnitude
         flat = mag.ravel()
         top_idx = flat.argsort()[::-1][:5]
-        print(f"# qx (nm⁻¹)  qy (nm⁻¹)  magnitude")
+        print("# qx (nm⁻¹)  qy (nm⁻¹)  magnitude")
         for idx in top_idx:
             iy, ix = divmod(int(idx), mag.shape[1])
             print(f"{float(qx[ix]):.4f}\t{float(qy[iy]):.4f}\t{float(flat[idx]):.4e}")
