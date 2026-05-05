@@ -2064,7 +2064,16 @@ class ImageViewerDialog(QDialog):
         # display array: raw with processing applied (no grain overlay — that's visual only)
         if self._raw_arr is not None and self._processing:
             try:
-                self._display_arr = _apply_processing(self._raw_arr, self._processing)
+                try:
+                    self._display_arr = _apply_processing(
+                        self._raw_arr,
+                        self._processing,
+                        roi_set=self._image_roi_set,
+                    )
+                except TypeError as exc:
+                    if "roi_set" not in str(exc):
+                        raise
+                    self._display_arr = _apply_processing(self._raw_arr, self._processing)
             except Exception:
                 self._display_arr = self._raw_arr
         else:
@@ -2510,12 +2519,16 @@ class ImageViewerDialog(QDialog):
 
     def _on_roi_bg_subtract_fit(self, roi_id: str) -> None:
         self._push_proc_undo_snapshot()
-        self._processing["plane_bg_roi_fit"] = roi_id
+        self._processing.setdefault("bg_order", 1)
+        self._processing["background_fit_roi_id"] = roi_id
+        self._processing.pop("background_fit_rect", None)
+        self._processing.pop("background_fit_geometry", None)
         self._refresh_processing_display()
 
     def _on_roi_bg_subtract_exclude(self, roi_id: str) -> None:
         self._push_proc_undo_snapshot()
-        self._processing["plane_bg_roi_exclude"] = roi_id
+        self._processing.setdefault("bg_order", 1)
+        self._processing["background_exclude_roi_id"] = roi_id
         self._refresh_processing_display()
 
     def _on_roi_fft(self, roi_id: str) -> None:
@@ -2621,7 +2634,7 @@ class ImageViewerDialog(QDialog):
         dlg.exec()
 
     def _current_array_shape(self) -> tuple[int, int] | None:
-        arr = self._raw_arr if self._raw_arr is not None else self._display_arr
+        arr = self._display_arr if self._display_arr is not None else self._raw_arr
         return None if arr is None else arr.shape
 
     def _set_selection_tool(self, kind: str) -> None:
@@ -3253,6 +3266,8 @@ class ImageViewerDialog(QDialog):
                 "periodic_notches",
                 "periodic_notch_radius",
                 "geometric_ops",
+                "background_fit_roi_id",
+                "background_exclude_roi_id",
             )
             if key in self._processing
         }
@@ -3411,6 +3426,7 @@ class ImageViewerDialog(QDialog):
                         ),
                         export_kind="viewer_png",
                         output_path=out_path,
+                        roi_set=self._image_roi_set,
                     )
                 except Exception:
                     pass
@@ -3477,6 +3493,7 @@ class ImageViewerDialog(QDialog):
         menu.exec(pos)
 
     def _on_geometric_op(self, op_name: str) -> None:
+        self._transform_image_roi_set_for_display_op(op_name)
         ops = list(self._processing.get("geometric_ops") or [])
         ops.append({"op": op_name, "params": {}})
         self._processing["geometric_ops"] = ops
@@ -3491,10 +3508,40 @@ class ImageViewerDialog(QDialog):
         )
         if not ok:
             return
+        self._transform_image_roi_set_for_display_op(
+            "rotate_arbitrary",
+            {"angle_degrees": angle},
+        )
         ops = list(self._processing.get("geometric_ops") or [])
         ops.append({"op": "rotate_arbitrary", "params": {"angle_degrees": angle}})
         self._processing["geometric_ops"] = ops
         self._refresh_processing_display()
+
+    def _transform_image_roi_set_for_display_op(
+        self,
+        op_name: str,
+        params: dict | None = None,
+    ) -> None:
+        """Keep GUI ROI coordinates in the same frame as display transforms."""
+        if self._image_roi_set is None or not self._image_roi_set.rois:
+            return
+        shape = self._current_array_shape()
+        if shape is None:
+            return
+        params = params or {}
+        invalidated = self._image_roi_set.transform_all(op_name, params, shape)
+        if invalidated:
+            invalid = set(invalidated)
+            self._image_roi_set.rois = [
+                roi for roi in self._image_roi_set.rois if roi.id not in invalid
+            ]
+            if self._image_roi_set.active_roi_id in invalid:
+                self._image_roi_set.active_roi_id = None
+            if hasattr(self, "_status_lbl"):
+                self._status_lbl.setText(
+                    f"{op_name} invalidated {len(invalidated)} ROI(s); removed them."
+                )
+        self._on_image_roi_set_changed()
 
     def _on_export_line_profile_csv(self):
         prof = self._line_profile_panel.profile_data()

@@ -179,6 +179,7 @@ def resolve_thumbnail_plane_index(
 def _apply_processing(
     arr: np.ndarray,
     processing: dict,
+    roi_set=None,
 ) -> np.ndarray:
     """Apply the array-transform portion of the processing pipeline.
 
@@ -188,7 +189,11 @@ def _apply_processing(
     array; the input is never modified.
     """
     from probeflow.processing.state import apply_processing_state
-    return apply_processing_state(arr, processing_state_from_gui(processing or {}))
+    return apply_processing_state(
+        arr,
+        processing_state_from_gui(processing or {}),
+        roi_set=roi_set,
+    )
 
 
 def render_scan_thumbnail(

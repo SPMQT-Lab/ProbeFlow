@@ -223,6 +223,27 @@ class TestGuiConversion:
         assert len(state.steps) == 1
         assert "fit_rect" not in state.steps[0].params
 
+    def test_background_roi_ids_captured_for_polynomial_fit(self):
+        state = processing_state_from_gui({
+            "bg_order": 1,
+            "background_fit_roi_id": "fit-id",
+            "background_exclude_roi_id": "exclude-id",
+        })
+        assert len(state.steps) == 1
+        assert state.steps[0].op == "plane_bg"
+        assert state.steps[0].params["fit_roi_id"] == "fit-id"
+        assert state.steps[0].params["exclude_roi_id"] == "exclude-id"
+
+    def test_legacy_background_roi_keys_captured(self):
+        state = processing_state_from_gui({
+            "bg_order": 1,
+            "plane_bg_roi_fit": "fit-id",
+            "plane_bg_roi_exclude": "exclude-id",
+        })
+        assert len(state.steps) == 1
+        assert state.steps[0].params["fit_roi_id"] == "fit-id"
+        assert state.steps[0].params["exclude_roi_id"] == "exclude-id"
+
     def test_stm_line_background_step_tolerant_captured(self):
         state = processing_state_from_gui({"stm_line_bg": "step_tolerant"})
         assert len(state.steps) == 1

@@ -478,6 +478,90 @@ def test_line_profile_panel_empty_clears_source_title(qapp):
     assert panel._ax.get_title() == ""
 
 
+def test_viewer_transform_updates_roi_set_coordinates(qapp):
+    from probeflow.core.roi import ROI, ROISet
+    from probeflow.gui import ImageViewerDialog
+
+    roi_set = ROISet(image_id="img1")
+    roi = ROI.new("rectangle", {"x": 2.0, "y": 1.0, "width": 4.0, "height": 3.0})
+    roi_set.add(roi)
+    roi_set.set_active(roi.id)
+
+    dlg = ImageViewerDialog.__new__(ImageViewerDialog)
+    dlg._image_roi_set = roi_set
+    dlg._display_arr = np.zeros((10, 20))
+    dlg._raw_arr = None
+    refreshed = []
+    dlg._on_image_roi_set_changed = lambda: refreshed.append(True)
+
+    dlg._transform_image_roi_set_for_display_op("rotate_90_cw")
+
+    moved = roi_set.get(roi.id)
+    assert moved.geometry["x"] == pytest.approx(6.0)
+    assert moved.geometry["y"] == pytest.approx(2.0)
+    assert moved.geometry["width"] == pytest.approx(3.0)
+    assert moved.geometry["height"] == pytest.approx(4.0)
+    assert roi_set.active_roi_id == roi.id
+    assert refreshed == [True]
+
+
+def test_viewer_arbitrary_transform_removes_rois(qapp):
+    from probeflow.core.roi import ROI, ROISet
+    from probeflow.gui import ImageViewerDialog
+
+    class FakeStatus:
+        def __init__(self):
+            self.text = ""
+
+        def setText(self, text):
+            self.text = text
+
+    roi_set = ROISet(image_id="img1")
+    roi = ROI.new("point", {"x": 2.0, "y": 1.0})
+    roi_set.add(roi)
+    roi_set.set_active(roi.id)
+
+    dlg = ImageViewerDialog.__new__(ImageViewerDialog)
+    dlg._image_roi_set = roi_set
+    dlg._display_arr = np.zeros((10, 20))
+    dlg._raw_arr = None
+    dlg._status_lbl = FakeStatus()
+    dlg._on_image_roi_set_changed = lambda: None
+
+    dlg._transform_image_roi_set_for_display_op("rotate_arbitrary", {"angle_degrees": 30.0})
+
+    assert roi_set.rois == []
+    assert roi_set.active_roi_id is None
+    assert "invalidated 1 ROI" in dlg._status_lbl.text
+
+
+def test_viewer_refresh_display_array_passes_roi_set(qapp, monkeypatch):
+    from probeflow.core.roi import ROISet
+    from probeflow.gui import ImageViewerDialog
+    import probeflow.gui._legacy as gui_mod
+
+    roi_set = ROISet(image_id="img1")
+    seen = {}
+
+    def fake_apply(arr, processing, roi_set=None):
+        seen["roi_set"] = roi_set
+        return arr + 1.0
+
+    monkeypatch.setattr(gui_mod, "_apply_processing", fake_apply)
+
+    dlg = ImageViewerDialog.__new__(ImageViewerDialog)
+    dlg._display_arr = None
+    dlg._raw_arr = np.zeros((2, 2))
+    dlg._processing = {"bg_order": 1, "background_fit_roi_id": "roi-id"}
+    dlg._image_roi_set = roi_set
+    dlg._reset_zoom_on_next_pixmap = False
+
+    dlg._refresh_display_array()
+
+    assert seen["roi_set"] is roi_set
+    np.testing.assert_allclose(dlg._display_arr, np.ones((2, 2)))
+
+
 def test_viewer_dialog_initializes_panel_from_thumbnail_processing(qapp, monkeypatch):
     from probeflow.gui import ImageViewerDialog, ProcessingControlPanel, SxmFile
 

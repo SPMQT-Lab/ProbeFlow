@@ -22,6 +22,8 @@ NUMERIC_PROC_KEYS: tuple[str, ...] = (
     "bg_step_tolerance",
     "background_fit_rect",
     "background_fit_geometry",
+    "background_fit_roi_id",
+    "background_exclude_roi_id",
     "stm_line_bg",
     "facet_level",
     "smooth_sigma",
@@ -111,6 +113,14 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
         }
         fit_rect = gui_state.get("background_fit_rect")
         fit_geometry = gui_state.get("background_fit_geometry")
+        fit_roi_id = (
+            gui_state.get("background_fit_roi_id")
+            or gui_state.get("plane_bg_roi_fit")
+        )
+        exclude_roi_id = (
+            gui_state.get("background_exclude_roi_id")
+            or gui_state.get("plane_bg_roi_exclude")
+        )
         if fit_rect is not None:
             try:
                 fit_rect_tuple = tuple(int(v) for v in fit_rect)
@@ -120,6 +130,10 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
                 pass
         if _area_geometry(fit_geometry):
             params["fit_geometry"] = dict(fit_geometry)
+        if fit_roi_id:
+            params["fit_roi_id"] = str(fit_roi_id)
+        if exclude_roi_id:
+            params["exclude_roi_id"] = str(exclude_roi_id)
         _append_step(ProcessingStep("plane_bg", params))
 
     if gui_state.get("stm_line_bg") == "step_tolerant":

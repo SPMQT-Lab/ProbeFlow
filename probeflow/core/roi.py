@@ -292,6 +292,12 @@ class ROI:
         rotate_arbitrary
             Always returns None.
         """
+        operation = {
+            "rotate_90_cw": "rot90_cw",
+            "rotate_180": "rot180",
+            "rotate_270_cw": "rot270_cw",
+        }.get(operation, operation)
+
         if operation == "rotate_arbitrary":
             return None
 
@@ -456,31 +462,36 @@ class ROI:
 
 def _geometry_to_serialisable(geometry: dict[str, Any]) -> dict[str, Any]:
     """Ensure geometry dict values are JSON-serialisable."""
-    out: dict[str, Any] = {}
-    for k, v in geometry.items():
-        if isinstance(v, list):
-            out[k] = [[float(c) for c in item] if hasattr(item, "__iter__")
-                       else float(item) for item in v]
-        elif isinstance(v, (int, float)):
-            out[k] = float(v)
-        else:
-            out[k] = v
-    return out
+    return {str(k): _jsonable_geometry_value(v) for k, v in geometry.items()}
+
+
+def _jsonable_geometry_value(value: Any) -> Any:
+    """Recursively convert ROI geometry values to plain JSON scalars/lists/dicts."""
+    if isinstance(value, dict):
+        return {str(k): _jsonable_geometry_value(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_jsonable_geometry_value(v) for v in value]
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, (int, float)):
+        return float(value)
+    return value
 
 
 def _geometry_from_serialisable(geometry: dict[str, Any]) -> dict[str, Any]:
     """Restore native types from a JSON-decoded geometry dict."""
-    out: dict[str, Any] = {}
-    for k, v in geometry.items():
-        if k == "vertices" and isinstance(v, list):
-            out[k] = [[float(c) for c in item] for item in v]
-        elif isinstance(v, (int, float)):
-            out[k] = float(v)
-        elif isinstance(v, list):
-            out[k] = [float(item) for item in v]
-        else:
-            out[k] = v
-    return out
+    return {str(k): _native_geometry_value(v) for k, v in geometry.items()}
+
+
+def _native_geometry_value(value: Any) -> Any:
+    """Restore numeric JSON geometry leaves to floats without flattening dict lists."""
+    if isinstance(value, dict):
+        return {str(k): _native_geometry_value(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_native_geometry_value(v) for v in value]
+    if isinstance(value, (int, float)):
+        return float(value)
+    return value
 
 
 # ── Legacy geometry compat ────────────────────────────────────────────────────

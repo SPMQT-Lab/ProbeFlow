@@ -98,6 +98,18 @@ class TestROISerialisation:
         restored = ROI.from_dict(roi.to_dict())
         assert restored.linked_file is None
 
+    def test_multipolygon_round_trip(self):
+        roi = ROI.new("multipolygon", {
+            "components": [{
+                "exterior": [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
+                "holes": [[[2.0, 2.0], [4.0, 2.0], [4.0, 4.0], [2.0, 4.0]]],
+            }],
+        }, name="donut")
+        restored = ROI.from_dict(roi.to_dict())
+        assert restored.kind == "multipolygon"
+        assert restored.geometry["components"][0]["exterior"][2] == [10.0, 10.0]
+        assert restored.geometry["components"][0]["holes"][0][0] == [2.0, 2.0]
+
 
 # ── to_mask ───────────────────────────────────────────────────────────────────
 

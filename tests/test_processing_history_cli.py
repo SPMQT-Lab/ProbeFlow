@@ -11,6 +11,7 @@ import pytest
 from probeflow.cli import (
     _Op,
     _apply_to_plane,
+    _load_named_roi,
     _op_align_rows,
     _op_fft,
     _op_plane_bg,
@@ -21,6 +22,7 @@ from probeflow.cli import (
     _record_op,
     main,
 )
+from probeflow.core.roi import ROI, ROISet
 from probeflow.core.scan_model import Scan
 
 
@@ -32,6 +34,27 @@ class TestOp:
         arr = np.ones((4, 4))
         result = op(arr)
         assert np.all(result == 2.0)
+
+
+class TestCliRoiSidecarLookup:
+    def test_load_named_roi_defaults_to_gui_rois_sidecar(self, tmp_path):
+        scan_path = tmp_path / "scan.sxm"
+        scan_path.write_bytes(b"")
+        roi = ROI.new("rectangle", {"x": 1.0, "y": 2.0, "width": 3.0, "height": 4.0},
+                      name="terrace")
+        roi_set = ROISet(image_id=str(scan_path))
+        roi_set.add(roi)
+
+        import json
+        (tmp_path / "scan.rois.json").write_text(
+            json.dumps(roi_set.to_dict()),
+            encoding="utf-8",
+        )
+
+        loaded = _load_named_roi(scan_path, "terrace")
+
+        assert loaded is not None
+        assert loaded.id == roi.id
 
     def test_carries_name_and_params(self):
         op = _Op("plane_bg", {"order": 1}, lambda a: a)

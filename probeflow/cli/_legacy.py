@@ -900,31 +900,35 @@ def _cmd_classify(args) -> int:
 
 
 def _load_named_roi(input_path: "Path", name_or_id: str, sidecar: "Path | None" = None):
-    """Load a named / UUID ROI from the scan's provenance sidecar.
+    """Load a named / UUID ROI from the scan's ROI or provenance sidecar.
 
     Returns the ROI object or None (error already logged).
     """
     import json as _json
     if sidecar is None:
-        sidecar = input_path.with_suffix("").with_suffix(".provenance.json")
-        if not sidecar.exists():
-            stem = input_path.stem
-            sidecar = input_path.parent / f"{stem}.provenance.json"
+        stem_path = input_path.with_suffix("")
+        candidates = [
+            stem_path.with_suffix(".rois.json"),
+            stem_path.with_suffix(".provenance.json"),
+            input_path.parent / f"{input_path.stem}.rois.json",
+            input_path.parent / f"{input_path.stem}.provenance.json",
+        ]
+        sidecar = next((p for p in candidates if p.exists()), candidates[0])
     if not sidecar.exists():
-        log.error("No provenance sidecar found for %s (tried %s)", input_path, sidecar)
+        log.error("No ROI/provenance sidecar found for %s (tried %s)", input_path, sidecar)
         return None
     try:
         data = _json.loads(sidecar.read_text(encoding="utf-8"))
     except Exception as exc:
         log.error("Could not read sidecar %s: %s", sidecar, exc)
         return None
-    rois_data = data.get("rois")
-    if not rois_data:
+    roi_set_data = data if isinstance(data.get("rois"), list) else data.get("rois")
+    if not roi_set_data:
         log.error("Sidecar %s contains no ROI data", sidecar)
         return None
     from probeflow.core.roi import ROISet
     try:
-        roi_set = ROISet.from_dict(rois_data)
+        roi_set = ROISet.from_dict(roi_set_data)
     except Exception as exc:
         log.error("Could not deserialise ROIs from sidecar: %s", exc)
         return None
@@ -1775,7 +1779,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Inline rectangular region to exclude from the fit")
     # Sidecar for named ROI lookup
     plane_bg.add_argument("--sidecar", type=Path, default=None,
-        help="Explicit .provenance.json path (default: <input>.provenance.json)")
+        help="Explicit ROI/provenance sidecar .json path (default: <input>.rois.json, then provenance)")
     plane_bg.set_defaults(func=_cmd_plane_bg)
 
     align = sub.add_parser("align-rows",
@@ -2047,7 +2051,7 @@ def _build_parser() -> argparse.ArgumentParser:
     hist.add_argument("--roi", type=str, default=None, metavar="NAME_OR_ID",
         help="Use a persisted ROI from the scan sidecar by name or UUID")
     hist.add_argument("--sidecar", type=Path, default=None,
-        help="Explicit sidecar .json path (default: <input>.provenance.json)")
+        help="Explicit ROI/provenance sidecar .json path (default: <input>.rois.json, then provenance)")
     hist.add_argument("--verbose", action="store_true")
     hist.set_defaults(func=_cmd_histogram)
 
@@ -2074,7 +2078,7 @@ def _build_parser() -> argparse.ArgumentParser:
     fft_spec.add_argument("--roi", type=str, default=None, metavar="NAME_OR_ID",
         help="Use a persisted ROI from the scan sidecar by name or UUID")
     fft_spec.add_argument("--sidecar", type=Path, default=None,
-        help="Explicit sidecar .json path (default: <input>.provenance.json)")
+        help="Explicit ROI/provenance sidecar .json path (default: <input>.rois.json, then provenance)")
     fft_spec.add_argument("--colormap", default="gray")
     fft_spec.add_argument("--verbose", action="store_true")
     fft_spec.set_defaults(func=_cmd_fft_spectrum)
