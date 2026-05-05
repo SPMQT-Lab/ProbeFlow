@@ -138,6 +138,13 @@ def segment_particles(
     if pixel_size_m <= 0:
         raise ValueError("pixel_size_m must be > 0")
 
+    # Constant or empty planes carry no features. OpenCV's Otsu threshold on
+    # a flat image is undefined (newer versions return a full-image foreground
+    # mask, which surfaces as a phantom whole-image particle).
+    finite = arr[np.isfinite(arr)] if arr.size else arr
+    if finite.size == 0 or float(finite.max()) == float(finite.min()):
+        return []
+
     cv2 = _cv()
     Ny, Nx = arr.shape
     u8 = _to_uint8(arr, clip_low=clip_low, clip_high=clip_high)

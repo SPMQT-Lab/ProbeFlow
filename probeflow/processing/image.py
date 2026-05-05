@@ -436,7 +436,12 @@ def _modal_shift(values: np.ndarray, *, bins: int = 128) -> Optional[float]:
         return None
     if vmin == vmax:
         return vmin
-    hist, edges = np.histogram(values, bins=min(bins, max(8, values.size)))
+    try:
+        # numpy>=2 raises ValueError when (vmax-vmin)/n_bins underflows; fall
+        # back to the median for residuals whose range is below float64 precision.
+        hist, edges = np.histogram(values, bins=min(bins, max(8, values.size)))
+    except ValueError:
+        return float(np.nanmedian(values))
     if hist.size == 0 or int(hist.max()) == 0:
         return float(np.nanmedian(values))
     peak = int(np.argmax(hist))
