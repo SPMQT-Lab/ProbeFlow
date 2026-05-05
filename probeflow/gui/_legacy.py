@@ -232,6 +232,8 @@ from probeflow.gui.viewer.widgets import (
     ScaleBarWidget,
     _ZoomLabel,
 )
+from probeflow.gui.image_canvas import ImageCanvas
+from probeflow.gui.roi_manager_dock import ROIManagerDock
 
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -1431,7 +1433,7 @@ class ImageViewerDialog(QDialog):
         self._scroll_area = QScrollArea()
         self._scroll_area.setWidgetResizable(False)
         self._scroll_area.setAlignment(Qt.AlignCenter)
-        self._zoom_lbl = _ZoomLabel()
+        self._zoom_lbl = ImageCanvas()
         self._zoom_lbl.setText("Loading…")
 
         toolbar = QHBoxLayout()
@@ -1451,6 +1453,13 @@ class ImageViewerDialog(QDialog):
         self._zoom_reset_btn.clicked.connect(self._zoom_lbl.reset_zoom)
         toolbar.addWidget(self._zoom_reset_btn)
 
+        self._zoom_fit_btn = QPushButton("Fit")
+        self._zoom_fit_btn.setFixedSize(36, 24)
+        self._zoom_fit_btn.setFont(QFont("Helvetica", 9))
+        self._zoom_fit_btn.setToolTip("Fit image to available space")
+        self._zoom_fit_btn.clicked.connect(self._zoom_lbl.fit_to_view)
+        toolbar.addWidget(self._zoom_fit_btn)
+
         self._zoom_in_btn = QPushButton("+")
         self._zoom_in_btn.setFixedSize(28, 24)
         self._zoom_in_btn.setFont(QFont("Helvetica", 11))
@@ -1469,6 +1478,11 @@ class ImageViewerDialog(QDialog):
         self._ch_cb.setMinimumWidth(170)
         self._ch_cb.currentIndexChanged.connect(self._on_channel_changed)
         toolbar.addWidget(self._ch_cb)
+
+        self._coord_lbl = QLabel("—")
+        self._coord_lbl.setFont(QFont("Helvetica", 8))
+        self._coord_lbl.setMinimumWidth(140)
+        toolbar.addWidget(self._coord_lbl)
 
         zoom_hint = QLabel("Ctrl+scroll to zoom")
         zoom_hint.setFont(QFont("Helvetica", 8))
@@ -1502,6 +1516,11 @@ class ImageViewerDialog(QDialog):
                 btn.setChecked(True)
             selection_bar.addWidget(btn)
         self._selection_group.buttonClicked.connect(self._on_selection_tool_clicked)
+        # Phase 4b: canvas drawing tools not yet implemented
+        for _btn in self._selection_group.buttons():
+            if (_btn.property("selection_tool") or "none") != "none":
+                _btn.setEnabled(False)
+                _btn.setToolTip(_btn.toolTip() + " (available in Phase 4b)")
         clear_selection_btn = QPushButton("Clear")
         clear_selection_btn.setFont(QFont("Helvetica", 8))
         clear_selection_btn.setFixedHeight(24)
@@ -1851,6 +1870,7 @@ class ImageViewerDialog(QDialog):
         self._zoom_lbl.selection_changed.connect(self._on_selection_changed)
         self._zoom_lbl.pixmap_resized.connect(self._on_pixmap_resized)
         self._zoom_lbl.context_menu_requested.connect(self._on_image_context_menu)
+        self._zoom_lbl.pixel_hovered.connect(self._on_pixel_hovered)
         self._line_profile_panel.export_csv_clicked.connect(self._on_export_line_profile_csv)
 
         self._status_lbl = QLabel("")
@@ -1866,7 +1886,29 @@ class ImageViewerDialog(QDialog):
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 0)
         splitter.setCollapsible(1, False)
-        root.addWidget(splitter, 1)
+
+        # Embed splitter in a QMainWindow so we can host the ROI dock widget
+        self._viewer_main = QMainWindow()
+        self._viewer_main.setWindowFlags(Qt.Widget)
+        self._viewer_main.setCentralWidget(splitter)
+        self._viewer_main.setDockNestingEnabled(False)
+
+        self._image_roi_set = None
+        self._roi_dock = ROIManagerDock(
+            roi_set_getter=lambda: self._image_roi_set,
+            callbacks={
+                "on_roi_set_changed":    self._on_image_roi_set_changed,
+                "on_bg_subtract_fit":    self._on_roi_bg_subtract_fit,
+                "on_bg_subtract_exclude": self._on_roi_bg_subtract_exclude,
+                "on_fft_roi":            self._on_roi_fft,
+                "on_histogram_roi":      self._on_roi_histogram,
+                "on_line_profile_roi":   self._on_roi_line_profile,
+                "get_image_shape":       self._current_array_shape,
+            },
+            parent=self._viewer_main,
+        )
+        self._viewer_main.addDockWidget(Qt.RightDockWidgetArea, self._roi_dock)
+        root.addWidget(self._viewer_main, 1)
 
         # navigation row
         nav_row = QHBoxLayout()
@@ -1943,6 +1985,7 @@ class ImageViewerDialog(QDialog):
             self._zoom_lbl.setText("Loading…")
             self._zoom_lbl.setPixmap(QPixmap())
         self._zoom_lbl.set_markers([])
+        self._load_image_roi_set(entry)
         try:
             _scan = load_scan(entry.path)
             self._set_scan_channel_choices(_scan)
@@ -2232,6 +2275,127 @@ class ImageViewerDialog(QDialog):
             self._zoom_lbl.set_markers(self._spec_markers)
         else:
             self._zoom_lbl.set_markers([])
+
+    # ── Image-level ROI set ───────────────────────────────────────────────────
+
+    def _load_image_roi_set(self, entry: "SxmFile") -> None:
+        """Load ROIs from <stem>.rois.json sidecar if it exists, else create empty set."""
+        from probeflow.core.roi import ROISet
+        sidecar = entry.path.with_suffix("").with_suffix(".rois.json")
+        if sidecar.exists():
+            try:
+                data = json.loads(sidecar.read_text(encoding="utf-8"))
+                self._image_roi_set = ROISet.from_dict(data)
+            except Exception:
+                self._image_roi_set = ROISet(image_id=str(entry.path))
+        else:
+            self._image_roi_set = ROISet(image_id=str(entry.path))
+        self._zoom_lbl.set_roi_set(self._image_roi_set)
+        if hasattr(self, "_roi_dock"):
+            self._roi_dock.refresh(self._image_roi_set)
+
+    def _save_image_roi_set(self) -> None:
+        """Persist the current ROISet to its sidecar file."""
+        if self._image_roi_set is None:
+            return
+        entry = self._entries[self._idx]
+        sidecar = entry.path.with_suffix("").with_suffix(".rois.json")
+        try:
+            sidecar.write_text(
+                json.dumps(self._image_roi_set.to_dict(), indent=2),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
+
+    def _on_image_roi_set_changed(self) -> None:
+        self._zoom_lbl.set_roi_set(self._image_roi_set)
+        self._save_image_roi_set()
+
+    def _on_pixel_hovered(self, col: int, row: int, val) -> None:
+        if not hasattr(self, "_coord_lbl"):
+            return
+        if val is None:
+            self._coord_lbl.setText(f"({col}, {row})")
+        else:
+            scale, unit, _ = self._channel_unit()
+            val_disp = float(val) * scale
+            unit_str = f" {unit}" if unit else ""
+            self._coord_lbl.setText(f"({col}, {row}): {val_disp:.4g}{unit_str}")
+
+    # ── ROI operation callbacks ───────────────────────────────────────────────
+
+    def _on_roi_bg_subtract_fit(self, roi_id: str) -> None:
+        self._push_proc_undo_snapshot()
+        self._processing["plane_bg_roi_fit"] = roi_id
+        self._refresh_processing_display()
+
+    def _on_roi_bg_subtract_exclude(self, roi_id: str) -> None:
+        self._push_proc_undo_snapshot()
+        self._processing["plane_bg_roi_exclude"] = roi_id
+        self._refresh_processing_display()
+
+    def _on_roi_fft(self, roi_id: str) -> None:
+        roi = self._image_roi_set.get(roi_id) if self._image_roi_set else None
+        if roi is None or self._display_arr is None:
+            return
+        try:
+            from probeflow.processing.image import fft_magnitude
+            mag, _qx, _qy = fft_magnitude(self._display_arr, roi=roi)
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.information(
+                self, "FFT",
+                f"FFT computed for ROI '{roi.name}'.\n"
+                f"Output shape: {mag.shape[0]} × {mag.shape[1]}",
+            )
+        except Exception as exc:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "FFT error", str(exc))
+
+    def _on_roi_histogram(self, roi_id: str) -> None:
+        roi = self._image_roi_set.get(roi_id) if self._image_roi_set else None
+        if roi is None or self._display_arr is None:
+            return
+        mask = roi.to_mask(self._display_arr.shape[:2])
+        vals = self._display_arr[mask]
+        from PySide6.QtWidgets import QMessageBox
+        if len(vals) == 0:
+            QMessageBox.information(self, "Histogram", "No pixels in ROI.")
+            return
+        scale, unit, _ = self._channel_unit()
+        unit_str = f" {unit}" if unit else ""
+        QMessageBox.information(
+            self, f"Histogram: {roi.name}",
+            f"Pixels: {len(vals)}\n"
+            f"Min:  {float(vals.min()) * scale:.4g}{unit_str}\n"
+            f"Max:  {float(vals.max()) * scale:.4g}{unit_str}\n"
+            f"Mean: {float(vals.mean()) * scale:.4g}{unit_str}",
+        )
+
+    def _on_roi_line_profile(self, roi_id: str) -> None:
+        roi = self._image_roi_set.get(roi_id) if self._image_roi_set else None
+        if roi is None or roi.kind != "line" or self._display_arr is None:
+            return
+        try:
+            px_x, px_y = self._pixel_size_xy_m()
+            from probeflow.processing.image import line_profile
+            s_m, values = line_profile(
+                self._display_arr, roi=roi,
+                pixel_size_x_m=px_x, pixel_size_y_m=px_y,
+            )
+            scale, unit, name = self._channel_unit()
+            from probeflow.analysis.spec_plot import choose_display_unit
+            x_scale, x_unit = choose_display_unit("m", s_m)
+            self._line_profile_panel.setVisible(True)
+            self._line_profile_panel.plot_profile(
+                s_m * x_scale,
+                values * scale,
+                x_label=f"Distance [{x_unit}]",
+                y_label=f"{name} [{unit}]" if unit else name,
+                theme=self._t,
+            )
+        except Exception as exc:
+            self._line_profile_panel.show_empty(str(exc), theme=self._t)
 
     def _on_map_spectra_here(self):
         """Open the per-image spec→this-image mapping dialog."""
@@ -2745,6 +2909,7 @@ class ImageViewerDialog(QDialog):
         reset_zoom = self._reset_zoom_on_next_pixmap
         self._reset_zoom_on_next_pixmap = False
         self._zoom_lbl.set_source(pixmap, reset_zoom=reset_zoom)
+        self._zoom_lbl.set_raw_array(self._display_arr)
         self._refresh_zero_markers()
         self._refresh_scale_bar()
 
@@ -2762,11 +2927,8 @@ class ImageViewerDialog(QDialog):
     def _refresh_scale_bar(self):
         """Re-bind the scale bar + axes rulers to current scan/pixmap dimensions."""
         w_nm, h_nm = self._scan_extent_nm()
-        pix = self._zoom_lbl.pixmap()
-        if pix is not None and not pix.isNull():
-            pw, ph = pix.width(), pix.height()
-        else:
-            pw = ph = 0
+        pw = self._zoom_lbl.width()
+        ph = self._zoom_lbl.height()
         self._scale_bar.set_scan_size(w_nm, pw)
         self._ruler_top.set_extent(w_nm, pw)
         self._ruler_left.set_extent(h_nm, ph)
@@ -2778,9 +2940,7 @@ class ImageViewerDialog(QDialog):
         self._ruler_container.adjustSize()
 
     def _on_pixmap_resized(self, new_width_px: int):
-        # The signal carries width only — read height off the pixmap directly.
-        pix = self._zoom_lbl.pixmap()
-        new_h = pix.height() if pix is not None and not pix.isNull() else 0
+        new_h = self._zoom_lbl.height()
         w_nm, h_nm = self._scan_extent_nm()
         self._scale_bar.set_scan_size(w_nm, new_width_px)
         self._ruler_top.set_extent(w_nm, new_width_px)
