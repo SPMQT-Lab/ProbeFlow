@@ -936,7 +936,7 @@ class TestBrowseLayoutCleanup:
         navbar.deleteLater()
 
     def test_browse_info_panel_keeps_key_values_and_channel_slots(self, qapp, monkeypatch):
-        import probeflow.gui as gui_mod
+        import probeflow.gui.browse as browse_mod
 
         class FakePool:
             def start(self, _loader):
@@ -953,7 +953,7 @@ class TestBrowseLayoutCleanup:
             bias_mv=100.0,
             current_pa=50.0,
         )
-        monkeypatch.setattr(gui_mod, "load_scan", lambda _path: type(
+        monkeypatch.setattr(browse_mod, "load_scan", lambda _path: type(
             "ScanLike",
             (),
             {"plane_names": ["Z forward", "Current forward"], "n_planes": 2, "header": {}},
@@ -997,7 +997,8 @@ class TestBrowseLayoutCleanup:
         panel.deleteLater()
 
     def test_browse_info_load_channels_decodes_once_and_renders_raw_planes(self, qapp, monkeypatch):
-        import probeflow.gui as gui_mod
+        import probeflow.gui.browse as browse_mod
+        import probeflow.gui.workers as worker_mod
         from PIL import Image
 
         render_calls = []
@@ -1026,8 +1027,8 @@ class TestBrowseLayoutCleanup:
             render_calls.append(kwargs)
             return Image.new("RGB", (2, 2))
 
-        monkeypatch.setattr(gui_mod, "load_scan", fake_load_scan)
-        monkeypatch.setattr(gui_mod, "render_scan_image", fake_render)
+        monkeypatch.setattr(browse_mod, "load_scan", fake_load_scan)
+        monkeypatch.setattr(worker_mod, "render_scan_image", fake_render)
 
         panel = BrowseInfoPanel(THEMES["dark"], {})
         panel._pool = SyncPool()

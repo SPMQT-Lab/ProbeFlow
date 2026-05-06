@@ -106,6 +106,26 @@ def test_convert_widgets_import_from_new_module_and_gui_package(qapp):
     sidebar.close()
 
 
+def test_browse_panels_import_from_new_module_and_gui_package(qapp):
+    from probeflow.gui import BrowseInfoPanel as PublicInfoPanel
+    from probeflow.gui import BrowseToolPanel as PublicToolPanel
+    from probeflow.gui.browse import BrowseInfoPanel, BrowseToolPanel
+
+    assert PublicInfoPanel is BrowseInfoPanel
+    assert PublicToolPanel is BrowseToolPanel
+
+    tools = BrowseToolPanel(_theme(), {"browse_filter": "spectra", "colormap": "Viridis"})
+    info = BrowseInfoPanel(_theme(), {})
+
+    assert tools.get_filter_mode() == "spectra"
+    assert tools.cmap_cb.currentText() == "Viridis"
+    assert tools.align_rows_cb.currentText() == "None"
+    assert info.name_lbl.text() == "No scan selected"
+
+    tools.close()
+    info.close()
+
+
 def test_main_window_browse_layout_uses_resizable_splitters(qapp):
     from probeflow.gui import ProbeFlowWindow
 
