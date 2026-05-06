@@ -17,6 +17,7 @@ class ProcessingControlPanel(QWidget):
 
     bad_line_preview_requested = Signal()
     bad_line_preview_settings_changed = Signal()
+    stm_background_requested = Signal()
 
     QUICK_KEYS = ("align_rows", "remove_bad_lines")
 
@@ -286,32 +287,13 @@ class ProcessingControlPanel(QWidget):
         R.setSpacing(3)
 
         _col_lbl("Background", R)
-
-        self._bg_combo = _combo_row(
-            "Order:",
-            ["None", "Plane", "Quad.", "Cubic", "Quart."],
-            R, 46,
+        self._stm_background_btn = QPushButton("STM Background...")
+        self._stm_background_btn.setFont(QFont("Helvetica", 8))
+        self._stm_background_btn.setToolTip(
+            "Open the ImageJ-style scan-line background tool with profile and image previews."
         )
-        self._bg_step_cb = QCheckBox("Step-tolerant")
-        self._bg_step_cb.setFont(QFont("Helvetica", 8))
-        self._bg_step_cb.setToolTip(
-            "Ignores steep pixels during polynomial surface fitting. "
-            "This is not the STM line-background algorithm."
-        )
-        R.addWidget(self._bg_step_cb)
-
-        self._stm_line_bg_combo = _combo_row(
-            "STM line:",
-            ["None", "Step-tol."],
-            R, 54,
-        )
-
-        self._facet_cb = QCheckBox("Facet level")
-        self._facet_cb.setFont(QFont("Helvetica", 8))
-        self._facet_cb.setToolTip(
-            "Level each atomically flat terrace to a common height reference."
-        )
-        R.addWidget(self._facet_cb)
+        self._stm_background_btn.clicked.connect(self.stm_background_requested.emit)
+        R.addWidget(self._stm_background_btn)
         R.addStretch()
 
         # ── Two-column container (2-col mode: filter | bg side by side) ───────
@@ -334,7 +316,6 @@ class ProcessingControlPanel(QWidget):
         if self._mode == "browse_quick":
             return {k: cfg[k] for k in self.QUICK_KEYS}
 
-        bg_map = {0: None, 1: 1, 2: 2, 3: 3, 4: 4}
         fft_map = {0: None, 1: "low_pass", 2: "high_pass"}
         edge_map = {0: None, 1: "laplacian", 2: "log", 3: "dog"}
         smooth_i = self._smooth_combo.currentIndex()
@@ -355,14 +336,6 @@ class ProcessingControlPanel(QWidget):
             "remove_bad_lines_max_adjacent_bad_lines": int(
                 self._bad_line_adjacent_spin.value()
             ),
-            "bg_order": bg_map[self._bg_combo.currentIndex()],
-            "bg_step_tolerance": self._bg_step_cb.isChecked(),
-            "stm_line_bg": (
-                "step_tolerant"
-                if self._stm_line_bg_combo.currentIndex() == 1
-                else None
-            ),
-            "facet_level": self._facet_cb.isChecked(),
             "smooth_sigma": self._smooth_sigma_sl.value() if smooth_i != 0 else None,
             "highpass_sigma": self._highpass_sigma_sl.value() if highpass_i != 0 else None,
             "edge_method": edge_map[edge_i],
@@ -398,13 +371,6 @@ class ProcessingControlPanel(QWidget):
             state.get("remove_bad_lines_min_segment_length_px", 2)))
         self._bad_line_adjacent_spin.setValue(float(
             state.get("remove_bad_lines_max_adjacent_bad_lines", 1)))
-
-        self._bg_combo.setCurrentIndex(
-            {None: 0, 1: 1, 2: 2, 3: 3, 4: 4}.get(state.get("bg_order"), 0))
-        self._bg_step_cb.setChecked(bool(state.get("bg_step_tolerance", False)))
-        self._stm_line_bg_combo.setCurrentIndex(
-            {"step_tolerant": 1}.get(state.get("stm_line_bg"), 0))
-        self._facet_cb.setChecked(bool(state.get("facet_level", False)))
 
         sigma = state.get("smooth_sigma")
         if sigma:

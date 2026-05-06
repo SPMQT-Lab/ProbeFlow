@@ -34,9 +34,6 @@ def test_browse_quick_panel_emits_only_thumbnail_corrections(qapp):
     panel = ProcessingControlPanel("browse_quick")
     panel.set_state({
         "align_rows": "median",
-        "bg_order": 4,
-        "stm_line_bg": "step_tolerant",
-        "facet_level": True,
         "smooth_sigma": 3,
         "highpass_sigma": 12,
         "fft_mode": "high_pass",
@@ -46,6 +43,7 @@ def test_browse_quick_panel_emits_only_thumbnail_corrections(qapp):
 
 
 def test_viewer_full_panel_round_trips_standard_processing_state(qapp):
+    from PySide6.QtWidgets import QLabel, QPushButton
     from probeflow.gui import ProcessingControlPanel
 
     panel = ProcessingControlPanel("viewer_full")
@@ -56,10 +54,6 @@ def test_viewer_full_panel_round_trips_standard_processing_state(qapp):
         "remove_bad_lines_polarity": "dark",
         "remove_bad_lines_min_segment_length_px": 8,
         "remove_bad_lines_max_adjacent_bad_lines": 2,
-        "bg_order": 4,
-        "bg_step_tolerance": True,
-        "stm_line_bg": "step_tolerant",
-        "facet_level": True,
         "smooth_sigma": 3,
         "highpass_sigma": 12,
         "edge_method": "dog",
@@ -77,10 +71,6 @@ def test_viewer_full_panel_round_trips_standard_processing_state(qapp):
     assert state["remove_bad_lines_polarity"] == "dark"
     assert state["remove_bad_lines_min_segment_length_px"] == 8
     assert state["remove_bad_lines_max_adjacent_bad_lines"] == 2
-    assert state["bg_order"] == 4
-    assert state["bg_step_tolerance"] is True
-    assert state["stm_line_bg"] == "step_tolerant"
-    assert state["facet_level"] is True
     assert state["smooth_sigma"] == 3
     assert state["highpass_sigma"] == 12
     assert state["edge_method"] == "dog"
@@ -89,6 +79,14 @@ def test_viewer_full_panel_round_trips_standard_processing_state(qapp):
     assert state["fft_mode"] == "high_pass"
     assert state["fft_cutoff"] == 0.25
     assert state["fft_soft_border"] is True
+    labels = {label.text() for label in panel.findChildren(QLabel)}
+    assert "Background" in labels
+    assert "Simple background" not in labels
+    assert "Line offset:" not in labels
+    assert any(
+        btn.text() == "STM Background..."
+        for btn in panel.findChildren(QPushButton)
+    )
 
 
 def test_viewer_dialog_keeps_standard_processing_visible(qapp, monkeypatch):
@@ -182,6 +180,18 @@ def test_viewer_dialog_menus_mirror_existing_controls(qapp, monkeypatch):
     action("Processing", "Gaussian").trigger()
     assert dlg._processing_panel._smooth_combo.currentText() == "Gaussian"
     assert action("Processing", "STM Background...").isEnabled() is True
+    dlg._display_arr = np.ones((8, 8), dtype=float)
+    action("Processing", "STM Background...").trigger()
+    qapp.processEvents()
+    assert dlg._stm_background_dialog.windowTitle() == "STM Background"
+    assert dlg._stm_background_dialog.isVisible()
+    dlg._stm_background_dialog.close()
+    qapp.processEvents()
+    dlg._processing_panel._stm_background_btn.click()
+    qapp.processEvents()
+    assert dlg._stm_background_dialog.windowTitle() == "STM Background"
+    assert dlg._stm_background_dialog.isVisible()
+    dlg._stm_background_dialog.close()
 
     action("ROI", "Rectangle").trigger()
     assert dlg._zoom_lbl.tool() == "rectangle"
@@ -243,6 +253,23 @@ def test_viewer_stm_background_apply_records_processing_state(qapp, monkeypatch)
     assert dlg._processing["stm_background"]["fit_roi_id"] == "roi-1"
     assert dlg._processing["stm_background"]["model"] == "poly2"
     assert dlg._processing["stm_background"]["applied_to"] == "whole_image"
+
+    dlg.close()
+    dlg.deleteLater()
+
+
+def test_legacy_background_controls_are_not_in_active_processing_panel(qapp, monkeypatch):
+    from probeflow.gui import ImageViewerDialog, SxmFile, THEMES
+
+    monkeypatch.setattr(ImageViewerDialog, "_load_current", lambda self: None)
+
+    entry = SxmFile(path=Path("/tmp/example.sxm"), stem="example", Nx=8, Ny=8)
+    dlg = ImageViewerDialog(entry, [entry], "gray", THEMES["dark"])
+
+    assert not hasattr(dlg._processing_panel, "_bg_combo")
+    assert not hasattr(dlg._processing_panel, "_stm_line_bg_combo")
+    assert not hasattr(dlg._processing_panel, "_facet_cb")
+    assert not hasattr(dlg, "_stm_background_dialog")
 
     dlg.close()
     dlg.deleteLater()
@@ -346,14 +373,14 @@ def test_viewer_apply_merges_standard_and_advanced_processing(qapp, monkeypatch)
 
     entry = SxmFile(path=Path("/tmp/example.sxm"), stem="example", Nx=8, Ny=8)
     dlg = ImageViewerDialog(entry, [entry], "gray", THEMES["dark"])
-    dlg._processing_panel.set_state({"align_rows": "median", "bg_order": 2})
+    dlg._processing_panel.set_state({"align_rows": "median"})
     dlg._undistort_shear_spin.setValue(3.0)
     dlg._undistort_scale_spin.setValue(1.10)
 
     dlg._on_apply_processing()
 
     assert dlg._processing["align_rows"] == "median"
-    assert dlg._processing["bg_order"] == 2
+    assert "bg_order" not in dlg._processing
     assert dlg._processing["linear_undistort"] is True
     assert dlg._processing["undistort_shear_x"] == 3.0
     assert dlg._processing["undistort_scale_y"] == 1.10
@@ -833,7 +860,14 @@ def test_viewer_refresh_display_array_passes_roi_set(qapp, monkeypatch):
     dlg = ImageViewerDialog.__new__(ImageViewerDialog)
     dlg._display_arr = None
     dlg._raw_arr = np.zeros((2, 2))
-    dlg._processing = {"bg_order": 1, "background_fit_roi_id": roi.id}
+    dlg._processing = {
+        "stm_background": {
+            "fit_region": "active_roi",
+            "fit_roi_id": roi.id,
+            "line_statistic": "median",
+            "model": "linear",
+        }
+    }
     dlg._image_roi_set = roi_set
     dlg._reset_zoom_on_next_pixmap = False
     dlg._processing_roi_error = ""
@@ -867,7 +901,14 @@ def test_viewer_refresh_display_array_blocks_stale_roi_reference(qapp, monkeypat
     dlg = ImageViewerDialog.__new__(ImageViewerDialog)
     dlg._display_arr = None
     dlg._raw_arr = np.zeros((2, 2))
-    dlg._processing = {"bg_order": 1, "background_fit_roi_id": "missing-id"}
+    dlg._processing = {
+        "stm_background": {
+            "fit_region": "active_roi",
+            "fit_roi_id": "missing-id",
+            "line_statistic": "median",
+            "model": "linear",
+        }
+    }
     dlg._image_roi_set = ROISet(image_id="img1")
     dlg._reset_zoom_on_next_pixmap = False
     dlg._status_lbl = FakeStatus()
@@ -902,7 +943,13 @@ def test_viewer_dialog_initializes_panel_from_thumbnail_processing(qapp, monkeyp
         [entry],
         "gray",
         {},
-        processing={"align_rows": "median", "bg_order": 2},
+        processing={
+            "align_rows": "median",
+            "stm_background": {"model": "linear", "line_statistic": "median"},
+        },
     )
 
-    assert captured == {"align_rows": "median", "bg_order": 2}
+    assert captured == {
+        "align_rows": "median",
+        "stm_background": {"model": "linear", "line_statistic": "median"},
+    }

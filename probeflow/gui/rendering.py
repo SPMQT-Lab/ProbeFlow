@@ -355,8 +355,7 @@ def render_with_processing(
         remove_bad_lines_min_segment_length_px : int
         remove_bad_lines_max_adjacent_bad_lines : int
         align_rows       : str | None  — 'median' | 'mean' | 'linear'
-        bg_order         : None | 1 | 2
-        facet_level      : bool
+        stm_background   : dict | None
         smooth_sigma     : float | None  — sigma in pixels (Gaussian)
         edge_method      : str | None   — 'laplacian' | 'log' | 'dog'
         edge_sigma       : float

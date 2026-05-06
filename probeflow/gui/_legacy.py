@@ -598,6 +598,8 @@ class ImageViewerDialog(QDialog):
             self._on_preview_bad_lines)
         self._processing_panel.bad_line_preview_settings_changed.connect(
             self._on_bad_line_preview_settings_changed)
+        self._processing_panel.stm_background_requested.connect(
+            self._on_open_stm_background)
         right_lay.addWidget(self._processing_panel)
 
         right_lay.addWidget(_sep())
@@ -643,13 +645,6 @@ class ImageViewerDialog(QDialog):
             "ROI filters only: smooth/high-pass/edge/FFT apply inside the "
             "drawn selection; background and scan-line corrections remain whole-image.")
         sel_col.addWidget(self._scope_cb)
-        self._bg_fit_roi_cb = QCheckBox("Fit bg from sel.")
-        self._bg_fit_roi_cb.setFont(QFont("Helvetica", 8))
-        self._bg_fit_roi_cb.setToolTip(
-            "Fits Plane/Quadratic/Cubic/Quartic background using selected area pixels, "
-            "then subtracts that fitted surface from the whole image."
-        )
-        sel_col.addWidget(self._bg_fit_roi_cb)
         self._patch_roi_cb = QCheckBox("Patch selection")
         self._patch_roi_cb.setFont(QFont("Helvetica", 8))
         self._patch_roi_cb.setToolTip(
@@ -848,11 +843,10 @@ class ImageViewerDialog(QDialog):
             roi_set_getter=lambda: self._image_roi_set,
             callbacks={
                 "on_roi_set_changed":    self._on_image_roi_set_changed,
-                "on_bg_subtract_fit":    self._on_roi_bg_subtract_fit,
-                "on_bg_subtract_exclude": self._on_roi_bg_subtract_exclude,
                 "on_fft_roi":            self._on_roi_fft,
                 "on_histogram_roi":      self._on_roi_histogram,
                 "on_line_profile_roi":   self._on_roi_line_profile,
+                "on_stm_background_roi": self._open_stm_background_for_roi,
                 "on_roi_selection_changed": self._sync_viewer_menu_actions,
                 "get_image_shape":       self._current_array_shape,
             },
@@ -1343,11 +1337,18 @@ class ImageViewerDialog(QDialog):
             self._zoom_lbl.clear_bad_segment_overlay()
 
     def _on_open_stm_background(self) -> None:
+        self._open_stm_background_for_roi(None)
+
+    def _open_stm_background_for_roi(self, roi_id: str | None = None) -> None:
         arr = self._display_arr if self._display_arr is not None else self._raw_arr
         if arr is None:
             self._status_lbl.setText("STM Background: no image loaded.")
             return
-        active_roi = self._active_image_roi()
+        active_roi = (
+            self._image_roi_set.get(roi_id)
+            if self._image_roi_set is not None and roi_id is not None
+            else self._active_image_roi()
+        )
         roi_mask = None
         roi_id = None
         roi_name = None
@@ -1730,12 +1731,9 @@ class ImageViewerDialog(QDialog):
         act_invert.setEnabled(is_area)
         act_invert.triggered.connect(lambda: self._invert_image_roi(roi_id))
         menu.addSeparator()
-        act_bg_fit = menu.addAction("Background subtract (fit region)")
-        act_bg_fit.setEnabled(is_area)
-        act_bg_fit.triggered.connect(lambda: self._on_roi_bg_subtract_fit(roi_id))
-        act_bg_exclude = menu.addAction("Background subtract (exclude region)")
-        act_bg_exclude.setEnabled(is_area)
-        act_bg_exclude.triggered.connect(lambda: self._on_roi_bg_subtract_exclude(roi_id))
+        act_stm_bg = menu.addAction("STM Background fit from ROI...")
+        act_stm_bg.setEnabled(is_area)
+        act_stm_bg.triggered.connect(lambda: self._open_stm_background_for_roi(roi_id))
         act_fft = menu.addAction("FFT this region")
         act_fft.setEnabled(is_area)
         act_fft.triggered.connect(lambda: self._on_roi_fft(roi_id))
@@ -1809,20 +1807,6 @@ class ImageViewerDialog(QDialog):
             self._on_image_roi_set_changed()
 
     # ── ROI operation callbacks ───────────────────────────────────────────────
-
-    def _on_roi_bg_subtract_fit(self, roi_id: str) -> None:
-        self._push_proc_undo_snapshot()
-        self._processing.setdefault("bg_order", 1)
-        self._processing["background_fit_roi_id"] = roi_id
-        self._processing.pop("background_fit_rect", None)
-        self._processing.pop("background_fit_geometry", None)
-        self._refresh_processing_display()
-
-    def _on_roi_bg_subtract_exclude(self, roi_id: str) -> None:
-        self._push_proc_undo_snapshot()
-        self._processing.setdefault("bg_order", 1)
-        self._processing["background_exclude_roi_id"] = roi_id
-        self._refresh_processing_display()
 
     def _on_roi_fft(self, roi_id: str) -> None:
         roi = self._image_roi_set.get(roi_id) if self._image_roi_set else None
@@ -2319,8 +2303,6 @@ class ImageViewerDialog(QDialog):
                 "processing_roi_id",
                 "roi_rect",
                 "roi_geometry",
-                "background_fit_rect",
-                "background_fit_geometry",
                 "patch_interpolate_rect",
                 "patch_interpolate_geometry",
                 "patch_interpolate_iterations",
@@ -2332,15 +2314,12 @@ class ImageViewerDialog(QDialog):
         self._processing.pop("processing_roi_id", None)
         self._processing.pop("roi_rect", None)
         self._processing.pop("roi_geometry", None)
-        self._processing.pop("background_fit_rect", None)
-        self._processing.pop("background_fit_geometry", None)
         self._processing.pop("patch_interpolate_rect", None)
         self._processing.pop("patch_interpolate_geometry", None)
         self._processing.pop("patch_interpolate_iterations", None)
         self._zoom_lbl.clear_roi()
         self._set_selection_tool("none")
         self._scope_cb.setCurrentIndex(0)
-        self._bg_fit_roi_cb.setChecked(False)
         self._patch_roi_cb.setChecked(False)
         self._roi_status_lbl.setText("Selection: none")
         if had_processing_selection:
@@ -2655,7 +2634,6 @@ class ImageViewerDialog(QDialog):
             self._scope_cb.currentIndex() == 1
             or (active_area_roi_id is not None and has_roi_aware_local_filter)
         )
-        wants_bg_fit_roi = self._bg_fit_roi_cb.isChecked()
         wants_patch_roi = self._patch_roi_cb.isChecked()
         selection_geometry = self._area_selection_geometry_px()
         if (
@@ -2668,7 +2646,7 @@ class ImageViewerDialog(QDialog):
                 "select an area ROI or delete/deselect it before applying local filters."
             )
             return
-        if wants_filter_roi or wants_bg_fit_roi or wants_patch_roi:
+        if wants_filter_roi or wants_patch_roi:
             if (
                 active_area_roi_id is None
                 and self._selection_geometry
@@ -2693,8 +2671,6 @@ class ImageViewerDialog(QDialog):
                 "periodic_notches",
                 "periodic_notch_radius",
                 "geometric_ops",
-                "background_fit_roi_id",
-                "background_exclude_roi_id",
                 "stm_background",
             )
             if key in self._processing
@@ -2719,15 +2695,6 @@ class ImageViewerDialog(QDialog):
             self._processing.pop("processing_roi_id", None)
             self._processing.pop("roi_rect", None)
             self._processing.pop("roi_geometry", None)
-        if wants_bg_fit_roi and self._processing.get("bg_order") is not None:
-            self._processing["background_fit_geometry"] = dict(selection_geometry)
-            if selection_geometry.get("kind") == "rectangle":
-                self._processing["background_fit_rect"] = selection_geometry.get("rect_px")
-            else:
-                self._processing.pop("background_fit_rect", None)
-        else:
-            self._processing.pop("background_fit_rect", None)
-            self._processing.pop("background_fit_geometry", None)
         if wants_patch_roi:
             self._processing["patch_interpolate_geometry"] = dict(selection_geometry)
             if selection_geometry.get("kind") == "rectangle":
@@ -2768,7 +2735,6 @@ class ImageViewerDialog(QDialog):
         self._zoom_lbl.clear_roi()
         self._set_selection_tool("none")
         self._scope_cb.setCurrentIndex(0)
-        self._bg_fit_roi_cb.setChecked(False)
         self._patch_roi_cb.setChecked(False)
         self._roi_status_lbl.setText("Selection: none")
         self._refresh_zero_markers()
@@ -3893,38 +3859,6 @@ each scan line.</p>
 
 <hr/>
 
-<h2>plane_bg (subtract_background)</h2>
-<p class="sub">Params: <span class="param">order</span> 1–4,
-<span class="param">step_tolerance</span>, optional <span class="param">fit_geometry</span></p>
-<p>Fits a 2-D polynomial background to the image and subtracts it.  The
-polynomial basis contains all monomials x<sup>i</sup>&nbsp;y<sup>j</sup> with
-i+j &le; order (6 terms for order=2, 10 for order=3).  Coordinates are
-normalised to [&minus;1,&nbsp;1] for numerical stability.  The fit uses only
-finite pixels and, optionally, only pixels inside a user-drawn ROI
-(<span class="param">fit_geometry</span>).</p>
-<p><b>order=1</b> (plane): equivalent to ImageJ's "Subtract Plane" /
-<em>Fit_Polynomial("linear")</em>.  <b>step_tolerance:</b> excludes steep
-pixels (gradient &gt; tan(3&deg;)) from the fit so that atomic steps do not
-bias the background — analogous to the "step tolerant" area mode in the ImageJ
-STM_Background plugin.</p>
-
-<hr/>
-
-<h2>stm_line_bg (stm_line_background)</h2>
-<p class="sub">Params: <span class="param">mode</span> = step_tolerant</p>
-<p>Corrects inter-line height offsets in images with atomic steps.  For each
-pair of adjacent scan lines, estimates the dominant row-to-row shift from the
-<em>modal peak</em> of the distribution of pixelwise row differences.  The
-modal peak tracks the most common shift (the flat terrace baseline) rather than
-the mean, so step edges — which produce large, infrequent differences — do not
-bias the correction.  A cumulative shift profile is built and subtracted.</p>
-<p class="note">Addresses the same artefact as the ImageJ STM_Background
-"line by line" mode, but uses the modal estimator instead of the median for
-better step tolerance.  Does not model slow background curvature; combine with
-plane_bg for that.</p>
-
-<hr/>
-
 <h2>STM Background</h2>
 <p class="sub">Params: <span class="param">fit_region</span>,
 <span class="param">line_statistic</span>, <span class="param">model</span>,
@@ -3964,17 +3898,6 @@ ROI to estimate the profile, then applies the subtraction to the full image.</p>
 <p>Shows the fitted background image without modifying the data.</p>
 <h2>Preview corrected image</h2>
 <p>Shows the proposed corrected image before applying the processing step.</p>
-
-<hr/>
-
-<h2>facet_level</h2>
-<p class="sub">Params: <span class="param">threshold_deg</span> (default 3.0)</p>
-<p>Levels the image using only the nearly-flat pixels as the reference plane.
-Local surface slope is estimated via central finite differences; pixels whose
-slope angle exceeds <span class="param">threshold_deg</span> are excluded from
-the plane fit.  The fitted plane is subtracted from the whole image.  Analogous
-to Gwyddion's "Facet Level" — essential for stepped surfaces (Au(111), Si(111))
-where step edges would bias a naive plane fit.</p>
 
 <hr/>
 

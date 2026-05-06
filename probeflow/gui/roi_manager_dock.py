@@ -255,16 +255,10 @@ class ROIManagerDock(QDockWidget):
 
         menu.addSeparator()
 
-        bg_fit_act = menu.addAction("Background subtract (fit region)")
-        bg_fit_act.setEnabled(is_area)
-        bg_fit_act.triggered.connect(
-            lambda: self._cb.get("on_bg_subtract_fit", lambda _: None)(roi_id)
-        )
-
-        bg_exc_act = menu.addAction("Background subtract (exclude region)")
-        bg_exc_act.setEnabled(is_area)
-        bg_exc_act.triggered.connect(
-            lambda: self._cb.get("on_bg_subtract_exclude", lambda _: None)(roi_id)
+        stm_bg_act = menu.addAction("STM Background fit from ROI...")
+        stm_bg_act.setEnabled(is_area)
+        stm_bg_act.triggered.connect(
+            lambda: self._cb.get("on_stm_background_roi", lambda _: None)(roi_id)
         )
 
         fft_act = menu.addAction("FFT this region")
