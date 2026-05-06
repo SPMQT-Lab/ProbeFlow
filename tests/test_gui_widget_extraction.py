@@ -52,10 +52,12 @@ def test_processing_panel_imports_from_new_module_and_gui_package(qapp):
 
 def test_terminal_widgets_import_from_new_module_and_gui_package(qapp):
     from probeflow.gui import DeveloperTerminalWidget as PublicTerminal
+    from probeflow.gui import _DevSidebar as PublicDevSidebar
     from probeflow.gui import _TerminalPane as PublicPane
-    from probeflow.gui.terminal import DeveloperTerminalWidget, _TerminalPane
+    from probeflow.gui.terminal import DeveloperTerminalWidget, _DevSidebar, _TerminalPane
 
     assert PublicTerminal is DeveloperTerminalWidget
+    assert PublicDevSidebar is _DevSidebar
     assert PublicPane is _TerminalPane
 
     pane = _TerminalPane()
@@ -65,9 +67,12 @@ def test_terminal_widgets_import_from_new_module_and_gui_package(qapp):
 
     widget = DeveloperTerminalWidget(_theme())
     assert widget.findChild(_TerminalPane) is not None
+    sidebar = _DevSidebar(_theme())
+    assert sidebar.layout() is not None
 
     pane.close()
     widget.close()
+    sidebar.close()
 
 
 def test_main_window_browse_layout_uses_resizable_splitters(qapp):

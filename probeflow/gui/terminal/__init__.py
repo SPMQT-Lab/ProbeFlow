@@ -358,3 +358,48 @@ class DeveloperTerminalWidget(QWidget):
     def _on_error(self, error):
         self._pane.append_error(f"[error: {error}]\n")
         self._pane.show_prompt()
+
+
+# ── Developer terminal sidebar ────────────────────────────────────────────────
+class _DevSidebar(QWidget):
+    """Sidebar for the Dev tab: shows cwd, quick links, and info."""
+
+    def __init__(self, t: dict, parent=None):
+        super().__init__(parent)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(8, 8, 8, 8)
+        lay.setSpacing(8)
+
+        title = QLabel("Developer Mode")
+        title.setFont(QFont("Helvetica", 11, QFont.Bold))
+        lay.addWidget(title)
+
+        info = QLabel(
+            "Run shell commands and Python scripts in the ProbeFlow environment.\n\n"
+            "↑/↓ — command history   Ctrl+C — interrupt\n\n"
+            "All ProbeFlow packages available: import probeflow, numpy, scipy…\n\n"
+            "⚠  Interactive tools (claude, ipython, vim) need a real PTY.\n"
+            "Use 'Open External Terminal' to launch WSL / Windows Terminal."
+        )
+        info.setFont(QFont("Helvetica", 9))
+        info.setWordWrap(True)
+        lay.addWidget(info)
+
+        example_lbl = QLabel("Quick examples:")
+        example_lbl.setFont(QFont("Helvetica", 9, QFont.Bold))
+        lay.addWidget(example_lbl)
+
+        examples = QLabel(
+            "python3 -c \"import probeflow; print(probeflow.__file__)\"\n\n"
+            "python3 scripts/my_analysis.py\n\n"
+            "ls -lh *.dat\n\n"
+            "python3 -c \"from probeflow.io.readers.createc_scan import read_dat; "
+            "import numpy as np; s = read_dat('scan.dat'); "
+            "print(np.nanmin(s.planes[0])*1e10, 'A')\""
+        )
+        examples.setFont(QFont("Courier New" if sys.platform == "win32" else "Monospace", 8))
+        examples.setWordWrap(True)
+        examples.setStyleSheet("color: #888;")
+        lay.addWidget(examples)
+
+        lay.addStretch()

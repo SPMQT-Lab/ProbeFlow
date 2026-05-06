@@ -44,6 +44,8 @@ def test_dialogs_import_from_dialogs_package():
         SpecViewerDialog,
         STMBackgroundDialog,
         ViewerSpecMappingDialog,
+        _DefinitionsDialog,
+        _DefinitionsPanel,
     )
 
     assert AboutDialog.__name__ == "AboutDialog"
@@ -53,6 +55,8 @@ def test_dialogs_import_from_dialogs_package():
     assert SpecViewerDialog.__name__ == "SpecViewerDialog"
     assert STMBackgroundDialog.__name__ == "STMBackgroundDialog"
     assert ViewerSpecMappingDialog.__name__ == "ViewerSpecMappingDialog"
+    assert _DefinitionsDialog.__name__ == "_DefinitionsDialog"
+    assert _DefinitionsPanel.__name__ == "_DefinitionsPanel"
 
 
 def test_dialogs_remain_available_from_gui_package():
@@ -64,6 +68,8 @@ def test_dialogs_remain_available_from_gui_package():
         SpecViewerDialog,
         STMBackgroundDialog,
         ViewerSpecMappingDialog,
+        _DefinitionsDialog as PublicDefinitionsDialog,
+        _DefinitionsPanel,
     )
 
     assert AboutDialog.__module__ == "probeflow.gui.dialogs.about"
@@ -73,6 +79,8 @@ def test_dialogs_remain_available_from_gui_package():
     assert SpecViewerDialog.__module__ == "probeflow.gui.dialogs.spec_viewer"
     assert STMBackgroundDialog.__module__ == "probeflow.gui.dialogs.stm_background"
     assert ViewerSpecMappingDialog.__module__ == "probeflow.gui.dialogs.spec_mapping"
+    assert PublicDefinitionsDialog.__module__ == "probeflow.gui.dialogs.definitions"
+    assert _DefinitionsPanel.__module__ == "probeflow.gui.dialogs.definitions"
 
 
 def test_extracted_dialogs_smoke_construct(qapp):
@@ -84,6 +92,7 @@ def test_extracted_dialogs_smoke_construct(qapp):
         SpecViewerDialog,
         STMBackgroundDialog,
         ViewerSpecMappingDialog,
+        _DefinitionsDialog,
     )
 
     arr = np.arange(64, dtype=float).reshape(8, 8)
@@ -93,6 +102,7 @@ def test_extracted_dialogs_smoke_construct(qapp):
         SpecMappingDialog([], [], {}),
         ViewerSpecMappingDialog("image", [], {}),
         STMBackgroundDialog(arr, theme=_theme()),
+        _DefinitionsDialog(_theme()),
         AboutDialog(_theme()),
     ]
 

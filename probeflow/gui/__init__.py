@@ -75,6 +75,8 @@ _LEGACY_EXPORTS = {
     "THEMES",
     "ThumbnailGrid",
     "ViewerSpecMappingDialog",
+    "_DEFINITIONS_HTML",
+    "_DefinitionsDialog",
     "_DefinitionsPanel",
     "_DevSidebar",
     "_TerminalPane",
