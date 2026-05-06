@@ -42,6 +42,7 @@ def test_dialogs_import_from_dialogs_package():
         PeriodicFilterDialog,
         SpecMappingDialog,
         SpecViewerDialog,
+        STMBackgroundDialog,
         ViewerSpecMappingDialog,
     )
 
@@ -50,6 +51,7 @@ def test_dialogs_import_from_dialogs_package():
     assert PeriodicFilterDialog.__name__ == "PeriodicFilterDialog"
     assert SpecMappingDialog.__name__ == "SpecMappingDialog"
     assert SpecViewerDialog.__name__ == "SpecViewerDialog"
+    assert STMBackgroundDialog.__name__ == "STMBackgroundDialog"
     assert ViewerSpecMappingDialog.__name__ == "ViewerSpecMappingDialog"
 
 
@@ -60,6 +62,7 @@ def test_dialogs_remain_available_from_gui_package():
         PeriodicFilterDialog,
         SpecMappingDialog,
         SpecViewerDialog,
+        STMBackgroundDialog,
         ViewerSpecMappingDialog,
     )
 
@@ -68,6 +71,7 @@ def test_dialogs_remain_available_from_gui_package():
     assert PeriodicFilterDialog.__module__ == "probeflow.gui.dialogs.periodic_filter"
     assert SpecMappingDialog.__module__ == "probeflow.gui.dialogs.spec_mapping"
     assert SpecViewerDialog.__module__ == "probeflow.gui.dialogs.spec_viewer"
+    assert STMBackgroundDialog.__module__ == "probeflow.gui.dialogs.stm_background"
     assert ViewerSpecMappingDialog.__module__ == "probeflow.gui.dialogs.spec_mapping"
 
 
@@ -78,6 +82,7 @@ def test_extracted_dialogs_smoke_construct(qapp):
         PeriodicFilterDialog,
         SpecMappingDialog,
         SpecViewerDialog,
+        STMBackgroundDialog,
         ViewerSpecMappingDialog,
     )
 
@@ -87,6 +92,7 @@ def test_extracted_dialogs_smoke_construct(qapp):
         PeriodicFilterDialog(arr),
         SpecMappingDialog([], [], {}),
         ViewerSpecMappingDialog("image", [], {}),
+        STMBackgroundDialog(arr, theme=_theme()),
         AboutDialog(_theme()),
     ]
 

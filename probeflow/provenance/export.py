@@ -204,7 +204,7 @@ def processing_state_from_history(history: list[dict[str, Any]] | None) -> dict[
 
 def background_processing_warnings(processing_state: dict[str, Any]) -> tuple[str, ...]:
     """Warnings for exports intended as downstream analysis inputs."""
-    bg_ops = {"plane_bg", "stm_line_bg", "facet_level"}
+    bg_ops = {"plane_bg", "stm_line_bg", "stm_background", "facet_level"}
     steps = processing_state.get("steps", []) if processing_state else []
     if any(step.get("op") in bg_ops for step in steps):
         return ()

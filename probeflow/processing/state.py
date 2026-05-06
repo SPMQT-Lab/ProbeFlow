@@ -30,6 +30,7 @@ _SUPPORTED_OPS: frozenset[str] = frozenset({
     "align_rows",
     "plane_bg",
     "stm_line_bg",
+    "stm_background",
     "facet_level",
     "smooth",
     "gaussian_high_pass",
@@ -295,6 +296,13 @@ def roi_references_from_state(state: "ProcessingState") -> list[dict[str, Any]]:
                 for ref in _roi_refs_from_expr(params.get(param), param):
                     ref.update({"step_index": step_index, "op": step.op})
                     refs.append(ref)
+        if step.op == "stm_background" and params.get("fit_roi_id") is not None:
+            refs.append({
+                "step_index": step_index,
+                "op": step.op,
+                "param": "fit_roi_id",
+                "value": str(params["fit_roi_id"]),
+            })
     return refs
 
 
@@ -436,6 +444,48 @@ def _resolve_bg_roi_param(
     return None
 
 
+def _resolve_mask_roi_param(
+    params: "dict[str, Any]",
+    prefix: str,
+    image_shape: "tuple[int, int]",
+    roi_set: "Any | None",
+) -> "np.ndarray | None":
+    roi_id = params.get(f"{prefix}_roi_id")
+    if roi_id is None:
+        return None
+    if roi_set is None:
+        import warnings
+        warnings.warn(
+            f"stm_background step has {prefix}_roi_id={roi_id!r} but no roi_set "
+            "was passed to apply_processing_state — ROI fit mask ignored.",
+            UserWarning,
+            stacklevel=4,
+        )
+        return None
+    roi = roi_set.get(str(roi_id)) or roi_set.get_by_name(str(roi_id))
+    if roi is None:
+        import warnings
+        warnings.warn(
+            f"stm_background: {prefix}_roi_id={roi_id!r} not found in roi_set — "
+            "ROI fit mask ignored.",
+            UserWarning,
+            stacklevel=4,
+        )
+        return None
+    if getattr(roi, "kind", None) not in {
+        "rectangle", "ellipse", "polygon", "freehand", "multipolygon",
+    }:
+        import warnings
+        warnings.warn(
+            f"stm_background: {prefix}_roi_id={roi_id!r} is not an area ROI — "
+            "ROI fit mask ignored.",
+            UserWarning,
+            stacklevel=4,
+        )
+        return None
+    return roi.to_mask(image_shape)
+
+
 # ── Canonical apply function ──────────────────────────────────────────────────
 
 def apply_processing_state(
@@ -509,6 +559,21 @@ def apply_processing_state(
             a = _proc.stm_line_background(
                 a,
                 mode=str(p.get("mode", "step_tolerant")),
+            )
+        elif step.op == "stm_background":
+            fit_mask = _resolve_mask_roi_param(p, "fit", a.shape, roi_set)
+            a = _proc.apply_stm_background(
+                a,
+                _proc.STMBackgroundParams(
+                    fit_region=str(p.get("fit_region", "whole_image")),
+                    line_statistic=str(p.get("line_statistic", "median")),
+                    model=str(p.get("model", "linear")),
+                    linear_x_first=bool(p.get("linear_x_first", False)),
+                    blur_length=p.get("blur_length"),
+                    jump_threshold=p.get("jump_threshold"),
+                    preserve_level=str(p.get("preserve_level", "median")),
+                ),
+                mask=fit_mask,
             )
         elif step.op == "facet_level":
             a = _proc.facet_level(

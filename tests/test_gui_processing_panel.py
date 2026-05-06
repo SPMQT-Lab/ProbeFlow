@@ -181,6 +181,7 @@ def test_viewer_dialog_menus_mirror_existing_controls(qapp, monkeypatch):
 
     action("Processing", "Gaussian").trigger()
     assert dlg._processing_panel._smooth_combo.currentText() == "Gaussian"
+    assert action("Processing", "STM Background...").isEnabled() is True
 
     action("ROI", "Rectangle").trigger()
     assert dlg._zoom_lbl.tool() == "rectangle"
@@ -213,6 +214,35 @@ def test_viewer_dialog_menus_mirror_existing_controls(qapp, monkeypatch):
     definitions_dialog.close()
     qapp.processEvents()
     assert dlg.isVisible()
+
+    dlg.close()
+    dlg.deleteLater()
+
+
+def test_viewer_stm_background_apply_records_processing_state(qapp, monkeypatch):
+    from probeflow.gui import ImageViewerDialog, SxmFile, THEMES
+
+    monkeypatch.setattr(ImageViewerDialog, "_load_current", lambda self: None)
+    monkeypatch.setattr(ImageViewerDialog, "_refresh_processing_display", lambda self: None)
+
+    entry = SxmFile(path=Path("/tmp/example.sxm"), stem="example", Nx=8, Ny=8)
+    dlg = ImageViewerDialog(entry, [entry], "gray", THEMES["dark"])
+
+    dlg._on_stm_background_applied({
+        "fit_region": "active_roi",
+        "fit_roi_id": "roi-1",
+        "line_statistic": "median",
+        "model": "poly2",
+        "linear_x_first": False,
+        "blur_length": None,
+        "jump_threshold": None,
+        "preserve_level": "median",
+        "applied_to": "whole_image",
+    })
+
+    assert dlg._processing["stm_background"]["fit_roi_id"] == "roi-1"
+    assert dlg._processing["stm_background"]["model"] == "poly2"
+    assert dlg._processing["stm_background"]["applied_to"] == "whole_image"
 
     dlg.close()
     dlg.deleteLater()

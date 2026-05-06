@@ -111,6 +111,7 @@ from probeflow.gui.dialogs import (
     PeriodicFilterDialog,
     SpecMappingDialog,
     SpecViewerDialog,
+    STMBackgroundDialog,
     ViewerSpecMappingDialog,
 )
 from probeflow.core.scan_loader import SUPPORTED_SUFFIXES, load_scan
@@ -945,6 +946,11 @@ class ImageViewerDialog(QDialog):
         processing_menu.addAction(fft_soft_action)
         processing_menu.addSeparator()
 
+        stm_background_action = QAction("STM Background...", self)
+        stm_background_action.triggered.connect(self._on_open_stm_background)
+        processing_menu.addAction(stm_background_action)
+        processing_menu.addSeparator()
+
         zero_action = QAction("Zero plane", self)
         zero_action.setCheckable(True)
         zero_action.triggered.connect(self._set_zero_plane_btn.setChecked)
@@ -1335,6 +1341,53 @@ class ImageViewerDialog(QDialog):
             self._processing_panel.set_bad_line_preview_summary(summary)
         if hasattr(self._zoom_lbl, "clear_bad_segment_overlay"):
             self._zoom_lbl.clear_bad_segment_overlay()
+
+    def _on_open_stm_background(self) -> None:
+        arr = self._display_arr if self._display_arr is not None else self._raw_arr
+        if arr is None:
+            self._status_lbl.setText("STM Background: no image loaded.")
+            return
+        active_roi = self._active_image_roi()
+        roi_mask = None
+        roi_id = None
+        roi_name = None
+        if (
+            active_roi is not None
+            and active_roi.kind in {"rectangle", "ellipse", "polygon", "freehand", "multipolygon"}
+        ):
+            try:
+                roi_mask = active_roi.to_mask(arr.shape[:2])
+                if not roi_mask.any():
+                    roi_mask = None
+                else:
+                    roi_id = active_roi.id
+                    roi_name = active_roi.name
+            except Exception:
+                roi_mask = None
+        dlg = STMBackgroundDialog(
+            arr,
+            theme=self._t,
+            active_roi_mask=roi_mask,
+            active_roi_id=roi_id,
+            active_roi_name=roi_name,
+            parent=self,
+        )
+        dlg.applied.connect(self._on_stm_background_applied)
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+        self._stm_background_dialog = dlg
+
+    def _on_stm_background_applied(self, params: dict) -> None:
+        self._push_proc_undo_snapshot()
+        self._processing["stm_background"] = dict(params)
+        self._clear_bad_line_preview()
+        self._refresh_processing_display()
+        model = str(params.get("model", "linear")).replace("_", " ")
+        fit_region = str(params.get("fit_region", "whole_image")).replace("_", " ")
+        self._status_lbl.setText(
+            f"Applied STM Background ({model}; fit region: {fit_region})."
+        )
 
     def _refresh_viewer_pixmap(self, reset_zoom: bool = False):
         if self._display_arr is None:
@@ -2642,6 +2695,7 @@ class ImageViewerDialog(QDialog):
                 "geometric_ops",
                 "background_fit_roi_id",
                 "background_exclude_roi_id",
+                "stm_background",
             )
             if key in self._processing
         }
@@ -3868,6 +3922,48 @@ bias the correction.  A cumulative shift profile is built and subtracted.</p>
 "line by line" mode, but uses the modal estimator instead of the median for
 better step tolerance.  Does not model slow background curvature; combine with
 plane_bg for that.</p>
+
+<hr/>
+
+<h2>STM Background</h2>
+<p class="sub">Params: <span class="param">fit_region</span>,
+<span class="param">line_statistic</span>, <span class="param">model</span>,
+<span class="param">linear_x_first</span>, <span class="param">blur_length</span>,
+<span class="param">jump_threshold</span></p>
+<p>Estimates one background value per fast-scan line, fits or smooths that
+scan-line profile, then subtracts the fitted background from the whole image.
+This is distinct from ROI-scoped processing: the fit region determines where
+the background is estimated, but subtraction is applied to the full image.</p>
+<h2>Scan-line profile</h2>
+<p>The one-dimensional background estimate, one value per image row.</p>
+<h2>Line statistic</h2>
+<p>The row value used for the scan-line profile. Median is robust against
+adsorbates, pits, and spikes; mean follows all selected pixels.</p>
+<h2>Linear fit in x first</h2>
+<p>Optionally fits and removes a straight x-direction slope from each scan line
+before estimating the y-direction background profile.</p>
+<h2>Piezo creep</h2>
+<p>A future nonlinear background model for slow scanner relaxation, based on a
+logarithmic creep-like curve. It is not exposed in the first ProbeFlow STM
+Background dialog until robust constrained fitting is available.</p>
+<h2>Piezo creep + x^2 / x^3</h2>
+<p>Piezo creep models with additional polynomial terms. These are useful for
+more complex slow-scan drift, but should be previewed carefully once enabled.</p>
+<h2>Sqrt creep</h2>
+<p>A future nonlinear background model based on a square-root creep-like curve.</p>
+<h2>Low-pass background</h2>
+<p>Smooths the scan-line profile using the blur length. Larger blur lengths
+produce a slower, smoother background.</p>
+<h2>Line-by-line background</h2>
+<p>Uses the raw scan-line profile directly as the background. This is
+aggressive and should be previewed carefully.</p>
+<h2>Fit region</h2>
+<p>Whole image uses all finite pixels. Active ROI uses only the selected area
+ROI to estimate the profile, then applies the subtraction to the full image.</p>
+<h2>Preview background</h2>
+<p>Shows the fitted background image without modifying the data.</p>
+<h2>Preview corrected image</h2>
+<p>Shows the proposed corrected image before applying the processing step.</p>
 
 <hr/>
 

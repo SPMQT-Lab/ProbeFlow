@@ -181,5 +181,17 @@ def test_definitions_content_includes_bad_scanline_terms():
         "Dark bad segment",
         "Preview detection",
         "Apply correction",
+        "STM Background",
+        "Scan-line profile",
+        "Line statistic",
+        "Linear fit in x first",
+        "Piezo creep",
+        "Piezo creep + x^2 / x^3",
+        "Sqrt creep",
+        "Low-pass background",
+        "Line-by-line background",
+        "Fit region",
+        "Preview background",
+        "Preview corrected image",
     ):
         assert term in definitions

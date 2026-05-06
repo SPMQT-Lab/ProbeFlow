@@ -8,7 +8,9 @@ import pytest
 from probeflow.processing import (
     align_rows,
     BadSegment,
+    apply_stm_background,
     correct_bad_scanline_segments,
+    compute_scanline_profile,
     detect_bad_scanline_segments,
     detect_grains,
     edge_detect,
@@ -23,6 +25,8 @@ from probeflow.processing import (
     periodic_notch_filter,
     remove_bad_lines,
     repair_bad_scanline_segments,
+    STMBackgroundParams,
+    preview_stm_background,
     set_zero_plane,
     stm_line_background,
     subtract_background,
@@ -217,6 +221,104 @@ class TestRemoveBadLines:
     def test_invalid_threshold_raises(self):
         with pytest.raises(ValueError, match="threshold_mad"):
             remove_bad_lines(np.ones((4, 4)), threshold_mad=-1.0)
+
+
+# ─── STM scan-line background ────────────────────────────────────────────────
+
+class TestSTMBackground:
+    def test_linear_background_subtraction_removes_scanline_drift(self):
+        yy, xx = np.mgrid[:40, :24]
+        arr = 0.25 * yy + 0.02 * xx + 3.0
+
+        params = STMBackgroundParams(model="linear", line_statistic="median")
+        result = preview_stm_background(arr, params)
+
+        assert result.fit_status == "success"
+        assert result.background_image.shape == arr.shape
+        assert float(np.nanstd(np.nanmedian(result.corrected, axis=1))) < 1e-10
+        assert abs(float(np.nanmedian(result.corrected)) - float(np.nanmedian(arr))) < 1e-10
+
+    def test_polynomial_background_subtraction_removes_quadratic_drift(self):
+        y = np.linspace(-1.0, 1.0, 48)
+        arr = (2.0 * y**2 - 0.4 * y + 5.0)[:, None] + np.zeros((48, 20))
+
+        corrected = apply_stm_background(
+            arr,
+            STMBackgroundParams(model="poly2", line_statistic="median"),
+        )
+
+        assert float(np.nanstd(np.nanmedian(corrected, axis=1))) < 1e-10
+
+    def test_low_pass_returns_smooth_background_profile(self):
+        rng = np.random.default_rng(5)
+        y = np.linspace(0.0, 4.0 * np.pi, 80)
+        profile = np.sin(y) + rng.normal(scale=0.25, size=80)
+        arr = profile[:, None] + np.zeros((80, 16))
+
+        result = preview_stm_background(
+            arr,
+            STMBackgroundParams(model="low_pass", blur_length=4.0),
+        )
+
+        raw_roughness = np.nanstd(np.diff(result.line_profile))
+        fit_roughness = np.nanstd(np.diff(result.fitted_profile))
+        assert fit_roughness < raw_roughness
+
+    def test_line_by_line_uses_raw_scanline_profile(self):
+        profile = np.linspace(1.0, 3.0, 10)
+        arr = profile[:, None] + np.zeros((10, 6))
+
+        result = preview_stm_background(arr, STMBackgroundParams(model="line_by_line"))
+
+        np.testing.assert_allclose(result.fitted_profile, profile)
+
+    def test_median_line_statistic_is_robust_against_local_outlier(self):
+        arr = np.ones((8, 8), dtype=float)
+        arr[3, 0] = 100.0
+
+        median_profile = compute_scanline_profile(arr, statistic="median")
+        mean_profile = compute_scanline_profile(arr, statistic="mean")
+
+        assert median_profile[3] == 1.0
+        assert mean_profile[3] > 10.0
+
+    def test_fit_roi_estimates_background_but_subtracts_full_image(self):
+        yy, _xx = np.mgrid[:30, :20]
+        arr = 0.2 * yy + np.zeros((30, 20))
+        arr[:, 12:] += 10.0
+        mask = np.zeros(arr.shape, dtype=bool)
+        mask[:, :8] = True
+
+        result = preview_stm_background(
+            arr,
+            STMBackgroundParams(fit_region="active_roi", model="linear"),
+            mask=mask,
+        )
+
+        assert float(np.nanstd(np.nanmedian(result.corrected[:, :8], axis=1))) < 1e-10
+        assert float(np.nanstd(np.nanmedian(result.corrected[:, 12:], axis=1))) < 1e-10
+        assert abs(
+            float(np.nanmedian(result.corrected[:, 12:]))
+            - float(np.nanmedian(result.corrected[:, :8]))
+            - 10.0
+        ) < 1e-10
+
+    def test_preview_does_not_modify_image_data(self):
+        arr = np.arange(100, dtype=float).reshape(10, 10)
+        before = arr.copy()
+
+        _result = preview_stm_background(arr, STMBackgroundParams(model="linear"))
+
+        np.testing.assert_array_equal(arr, before)
+
+    def test_unsupported_creep_model_fails_without_modifying_image(self):
+        arr = np.ones((10, 10), dtype=float)
+        before = arr.copy()
+
+        with pytest.raises(ValueError, match="STM background model"):
+            preview_stm_background(arr, STMBackgroundParams(model="piezo_creep"))
+
+        np.testing.assert_array_equal(arr, before)
 
 
 # ─── subtract_background ────────────────────────────────────────────────────

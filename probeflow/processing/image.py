@@ -44,6 +44,13 @@ def _nonnegative_finite(value: float, name: str) -> float:
     return value
 
 
+def _positive_finite(value: float, name: str) -> float:
+    value = float(value)
+    if not np.isfinite(value) or value <= 0.0:
+        raise ValueError(f"{name} must be finite and positive")
+    return value
+
+
 def _nan_normalized_gaussian(arr: np.ndarray, sigma: float) -> np.ndarray:
     """Gaussian blur that ignores NaNs instead of mean-filling them."""
     a = np.asarray(arr, dtype=np.float64)
@@ -451,7 +458,287 @@ def remove_bad_lines(
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# 2.  subtract_background
+# 2.  STM scan-line background subtraction
+# ═════════════════════════════════════════════════════════════════════════════
+
+@dataclass(frozen=True)
+class STMBackgroundParams:
+    """Parameters for ImageJ-style STM scan-line background subtraction."""
+
+    fit_region: str = "whole_image"
+    line_statistic: str = "median"
+    model: str = "linear"
+    linear_x_first: bool = False
+    blur_length: float | None = None
+    jump_threshold: float | None = None
+    preserve_level: str = "median"
+
+
+@dataclass(frozen=True)
+class STMBackgroundResult:
+    """Preview/apply result for STM scan-line background subtraction."""
+
+    corrected: np.ndarray
+    background_image: np.ndarray
+    line_profile: np.ndarray
+    fitted_profile: np.ndarray
+    params: STMBackgroundParams
+    fit_status: str
+
+
+def _normalise_stm_background_model(model: str) -> str:
+    key = str(model or "linear").lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "linear": "linear",
+        "poly1": "linear",
+        "polynomial_1": "linear",
+        "2nd_order_polynomial": "poly2",
+        "second_order_polynomial": "poly2",
+        "poly2": "poly2",
+        "quadratic": "poly2",
+        "3rd_order_polynomial": "poly3",
+        "third_order_polynomial": "poly3",
+        "poly3": "poly3",
+        "cubic": "poly3",
+        "low_pass": "low_pass",
+        "lowpass": "low_pass",
+        "line_by_line": "line_by_line",
+        "line": "line_by_line",
+    }
+    if key not in aliases:
+        raise ValueError(
+            "STM background model must be linear, poly2, poly3, low_pass, "
+            f"or line_by_line, got {model!r}"
+        )
+    return aliases[key]
+
+
+def _normalise_line_statistic(statistic: str) -> str:
+    key = str(statistic or "median").lower()
+    if key not in {"median", "mean"}:
+        raise ValueError(f"line_statistic must be 'median' or 'mean', got {statistic!r}")
+    return key
+
+
+def _coerce_mask(mask: np.ndarray | None, shape: tuple[int, int]) -> np.ndarray | None:
+    if mask is None:
+        return None
+    m = np.asarray(mask, dtype=bool)
+    if m.shape != shape:
+        raise ValueError(f"mask shape {m.shape!r} does not match image shape {shape!r}")
+    return m
+
+
+def compute_scanline_profile(
+    image: np.ndarray,
+    mask: np.ndarray | None = None,
+    statistic: str = "median",
+) -> np.ndarray:
+    """Return one representative background value per fast-scan row.
+
+    ``mask`` controls where the background is estimated.  Rows with no selected
+    finite pixels return ``NaN`` so the fitting stage can interpolate or
+    extrapolate from rows that do contain fit data.
+    """
+    stat = _normalise_line_statistic(statistic)
+    a = np.asarray(image, dtype=np.float64)
+    if a.ndim != 2:
+        raise ValueError("image must be a 2-D array")
+    m = _coerce_mask(mask, a.shape)
+    profile = np.full(a.shape[0], np.nan, dtype=np.float64)
+    for row in range(a.shape[0]):
+        values = a[row] if m is None else a[row, m[row]]
+        values = values[np.isfinite(values)]
+        if values.size == 0:
+            continue
+        profile[row] = float(np.mean(values) if stat == "mean" else np.median(values))
+    return profile
+
+
+def _interp_nan_profile(profile: np.ndarray) -> np.ndarray:
+    p = np.asarray(profile, dtype=np.float64)
+    x = np.arange(p.size, dtype=np.float64)
+    finite = np.isfinite(p)
+    if not finite.any():
+        raise ValueError("scan-line profile has no finite values to fit")
+    if finite.all():
+        return p.copy()
+    return np.interp(x, x[finite], p[finite])
+
+
+def _smooth_profile_ignore_nan(profile: np.ndarray, sigma: float) -> np.ndarray:
+    sigma = _positive_finite(sigma, "blur_length")
+    p = np.asarray(profile, dtype=np.float64)
+    finite = np.isfinite(p)
+    if not finite.any():
+        raise ValueError("scan-line profile has no finite values to smooth")
+    values = np.where(finite, p, 0.0)
+    weights = finite.astype(np.float64)
+    smooth_values = gaussian_filter(values, sigma=sigma, mode="nearest")
+    smooth_weights = gaussian_filter(weights, sigma=sigma, mode="nearest")
+    with np.errstate(invalid="ignore", divide="ignore"):
+        smoothed = smooth_values / smooth_weights
+    if not np.isfinite(smoothed).all():
+        smoothed = _interp_nan_profile(smoothed)
+    return smoothed
+
+
+def _eliminate_profile_jumps(profile: np.ndarray, threshold: float | None) -> np.ndarray:
+    if threshold is None:
+        return np.asarray(profile, dtype=np.float64).copy()
+    threshold = _positive_finite(threshold, "jump_threshold")
+    p = np.asarray(profile, dtype=np.float64).copy()
+    finite_idx = np.flatnonzero(np.isfinite(p))
+    if finite_idx.size < 2:
+        return p
+    offset = 0.0
+    prev_idx = int(finite_idx[0])
+    prev_value = float(p[prev_idx])
+    for idx in finite_idx[1:]:
+        idx = int(idx)
+        value = float(p[idx]) + offset
+        jump = value - prev_value
+        if abs(jump) > threshold:
+            offset -= jump
+            value = float(p[idx]) + offset
+        p[idx] = value
+        prev_value = value
+    return p
+
+
+def fit_scanline_background(
+    profile: np.ndarray,
+    model: str = "linear",
+    *,
+    blur_length: float | None = None,
+    jump_threshold: float | None = None,
+) -> np.ndarray:
+    """Fit or smooth a 1-D scan-line background profile."""
+    model = _normalise_stm_background_model(model)
+    working = _eliminate_profile_jumps(profile, jump_threshold)
+    if model == "line_by_line":
+        return _interp_nan_profile(working)
+    if model == "low_pass":
+        sigma = 5.0 if blur_length is None else float(blur_length)
+        return _smooth_profile_ignore_nan(working, sigma=sigma)
+
+    p = np.asarray(working, dtype=np.float64)
+    x = np.linspace(-1.0, 1.0, p.size, dtype=np.float64)
+    finite = np.isfinite(p)
+    degree = {"linear": 1, "poly2": 2, "poly3": 3}[model]
+    if int(finite.sum()) < degree + 1:
+        raise ValueError(
+            f"not enough finite scan-line values for {model} background fit"
+        )
+    coeff = np.polyfit(x[finite], p[finite], degree)
+    return np.polyval(coeff, x).astype(np.float64, copy=False)
+
+
+def _linear_x_background(image: np.ndarray, mask: np.ndarray | None = None) -> np.ndarray:
+    a = np.asarray(image, dtype=np.float64)
+    m = _coerce_mask(mask, a.shape)
+    Ny, Nx = a.shape
+    x = np.linspace(-1.0, 1.0, Nx, dtype=np.float64)
+    bg = np.zeros_like(a, dtype=np.float64)
+    for row in range(Ny):
+        row_values = a[row]
+        row_mask = np.isfinite(row_values) if m is None else (m[row] & np.isfinite(row_values))
+        if int(row_mask.sum()) < 2:
+            continue
+        coeff = np.polyfit(x[row_mask], row_values[row_mask], 1)
+        bg[row] = np.polyval(coeff, x)
+    return bg
+
+
+def subtract_scanline_background(
+    image: np.ndarray,
+    fitted_profile: np.ndarray,
+    *,
+    x_background: np.ndarray | None = None,
+    preserve_level: str = "median",
+) -> tuple[np.ndarray, np.ndarray]:
+    """Subtract a fitted scan-line profile from the full image."""
+    a = np.asarray(image, dtype=np.float64)
+    if a.ndim != 2:
+        raise ValueError("image must be a 2-D array")
+    fitted = np.asarray(fitted_profile, dtype=np.float64)
+    if fitted.shape != (a.shape[0],):
+        raise ValueError("fitted_profile length must match image rows")
+    background = fitted[:, None] + np.zeros_like(a, dtype=np.float64)
+    if x_background is not None:
+        xb = np.asarray(x_background, dtype=np.float64)
+        if xb.shape != a.shape:
+            raise ValueError("x_background shape must match image shape")
+        background = background + xb
+    if preserve_level == "median":
+        reference = _finite_median(background, default=0.0)
+    elif preserve_level == "mean":
+        reference = _finite_mean(background, default=0.0)
+    elif preserve_level in (None, "none"):
+        reference = 0.0
+    else:
+        raise ValueError("preserve_level must be 'median', 'mean', or 'none'")
+    return a - background + reference, background
+
+
+def preview_stm_background(
+    image: np.ndarray,
+    params: STMBackgroundParams | None = None,
+    mask: np.ndarray | None = None,
+) -> STMBackgroundResult:
+    """Return non-destructive STM background preview data."""
+    params = params or STMBackgroundParams()
+    model = _normalise_stm_background_model(params.model)
+    statistic = _normalise_line_statistic(params.line_statistic)
+    a = np.asarray(image, dtype=np.float64)
+    if a.ndim != 2:
+        raise ValueError("image must be a 2-D array")
+    m = _coerce_mask(mask, a.shape)
+    x_bg = _linear_x_background(a, m) if params.linear_x_first else None
+    working = a - x_bg if x_bg is not None else a
+    profile = compute_scanline_profile(working, m, statistic)
+    fitted = fit_scanline_background(
+        profile,
+        model,
+        blur_length=params.blur_length,
+        jump_threshold=params.jump_threshold,
+    )
+    corrected, background = subtract_scanline_background(
+        a,
+        fitted,
+        x_background=x_bg,
+        preserve_level=params.preserve_level,
+    )
+    resolved = STMBackgroundParams(
+        fit_region=params.fit_region,
+        line_statistic=statistic,
+        model=model,
+        linear_x_first=bool(params.linear_x_first),
+        blur_length=params.blur_length,
+        jump_threshold=params.jump_threshold,
+        preserve_level=params.preserve_level,
+    )
+    return STMBackgroundResult(
+        corrected=corrected,
+        background_image=background,
+        line_profile=profile,
+        fitted_profile=fitted,
+        params=resolved,
+        fit_status="success",
+    )
+
+
+def apply_stm_background(
+    image: np.ndarray,
+    params: STMBackgroundParams | None = None,
+    mask: np.ndarray | None = None,
+) -> np.ndarray:
+    """Apply STM scan-line background subtraction and return corrected data."""
+    return preview_stm_background(image, params=params, mask=mask).corrected
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 3.  subtract_background
 # ═════════════════════════════════════════════════════════════════════════════
 
 def _poly_terms(x: np.ndarray, y: np.ndarray, order: int) -> np.ndarray:

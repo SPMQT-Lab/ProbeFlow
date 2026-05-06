@@ -280,6 +280,13 @@ class TestFromScanExport:
         state = {"steps": [{"op": "stm_line_bg", "params": {"mode": "step_tolerant"}}]}
         assert background_processing_warnings(state) == ()
 
+    def test_background_warning_absent_with_stm_background(self):
+        state = {"steps": [{
+            "op": "stm_background",
+            "params": {"model": "linear", "line_statistic": "median"},
+        }]}
+        assert background_processing_warnings(state) == ()
+
     def test_background_warning_present_without_background(self):
         state = {"steps": [{"op": "smooth", "params": {"sigma_px": 1.0}}]}
         warnings = background_processing_warnings(state)

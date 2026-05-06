@@ -354,6 +354,32 @@ class TestGuiConversion:
         assert state.steps[0].op == "stm_line_bg"
         assert state.steps[0].params == {"mode": "step_tolerant"}
 
+    def test_stm_background_captured(self):
+        state = processing_state_from_gui({
+            "stm_background": {
+                "fit_region": "active_roi",
+                "fit_roi_id": "terrace-1",
+                "line_statistic": "mean",
+                "model": "poly2",
+                "linear_x_first": True,
+                "blur_length": 6.0,
+                "jump_threshold": 2.5,
+            },
+        })
+        assert len(state.steps) == 1
+        assert state.steps[0].op == "stm_background"
+        assert state.steps[0].params == {
+            "fit_region": "active_roi",
+            "line_statistic": "mean",
+            "model": "poly2",
+            "linear_x_first": True,
+            "preserve_level": "median",
+            "blur_length": 6.0,
+            "jump_threshold": 2.5,
+            "fit_roi_id": "terrace-1",
+            "applied_to": "whole_image",
+        }
+
     def test_roi_scope_wraps_local_filter_step(self):
         gui = {
             "processing_scope": "roi",
@@ -688,6 +714,69 @@ class TestApplyKnownSteps:
         result = apply_processing_state(arr, state)
         assert result.shape == arr.shape
         assert float(np.std(np.nanmedian(result, axis=1))) < 1e-10
+
+    def test_stm_background_params_are_forwarded(self, monkeypatch):
+        captured = {}
+
+        def fake_apply_stm_background(arr, params=None, mask=None):
+            captured["params"] = params
+            captured["mask"] = mask
+            return arr + 1.0
+
+        monkeypatch.setattr(
+            "probeflow.processing.apply_stm_background",
+            fake_apply_stm_background,
+        )
+        state = ProcessingState(steps=[
+            ProcessingStep("stm_background", {
+                "fit_region": "whole_image",
+                "line_statistic": "mean",
+                "model": "poly3",
+                "linear_x_first": True,
+                "blur_length": 7.0,
+                "jump_threshold": 2.0,
+                "preserve_level": "mean",
+            }),
+        ])
+        result = apply_processing_state(np.ones((8, 8)), state)
+
+        assert np.all(result == 2.0)
+        assert captured["params"].fit_region == "whole_image"
+        assert captured["params"].line_statistic == "mean"
+        assert captured["params"].model == "poly3"
+        assert captured["params"].linear_x_first is True
+        assert captured["params"].blur_length == 7.0
+        assert captured["params"].jump_threshold == 2.0
+        assert captured["params"].preserve_level == "mean"
+        assert captured["mask"] is None
+
+    def test_stm_background_fit_roi_applies_to_full_image(self):
+        from probeflow.core.roi import ROI, ROISet
+
+        yy, _xx = np.mgrid[:30, :20]
+        arr = 0.2 * yy + np.zeros((30, 20))
+        arr[:, 12:] += 10.0
+        roi = ROI.new("rectangle", {"x": 0, "y": 0, "width": 8, "height": 30})
+        roi_set = ROISet(image_id="test")
+        roi_set.add(roi)
+        state = ProcessingState(steps=[
+            ProcessingStep("stm_background", {
+                "fit_region": "active_roi",
+                "fit_roi_id": roi.id,
+                "line_statistic": "median",
+                "model": "linear",
+            }),
+        ])
+
+        result = apply_processing_state(arr, state, roi_set=roi_set)
+
+        assert float(np.nanstd(np.nanmedian(result[:, :8], axis=1))) < 1e-10
+        assert float(np.nanstd(np.nanmedian(result[:, 12:], axis=1))) < 1e-10
+        assert abs(
+            float(np.nanmedian(result[:, 12:]))
+            - float(np.nanmedian(result[:, :8]))
+            - 10.0
+        ) < 1e-10
 
     def test_remove_bad_lines_threshold_is_forwarded(self, monkeypatch):
         captured = {}

@@ -31,6 +31,7 @@ NUMERIC_PROC_KEYS: tuple[str, ...] = (
     "background_fit_roi_id",
     "background_exclude_roi_id",
     "stm_line_bg",
+    "stm_background",
     "facet_level",
     "smooth_sigma",
     "highpass_sigma",
@@ -176,6 +177,24 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
 
     if gui_state.get("stm_line_bg") == "step_tolerant":
         _append_step(ProcessingStep("stm_line_bg", {"mode": "step_tolerant"}))
+
+    stm_bg = gui_state.get("stm_background")
+    if isinstance(stm_bg, dict):
+        params = {
+            "fit_region": str(stm_bg.get("fit_region", "whole_image")),
+            "line_statistic": str(stm_bg.get("line_statistic", "median")),
+            "model": str(stm_bg.get("model", "linear")),
+            "linear_x_first": bool(stm_bg.get("linear_x_first", False)),
+            "preserve_level": str(stm_bg.get("preserve_level", "median")),
+        }
+        if stm_bg.get("blur_length") is not None:
+            params["blur_length"] = float(stm_bg["blur_length"])
+        if stm_bg.get("jump_threshold") is not None:
+            params["jump_threshold"] = float(stm_bg["jump_threshold"])
+        if stm_bg.get("fit_roi_id") is not None:
+            params["fit_roi_id"] = str(stm_bg["fit_roi_id"])
+            params["applied_to"] = "whole_image"
+        _append_step(ProcessingStep("stm_background", params))
 
     if gui_state.get("facet_level"):
         _append_step(ProcessingStep("facet_level", {"threshold_deg": 3.0}))
