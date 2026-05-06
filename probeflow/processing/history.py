@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import datetime
 from typing import Any
 
@@ -23,7 +24,7 @@ def processing_history_entries_from_state(
     for idx, step in enumerate(state.steps):
         entry = {
             "op": step.op,
-            "params": dict(step.params),
+            "params": deepcopy(step.params),
         }
         ts = timestamps[idx] if idx < len(timestamps) else None
         if ts is not None:
@@ -50,7 +51,7 @@ def processing_state_from_history(
                 for key, value in entry.items()
                 if key not in {"op", "timestamp"}
             }
-        steps.append(ProcessingStep(str(op), dict(params)))
+        steps.append(ProcessingStep(str(op), deepcopy(dict(params))))
     return ProcessingState(steps=steps)
 
 

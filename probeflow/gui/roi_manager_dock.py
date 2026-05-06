@@ -17,9 +17,9 @@ from typing import Callable
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QAbstractItemView, QComboBox, QDockWidget, QHBoxLayout, QInputDialog,
-    QLabel, QListWidget, QListWidgetItem, QMenu, QPushButton, QToolBar,
-    QVBoxLayout, QWidget,
+    QAbstractItemView, QComboBox, QDockWidget, QGridLayout, QHBoxLayout,
+    QInputDialog, QLabel, QListWidget, QListWidgetItem, QMenu, QPushButton,
+    QSizePolicy, QVBoxLayout, QWidget,
 )
 
 _KIND_PREFIX = {
@@ -43,41 +43,54 @@ class ROIManagerDock(QDockWidget):
         self._roi_set_getter = roi_set_getter
         self._cb = callbacks
         self.setFeatures(
-            QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable
+            QDockWidget.DockWidgetClosable
+            | QDockWidget.DockWidgetMovable
+            | QDockWidget.DockWidgetFloatable
         )
+        self.setMinimumWidth(160)
+        self.setMaximumWidth(280)
+        self.resize(200, self.height())
 
         contents = QWidget()
+        contents.setMinimumWidth(150)
+        contents.setMaximumWidth(270)
         lay = QVBoxLayout(contents)
-        lay.setContentsMargins(2, 2, 2, 2)
-        lay.setSpacing(2)
+        lay.setContentsMargins(6, 6, 6, 6)
+        lay.setSpacing(4)
 
-        # ── toolbar ──────────────────────────────────────────────────────────
-        bar = QToolBar()
-        bar.setMovable(False)
+        title = QLabel("ROI")
+        title.setAlignment(Qt.AlignCenter)
+        lay.addWidget(title)
 
         self._rename_btn = QPushButton("Rename")
         self._rename_btn.setFixedHeight(22)
         self._rename_btn.setEnabled(False)
         self._rename_btn.clicked.connect(self._on_rename)
-        bar.addWidget(self._rename_btn)
 
         self._delete_btn = QPushButton("Delete")
         self._delete_btn.setFixedHeight(22)
         self._delete_btn.setEnabled(False)
         self._delete_btn.clicked.connect(self._on_delete)
-        bar.addWidget(self._delete_btn)
 
-        self._active_btn = QPushButton("Set Active")
+        self._active_btn = QPushButton("Set active")
         self._active_btn.setFixedHeight(22)
         self._active_btn.setEnabled(False)
         self._active_btn.clicked.connect(self._on_set_active)
-        bar.addWidget(self._active_btn)
 
         self._invert_btn = QPushButton("Invert")
         self._invert_btn.setFixedHeight(22)
         self._invert_btn.setEnabled(False)
         self._invert_btn.clicked.connect(self._on_invert)
-        bar.addWidget(self._invert_btn)
+
+        action_grid = QGridLayout()
+        action_grid.setContentsMargins(0, 0, 0, 0)
+        action_grid.setHorizontalSpacing(3)
+        action_grid.setVerticalSpacing(3)
+        action_grid.addWidget(self._rename_btn, 0, 0)
+        action_grid.addWidget(self._delete_btn, 0, 1)
+        action_grid.addWidget(self._active_btn, 1, 0)
+        action_grid.addWidget(self._invert_btn, 1, 1)
+        lay.addLayout(action_grid)
 
         combine_row = QWidget()
         combine_lay = QHBoxLayout(combine_row)
@@ -92,12 +105,11 @@ class ROIManagerDock(QDockWidget):
         self._combine_mode.setFixedHeight(22)
         combine_lay.addWidget(self._combine_btn)
         combine_lay.addWidget(self._combine_mode)
-        bar.addWidget(combine_row)
-
-        lay.addWidget(bar)
+        lay.addWidget(combine_row)
 
         # ── list widget ───────────────────────────────────────────────────────
         self._list = QListWidget()
+        self._list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self._list.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self._list.itemDoubleClicked.connect(lambda _: self._on_rename())
         self._list.itemSelectionChanged.connect(self._on_item_selection_changed)
@@ -212,6 +224,7 @@ class ROIManagerDock(QDockWidget):
         self._active_btn.setEnabled(n == 1)
         self._invert_btn.setEnabled(n == 1)
         self._combine_btn.setEnabled(n >= 2)
+        self._cb.get("on_roi_selection_changed", lambda: None)()
 
     # ── context menu ─────────────────────────────────────────────────────────
 

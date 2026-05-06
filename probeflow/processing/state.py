@@ -16,6 +16,7 @@ Typical call order
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -108,6 +109,34 @@ def roi_geometry_bounds(
         return None
     ys, xs = np.nonzero(mask)
     return int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())
+
+
+def apply_operation_with_optional_roi(
+    image: np.ndarray,
+    operation,
+    roi_mask: np.ndarray | None = None,
+) -> np.ndarray:
+    """Apply ``operation`` globally, or copy its result back only inside ``roi_mask``."""
+    source = np.asarray(image, dtype=np.float64).copy()
+    if roi_mask is None:
+        return np.asarray(operation(source), dtype=np.float64)
+
+    mask = np.asarray(roi_mask, dtype=bool)
+    if mask.shape != source.shape:
+        raise ValueError(
+            f"roi_mask shape {mask.shape} does not match image shape {source.shape}"
+        )
+    if not mask.any():
+        raise ValueError("roi_mask is empty")
+
+    processed_full = np.asarray(operation(source.copy()), dtype=np.float64)
+    if processed_full.shape != source.shape:
+        raise ValueError(
+            "ROI-scoped operation must return the same shape as the input image"
+        )
+    result = source.copy()
+    result[mask] = processed_full[mask]
+    return result
 
 
 def _points_from_geometry(
@@ -203,7 +232,7 @@ class ProcessingState:
         """
         return {
             "steps": [
-                {"op": step.op, "params": dict(step.params)}
+                {"op": step.op, "params": deepcopy(step.params)}
                 for step in self.steps
             ]
         }
@@ -215,7 +244,7 @@ class ProcessingState:
         for item in data.get("steps", []):
             steps.append(ProcessingStep(
                 op=str(item["op"]),
-                params=dict(item.get("params", {})),
+                params=deepcopy(dict(item.get("params", {}))),
             ))
         return cls(steps=steps)
 
@@ -605,13 +634,14 @@ def apply_processing_state(
                     bounds = (x0, y0, x1, y1)
             if mask is None or bounds is None or not mask.any():
                 continue
-            x0, y0, x1, y1 = bounds
-            crop = a[y0:y1 + 1, x0:x1 + 1]
-            processed = apply_processing_state(crop, ProcessingState(steps=[nested]))
-            local_mask = mask[y0:y1 + 1, x0:x1 + 1]
-            a = a.copy()
-            target = a[y0:y1 + 1, x0:x1 + 1]
-            target[local_mask] = processed[local_mask]
+            a = apply_operation_with_optional_roi(
+                a,
+                lambda image, nested=nested: apply_processing_state(
+                    image,
+                    ProcessingState(steps=[nested]),
+                ),
+                mask,
+            )
         elif step.op in ("flip_horizontal", "flip_vertical",
                          "rotate_90_cw", "rotate_180", "rotate_270_cw"):
             fn = getattr(_proc, step.op)

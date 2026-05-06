@@ -92,8 +92,6 @@ def test_extracted_dialogs_smoke_construct(qapp):
 
     for dlg in dialogs:
         assert dlg.windowTitle()
-        qapp.processEvents()
-        dlg.close()
 
     # Keep Qt/Matplotlib-backed widgets alive for the test process so queued
     # draw_idle timers cannot fire against deleted canvas objects in later tests.

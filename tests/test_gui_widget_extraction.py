@@ -68,3 +68,95 @@ def test_terminal_widgets_import_from_new_module_and_gui_package(qapp):
 
     pane.close()
     widget.close()
+
+
+def test_main_window_browse_layout_uses_resizable_splitters(qapp):
+    from probeflow.gui import ProbeFlowWindow
+
+    window = ProbeFlowWindow()
+    window.show()
+
+    assert window._browse_tools.minimumWidth() == 240
+    assert window._grid.minimumWidth() == 500
+    assert window._sidebar_stack.minimumWidth() == 300
+    assert window._browse_tools.maximumWidth() > 10000
+    assert window._sidebar_stack.maximumWidth() > 10000
+    assert not window._splitter.childrenCollapsible()
+    assert not window._browse_splitter.childrenCollapsible()
+
+    main_sizes = window._splitter.sizes()
+    browse_sizes = window._browse_splitter.sizes()
+    assert main_sizes[1] >= 300
+    assert browse_sizes[0] >= 240
+    assert browse_sizes[1] >= 500
+
+    window.close()
+
+
+def test_main_window_uses_standard_menus_for_secondary_views(qapp):
+    from probeflow.gui import ProbeFlowWindow
+
+    window = ProbeFlowWindow()
+    top_menu_names = [action.text() for action in window.menuBar().actions()]
+
+    assert top_menu_names == ["File", "View", "Processing", "Convert", "Tools", "Help"]
+    assert not hasattr(window, "_tab_features")
+    assert not hasattr(window, "_tab_tv")
+    assert not hasattr(window, "_tab_dev")
+    assert not hasattr(window, "_tab_defs")
+
+    def action(menu_name: str, text: str):
+        top_action = next(
+            item for item in window.menuBar().actions() if item.text() == menu_name
+        )
+        menu = top_action.menu()
+        for item in menu.actions():
+            if item.text() == text:
+                return item
+            submenu = item.menu()
+            if submenu is not None:
+                for subitem in submenu.actions():
+                    if subitem.text() == text:
+                        return subitem
+        raise AssertionError(f"Missing menu action: {menu_name} > {text}")
+
+    assert action("View", "Dark mode" if window._dark else "Light mode").isChecked()
+    assert action("View", window._gui_font_size).isChecked()
+    assert action("View", window._browse_tools.cmap_cb.currentText()).isChecked()
+    assert action("View", "Z").isChecked()
+    assert action("Processing", "None").isChecked()
+
+    action("View", "Light mode").trigger()
+    assert window._dark is False
+    assert action("View", "Light mode").isChecked()
+
+    action("View", "Large").trigger()
+    assert window._gui_font_size == "Large"
+    assert action("View", "Large").isChecked()
+
+    action("View", "Viridis").trigger()
+    assert window._browse_tools.cmap_cb.currentText() == "Viridis"
+    assert action("View", "Viridis").isChecked()
+
+    action("View", "Current").trigger()
+    assert window._browse_tools.thumbnail_channel_cb.currentText() == "Current"
+    assert action("View", "Current").isChecked()
+
+    action("Processing", "Mean").trigger()
+    assert window._browse_tools.align_rows_cb.currentText() == "Mean"
+    assert action("Processing", "Mean").isChecked()
+
+    action("Tools", "Feature counting").trigger()
+    assert window._mode == "features"
+    action("Tools", "TV denoise").trigger()
+    assert window._mode == "tv"
+    action("Tools", "Developer tools").trigger()
+    assert window._mode == "dev"
+    action("Tools", "Definitions / Debug info").trigger()
+    assert window._mode == "defs"
+    action("Convert", "Convert Createc .dat to .sxm...").trigger()
+    assert window._mode == "convert"
+    action("View", "Browse").trigger()
+    assert window._mode == "browse"
+
+    window.close()

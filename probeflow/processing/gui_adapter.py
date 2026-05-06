@@ -6,6 +6,7 @@ No Qt imports — this module can be tested without a running Qt event loop.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
+import warnings
 
 from probeflow.processing.history import processing_history_entries_from_state
 
@@ -42,6 +43,8 @@ NUMERIC_PROC_KEYS: tuple[str, ...] = (
     "set_zero_xy",
     "set_zero_plane_points",
     "processing_scope",
+    "processing_roi_id",
+    "roi_id",
     "roi_rect",
     "roi_geometry",
     "geometric_ops",
@@ -70,8 +73,12 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
         "fft_soft_border",
     }
     roi_rect = None
+    roi_id = None
     roi_geometry = gui_state.get("roi_geometry")
     if roi_scope:
+        roi_id = gui_state.get("processing_roi_id") or gui_state.get("roi_id")
+        if roi_id is not None:
+            roi_id = str(roi_id)
         try:
             roi_rect = tuple(int(v) for v in gui_state.get("roi_rect", ()))
             if len(roi_rect) != 4:
@@ -81,13 +88,28 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
         if not _area_geometry(roi_geometry):
             roi_geometry = None
 
+    skipped_roi_scope_warning = False
+
     def _append_step(step: ProcessingStep):
-        if step.op in roi_eligible and (roi_geometry is not None or roi_rect is not None):
+        nonlocal skipped_roi_scope_warning
+        if step.op in roi_eligible and roi_scope:
             params = {"step": {"op": step.op, "params": dict(step.params)}}
-            if roi_geometry is not None:
+            if roi_id is not None:
+                params["roi_id"] = roi_id
+            elif roi_geometry is not None:
                 params["geometry"] = dict(roi_geometry)
-            if roi_rect is not None:
+            elif roi_rect is not None:
                 params["rect"] = roi_rect
+            else:
+                if not skipped_roi_scope_warning:
+                    warnings.warn(
+                        "ROI-scoped processing was requested but no supported area "
+                        "ROI was provided; ROI-aware local filter step(s) skipped.",
+                        UserWarning,
+                        stacklevel=2,
+                    )
+                    skipped_roi_scope_warning = True
+                return
             steps.append(ProcessingStep("roi", params))
         else:
             steps.append(step)

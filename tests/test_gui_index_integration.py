@@ -925,14 +925,12 @@ class TestBrowseLayoutCleanup:
         seen = []
         navbar.font_size_changed.connect(seen.append)
 
-        assert navbar._font_size_btn.text() == "Text: Medium"
-        assert navbar._font_size_actions["Medium"].isChecked()
+        assert navbar._font_size_label == "Medium"
 
         navbar.set_font_size("Large")
 
         assert seen == ["Large"]
-        assert navbar._font_size_btn.text() == "Text: Large"
-        assert navbar._font_size_actions["Large"].isChecked()
+        assert navbar._font_size_label == "Large"
 
         navbar.close()
         navbar.deleteLater()

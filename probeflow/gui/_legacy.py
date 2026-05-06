@@ -40,7 +40,7 @@ from PySide6.QtCore import (
     QSize, Signal, Slot,
 )
 from PySide6.QtGui import (
-    QAction, QBrush, QColor, QCursor, QFont, QImage, QKeySequence, QMovie,
+    QAction, QActionGroup, QBrush, QColor, QCursor, QFont, QImage, QKeySequence, QMovie,
     QPainter, QPen, QPixmap, QShortcut, QWheelEvent,
 )
 from PySide6.QtWidgets import (
@@ -367,6 +367,7 @@ class ImageViewerDialog(QDialog):
 
         # ── Left: scrollable zoom image ────────────────────────────────────────
         left = QWidget()
+        left.setMinimumWidth(500)
         left_lay = QVBoxLayout(left)
         left_lay.setContentsMargins(0, 0, 0, 0)
         left_lay.setSpacing(4)
@@ -495,10 +496,13 @@ class ImageViewerDialog(QDialog):
         right_scroll.setWidgetResizable(True)
         right_scroll.setFrameShape(QFrame.NoFrame)
         right_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        right_scroll.setMinimumWidth(240)
-        right_scroll.setMaximumWidth(480)
+        right_scroll.setMinimumWidth(300)
+        right_scroll.setMaximumWidth(380)
+        right_scroll.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
 
         right = QWidget()
+        right.setMinimumWidth(300)
+        right.setMaximumWidth(380)
         right_lay = QVBoxLayout(right)
         right_lay.setContentsMargins(8, 4, 8, 4)
         right_lay.setSpacing(6)
@@ -552,7 +556,8 @@ class ImageViewerDialog(QDialog):
         self._fig.patch.set_alpha(0)
         self._ax   = self._fig.add_subplot(111)
         self._canvas = FigureCanvasQTAgg(self._fig)
-        self._canvas.setFixedHeight(160)
+        self._canvas.setFixedHeight(140)
+        self._canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self._canvas.setContextMenuPolicy(Qt.CustomContextMenu)
         self._canvas.customContextMenuRequested.connect(self._on_hist_context_menu)
         right_lay.addWidget(self._canvas)
@@ -821,7 +826,7 @@ class ImageViewerDialog(QDialog):
 
         right_scroll.setWidget(right)
         splitter.addWidget(right_scroll)
-        splitter.setSizes([880, 300])
+        splitter.setSizes([740, 320])
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 0)
         splitter.setCollapsible(1, False)
@@ -842,11 +847,14 @@ class ImageViewerDialog(QDialog):
                 "on_fft_roi":            self._on_roi_fft,
                 "on_histogram_roi":      self._on_roi_histogram,
                 "on_line_profile_roi":   self._on_roi_line_profile,
+                "on_roi_selection_changed": self._sync_viewer_menu_actions,
                 "get_image_shape":       self._current_array_shape,
             },
             parent=self._viewer_main,
         )
         self._viewer_main.addDockWidget(Qt.RightDockWidgetArea, self._roi_dock)
+        self._viewer_main.resizeDocks([self._roi_dock], [200], Qt.Horizontal)
+        self._build_viewer_menu_bar()
         root.addWidget(self._viewer_main, 1)
 
         # navigation row
@@ -878,6 +886,180 @@ class ImageViewerDialog(QDialog):
         nav_row.addSpacing(16)
         nav_row.addWidget(close_btn)
         root.addLayout(nav_row)
+
+    def _build_viewer_menu_bar(self) -> None:
+        menu_bar = self._viewer_main.menuBar()
+        self._viewer_processing_actions: dict[str, QAction | dict[str, QAction]] = {}
+        self._viewer_roi_tool_actions: dict[str, QAction] = {}
+        self._viewer_roi_actions: dict[str, QAction] = {}
+
+        file_menu = menu_bar.addMenu("File")
+        close_action = QAction("Close", self)
+        close_action.setShortcut(QKeySequence.Close)
+        close_action.triggered.connect(self.close)
+        file_menu.addAction(close_action)
+
+        view_menu = menu_bar.addMenu("View")
+        fit_action = QAction("Fit image", self)
+        fit_action.triggered.connect(self._zoom_lbl.fit_to_view)
+        view_menu.addAction(fit_action)
+        native_action = QAction("Native size", self)
+        native_action.triggered.connect(self._zoom_lbl.reset_zoom)
+        view_menu.addAction(native_action)
+
+        processing_menu = menu_bar.addMenu("Processing")
+        self._add_combo_menu(
+            processing_menu, "Align rows", self._processing_panel._align_combo,
+            ["None", "Median", "Mean"],
+        )
+        self._add_combo_menu(
+            processing_menu, "Bad line correction", self._processing_panel._bad_lines_combo,
+            ["None", "MAD (rows)", "Step (cols)"],
+        )
+        self._add_combo_menu(
+            processing_menu, "Smooth", self._processing_panel._smooth_combo,
+            ["None", "Gaussian"],
+        )
+        self._add_combo_menu(
+            processing_menu, "Hi-pass", self._processing_panel._highpass_combo,
+            ["None", "Gaussian"],
+        )
+        self._add_combo_menu(
+            processing_menu, "Edge filter", self._processing_panel._edge_combo,
+            ["None", "Laplacian", "LoG", "DoG"],
+        )
+        self._add_combo_menu(
+            processing_menu, "Radial FFT", self._processing_panel._fft_combo,
+            ["None", "Low-pass", "High-pass"],
+        )
+        fft_soft_action = QAction("FFT soft border", self)
+        fft_soft_action.setCheckable(True)
+        fft_soft_action.triggered.connect(self._processing_panel._fft_soft_cb.setChecked)
+        self._processing_panel._fft_soft_cb.toggled.connect(self._sync_viewer_menu_actions)
+        self._viewer_processing_actions["fft_soft_border"] = fft_soft_action
+        processing_menu.addAction(fft_soft_action)
+        processing_menu.addSeparator()
+
+        zero_action = QAction("Zero plane", self)
+        zero_action.setCheckable(True)
+        zero_action.triggered.connect(self._set_zero_plane_btn.setChecked)
+        self._set_zero_plane_btn.toggled.connect(self._sync_viewer_menu_actions)
+        self._viewer_processing_actions["zero_plane"] = zero_action
+        processing_menu.addAction(zero_action)
+        clear_zero_action = QAction("Clear zero plane", self)
+        clear_zero_action.triggered.connect(self._on_clear_set_zero)
+        processing_menu.addAction(clear_zero_action)
+        processing_menu.addSeparator()
+
+        apply_action = QAction("Apply processing", self)
+        apply_action.triggered.connect(self._on_apply_processing)
+        processing_menu.addAction(apply_action)
+        undo_action = QAction("Undo", self)
+        undo_action.setShortcut(QKeySequence.Undo)
+        undo_action.triggered.connect(self._on_undo_processing)
+        self._viewer_processing_actions["undo"] = undo_action
+        processing_menu.addAction(undo_action)
+        redo_action = QAction("Redo", self)
+        redo_action.setShortcut(QKeySequence.Redo)
+        redo_action.triggered.connect(self._on_redo_processing)
+        self._viewer_processing_actions["redo"] = redo_action
+        processing_menu.addAction(redo_action)
+        reset_action = QAction("Reset processing", self)
+        reset_action.triggered.connect(self._on_reset_processing)
+        processing_menu.addAction(reset_action)
+
+        roi_menu = menu_bar.addMenu("ROI")
+        show_roi_manager_action = QAction("Show ROI Manager", self)
+        show_roi_manager_action.triggered.connect(self._show_roi_manager)
+        roi_menu.addAction(show_roi_manager_action)
+        roi_menu.addSeparator()
+        tool_group = QActionGroup(self)
+        tool_group.setExclusive(True)
+        for key, label in (
+            ("pan", "Pan"),
+            ("rectangle", "Rectangle"),
+            ("ellipse", "Ellipse"),
+            ("polygon", "Polygon"),
+            ("freehand", "Freehand"),
+            ("line", "Line"),
+            ("point", "Point"),
+        ):
+            action = QAction(label, self)
+            action.setCheckable(True)
+            action.triggered.connect(
+                lambda _checked=False, value=key: self._set_drawing_tool(value)
+            )
+            tool_group.addAction(action)
+            self._viewer_roi_tool_actions[key] = action
+            roi_menu.addAction(action)
+        roi_menu.addSeparator()
+
+        rename_action = QAction("Rename ROI", self)
+        rename_action.triggered.connect(self._rename_active_image_roi)
+        self._viewer_roi_actions["rename"] = rename_action
+        roi_menu.addAction(rename_action)
+        delete_action = QAction("Delete ROI", self)
+        delete_action.triggered.connect(self._delete_active_image_roi)
+        self._viewer_roi_actions["delete"] = delete_action
+        roi_menu.addAction(delete_action)
+        set_active_action = QAction("Set active ROI", self)
+        set_active_action.triggered.connect(self._set_selected_or_active_image_roi)
+        self._viewer_roi_actions["set_active"] = set_active_action
+        roi_menu.addAction(set_active_action)
+        invert_action = QAction("Invert ROI", self)
+        invert_action.triggered.connect(self._invert_active_image_roi)
+        self._viewer_roi_actions["invert"] = invert_action
+        roi_menu.addAction(invert_action)
+
+        export_menu = menu_bar.addMenu("Export")
+        save_png_action = QAction("Save PNG copy", self)
+        save_png_action.triggered.connect(self._on_save_png)
+        export_menu.addAction(save_png_action)
+        save_processed_action = QAction("Save processed image", self)
+        save_processed_action.setEnabled(False)
+        export_menu.addAction(save_processed_action)
+        save_provenance_action = QAction("Save provenance", self)
+        save_provenance_action.setEnabled(False)
+        export_menu.addAction(save_provenance_action)
+
+        help_menu = menu_bar.addMenu("Help")
+        github_action = QAction("GitHub", self)
+        github_action.triggered.connect(lambda: _open_url(GITHUB_URL))
+        help_menu.addAction(github_action)
+        about_action = QAction("About ProbeFlow", self)
+        about_action.triggered.connect(self._show_viewer_about)
+        help_menu.addAction(about_action)
+
+        self._sync_viewer_menu_actions()
+
+    def _add_combo_menu(
+        self,
+        parent_menu: QMenu,
+        title: str,
+        combo: QComboBox,
+        labels: list[str],
+    ) -> None:
+        menu = parent_menu.addMenu(title)
+        group = QActionGroup(self)
+        group.setExclusive(True)
+        action_map: dict[str, QAction] = {}
+        for label in labels:
+            action = QAction(label, self)
+            action.setCheckable(True)
+            action.triggered.connect(
+                lambda _checked=False, value=label, cb=combo: cb.setCurrentText(value)
+            )
+            group.addAction(action)
+            menu.addAction(action)
+            action_map[label] = action
+        self._viewer_processing_actions[f"combo:{title}"] = action_map
+        combo.currentTextChanged.connect(self._sync_viewer_menu_actions)
+
+    def _show_roi_manager(self) -> None:
+        if not hasattr(self, "_roi_dock"):
+            return
+        self._roi_dock.show()
+        self._roi_dock.raise_()
 
     # ── Navigation ─────────────────────────────────────────────────────────────
     def keyPressEvent(self, event):
@@ -1307,6 +1489,7 @@ class ImageViewerDialog(QDialog):
         self._zoom_lbl.set_roi_set(self._image_roi_set)
         if hasattr(self, "_roi_dock"):
             self._roi_dock.refresh(self._image_roi_set)
+        self._sync_viewer_menu_actions()
 
     def _save_image_roi_set(self) -> None:
         """Persist the current ROISet to its sidecar file."""
@@ -1326,6 +1509,7 @@ class ImageViewerDialog(QDialog):
         if hasattr(self, "_roi_dock"):
             self._roi_dock.refresh(self._image_roi_set)
         self._sync_line_profile_visibility()
+        self._sync_viewer_menu_actions()
 
     def _on_pixel_hovered(self, col: int, row: int, val) -> None:
         if not hasattr(self, "_coord_lbl"):
@@ -1372,6 +1556,7 @@ class ImageViewerDialog(QDialog):
         from probeflow.gui.tool_manager import _TOOL_HINTS
         if hasattr(self, "_status_lbl"):
             self._status_lbl.setText(_TOOL_HINTS.get(kind, ""))
+        self._sync_viewer_menu_actions()
 
     def _on_roi_canvas_context_menu(self, roi_id: str, global_pos) -> None:
         """Right-click on a ROI in the canvas — show a small ROI action menu."""
@@ -1593,6 +1778,100 @@ class ImageViewerDialog(QDialog):
         arr = self._display_arr if self._display_arr is not None else self._raw_arr
         return None if arr is None else arr.shape
 
+    def _active_image_roi_id(self) -> "str | None":
+        if self._image_roi_set is None:
+            return None
+        return self._image_roi_set.active_roi_id
+
+    def _active_image_roi(self):
+        roi_id = self._active_image_roi_id()
+        if self._image_roi_set is None or roi_id is None:
+            return None
+        return self._image_roi_set.get(roi_id)
+
+    def _processing_has_roi_aware_local_filter(self, state: dict) -> bool:
+        return bool(
+            state.get("smooth_sigma")
+            or state.get("highpass_sigma")
+            or state.get("edge_method")
+            or state.get("fft_mode") is not None
+            or state.get("fft_soft_border")
+        )
+
+    def _selected_or_active_image_roi_id(self) -> "str | None":
+        if hasattr(self, "_roi_dock"):
+            try:
+                selected = self._roi_dock._selected_roi_id()
+            except Exception:
+                selected = None
+            if selected:
+                return selected
+        return self._active_image_roi_id()
+
+    def _rename_active_image_roi(self) -> None:
+        roi_id = self._selected_or_active_image_roi_id()
+        if roi_id:
+            self._rename_image_roi(roi_id)
+
+    def _set_selected_or_active_image_roi(self) -> None:
+        roi_id = self._selected_or_active_image_roi_id()
+        if roi_id:
+            self._set_active_image_roi(roi_id)
+
+    def _show_viewer_about(self) -> None:
+        dlg = AboutDialog(self._t, self)
+        dlg.exec()
+
+    def _sync_viewer_menu_actions(self) -> None:
+        if hasattr(self, "_viewer_processing_actions"):
+            for key, value in self._viewer_processing_actions.items():
+                if isinstance(value, dict):
+                    title = key.removeprefix("combo:")
+                    combo = {
+                        "Align rows": self._processing_panel._align_combo,
+                        "Bad line correction": self._processing_panel._bad_lines_combo,
+                        "Smooth": self._processing_panel._smooth_combo,
+                        "Hi-pass": self._processing_panel._highpass_combo,
+                        "Edge filter": self._processing_panel._edge_combo,
+                        "Radial FFT": self._processing_panel._fft_combo,
+                    }.get(title)
+                    current = combo.currentText() if combo is not None else ""
+                    for label, action in value.items():
+                        action.blockSignals(True)
+                        action.setChecked(label == current)
+                        action.blockSignals(False)
+                    continue
+                if key == "fft_soft_border":
+                    value.blockSignals(True)
+                    value.setChecked(self._processing_panel._fft_soft_cb.isChecked())
+                    value.blockSignals(False)
+                elif key == "zero_plane":
+                    value.blockSignals(True)
+                    value.setChecked(self._set_zero_plane_btn.isChecked())
+                    value.blockSignals(False)
+                elif key == "undo":
+                    value.setEnabled(bool(self._proc_undo_stack))
+                elif key == "redo":
+                    value.setEnabled(bool(self._proc_redo_stack))
+
+        if hasattr(self, "_viewer_roi_tool_actions"):
+            tool = self._zoom_lbl.tool()
+            for key, action in self._viewer_roi_tool_actions.items():
+                action.blockSignals(True)
+                action.setChecked(key == tool)
+                action.blockSignals(False)
+
+        if hasattr(self, "_viewer_roi_actions"):
+            roi_id = self._selected_or_active_image_roi_id()
+            roi = self._image_roi_set.get(roi_id) if (self._image_roi_set and roi_id) else None
+            is_area = roi is not None and roi.kind in {
+                "rectangle", "ellipse", "polygon", "freehand", "multipolygon"
+            }
+            for key, action in self._viewer_roi_actions.items():
+                action.setEnabled(roi is not None)
+                if key == "invert":
+                    action.setEnabled(is_area)
+
     def _set_selection_tool(self, kind: str) -> None:
         """Compat shim: delegates to _set_drawing_tool, mapping 'none' → 'pan'."""
         self._set_drawing_tool(kind if kind and kind != "none" else "pan")
@@ -1610,6 +1889,7 @@ class ImageViewerDialog(QDialog):
         from probeflow.gui.tool_manager import _TOOL_HINTS
         if hasattr(self, "_status_lbl"):
             self._status_lbl.setText(_TOOL_HINTS.get(kind, ""))
+        self._sync_viewer_menu_actions()
 
     def _on_selection_tool_clicked(self, button) -> None:
         """Compat shim kept for any lingering external references."""
@@ -1624,6 +1904,7 @@ class ImageViewerDialog(QDialog):
         from probeflow.gui.tool_manager import _TOOL_HINTS
         if hasattr(self, "_status_lbl"):
             self._status_lbl.setText(_TOOL_HINTS.get(kind, ""))
+        self._sync_viewer_menu_actions()
 
     def _active_line_roi_id(self) -> "str | None":
         """Return the active ROI id if it is a line ROI, else None."""
@@ -1874,6 +2155,7 @@ class ImageViewerDialog(QDialog):
             key in self._processing
             for key in (
                 "processing_scope",
+                "processing_roi_id",
                 "roi_rect",
                 "roi_geometry",
                 "background_fit_rect",
@@ -1886,6 +2168,7 @@ class ImageViewerDialog(QDialog):
         self._roi_rect_px = None
         self._selection_geometry = None
         self._processing.pop("processing_scope", None)
+        self._processing.pop("processing_roi_id", None)
         self._processing.pop("roi_rect", None)
         self._processing.pop("roi_geometry", None)
         self._processing.pop("background_fit_rect", None)
@@ -2197,17 +2480,44 @@ class ImageViewerDialog(QDialog):
         self._refresh_processing_display()
 
     def _on_apply_processing(self):
-        wants_filter_roi = self._scope_cb.currentIndex() == 1
+        panel_state = self._processing_panel.state()
+        panel_state.update(self._advanced_processing_state())
+        has_roi_aware_local_filter = self._processing_has_roi_aware_local_filter(panel_state)
+        active_roi = self._active_image_roi()
+        active_area_roi_id = (
+            active_roi.id
+            if active_roi is not None
+            and active_roi.kind in {"rectangle", "ellipse", "polygon", "freehand", "multipolygon"}
+            else None
+        )
+        wants_filter_roi = (
+            self._scope_cb.currentIndex() == 1
+            or (active_area_roi_id is not None and has_roi_aware_local_filter)
+        )
         wants_bg_fit_roi = self._bg_fit_roi_cb.isChecked()
         wants_patch_roi = self._patch_roi_cb.isChecked()
         selection_geometry = self._area_selection_geometry_px()
+        if (
+            active_roi is not None
+            and active_area_roi_id is None
+            and has_roi_aware_local_filter
+        ):
+            self._status_lbl.setText(
+                f"Active {active_roi.kind} ROI is not valid for area processing; "
+                "select an area ROI or delete/deselect it before applying local filters."
+            )
+            return
         if wants_filter_roi or wants_bg_fit_roi or wants_patch_roi:
-            if self._selection_geometry and self._selection_geometry.get("kind") == "line":
+            if (
+                active_area_roi_id is None
+                and self._selection_geometry
+                and self._selection_geometry.get("kind") == "line"
+            ):
                 self._status_lbl.setText(
                     "Line selections are display-only; choose an area selection for processing."
                 )
                 return
-            if selection_geometry is None:
+            if active_area_roi_id is None and selection_geometry is None:
                 self._status_lbl.setText("Select an area before using selection-based processing.")
                 return
         # Snapshot for undo before any mutation. Validation has passed; this
@@ -2227,11 +2537,16 @@ class ImageViewerDialog(QDialog):
             )
             if key in self._processing
         }
-        self._processing = self._processing_panel.state()
-        self._processing.update(self._advanced_processing_state())
+        self._processing = panel_state
         self._processing.update(preserve)
-        if wants_filter_roi:
+        if wants_filter_roi and active_area_roi_id is not None:
             self._processing["processing_scope"] = "roi"
+            self._processing["processing_roi_id"] = active_area_roi_id
+            self._processing.pop("roi_rect", None)
+            self._processing.pop("roi_geometry", None)
+        elif wants_filter_roi:
+            self._processing["processing_scope"] = "roi"
+            self._processing.pop("processing_roi_id", None)
             self._processing["roi_geometry"] = dict(selection_geometry)
             if selection_geometry.get("kind") == "rectangle":
                 self._processing["roi_rect"] = selection_geometry.get("rect_px")
@@ -2239,6 +2554,7 @@ class ImageViewerDialog(QDialog):
                 self._processing.pop("roi_rect", None)
         else:
             self._processing.pop("processing_scope", None)
+            self._processing.pop("processing_roi_id", None)
             self._processing.pop("roi_rect", None)
             self._processing.pop("roi_geometry", None)
         if wants_bg_fit_roi and self._processing.get("bg_order") is not None:
@@ -2342,6 +2658,7 @@ class ImageViewerDialog(QDialog):
             self._proc_undo_btn.setEnabled(bool(self._proc_undo_stack))
         if self._proc_redo_btn is not None:
             self._proc_redo_btn.setEnabled(bool(self._proc_redo_stack))
+        self._sync_viewer_menu_actions()
 
     def _on_save_png(self):
         entry = self._entries[self._idx]
@@ -3254,10 +3571,10 @@ class Navbar(QWidget):
         self._dark            = dark
         self._font_size_label = normalise_gui_font_size(font_size_label)
         self._btns:           list[QPushButton] = []
-        self.setFixedHeight(NAVBAR_H)
+        self.setFixedHeight(50)
 
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(8, 6, 8, 6)
+        lay.setContentsMargins(10, 4, 10, 4)
         lay.setSpacing(6)
 
         if LOGO_NAV_PATH.exists():
@@ -3270,44 +3587,17 @@ class Navbar(QWidget):
             self._logo_lbl.mousePressEvent = lambda e: _open_url(GITHUB_URL)
             lay.addWidget(self._logo_lbl)
 
+        title_lbl = QLabel("ProbeFlow")
+        title_lbl.setFont(QFont("Helvetica", 12, QFont.Bold))
+        title_lbl.setStyleSheet("background: transparent;")
+        lay.addWidget(title_lbl)
         lay.addStretch()
-
-        def _nbtn(text: str, slot) -> QPushButton:
-            btn = QPushButton(text)
-            btn.setFont(QFont("Helvetica", 11))
-            btn.setObjectName("navBtn")
-            btn.setCursor(QCursor(Qt.PointingHandCursor))
-            btn.clicked.connect(slot)
-            lay.addWidget(btn)
-            self._btns.append(btn)
-            return btn
-
-        self._theme_btn = _nbtn(
-            "Light mode" if dark else "Dark mode",
-            self.theme_toggle_clicked.emit,
-        )
-        self._font_size_btn = _nbtn(
-            f"Text: {self._font_size_label}",
-            lambda: None,
-        )
-        font_menu = QMenu(self._font_size_btn)
         self._font_size_actions: dict[str, QAction] = {}
-        for label in GUI_FONT_SIZES:
-            action = QAction(label, font_menu)
-            action.setCheckable(True)
-            action.triggered.connect(lambda _checked=False, value=label: self.set_font_size(value))
-            font_menu.addAction(action)
-            self._font_size_actions[label] = action
-        self._font_size_btn.setMenu(font_menu)
-        self._sync_font_size_button()
-        _nbtn("GitHub", lambda: _open_url(GITHUB_URL))
-        _nbtn("About",  self.about_clicked.emit)
 
         self._apply_nav_theme()
 
     def set_dark(self, dark: bool):
         self._dark = dark
-        self._theme_btn.setText("Light mode" if dark else "Dark mode")
         self._apply_nav_theme()
 
     def set_font_size(self, label: str):
@@ -3320,7 +3610,6 @@ class Navbar(QWidget):
         self.font_size_changed.emit(label)
 
     def _sync_font_size_button(self):
-        self._font_size_btn.setText(f"Text: {self._font_size_label}")
         for label, action in self._font_size_actions.items():
             action.setChecked(label == self._font_size_label)
 
@@ -3659,10 +3948,17 @@ class _DevSidebar(QWidget):
 # ── Developer terminal ────────────────────────────────────────────────────────
 # ── Main window ───────────────────────────────────────────────────────────────
 class ProbeFlowWindow(QMainWindow):
+    LEFT_SIDEBAR_DEFAULT_W = 280
+    LEFT_SIDEBAR_MIN_W = 240
+    RIGHT_INSPECTOR_DEFAULT_W = 340
+    RIGHT_INSPECTOR_MIN_W = 300
+    CENTRAL_BROWSER_MIN_W = 500
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("ProbeFlow")
         self.setMinimumSize(1100, 720)
+        self.resize(1280, 800)
 
         self._cfg      = load_config()
         self._dark     = self._cfg.get("dark_mode", True)
@@ -3681,6 +3977,8 @@ class ProbeFlowWindow(QMainWindow):
 
     # ── Build ──────────────────────────────────────────────────────────────────
     def _build_ui(self):
+        self._build_menu_bar()
+
         central = QWidget()
         self.setCentralWidget(central)
         v_lay = QVBoxLayout(central)
@@ -3692,34 +3990,6 @@ class ProbeFlowWindow(QMainWindow):
         self._navbar.font_size_changed.connect(self._on_gui_font_size_changed)
         self._navbar.about_clicked.connect(self._show_about)
         v_lay.addWidget(self._navbar)
-
-        # Tab bar
-        self._tab_bar = QWidget()
-        self._tab_bar.setFixedHeight(44)
-        tab_lay = QHBoxLayout(self._tab_bar)
-        tab_lay.setContentsMargins(0, 0, 0, 0)
-        tab_lay.setSpacing(0)
-        self._tab_browse   = QPushButton("Browse")
-        self._tab_convert  = QPushButton("Convert")
-        self._tab_features = QPushButton("FeatureCounting")
-        self._tab_tv       = QPushButton("TV-denoise")
-        self._tab_dev      = QPushButton("Dev")
-        self._tab_defs     = QPushButton("Defs")
-        for btn in (self._tab_browse, self._tab_convert, self._tab_features,
-                    self._tab_tv, self._tab_dev, self._tab_defs):
-            btn.setFont(QFont("Helvetica", 11, QFont.Bold))
-            btn.setFixedHeight(44)
-            btn.setCursor(QCursor(Qt.PointingHandCursor))
-            btn.setFlat(True)
-            tab_lay.addWidget(btn)
-        tab_lay.addStretch()
-        self._tab_browse.clicked.connect(lambda: self._switch_mode("browse"))
-        self._tab_convert.clicked.connect(lambda: self._switch_mode("convert"))
-        self._tab_features.clicked.connect(lambda: self._switch_mode("features"))
-        self._tab_tv.clicked.connect(lambda: self._switch_mode("tv"))
-        self._tab_dev.clicked.connect(lambda: self._switch_mode("dev"))
-        self._tab_defs.clicked.connect(lambda: self._switch_mode("defs"))
-        v_lay.addWidget(self._tab_bar)
 
         # Body splitter
         self._splitter = QSplitter(Qt.Horizontal)
@@ -3733,20 +4003,23 @@ class ProbeFlowWindow(QMainWindow):
 
         # Browse mode: inner splitter [BrowseToolPanel | ThumbnailGrid]
         self._browse_tools = BrowseToolPanel(t, self._cfg)
-        self._browse_tools.setFixedWidth(265)
+        self._browse_tools.setMinimumWidth(self.LEFT_SIDEBAR_MIN_W)
+        self._browse_tools.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
         self._grid         = ThumbnailGrid(t)
-        browse_split = QSplitter(Qt.Horizontal)
-        browse_split.setHandleWidth(3)
-        browse_split.addWidget(self._browse_tools)
-        browse_split.addWidget(self._grid)
-        browse_split.setStretchFactor(0, 0)
-        browse_split.setStretchFactor(1, 1)
+        self._grid.setMinimumWidth(self.CENTRAL_BROWSER_MIN_W)
+        self._browse_splitter = QSplitter(Qt.Horizontal)
+        self._browse_splitter.setHandleWidth(3)
+        self._browse_splitter.setChildrenCollapsible(False)
+        self._browse_splitter.addWidget(self._browse_tools)
+        self._browse_splitter.addWidget(self._grid)
+        self._browse_splitter.setStretchFactor(0, 0)
+        self._browse_splitter.setStretchFactor(1, 1)
 
         self._conv_panel    = ConvertPanel(t, self._cfg)
         self._features_panel = FeaturesPanel(t)
         self._tv_panel       = TVPanel(t)
         self._dev_terminal   = DeveloperTerminalWidget(t)
-        self._content_stack.addWidget(browse_split)
+        self._content_stack.addWidget(self._browse_splitter)
         self._content_stack.addWidget(self._conv_panel)
         self._content_stack.addWidget(self._features_panel)
         self._content_stack.addWidget(self._tv_panel)
@@ -3757,7 +4030,8 @@ class ProbeFlowWindow(QMainWindow):
 
         # ── Right: sidebar stack ───────────────────────────────────────────────
         self._sidebar_stack    = QStackedWidget()
-        self._sidebar_stack.setFixedWidth(300)
+        self._sidebar_stack.setMinimumWidth(self.RIGHT_INSPECTOR_MIN_W)
+        self._sidebar_stack.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
         self._browse_info      = BrowseInfoPanel(t, self._cfg)
         self._convert_sidebar  = ConvertSidebar(t, self._cfg)
         self._features_sidebar = FeaturesSidebar(t)
@@ -3771,8 +4045,10 @@ class ProbeFlowWindow(QMainWindow):
         self._defs_sidebar   = QWidget()
         self._sidebar_stack.addWidget(self._defs_sidebar)
         self._splitter.addWidget(self._sidebar_stack)
+        self._splitter.setChildrenCollapsible(False)
         self._splitter.setStretchFactor(0, 1)
         self._splitter.setStretchFactor(1, 0)
+        self._apply_default_splitter_sizes()
 
         # Features tab plumbing
         self._features_pool    = QThreadPool.globalInstance()
@@ -3819,6 +4095,205 @@ class ProbeFlowWindow(QMainWindow):
         self.setStatusBar(self._status_bar)
         self._status_bar.showMessage("Open a folder to browse scans")
 
+    def _build_menu_bar(self) -> None:
+        menu_bar = self.menuBar()
+        self._mode_actions: dict[str, QAction] = {}
+        self._font_size_actions: dict[str, QAction] = {}
+        self._theme_actions: dict[str, QAction] = {}
+        self._thumbnail_cmap_actions: dict[str, QAction] = {}
+        self._thumbnail_channel_actions: dict[str, QAction] = {}
+        self._thumbnail_align_actions: dict[str, QAction] = {}
+
+        self._mode_action_group = QActionGroup(self)
+        self._mode_action_group.setExclusive(True)
+        self._font_size_action_group = QActionGroup(self)
+        self._font_size_action_group.setExclusive(True)
+        self._theme_action_group = QActionGroup(self)
+        self._theme_action_group.setExclusive(True)
+        self._thumbnail_cmap_action_group = QActionGroup(self)
+        self._thumbnail_cmap_action_group.setExclusive(True)
+        self._thumbnail_channel_action_group = QActionGroup(self)
+        self._thumbnail_channel_action_group.setExclusive(True)
+        self._thumbnail_align_action_group = QActionGroup(self)
+        self._thumbnail_align_action_group.setExclusive(True)
+
+        def _mode_action(menu, text: str, mode: str, shortcut: str | None = None):
+            action = QAction(text, self)
+            action.setCheckable(True)
+            if shortcut:
+                action.setShortcut(QKeySequence(shortcut))
+            action.triggered.connect(
+                lambda _checked=False, value=mode: self._switch_mode(value)
+            )
+            self._mode_action_group.addAction(action)
+            self._mode_actions[mode] = action
+            menu.addAction(action)
+            return action
+
+        file_menu = menu_bar.addMenu("File")
+        open_action = QAction("Open folder...", self)
+        open_action.setShortcut(QKeySequence.Open)
+        open_action.triggered.connect(self._menu_open_folder)
+        file_menu.addAction(open_action)
+        recent_action = QAction("Open recent", self)
+        recent_action.setEnabled(False)
+        file_menu.addAction(recent_action)
+        file_menu.addSeparator()
+        export_image_action = QAction("Export image...", self)
+        export_image_action.setEnabled(False)
+        file_menu.addAction(export_image_action)
+        export_processed_action = QAction("Export processed image...", self)
+        export_processed_action.setEnabled(False)
+        file_menu.addAction(export_processed_action)
+        file_menu.addSeparator()
+        quit_action = QAction("Quit", self)
+        quit_action.setShortcut(QKeySequence.Quit)
+        quit_action.triggered.connect(self.close)
+        file_menu.addAction(quit_action)
+
+        view_menu = menu_bar.addMenu("View")
+        _mode_action(view_menu, "Browse", "browse", "Ctrl+1")
+        view_menu.addSeparator()
+        theme_menu = view_menu.addMenu("Theme")
+        for label, dark in (("Dark mode", True), ("Light mode", False)):
+            action = QAction(label, self)
+            action.setCheckable(True)
+            action.triggered.connect(
+                lambda _checked=False, value=dark: self._set_dark_mode(value)
+            )
+            self._theme_action_group.addAction(action)
+            self._theme_actions["dark" if dark else "light"] = action
+            theme_menu.addAction(action)
+        self._theme_actions["dark"].setShortcut(QKeySequence("Ctrl+Shift+T"))
+        text_menu = view_menu.addMenu("Text size")
+        for label in GUI_FONT_SIZES:
+            action = QAction(label, self)
+            action.setCheckable(True)
+            action.triggered.connect(
+                lambda _checked=False, value=label: self._on_gui_font_size_changed(value)
+            )
+            self._font_size_action_group.addAction(action)
+            self._font_size_actions[label] = action
+            text_menu.addAction(action)
+        cmap_menu = view_menu.addMenu("Thumbnail colourmap")
+        for label in ("Gray", "Viridis", "Inferno", "Magma", "Plasma", "Cividis"):
+            if label not in CMAP_KEY:
+                continue
+            action = QAction(label, self)
+            action.setCheckable(True)
+            action.triggered.connect(
+                lambda _checked=False, value=label: self._set_thumbnail_colormap(value)
+            )
+            self._thumbnail_cmap_action_group.addAction(action)
+            self._thumbnail_cmap_actions[label] = action
+            cmap_menu.addAction(action)
+        channel_menu = view_menu.addMenu("Thumbnail channel")
+        for label in THUMBNAIL_CHANNEL_OPTIONS:
+            action = QAction(label, self)
+            action.setCheckable(True)
+            action.triggered.connect(
+                lambda _checked=False, value=label: self._set_thumbnail_channel(value)
+            )
+            self._thumbnail_channel_action_group.addAction(action)
+            self._thumbnail_channel_actions[label] = action
+            channel_menu.addAction(action)
+
+        processing_menu = menu_bar.addMenu("Processing")
+        align_menu = processing_menu.addMenu("Align rows")
+        for label in ("None", "Mean", "Median"):
+            action = QAction(label, self)
+            action.setCheckable(True)
+            action.triggered.connect(
+                lambda _checked=False, value=label: self._set_thumbnail_align(value)
+            )
+            self._thumbnail_align_action_group.addAction(action)
+            self._thumbnail_align_actions[label] = action
+            align_menu.addAction(action)
+
+        convert_menu = menu_bar.addMenu("Convert")
+        _mode_action(convert_menu, "Convert Createc .dat to .sxm...", "convert", "Ctrl+2")
+        batch_convert_action = QAction("Batch convert folder...", self)
+        batch_convert_action.triggered.connect(lambda: self._switch_mode("convert"))
+        convert_menu.addAction(batch_convert_action)
+
+        tools_menu = menu_bar.addMenu("Tools")
+        map_action = QAction("Map Spectra to Images...", self)
+        map_action.triggered.connect(self._on_map_spectra)
+        tools_menu.addAction(map_action)
+        tools_menu.addSeparator()
+        _mode_action(tools_menu, "Feature counting", "features", "Ctrl+3")
+        _mode_action(tools_menu, "TV denoise", "tv", "Ctrl+4")
+        tools_menu.addSeparator()
+        _mode_action(tools_menu, "Developer tools", "dev", "Ctrl+5")
+        _mode_action(tools_menu, "Definitions / Debug info", "defs", "Ctrl+6")
+        prefs_action = QAction("Preferences...", self)
+        prefs_action.setEnabled(False)
+        tools_menu.addAction(prefs_action)
+
+        help_menu = menu_bar.addMenu("Help")
+        github_action = QAction("GitHub", self)
+        github_action.triggered.connect(lambda: _open_url(GITHUB_URL))
+        help_menu.addAction(github_action)
+        report_action = QAction("Report issue", self)
+        report_action.triggered.connect(lambda: _open_url(f"{GITHUB_URL}/issues"))
+        help_menu.addAction(report_action)
+        help_menu.addSeparator()
+        about_action = QAction("About ProbeFlow", self)
+        about_action.triggered.connect(self._show_about)
+        help_menu.addAction(about_action)
+
+        self._sync_menu_actions()
+
+    def _apply_default_splitter_sizes(self) -> None:
+        center_default = max(
+            self.CENTRAL_BROWSER_MIN_W,
+            self.width()
+            - self.LEFT_SIDEBAR_DEFAULT_W
+            - self.RIGHT_INSPECTOR_DEFAULT_W,
+        )
+        self._browse_splitter.setSizes([
+            self.LEFT_SIDEBAR_DEFAULT_W,
+            center_default,
+        ])
+        self._splitter.setSizes([
+            self.LEFT_SIDEBAR_DEFAULT_W + center_default,
+            self.RIGHT_INSPECTOR_DEFAULT_W,
+        ])
+
+    def _menu_open_folder(self) -> None:
+        self._switch_mode("browse")
+        self._open_browse_folder()
+
+    def _set_dark_mode(self, dark: bool) -> None:
+        dark = bool(dark)
+        if self._dark == dark:
+            self._sync_menu_actions()
+            return
+        self._dark = dark
+        self._navbar.set_dark(self._dark)
+        self._apply_theme()
+
+    def _set_thumbnail_colormap(self, label: str) -> None:
+        if hasattr(self, "_browse_tools") and self._browse_tools.cmap_cb.currentText() != label:
+            self._browse_tools.cmap_cb.setCurrentText(label)
+        else:
+            self._on_thumbnail_colormap_changed(CMAP_KEY.get(label, DEFAULT_CMAP_KEY))
+        self._sync_menu_actions()
+
+    def _set_thumbnail_channel(self, channel: str) -> None:
+        if hasattr(self, "_browse_tools") and self._browse_tools.thumbnail_channel_cb.currentText() != channel:
+            self._browse_tools.thumbnail_channel_cb.setCurrentText(channel)
+        else:
+            self._on_thumbnail_channel_changed(channel)
+        self._sync_menu_actions()
+
+    def _set_thumbnail_align(self, mode: str) -> None:
+        if hasattr(self, "_browse_tools") and self._browse_tools.align_rows_cb.currentText() != mode:
+            self._browse_tools.align_rows_cb.setCurrentText(mode)
+        else:
+            self._on_thumbnail_align_changed(mode)
+        self._sync_menu_actions()
+
     # ── Mode switching ─────────────────────────────────────────────────────────
     def _switch_mode(self, mode: str):
         self._mode = mode
@@ -3861,34 +4336,55 @@ class ProbeFlowWindow(QMainWindow):
         self._update_tab_styles()
 
     def _update_tab_styles(self):
-        t = THEMES["dark" if self._dark else "light"]
-        for btn, name in ((self._tab_browse, "browse"),
-                          (self._tab_convert, "convert"),
-                          (self._tab_features, "features"),
-                          (self._tab_tv, "tv"),
-                          (self._tab_dev, "dev"),
-                          (self._tab_defs, "defs")):
-            active = (self._mode == name)
-            if active:
-                btn.setStyleSheet(f"""
-                    QPushButton {{
-                        background-color: {t['tab_act']};
-                        color: {t['accent_bg']};
-                        border-bottom: 2px solid {t['accent_bg']};
-                        border-top: none; border-left: none; border-right: none;
-                        padding: 0 18px;
-                    }}
-                """)
-            else:
-                btn.setStyleSheet(f"""
-                    QPushButton {{
-                        background-color: {t['tab_inact']};
-                        color: {t['fg']};
-                        border: none;
-                        padding: 0 18px;
-                    }}
-                    QPushButton:hover {{ color: {t['accent_bg']}; }}
-                """)
+        self._sync_menu_actions()
+
+    def _sync_menu_actions(self) -> None:
+        if hasattr(self, "_mode_actions"):
+            for mode, action in self._mode_actions.items():
+                action.blockSignals(True)
+                action.setChecked(self._mode == mode)
+                action.blockSignals(False)
+        if hasattr(self, "_theme_actions"):
+            dark_key = "dark" if self._dark else "light"
+            for key, action in self._theme_actions.items():
+                action.blockSignals(True)
+                action.setChecked(key == dark_key)
+                action.blockSignals(False)
+        if hasattr(self, "_font_size_actions"):
+            for label, action in self._font_size_actions.items():
+                action.blockSignals(True)
+                action.setChecked(label == self._gui_font_size)
+                action.blockSignals(False)
+        if hasattr(self, "_thumbnail_cmap_actions"):
+            cmap_label = (
+                self._browse_tools.cmap_cb.currentText()
+                if hasattr(self, "_browse_tools")
+                else self._cfg.get("colormap", DEFAULT_CMAP_LABEL)
+            )
+            for label, action in self._thumbnail_cmap_actions.items():
+                action.blockSignals(True)
+                action.setChecked(label == cmap_label)
+                action.blockSignals(False)
+        if hasattr(self, "_thumbnail_channel_actions"):
+            channel = (
+                self._browse_tools.thumbnail_channel_cb.currentText()
+                if hasattr(self, "_browse_tools")
+                else THUMBNAIL_CHANNEL_DEFAULT
+            )
+            for label, action in self._thumbnail_channel_actions.items():
+                action.blockSignals(True)
+                action.setChecked(label == channel)
+                action.blockSignals(False)
+        if hasattr(self, "_thumbnail_align_actions"):
+            align = (
+                self._browse_tools.align_rows_cb.currentText()
+                if hasattr(self, "_browse_tools")
+                else "None"
+            )
+            for label, action in self._thumbnail_align_actions.items():
+                action.blockSignals(True)
+                action.setChecked(label == align)
+                action.blockSignals(False)
 
     # ── Browse ─────────────────────────────────────────────────────────────────
     def _open_browse_folder(self):
@@ -3963,6 +4459,7 @@ class ProbeFlowWindow(QMainWindow):
             self._status_bar.showMessage(
                 f"Thumbnail channel: {channel} — queued {n} image thumbnail"
                 f"{'s' if n != 1 else ''}")
+        self._sync_menu_actions()
 
     def _on_thumbnail_colormap_changed(self, cmap_key: str):
         n = self._grid.set_thumbnail_colormap(cmap_key)
@@ -3974,6 +4471,7 @@ class ProbeFlowWindow(QMainWindow):
                 f"Thumbnail colormap: {label} — queued {n} image thumbnail"
                 f"{'s' if n != 1 else ''}")
         self._refresh_primary_channel_previews()
+        self._sync_menu_actions()
 
     def _on_thumbnail_align_changed(self, mode: str):
         n = self._grid.set_thumbnail_align_rows(mode)
@@ -3984,6 +4482,7 @@ class ProbeFlowWindow(QMainWindow):
             self._status_bar.showMessage(
                 f"Thumbnail align rows: {label} — queued {n} image thumbnail"
                 f"{'s' if n != 1 else ''}")
+        self._sync_menu_actions()
 
     def _refresh_primary_channel_previews(self):
         primary = self._grid.get_primary()
@@ -4401,12 +4900,13 @@ class ProbeFlowWindow(QMainWindow):
 
     # ── Theme ──────────────────────────────────────────────────────────────────
     def _toggle_theme(self):
-        self._dark = not self._dark
-        self._navbar.set_dark(self._dark)
-        self._apply_theme()
+        self._set_dark_mode(not self._dark)
 
     def _on_gui_font_size_changed(self, label: str):
         self._gui_font_size = normalise_gui_font_size(label)
+        self._navbar.blockSignals(True)
+        self._navbar.set_font_size(self._gui_font_size)
+        self._navbar.blockSignals(False)
         self._apply_theme()
         self._status_bar.showMessage(f"Text size: {self._gui_font_size}")
 
@@ -4419,7 +4919,6 @@ class ProbeFlowWindow(QMainWindow):
         self._browse_tools.apply_theme(t)
         self._browse_info.apply_theme(t)
         self._conv_panel.apply_theme(t)
-        self._tab_bar.setStyleSheet(f"background-color: {t['main_bg']};")
         self._update_tab_styles()
 
     # ── About ──────────────────────────────────────────────────────────────────

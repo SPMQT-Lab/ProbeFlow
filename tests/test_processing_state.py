@@ -8,6 +8,7 @@ import pytest
 from probeflow.processing.state import (
     ProcessingState,
     ProcessingStep,
+    apply_operation_with_optional_roi,
     apply_processing_state,
     missing_roi_references,
     roi_references_from_state,
@@ -95,6 +96,29 @@ class TestSerialisation:
         ])
         # Should not raise
         json.dumps(state.to_dict())
+
+    def test_to_dict_deep_copies_nested_params(self):
+        state = ProcessingState(steps=[
+            ProcessingStep("plane_bg", {"fit_roi": {"ref": "terrace"}}),
+        ])
+
+        data = state.to_dict()
+        data["steps"][0]["params"]["fit_roi"]["ref"] = "changed"
+
+        assert state.steps[0].params == {"fit_roi": {"ref": "terrace"}}
+
+    def test_from_dict_deep_copies_nested_params(self):
+        data = {
+            "steps": [{
+                "op": "plane_bg",
+                "params": {"fit_roi": {"ref": "terrace"}},
+            }],
+        }
+
+        state = ProcessingState.from_dict(data)
+        data["steps"][0]["params"]["fit_roi"]["ref"] = "changed"
+
+        assert state.steps[0].params == {"fit_roi": {"ref": "terrace"}}
 
 
 # ── Test B2: ROI reference validation ────────────────────────────────────────
@@ -341,6 +365,21 @@ class TestGuiConversion:
         assert "rect" not in step.params
         assert step.params["step"]["op"] == "smooth"
 
+    def test_roi_scope_wraps_active_roi_id(self):
+        state = processing_state_from_gui({
+            "processing_scope": "roi",
+            "processing_roi_id": "roi-123",
+            "smooth_sigma": 1.5,
+        })
+        assert len(state.steps) == 1
+        step = state.steps[0]
+        assert step.op == "roi"
+        assert step.params["roi_id"] == "roi-123"
+        assert step.params["step"] == {
+            "op": "smooth",
+            "params": {"sigma_px": 1.5},
+        }
+
     def test_roi_scope_keeps_global_background_steps_global(self):
         gui = {
             "processing_scope": "roi",
@@ -359,15 +398,15 @@ class TestGuiConversion:
         ]
         assert state.steps[-1].params["step"]["op"] == "smooth"
 
-    def test_bad_roi_rect_falls_back_to_global_local_filter(self):
+    def test_bad_roi_rect_skips_local_filter_instead_of_falling_back_global(self):
         gui = {
             "processing_scope": "roi",
             "roi_rect": "not-a-rect",
             "smooth_sigma": 1.0,
         }
-        state = processing_state_from_gui(gui)
-        assert len(state.steps) == 1
-        assert state.steps[0].op == "smooth"
+        with pytest.warns(UserWarning, match="ROI-scoped processing"):
+            state = processing_state_from_gui(gui)
+        assert state.steps == []
 
     def test_highpass_gui_state_captured(self):
         state = processing_state_from_gui({"highpass_sigma": 12})
@@ -678,6 +717,53 @@ class TestApplyKnownSteps:
         outside[5:11, 5:11] = False
         np.testing.assert_array_equal(result[outside], arr[outside])
         assert not np.allclose(result[5:11, 5:11], arr[5:11, 5:11])
+
+    def test_apply_operation_with_optional_roi_leaves_outside_mask_unchanged(self):
+        arr = np.arange(36, dtype=float).reshape(6, 6)
+        mask = np.zeros(arr.shape, dtype=bool)
+        mask[2:5, 1:4] = True
+
+        result = apply_operation_with_optional_roi(
+            arr,
+            lambda image: image + 100.0,
+            mask,
+        )
+
+        np.testing.assert_array_equal(result[~mask], arr[~mask])
+        np.testing.assert_array_equal(result[mask], arr[mask] + 100.0)
+
+    def test_apply_operation_with_optional_roi_without_mask_applies_globally(self):
+        arr = np.arange(9, dtype=float).reshape(3, 3)
+
+        result = apply_operation_with_optional_roi(
+            arr,
+            lambda image: image + 10.0,
+            None,
+        )
+
+        np.testing.assert_array_equal(result, arr + 10.0)
+
+    def test_roi_smooth_by_roi_id_changes_only_active_roi(self):
+        from probeflow.core.roi import ROI, ROISet
+
+        rng = np.random.default_rng(5)
+        arr = np.zeros((16, 16), dtype=float)
+        arr[5:11, 5:11] = rng.normal(size=(6, 6))
+        roi_set = ROISet(image_id="img")
+        roi = ROI.new("rectangle", {"x": 5.0, "y": 5.0, "width": 6.0, "height": 6.0})
+        roi_set.add(roi)
+        state = ProcessingState(steps=[
+            ProcessingStep("roi", {
+                "roi_id": roi.id,
+                "step": {"op": "smooth", "params": {"sigma_px": 1.0}},
+            }),
+        ])
+
+        result = apply_processing_state(arr, state, roi_set=roi_set)
+
+        mask = roi.to_mask(arr.shape)
+        np.testing.assert_array_equal(result[~mask], arr[~mask])
+        assert not np.allclose(result[mask], arr[mask])
 
     def test_roi_smooth_changes_only_selected_ellipse_mask(self):
         rng = np.random.default_rng(4)

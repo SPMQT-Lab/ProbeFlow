@@ -24,7 +24,7 @@ class ProcessingControlPanel(QWidget):
         self._mode = mode
         self._build()
 
-    _TWO_COL_THRESHOLD = 260  # px — switch to 1-col below this panel width
+    _TWO_COL_THRESHOLD = 360  # px — switch to 1-col below this panel width
 
     def resizeEvent(self, event: "QResizeEvent"):
         super().resizeEvent(event)

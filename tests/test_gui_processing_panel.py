@@ -112,6 +112,91 @@ def test_viewer_dialog_keeps_standard_processing_visible(qapp, monkeypatch):
     dlg.deleteLater()
 
 
+def test_viewer_dialog_layout_prioritises_image_and_bounds_side_panels(qapp, monkeypatch):
+    from probeflow.gui import ImageViewerDialog, SxmFile, THEMES
+
+    monkeypatch.setattr(ImageViewerDialog, "_load_current", lambda self: None)
+
+    entry = SxmFile(path=Path("/tmp/example.sxm"), stem="example", Nx=8, Ny=8)
+    dlg = ImageViewerDialog(entry, [entry], "gray", THEMES["dark"])
+    splitter = dlg._viewer_main.centralWidget()
+
+    assert splitter.widget(0).minimumWidth() == 500
+    assert splitter.widget(1).minimumWidth() == 300
+    assert splitter.widget(1).maximumWidth() == 380
+    assert dlg._roi_dock.minimumWidth() == 160
+    assert dlg._roi_dock.maximumWidth() == 280
+    assert dlg._canvas.minimumHeight() == 140
+    assert dlg._canvas.maximumHeight() == 140
+    assert dlg._canvas.sizePolicy().verticalPolicy().name == "Fixed"
+    assert dlg._processing_panel._TWO_COL_THRESHOLD == 360
+
+    dlg.close()
+    dlg.deleteLater()
+
+
+def test_viewer_dialog_menus_mirror_existing_controls(qapp, monkeypatch):
+    from probeflow.gui import ImageViewerDialog, SxmFile, THEMES
+
+    monkeypatch.setattr(ImageViewerDialog, "_load_current", lambda self: None)
+
+    entry = SxmFile(path=Path("/tmp/example.sxm"), stem="example", Nx=8, Ny=8)
+    dlg = ImageViewerDialog(entry, [entry], "gray", THEMES["dark"])
+    top_menu_names = [action.text() for action in dlg._viewer_main.menuBar().actions()]
+
+    assert top_menu_names == ["File", "View", "Processing", "ROI", "Export", "Help"]
+
+    def action(menu_name: str, text: str):
+        top_action = next(
+            item for item in dlg._viewer_main.menuBar().actions()
+            if item.text() == menu_name
+        )
+        menu = top_action.menu()
+        for item in menu.actions():
+            if item.text() == text:
+                return item
+            submenu = item.menu()
+            if submenu is not None:
+                for subitem in submenu.actions():
+                    if subitem.text() == text:
+                        return subitem
+        raise AssertionError(f"Missing menu action: {menu_name} > {text}")
+
+    action("Processing", "Median").trigger()
+    assert dlg._processing_panel._align_combo.currentText() == "Median"
+    assert action("Processing", "Median").isChecked()
+
+    action("Processing", "MAD (rows)").trigger()
+    assert dlg._processing_panel._bad_lines_combo.currentText() == "MAD (rows)"
+
+    action("Processing", "Gaussian").trigger()
+    assert dlg._processing_panel._smooth_combo.currentText() == "Gaussian"
+
+    action("ROI", "Rectangle").trigger()
+    assert dlg._zoom_lbl.tool() == "rectangle"
+    assert action("ROI", "Rectangle").isChecked()
+    action("ROI", "Pan").trigger()
+    assert dlg._zoom_lbl.tool() == "pan"
+
+    dlg.show()
+    qapp.processEvents()
+    dlg._roi_dock.close()
+    qapp.processEvents()
+    assert dlg._roi_dock.isVisible() is False
+    action("ROI", "Show ROI Manager").trigger()
+    qapp.processEvents()
+    assert dlg._roi_dock.isVisible() is True
+
+    assert action("ROI", "Rename ROI").isEnabled() is False
+    assert action("ROI", "Delete ROI").isEnabled() is False
+    assert action("Export", "Save PNG copy").isEnabled() is True
+    assert action("Export", "Save processed image").isEnabled() is False
+    assert action("Export", "Save provenance").isEnabled() is False
+
+    dlg.close()
+    dlg.deleteLater()
+
+
 def test_viewer_apply_merges_standard_and_advanced_processing(qapp, monkeypatch):
     from probeflow.gui import ImageViewerDialog, SxmFile, THEMES
 
@@ -131,6 +216,59 @@ def test_viewer_apply_merges_standard_and_advanced_processing(qapp, monkeypatch)
     assert dlg._processing["linear_undistort"] is True
     assert dlg._processing["undistort_shear_x"] == 3.0
     assert dlg._processing["undistort_scale_y"] == 1.10
+
+    dlg.close()
+    dlg.deleteLater()
+
+
+def test_viewer_apply_scopes_local_filter_to_active_area_roi(qapp, monkeypatch):
+    from probeflow.core.roi import ROI, ROISet
+    from probeflow.gui import ImageViewerDialog, SxmFile, THEMES
+
+    monkeypatch.setattr(ImageViewerDialog, "_load_current", lambda self: None)
+    monkeypatch.setattr(ImageViewerDialog, "_refresh_processing_display", lambda self: None)
+
+    entry = SxmFile(path=Path("/tmp/example.sxm"), stem="example", Nx=8, Ny=8)
+    dlg = ImageViewerDialog(entry, [entry], "gray", THEMES["dark"])
+    roi_set = ROISet(image_id="img1")
+    roi = ROI.new("rectangle", {"x": 2.0, "y": 2.0, "width": 3.0, "height": 3.0})
+    roi_set.add(roi)
+    roi_set.set_active(roi.id)
+    dlg._image_roi_set = roi_set
+    dlg._processing_panel.set_state({"smooth_sigma": 1.0})
+    dlg._scope_cb.setCurrentIndex(0)
+
+    dlg._on_apply_processing()
+
+    assert dlg._processing["processing_scope"] == "roi"
+    assert dlg._processing["processing_roi_id"] == roi.id
+    assert "roi_geometry" not in dlg._processing
+    assert "roi_rect" not in dlg._processing
+
+    dlg.close()
+    dlg.deleteLater()
+
+
+def test_viewer_apply_rejects_local_filter_for_active_non_area_roi(qapp, monkeypatch):
+    from probeflow.core.roi import ROI, ROISet
+    from probeflow.gui import ImageViewerDialog, SxmFile, THEMES
+
+    monkeypatch.setattr(ImageViewerDialog, "_load_current", lambda self: None)
+    monkeypatch.setattr(ImageViewerDialog, "_refresh_processing_display", lambda self: None)
+
+    entry = SxmFile(path=Path("/tmp/example.sxm"), stem="example", Nx=8, Ny=8)
+    dlg = ImageViewerDialog(entry, [entry], "gray", THEMES["dark"])
+    roi_set = ROISet(image_id="img1")
+    roi = ROI.new("point", {"x": 2.0, "y": 2.0})
+    roi_set.add(roi)
+    roi_set.set_active(roi.id)
+    dlg._image_roi_set = roi_set
+    dlg._processing_panel.set_state({"smooth_sigma": 1.0})
+
+    dlg._on_apply_processing()
+
+    assert "not valid for area processing" in dlg._status_lbl.text()
+    assert "processing_scope" not in dlg._processing
 
     dlg.close()
     dlg.deleteLater()
