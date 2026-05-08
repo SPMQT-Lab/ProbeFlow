@@ -105,6 +105,38 @@ def test_2_channel_dat_roundtrip_preserves_synthetic_backward(
     assert np.array_equal(direct.planes[3], converted.planes[3])
 
 
+def test_4_channel_dat_roundtrip_backward_orientation_is_preserved(
+    sample_dat_files, tmp_path, cushion_dir
+):
+    """Verify the backward-channel round-trip invariant for real 4-channel data.
+
+    Createc stores backward rows in display order; the converter flips them to
+    SXM acquisition order; the SXM reader flips them back.  Net result: both
+    load paths must produce byte-identical backward planes.
+    """
+    four_channel = next(
+        (
+            path
+            for path in sample_dat_files
+            if (
+                read_createc_dat_report(path, include_raw=False).detected_channel_count
+                == 4
+            )
+        ),
+        None,
+    )
+    if four_channel is None:
+        pytest.skip("no 4-channel sample .dat available")
+
+    direct = load_scan(four_channel)
+    convert_dat_to_sxm(four_channel, tmp_path, cushion_dir)
+    converted = load_scan(next(tmp_path.glob("*.sxm")))
+
+    # planes[1] = Z backward, planes[3] = Current backward
+    np.testing.assert_array_equal(direct.planes[1], converted.planes[1])
+    np.testing.assert_array_equal(direct.planes[3], converted.planes[3])
+
+
 def test_exact_non_stm_channel_count_and_raw_fallback(tmp_path):
     dat = tmp_path / "nine_channels.dat"
     header = b"[Paramco32]\nNum.X=2\nNum.Y=2\n"

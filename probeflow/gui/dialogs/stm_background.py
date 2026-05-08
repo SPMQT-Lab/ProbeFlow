@@ -7,7 +7,7 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtGui import QImage, QPixmap, QStandardItem, QStandardItemModel
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -32,6 +32,49 @@ _MODEL_LABELS = {
     "3rd order polynomial": "poly3",
     "Low-pass": "low_pass",
     "Line by line": "line_by_line",
+    "Piezo creep": "piezo_creep",
+    "Piezo creep + y²": "piezo_creep_x2",
+    "Piezo creep + y³": "piezo_creep_x3",
+    "Sqrt creep": "sqrt_creep",
+}
+
+_MODEL_TOOLTIPS = {
+    "Linear":
+        "B(y) = a + b·y\n"
+        "Least-squares line fitted to the row profile. Removes a constant "
+        "tilt along the slow-scan direction.",
+    "2nd order polynomial":
+        "B(y) = a + b·y + c·y²\n"
+        "Least-squares quadratic. Removes tilt and gentle bowl-shaped "
+        "background curvature.",
+    "3rd order polynomial":
+        "B(y) = a + b·y + c·y² + d·y³\n"
+        "Least-squares cubic. Handles more complex slow-scan drift.",
+    "Low-pass":
+        "B(y) = Gaussian-smoothed row profile (width = blur length).\n"
+        "Non-parametric; captures any slowly-varying background without "
+        "assuming a functional form.",
+    "Line by line":
+        "B(y) = raw per-row statistic (median or mean).\n"
+        "Each scan line is zeroed independently — strongest correction, "
+        "but removes genuine large-scale topography.",
+    "Piezo creep":
+        "B(y) = a + b·y + c·log(|y − d|)\n"
+        "Logarithmic creep model. d is the fitted singularity anchor "
+        "(typically before scan start). Best for images showing a rapid "
+        "height drift that decays logarithmically from the first line.",
+    "Piezo creep + y²":
+        "B(y) = a + b·y + c·log(|y − d|) + e·y²\n"
+        "Logarithmic creep plus a quadratic term. Handles residual "
+        "parabolic background on top of the creep drift.",
+    "Piezo creep + y³":
+        "B(y) = a + b·y + c·log(|y − d|) + e·y³\n"
+        "Logarithmic creep plus a cubic term. Use when the residual "
+        "background is asymmetric across the scan.",
+    "Sqrt creep":
+        "B(y) = a + b·y + c·√|y − d|\n"
+        "Square-root creep variant. Useful when the drift grows more "
+        "slowly than a logarithm (intermediate between linear and log).",
 }
 
 
@@ -97,7 +140,12 @@ class STMBackgroundDialog(QDialog):
         controls.addRow("Line statistic:", self._stat_combo)
 
         self._model_combo = QComboBox()
-        self._model_combo.addItems(list(_MODEL_LABELS))
+        _model_item_model = QStandardItemModel(self._model_combo)
+        for label in _MODEL_LABELS:
+            item = QStandardItem(label)
+            item.setToolTip(_MODEL_TOOLTIPS.get(label, ""))
+            _model_item_model.appendRow(item)
+        self._model_combo.setModel(_model_item_model)
         controls.addRow("Background model:", self._model_combo)
 
         self._linear_x_cb = QCheckBox("Linear fit in x first")
@@ -169,6 +217,13 @@ class STMBackgroundDialog(QDialog):
         self._apply_btn.clicked.connect(self._apply)
         close_btn.clicked.connect(self.close)
         self._model_combo.currentTextChanged.connect(self._sync_controls)
+        self._model_combo.currentTextChanged.connect(lambda _: self._invalidate_preview())
+        self._fit_region_combo.currentIndexChanged.connect(lambda _: self._invalidate_preview())
+        self._stat_combo.currentIndexChanged.connect(lambda _: self._invalidate_preview())
+        self._linear_x_cb.toggled.connect(lambda _: self._invalidate_preview())
+        self._blur_spin.valueChanged.connect(lambda _: self._invalidate_preview())
+        self._jump_cb.toggled.connect(lambda _: self._invalidate_preview())
+        self._jump_spin.valueChanged.connect(lambda _: self._invalidate_preview())
         self._sync_controls()
 
     def processing_params(self) -> dict:
@@ -277,6 +332,13 @@ class STMBackgroundDialog(QDialog):
         self._fig.tight_layout()
         self._canvas.draw_idle()
 
+    def _invalidate_preview(self) -> None:
+        if self._last_result is not None:
+            self._last_result = None
+            self._status_lbl.setText("Parameters changed — run a preview before applying.")
+
     def _sync_controls(self) -> None:
-        is_low_pass = _MODEL_LABELS[self._model_combo.currentText()] == "low_pass"
+        label = self._model_combo.currentText()
+        is_low_pass = _MODEL_LABELS[label] == "low_pass"
         self._blur_spin.setEnabled(is_low_pass)
+        self._model_combo.setToolTip(_MODEL_TOOLTIPS.get(label, ""))

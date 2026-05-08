@@ -77,14 +77,8 @@ def _open_url(url: str) -> None:
     except Exception:
         pass
 
-from probeflow import processing as _proc
-from probeflow.processing.display import (
-    array_to_uint8 as _array_to_uint8,
-    clip_range_from_array as _clip_range_from_array,
-)
 from probeflow.gui.viewer.display_range import DisplayRangeController
 from probeflow.gui.viewer.histogram import HistogramPanel
-from probeflow.provenance.export import build_scan_export_provenance, png_display_state
 from probeflow.processing.gui_adapter import (
     processing_state_from_gui,
 )
@@ -116,6 +110,37 @@ from probeflow.gui.dialogs import (
     ViewerSpecMappingDialog,
 )
 from probeflow.core.scan_loader import SUPPORTED_SUFFIXES, load_scan
+from probeflow.gui.viewer import (
+    BadLinePreviewController,
+    DeferredPlaneAction,
+    DisplaySliderController,
+    ProcessingUndoController,
+    SetZeroPlaneController,
+    SpecOverlayController,
+    activate_roi,
+    active_roi,
+    active_roi_id,
+    delete_active_roi,
+    delete_roi,
+    export_histogram,
+    export_line_profile,
+    has_roi_aware_local_filter,
+    invert_active_roi,
+    invert_roi,
+    load_roi_set,
+    plot_roi_line_profile,
+    rename_roi,
+    resolve_channel_unit,
+    roi_canvas_created,
+    roi_canvas_moved,
+    save_roi_set,
+    save_viewer_png,
+    select_nth_roi,
+    selected_or_active_roi_id,
+    show_roi_fft,
+    show_roi_histogram,
+    transform_roi_set_for_display_op,
+)
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 CONFIG_PATH     = Path.home() / ".probeflow_config.json"
@@ -217,16 +242,6 @@ from probeflow.gui.rendering import (
     THUMBNAIL_CHANNEL_DEFAULT,
     THUMBNAIL_CHANNEL_OPTIONS,
     _apply_processing,
-    _fit_image_to_box,
-    _get_lut,
-    _make_lut,
-    clip_range_from_arr,
-    pil_to_pixmap,
-    render_scan_image,
-    render_scan_thumbnail,
-    render_spec_thumbnail,
-    render_with_processing,
-    resolve_thumbnail_plane_index,
 )
 from probeflow.gui.workers import (
     ChannelLoader,
@@ -322,8 +337,6 @@ class ImageViewerDialog(QDialog):
         # of the full processing dict at a prior point. Apply / Reset push
         # the previous state onto _undo_stack and clear _redo_stack; the
         # Undo / Redo buttons swap between the two.
-        self._proc_undo_stack: list[dict] = []
-        self._proc_redo_stack: list[dict] = []
         self._proc_undo_btn = None
         self._proc_redo_btn = None
         # Mutable mapping shared with the parent window: spec_stem → image_stem.
@@ -332,21 +345,21 @@ class ImageViewerDialog(QDialog):
         self._raw_arr: Optional[np.ndarray] = None
         self._display_arr: Optional[np.ndarray] = None  # raw or processed, for histogram/export
         # Data range for sliders lives in self._hist_panel.data_min_si / data_max_si
-        self._spec_markers: list[dict] = []
-        self._spec_roi_set: "object | None" = None  # ROISet when spec positions are loaded
         self._scan_header: dict = {}
         self._scan_range_m: Optional[tuple] = None
         self._scan_shape: Optional[tuple] = None
         self._scan_format: str = ""
         self._scan_plane_names: list[str] = list(PLANE_NAMES)
         self._scan_plane_units: list[str] = ["m", "m", "A", "A"]
-        self._zero_pick_mode: str = "plane"
-        self._zero_plane_points_px: list[tuple[int, int]] = []
-        self._zero_markers_hidden = False
+        # Controllers initialised inside _build() after their dependent widgets are created.
+        self._spec_overlay: "SpecOverlayController | None" = None
+        self._zero_ctrl: "SetZeroPlaneController | None" = None
+        self._proc_undo_ctrl: "ProcessingUndoController | None" = None
+        self._display_slider_ctrl: "DisplaySliderController | None" = None
+        self._bad_line_preview_ctrl: "BadLinePreviewController | None" = None
         self._pending_initial_plane_idx: Optional[int] = max(0, int(initial_plane_idx))
         self._reset_zoom_on_next_pixmap = True
-        self._deferred_action: str = ""
-        self._deferred_plane_idx: int = 0
+        self._deferred = DeferredPlaneAction()
 
         self._build()
         self._drs.rangeChanged.connect(self._refresh_display_range)
@@ -690,6 +703,9 @@ class ImageViewerDialog(QDialog):
         ur_row.addWidget(self._proc_undo_btn, 1)
         ur_row.addWidget(self._proc_redo_btn, 1)
         right_lay.addLayout(ur_row)
+        self._proc_undo_ctrl = ProcessingUndoController(
+            self._proc_undo_btn, self._proc_redo_btn, self._sync_viewer_menu_actions,
+        )
         self._update_undo_redo_buttons()
 
         QShortcut(QKeySequence("Ctrl+Z"), self,
@@ -903,6 +919,20 @@ class ImageViewerDialog(QDialog):
         nav_row.addSpacing(16)
         nav_row.addWidget(close_btn)
         root.addLayout(nav_row)
+
+        # Controllers that need widgets created above.
+        self._spec_overlay = SpecOverlayController(self._zoom_lbl, self._spec_image_map)
+        self._zero_ctrl = SetZeroPlaneController(self._zoom_lbl)
+        self._display_slider_ctrl = DisplaySliderController(
+            self._drs, self._hist_panel,
+            lambda: self._display_arr,
+            self._channel_unit,
+        )
+        self._bad_line_preview_ctrl = BadLinePreviewController(
+            self._zoom_lbl,
+            self._processing_panel,
+            lambda: self._display_arr if self._display_arr is not None else self._raw_arr,
+        )
 
     def _build_viewer_menu_bar(self) -> None:
         menu_bar = self._viewer_main.menuBar()
@@ -1252,92 +1282,22 @@ class ImageViewerDialog(QDialog):
         self._sync_line_profile_visibility()
 
     def _on_bad_line_preview_settings_changed(self) -> None:
-        if getattr(self, "_bad_line_preview_active", False):
-            self._on_preview_bad_lines()
+        if self._bad_line_preview_ctrl is None:
             return
-        if hasattr(self, "_processing_panel"):
-            method = self._processing_panel.bad_line_method()
-            if method is None:
-                self._processing_panel.set_bad_line_preview_summary(
-                    "Preview: select a method")
-            else:
-                self._processing_panel.set_bad_line_preview_summary(
-                    "Preview: run detection")
-        if hasattr(self._zoom_lbl, "clear_bad_segment_overlay"):
-            self._zoom_lbl.clear_bad_segment_overlay()
+        msg = self._bad_line_preview_ctrl.on_settings_changed()
+        if msg and hasattr(self, "_status_lbl"):
+            self._status_lbl.setText(msg)
 
     def _on_preview_bad_lines(self) -> None:
-        if self._display_arr is None and self._raw_arr is None:
-            self._processing_panel.set_bad_line_preview_summary("Preview: no image")
+        if self._bad_line_preview_ctrl is None:
             return
-        method = self._processing_panel.bad_line_method()
-        if method is None:
-            self._clear_bad_line_preview("Preview: select a method")
-            return
-        arr = self._display_arr if self._display_arr is not None else self._raw_arr
-        try:
-            from probeflow.processing import (
-                detect_bad_scanline_segments,
-                repair_bad_scanline_segments,
-            )
-            segments = detect_bad_scanline_segments(
-                arr,
-                threshold=self._processing_panel.bad_line_threshold(),
-                method=method,
-                polarity=self._processing_panel.bad_line_polarity(),
-                min_segment_length_px=(
-                    self._processing_panel.bad_line_min_segment_length_px()
-                ),
-                max_adjacent_bad_lines=(
-                    self._processing_panel.bad_line_max_adjacent_bad_lines()
-                ),
-            )
-            _preview_arr, preview_info = repair_bad_scanline_segments(
-                arr,
-                segments,
-                max_adjacent_bad_lines=(
-                    self._processing_panel.bad_line_max_adjacent_bad_lines()
-                ),
-                threshold=self._processing_panel.bad_line_threshold(),
-                polarity=self._processing_panel.bad_line_polarity(),
-                min_segment_length_px=(
-                    self._processing_panel.bad_line_min_segment_length_px()
-                ),
-            )
-        except Exception as exc:
-            self._clear_bad_line_preview(f"Preview error: {exc}")
-            return
-        self._bad_line_preview_segments = list(segments)
-        self._bad_line_preview_active = True
-        if hasattr(self._zoom_lbl, "set_bad_segment_overlay"):
-            self._zoom_lbl.set_bad_segment_overlay(segments)
-        n = len(segments)
-        n_lines = len({seg.line_index for seg in segments})
-        skipped = len(preview_info.skipped_segments)
-        skipped_lines = len({seg.line_index for seg in preview_info.skipped_segments})
-        if n == 0:
-            summary = "Detected 0 segments"
-        elif n == 1:
-            summary = f"Detected 1 segment on 1 scan line"
-        else:
-            summary = f"Detected {n} segments across {n_lines} scan lines"
-        if skipped:
-            summary += (
-                f"; skipped {skipped} segment{'s' if skipped != 1 else ''} "
-                f"across {skipped_lines} line{'s' if skipped_lines != 1 else ''} "
-                "because the adjacent-line limit was exceeded"
-            )
-        self._processing_panel.set_bad_line_preview_summary(summary)
-        if hasattr(self, "_status_lbl"):
-            self._status_lbl.setText(summary)
+        msg = self._bad_line_preview_ctrl.run()
+        if msg and hasattr(self, "_status_lbl"):
+            self._status_lbl.setText(msg)
 
     def _clear_bad_line_preview(self, summary: str = "Preview: not run") -> None:
-        self._bad_line_preview_segments = []
-        self._bad_line_preview_active = False
-        if hasattr(self, "_processing_panel"):
-            self._processing_panel.set_bad_line_preview_summary(summary)
-        if hasattr(self._zoom_lbl, "clear_bad_segment_overlay"):
-            self._zoom_lbl.clear_bad_segment_overlay()
+        if self._bad_line_preview_ctrl is not None:
+            self._bad_line_preview_ctrl.clear(summary)
 
     def _on_open_stm_background(self) -> None:
         self._open_stm_background_for_roi(None)
@@ -1415,13 +1375,14 @@ class ImageViewerDialog(QDialog):
     def _channel_unit(self) -> tuple[float, str, str]:
         """Return (scale, unit_label, axis_label) for the current channel."""
         idx = self._ch_cb.currentIndex()
-        unit = self._scan_plane_units[idx] if idx < len(self._scan_plane_units) else ""
-        name = self._scan_plane_names[idx] if idx < len(self._scan_plane_names) else self._ch_cb.currentText()
         arr = self._display_arr if self._display_arr is not None else self._raw_arr
-        from probeflow.analysis.spec_plot import choose_display_unit
-        scale, unit_label = choose_display_unit(unit, arr)
-        axis_label = name.rsplit(" ", 1)[0] if name.endswith((" forward", " backward")) else name
-        return scale, unit_label, axis_label
+        return resolve_channel_unit(
+            self._scan_plane_units,
+            self._scan_plane_names,
+            idx,
+            self._ch_cb.currentText(),
+            arr,
+        )
 
     def _set_scan_channel_choices(self, scan) -> None:
         names = list(scan.plane_names) if scan.plane_names else [
@@ -1463,133 +1424,23 @@ class ImageViewerDialog(QDialog):
 
     # ── Spec position overlay ─────────────────────────────────────────────────
     def _load_spec_markers(self, entry):
-        """Show markers ONLY for spec files explicitly mapped to this image.
-
-        Coordinate-based auto-matching used to be done here, but it
-        attached spectra to the wrong scans for users with overlapping
-        scan windows. Use the "Map spectra…" dialogs (folder-level on the
-        toolbar, or per-image inside this viewer) to establish the
-        spec→image mapping explicitly. Without a mapping, no markers
-        appear — that's intentional, not a bug.
-        """
-        self._spec_markers = []
-        self._zoom_lbl.set_markers([])
-
-        if self._scan_range_m is None or self._scan_shape is None:
-            return
-
-        # Walk the spec→image mapping; only specs assigned to this stem are
-        # candidates. We still need their coordinates to position the marker.
-        from probeflow.io.file_type import FileType, sniff_file_type
-        from probeflow.io.spectroscopy import read_spec_file
-        from probeflow.analysis.spec_plot import spec_position_to_pixel, _parse_sxm_offset
-
-        try:
-            folder = entry.path.parent
-            assigned_specs = {
-                spec_stem for spec_stem, img_stem in self._spec_image_map.items()
-                if img_stem == entry.stem
-            }
-            if not assigned_specs:
-                return
-            spec_types = (FileType.CREATEC_SPEC, FileType.NANONIS_SPEC)
-            candidates = [
-                f for f in sorted(folder.iterdir())
-                if f.is_file()
-                   and f.stem in assigned_specs
-                   and sniff_file_type(f) in spec_types
-            ]
-
-            if self._scan_format == "sxm" and self._scan_header:
-                scan_offset_m = _parse_sxm_offset(self._scan_header)
-                raw_angle = self._scan_header.get("SCAN_ANGLE", "0").strip()
-                try:
-                    scan_angle_deg = float(raw_angle) if raw_angle else 0.0
-                except ValueError:
-                    scan_angle_deg = 0.0
-            else:
-                scan_offset_m = (0.0, 0.0)
-                scan_angle_deg = 0.0
-
-            markers = []
-            for spec_path in candidates:
-                try:
-                    spec = read_spec_file(spec_path)
-                    x_m, y_m = spec.position
-                    result = spec_position_to_pixel(
-                        x_m, y_m,
-                        scan_shape=self._scan_shape,
-                        scan_range_m=self._scan_range_m,
-                        scan_offset_m=scan_offset_m,
-                        scan_angle_deg=scan_angle_deg,
-                    )
-                    if result is None:
-                        # User explicitly mapped this spec to this image, but
-                        # the coordinates don't actually fall in-frame. Show
-                        # the marker anyway, clamped to the centre, so the
-                        # user can see the assignment exists.
-                        frac_x, frac_y = 0.5, 0.5
-                    else:
-                        frac_x, frac_y = result
-                    markers.append({
-                        "frac_x": frac_x,
-                        "frac_y": frac_y,
-                        "entry": VertFile(
-                            path=spec_path,
-                            stem=spec_path.stem,
-                            sweep_type=spec.metadata.get("sweep_type", "unknown"),
-                            bias_mv=spec.metadata.get("bias_mv"),
-                        ),
-                    })
-                except Exception:
-                    continue
-
-            # Build a parallel ROISet with the same positions as point ROIs.
-            try:
-                from probeflow.core.roi import ROI, ROISet
-                _roi_set = ROISet(image_id=str(entry.path))
-                for m in markers:
-                    frac_x = float(m.get("frac_x", 0.5))
-                    frac_y = float(m.get("frac_y", 0.5))
-                    _entry = m.get("entry")
-                    stem = getattr(_entry, "stem", None) or "spectrum"
-                    name = f"spectrum_{stem}"
-                    linked = str(getattr(_entry, "path", "") or "")
-                    _shape = self._scan_shape or (1, 1)
-                    px_x = frac_x * (_shape[1] - 1)
-                    px_y = frac_y * (_shape[0] - 1)
-                    _roi_set.add(ROI.new("point", {"x": px_x, "y": px_y},
-                                         name=name,
-                                         linked_file=linked or None))
-                self._spec_roi_set = _roi_set
-            except Exception:
-                self._spec_roi_set = None
-            self._spec_markers = markers
-            if self._spec_show_cb.isChecked():
-                self._zoom_lbl.set_markers(markers)
-        except Exception:
-            pass
+        self._spec_overlay.load(
+            entry,
+            self._scan_range_m,
+            self._scan_shape,
+            self._scan_format,
+            self._scan_header,
+            show=self._spec_show_cb.isChecked(),
+        )
 
     def _on_spec_show_toggled(self, checked: bool):
-        if checked:
-            self._zoom_lbl.set_markers(self._spec_markers)
-        else:
-            self._zoom_lbl.set_markers([])
+        self._spec_overlay.apply_visibility(checked)
 
     # ── Image-level ROI set ───────────────────────────────────────────────────
 
     def _load_image_roi_set(self, entry: "SxmFile") -> None:
         """Load ROIs from <stem>.rois.json sidecar if it exists, else create empty set."""
-        from probeflow.core.roi import ROISet
-        from probeflow.io.roi_sidecar import load_roi_set_sidecar
-        try:
-            loaded, _sidecar = load_roi_set_sidecar(entry.path, missing_ok=True)
-        except Exception as exc:
-            self._image_roi_set = ROISet(image_id=str(entry.path))
-            if hasattr(self, "_status_lbl"):
-                self._status_lbl.setText(f"Could not load ROI sidecar: {exc}")
-        else:
-            self._image_roi_set = loaded or ROISet(image_id=str(entry.path))
+        self._image_roi_set, _err = load_roi_set(entry.path)
         self._zoom_lbl.set_roi_set(self._image_roi_set)
         if hasattr(self, "_roi_dock"):
             self._roi_dock.refresh(self._image_roi_set)
@@ -1600,12 +1451,9 @@ class ImageViewerDialog(QDialog):
         if self._image_roi_set is None:
             return
         entry = self._entries[self._idx]
-        from probeflow.io.roi_sidecar import save_roi_set_sidecar
-        try:
-            save_roi_set_sidecar(self._image_roi_set, entry.path)
-        except Exception as exc:
-            if hasattr(self, "_status_lbl"):
-                self._status_lbl.setText(f"Could not save ROI sidecar: {exc}")
+        err = save_roi_set(self._image_roi_set, entry.path)
+        if err and hasattr(self, "_status_lbl"):
+            self._status_lbl.setText(err)
 
     def _on_image_roi_set_changed(self) -> None:
         self._zoom_lbl.set_roi_set(self._image_roi_set)
@@ -1629,28 +1477,15 @@ class ImageViewerDialog(QDialog):
     # ── Canvas drawing-tool callbacks ─────────────────────────────────────────
 
     def _on_canvas_roi_created(self, roi) -> None:
-        """A drawing tool completed; add the new ROI and make it active."""
-        if self._image_roi_set is None:
-            return
-        self._image_roi_set.add(roi)
-        self._image_roi_set.set_active(roi.id)
-        self._on_image_roi_set_changed()
-        # Canvas already switched to pan internally; sync toolbar
-        self._set_drawing_tool("pan")
+        roi_canvas_created(
+            self._image_roi_set, roi,
+            self._on_image_roi_set_changed, self._set_drawing_tool,
+        )
 
     def _on_canvas_roi_move(self, roi_id: str, dx: int, dy: int) -> None:
-        """Active ROI was drag-moved on the canvas; translate its geometry."""
-        if self._image_roi_set is None or (dx == 0 and dy == 0):
-            return
-        roi = self._image_roi_set.get(roi_id)
-        if roi is None:
-            return
-        from probeflow.core.roi import translate as _translate_roi
-        new_roi = _translate_roi(roi, float(dx), float(dy))
-        self._image_roi_set.remove(roi_id)
-        self._image_roi_set.add(new_roi)
-        self._image_roi_set.set_active(new_roi.id)
-        self._on_image_roi_set_changed()
+        roi_canvas_moved(
+            self._image_roi_set, roi_id, dx, dy, self._on_image_roi_set_changed,
+        )
 
     def _on_canvas_tool_changed(self, kind: str) -> None:
         """Canvas emitted tool_changed (e.g. after Escape or drawing completion)."""
@@ -1699,63 +1534,30 @@ class ImageViewerDialog(QDialog):
     # ── ROI helper actions ────────────────────────────────────────────────────
 
     def _set_active_image_roi(self, roi_id: str) -> None:
-        if self._image_roi_set is None:
-            return
-        self._image_roi_set.set_active(roi_id)
-        self._on_image_roi_set_changed()
+        activate_roi(self._image_roi_set, roi_id, self._on_image_roi_set_changed)
 
     def _rename_image_roi(self, roi_id: str) -> None:
-        from PySide6.QtWidgets import QInputDialog
-        roi_set = self._image_roi_set
-        roi = roi_set.get(roi_id) if roi_set else None
-        if roi is None:
-            return
-        new_name, ok = QInputDialog.getText(self, "Rename ROI", "New name:", text=roi.name)
-        if ok and new_name.strip():
-            roi.name = new_name.strip()
-            self._on_image_roi_set_changed()
+        rename_roi(self._image_roi_set, roi_id, self._on_image_roi_set_changed, parent=self)
 
     def _delete_image_roi(self, roi_id: str) -> None:
-        if self._image_roi_set is None:
-            return
-        self._image_roi_set.remove(roi_id)
-        self._on_image_roi_set_changed()
+        delete_roi(self._image_roi_set, roi_id, self._on_image_roi_set_changed)
 
     def _delete_active_image_roi(self) -> None:
-        if self._image_roi_set is None:
-            return
-        active_id = self._image_roi_set.active_roi_id
-        if active_id is not None:
-            self._delete_image_roi(active_id)
+        delete_active_roi(self._image_roi_set, self._on_image_roi_set_changed)
 
     def _invert_image_roi(self, roi_id: str) -> None:
-        roi_set = self._image_roi_set
-        roi = roi_set.get(roi_id) if roi_set else None
-        if roi is None:
-            return
-        shape = self._current_array_shape()
-        if shape is None:
-            return
-        from probeflow.core import roi as _roi_module
-        inverted = _roi_module.invert(roi, shape)
-        roi_set.add(inverted)
-        self._on_image_roi_set_changed()
+        invert_roi(
+            self._image_roi_set, roi_id,
+            self._current_array_shape(), self._on_image_roi_set_changed,
+        )
 
     def _invert_active_image_roi(self) -> None:
-        if self._image_roi_set is None:
-            return
-        active_id = self._image_roi_set.active_roi_id
-        if active_id is not None:
-            self._invert_image_roi(active_id)
+        invert_active_roi(
+            self._image_roi_set, self._current_array_shape(), self._on_image_roi_set_changed,
+        )
 
     def _select_nth_image_roi(self, n: int) -> None:
-        if self._image_roi_set is None:
-            return
-        rois = list(self._image_roi_set.rois)
-        if 1 <= n <= len(rois):
-            roi_id = rois[n - 1].id
-            self._image_roi_set.set_active(roi_id)
-            self._on_image_roi_set_changed()
+        select_nth_roi(self._image_roi_set, n, self._on_image_roi_set_changed)
 
     # ── ROI operation callbacks ───────────────────────────────────────────────
 
@@ -1763,137 +1565,59 @@ class ImageViewerDialog(QDialog):
         roi = self._image_roi_set.get(roi_id) if self._image_roi_set else None
         if roi is None or self._display_arr is None:
             return
-        try:
-            from probeflow.processing.image import fft_magnitude
-            mag, _qx, _qy = fft_magnitude(self._display_arr, roi=roi)
-            from PySide6.QtWidgets import QMessageBox
-            QMessageBox.information(
-                self, "FFT",
-                f"FFT computed for ROI '{roi.name}'.\n"
-                f"Output shape: {mag.shape[0]} × {mag.shape[1]}",
-            )
-        except Exception as exc:
-            from PySide6.QtWidgets import QMessageBox
-            QMessageBox.warning(self, "FFT error", str(exc))
+        show_roi_fft(roi, self._display_arr, parent=self)
 
     def _on_roi_histogram(self, roi_id: str) -> None:
         roi = self._image_roi_set.get(roi_id) if self._image_roi_set else None
         if roi is None or self._display_arr is None:
             return
-        mask = roi.to_mask(self._display_arr.shape[:2])
-        vals = self._display_arr[mask]
-        from PySide6.QtWidgets import QMessageBox
-        if len(vals) == 0:
-            QMessageBox.information(self, "Histogram", "No pixels in ROI.")
-            return
-        scale, unit, _ = self._channel_unit()
-        unit_str = f" {unit}" if unit else ""
-        QMessageBox.information(
-            self, f"Histogram: {roi.name}",
-            f"Pixels: {len(vals)}\n"
-            f"Min:  {float(vals.min()) * scale:.4g}{unit_str}\n"
-            f"Max:  {float(vals.max()) * scale:.4g}{unit_str}\n"
-            f"Mean: {float(vals.mean()) * scale:.4g}{unit_str}",
-        )
+        show_roi_histogram(roi, self._display_arr, self._channel_unit, parent=self)
 
     def _on_roi_line_profile(self, roi_id: str) -> None:
         roi = self._image_roi_set.get(roi_id) if self._image_roi_set else None
         if roi is None or roi.kind != "line" or self._display_arr is None:
             return
-        try:
-            px_x, px_y = self._pixel_size_xy_m()
-            from probeflow.processing.image import line_profile
-            s_m, values = line_profile(
-                self._display_arr, roi=roi,
-                pixel_size_x_m=px_x, pixel_size_y_m=px_y,
-            )
-            scale, unit, name = self._channel_unit()
-            from probeflow.analysis.spec_plot import choose_display_unit
-            x_scale, x_unit = choose_display_unit("m", s_m)
-            self._line_profile_panel.setVisible(True)
-            self._line_profile_panel.plot_profile(
-                s_m * x_scale,
-                values * scale,
-                x_label=f"Distance [{x_unit}]",
-                y_label=f"{name} [{unit}]" if unit else name,
-                theme=self._t,
-            )
-            if hasattr(self._line_profile_panel, "set_source_label"):
-                self._line_profile_panel.set_source_label(
-                    f"Line ROI: {roi.name} ({roi.id[:8]})",
-                    theme=self._t,
-                )
-        except Exception as exc:
-            self._line_profile_panel.show_empty(str(exc), theme=self._t)
+        plot_roi_line_profile(
+            roi, self._display_arr,
+            self._pixel_size_xy_m(),
+            self._channel_unit,
+            self._line_profile_panel,
+            self._t,
+        )
 
     def _on_map_spectra_here(self):
         """Open the per-image spec→this-image mapping dialog."""
         entry = self._entries[self._idx]
-        # Find sibling .VERT files in the same folder.
-        from probeflow.io.file_type import FileType, sniff_file_type
-        try:
-            spec_paths = sorted(
-                f for f in entry.path.parent.iterdir()
-                if f.is_file() and sniff_file_type(f) in (
-                    FileType.CREATEC_SPEC, FileType.NANONIS_SPEC)
-            )
-        except Exception:
-            spec_paths = []
-        if not spec_paths:
+        accepted, n = self._spec_overlay.open_map_dialog(entry, self)
+        if not accepted and n == 0 and not self._spec_image_map:
             self._status_lbl.setText(
                 "No spectroscopy files found alongside this image.")
             return
-        # Build minimal VertFile placeholders (read_spec_file is slow; the
-        # dialog only needs the stem).
-        vert_entries = [VertFile(path=p, stem=p.stem) for p in spec_paths]
-        dlg = ViewerSpecMappingDialog(
-            entry.stem, vert_entries, self._spec_image_map, self)
-        if dlg.exec() == QDialog.Accepted:
-            new_map = dlg.updated_map()
-            self._spec_image_map.clear()
-            self._spec_image_map.update(new_map)
-            n_for_this = sum(1 for v in new_map.values() if v == entry.stem)
+        if accepted:
             self._status_lbl.setText(
-                f"{n_for_this} spec(s) mapped to this image. Reloading markers…")
+                f"{n} spec(s) mapped to this image. Reloading markers…")
             self._load_spec_markers(entry)
 
     def _on_marker_clicked(self, entry):
-        dlg = SpecViewerDialog(entry, self._t, self)
-        dlg.exec()
+        self._spec_overlay.open_spec_viewer(entry, self._t, self)
 
     def _current_array_shape(self) -> tuple[int, int] | None:
         arr = self._display_arr if self._display_arr is not None else self._raw_arr
         return None if arr is None else arr.shape
 
     def _active_image_roi_id(self) -> "str | None":
-        if self._image_roi_set is None:
-            return None
-        return self._image_roi_set.active_roi_id
+        return active_roi_id(self._image_roi_set)
 
     def _active_image_roi(self):
-        roi_id = self._active_image_roi_id()
-        if self._image_roi_set is None or roi_id is None:
-            return None
-        return self._image_roi_set.get(roi_id)
+        return active_roi(self._image_roi_set)
 
     def _processing_has_roi_aware_local_filter(self, state: dict) -> bool:
-        return bool(
-            state.get("smooth_sigma")
-            or state.get("highpass_sigma")
-            or state.get("edge_method")
-            or state.get("fft_mode") is not None
-            or state.get("fft_soft_border")
-        )
+        return has_roi_aware_local_filter(state)
 
     def _selected_or_active_image_roi_id(self) -> "str | None":
-        if hasattr(self, "_roi_dock"):
-            try:
-                selected = self._roi_dock._selected_roi_id()
-            except Exception:
-                selected = None
-            if selected:
-                return selected
-        return self._active_image_roi_id()
+        return selected_or_active_roi_id(
+            self._image_roi_set, getattr(self, "_roi_dock", None),
+        )
 
     def _rename_active_image_roi(self) -> None:
         roi_id = self._selected_or_active_image_roi_id()
@@ -1941,9 +1665,9 @@ class ImageViewerDialog(QDialog):
                     value.setChecked(self._set_zero_plane_btn.isChecked())
                     value.blockSignals(False)
                 elif key == "undo":
-                    value.setEnabled(bool(self._proc_undo_stack))
+                    value.setEnabled(self._proc_undo_ctrl.can_undo)
                 elif key == "redo":
-                    value.setEnabled(bool(self._proc_redo_stack))
+                    value.setEnabled(self._proc_undo_ctrl.can_redo)
 
         if hasattr(self, "_viewer_roi_tool_actions"):
             tool = self._zoom_lbl.tool()
@@ -2033,97 +1757,36 @@ class ImageViewerDialog(QDialog):
         return px_x, px_y
 
     def _on_set_zero_plane_mode_toggled(self, checked: bool):
-        cleared_partial_points = False
-        if checked:
-            self._set_selection_tool("none")
-            self._zero_pick_mode = "plane"
-            self._zero_plane_points_px = []
-            self._zero_markers_hidden = False
-            self._status_lbl.setText("Click 3 reference points to define the zero plane.")
-        elif self._zero_pick_mode == "plane" and len(self._zero_plane_points_px) < 3:
-            self._zero_plane_points_px = []
-            cleared_partial_points = True
+        msg = self._zero_ctrl.toggle(checked, self._set_selection_tool)
         self._zoom_lbl.set_set_zero_mode(checked)
-        if cleared_partial_points:
+        if msg:
+            self._status_lbl.setText(msg)
+        if not checked:
             self._refresh_zero_markers()
 
     def _on_set_zero_pick(self, frac_x: float, frac_y: float):
         """Handle image clicks while manual zero-plane mode is active."""
-        if self._raw_arr is None:
-            return
-        Ny, Nx = self._raw_arr.shape
-        x_px = int(round(frac_x * (Nx - 1)))
-        y_px = int(round(frac_y * (Ny - 1)))
-        x_px = max(0, min(x_px, Nx - 1))
-        y_px = max(0, min(y_px, Ny - 1))
-
-        if self._zero_pick_mode == "plane" and self._set_zero_plane_btn.isChecked():
-            self._zero_markers_hidden = False
-            self._zero_plane_points_px.append((x_px, y_px))
-            n = len(self._zero_plane_points_px)
-            self._refresh_zero_markers()  # show partial pick immediately
-            if n < 3:
-                self._status_lbl.setText(
-                    f"Zero plane point {n}/3 set at ({x_px}, {y_px}); click {3 - n} more."
-                )
-                return
-            self._processing['set_zero_plane_points'] = self._zero_plane_points_px[:3]
-            self._processing['set_zero_patch'] = 1
-            self._processing.pop('set_zero_xy', None)
+        rerender, msg = self._zero_ctrl.on_canvas_pick(
+            frac_x, frac_y,
+            self._raw_arr,
+            self._processing,
+            self._set_zero_plane_btn.isChecked(),
+        )
+        if msg:
+            self._status_lbl.setText(msg)
+        if rerender:
             if self._set_zero_plane_btn.isChecked():
                 self._set_zero_plane_btn.setChecked(False)
-            self._status_lbl.setText("Zero plane set from 3 reference points.")
             self._refresh_processing_display()
-            return
-
-        return
 
     def _refresh_zero_markers(self):
-        """Push the current set-zero pick state into the image canvas for drawing.
-
-        Sources, in order of priority:
-          1. In-progress plane picks (``self._zero_plane_points_px``).
-          2. Committed plane points (``processing['set_zero_plane_points']``).
-          3. Legacy committed single-point zero (``processing['set_zero_xy']``).
-        """
-        if self._raw_arr is None:
-            self._zoom_lbl.set_zero_markers([])
-            return
-        if self._zero_markers_hidden:
-            self._zoom_lbl.set_zero_markers([])
-            return
-        Ny, Nx = self._raw_arr.shape
-        denom_x = max(1, Nx - 1)
-        denom_y = max(1, Ny - 1)
-
-        def _to_marker(pt, label):
-            x_px, y_px = pt
-            return {
-                "frac_x": float(x_px) / denom_x,
-                "frac_y": float(y_px) / denom_y,
-                "label": label,
-            }
-
-        markers: list[dict] = []
-        if self._zero_plane_points_px:
-            for i, pt in enumerate(self._zero_plane_points_px[:3]):
-                markers.append(_to_marker(pt, str(i + 1)))
-        elif self._processing.get("set_zero_plane_points"):
-            for i, pt in enumerate(self._processing["set_zero_plane_points"][:3]):
-                markers.append(_to_marker(pt, str(i + 1)))
-        elif self._processing.get("set_zero_xy") is not None:
-            markers.append(_to_marker(self._processing["set_zero_xy"], "0"))
-        self._zoom_lbl.set_zero_markers(markers)
+        self._zero_ctrl.refresh_markers(self._raw_arr, self._processing)
 
     def _on_clear_set_zero(self):
-        self._zero_plane_points_px = []
-        self._zero_markers_hidden = True
         if self._set_zero_plane_btn.isChecked():
             self._set_zero_plane_btn.setChecked(False)
-        self._zoom_lbl.set_zero_markers([])
-        self._status_lbl.setText(
-            "Zero reference markers hidden. Processing is unchanged; use Reset to original to undo leveling."
-        )
+        msg = self._zero_ctrl.clear()
+        self._status_lbl.setText(msg)
 
     # ── Histogram range and clip handlers ─────────────────────────────────────
     def _on_hist_range_released(self, lo_phys: float, hi_phys: float) -> None:
@@ -2153,93 +1816,19 @@ class ImageViewerDialog(QDialog):
     # ── Display range sliders ─────────────────────────────────────────────────
 
     def _update_display_sliders(self) -> None:
-        """Sync all four display sliders to the current _drs / _display_arr state."""
-        if self._display_arr is None or self._hist_panel.data_min_si is None:
-            return
-        vmin_si, vmax_si = self._drs.resolve(self._display_arr)
-        if vmin_si is None:
-            return
-        data_min = self._hist_panel.data_min_si
-        data_max = self._hist_panel.data_max_si or 0.0
-        data_range = data_max - data_min
-        center = (vmin_si + vmax_si) / 2.0
-        width = vmax_si - vmin_si
-        center_clamped = max(data_min, min(data_max, center))
-        if data_range > 0:
-            width_frac = max(0.001, min(1.0, width / data_range))
-            contrast_sl = max(0, min(1000, round((1.0 - width_frac) * 1000)))
-        else:
-            contrast_sl = 0
-
-        self._hist_panel.set_slider_positions(
-            self._hist_panel.si_to_sl(vmin_si),
-            self._hist_panel.si_to_sl(vmax_si),
-            self._hist_panel.si_to_sl(center_clamped),
-            contrast_sl,
-        )
-
-        scale, unit, _ = self._channel_unit()
-        if scale:
-            self._hist_panel.set_slider_labels(
-                f"{vmin_si * scale:.3g} {unit}",
-                f"{vmax_si * scale:.3g} {unit}",
-                f"{center * scale:.3g} {unit}",
-                f"{width * scale:.3g} {unit}",
-            )
+        self._display_slider_ctrl.update()
 
     def _on_min_slider_changed(self, v: int) -> None:
-        if self._display_arr is None or self._hist_panel.data_min_si is None:
-            return
-        vmin_si = self._hist_panel.sl_to_si(v)
-        _, vmax_si = self._drs.resolve(self._display_arr)
-        if vmax_si is None:
-            return
-        vmin_si = min(vmin_si, vmax_si - abs(vmax_si) * 1e-9 - 1e-30)
-        self._drs.set_manual(vmin_si, vmax_si)
+        self._display_slider_ctrl.on_min_changed(v)
 
     def _on_max_slider_changed(self, v: int) -> None:
-        if self._display_arr is None or self._hist_panel.data_min_si is None:
-            return
-        vmax_si = self._hist_panel.sl_to_si(v)
-        vmin_si, _ = self._drs.resolve(self._display_arr)
-        if vmin_si is None:
-            return
-        vmax_si = max(vmax_si, vmin_si + abs(vmin_si) * 1e-9 + 1e-30)
-        self._drs.set_manual(vmin_si, vmax_si)
+        self._display_slider_ctrl.on_max_changed(v)
 
     def _on_brightness_slider_changed(self, v: int) -> None:
-        """Shift display window centre; keep width fixed."""
-        if self._display_arr is None or self._hist_panel.data_min_si is None:
-            return
-        vmin_si, vmax_si = self._drs.resolve(self._display_arr)
-        if vmin_si is None:
-            return
-        width = vmax_si - vmin_si
-        new_center = self._hist_panel.sl_to_si(v)
-        new_min = new_center - width / 2.0
-        new_max = new_center + width / 2.0
-        if new_min >= new_max:
-            return
-        self._drs.set_manual(new_min, new_max)
+        self._display_slider_ctrl.on_brightness_changed(v)
 
     def _on_contrast_slider_changed(self, v: int) -> None:
-        """Change display window width; keep centre fixed."""
-        if self._display_arr is None or self._hist_panel.data_min_si is None:
-            return
-        vmin_si, vmax_si = self._drs.resolve(self._display_arr)
-        if vmin_si is None:
-            return
-        center = (vmin_si + vmax_si) / 2.0
-        data_range = (self._hist_panel.data_max_si or 0.0) - self._hist_panel.data_min_si
-        if data_range <= 0:
-            return
-        width_frac = max(0.001, 1.0 - v / 1000.0)
-        new_width = data_range * width_frac
-        new_min = center - new_width / 2.0
-        new_max = center + new_width / 2.0
-        if new_min >= new_max:
-            return
-        self._drs.set_manual(new_min, new_max)
+        self._display_slider_ctrl.on_contrast_changed(v)
 
     # ── Simple background subtraction ─────────────────────────────────────────
     def _on_simple_background(self) -> None:
@@ -2264,37 +1853,15 @@ class ImageViewerDialog(QDialog):
 
     def _on_export_histogram(self):
         """Save the current histogram (bin centres + counts) as a TSV file."""
-        flat = self._hist_panel.flat_phys
-        if flat is None or flat.size < 2:
-            self._status_lbl.setText("No histogram data to export.")
-            return
-        entry = self._entries[self._idx]
-        unit = self._hist_panel.unit or ""
-        out_path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Export histogram",
-            str(Path.home() / f"{entry.stem}_histogram.txt"),
-            "Text files (*.txt *.tsv *.csv)",
+        ok, msg = export_histogram(
+            self._hist_panel.flat_phys,
+            self._entries[self._idx].stem,
+            self._hist_panel.unit or "",
+            self._ch_cb.currentText(),
+            parent=self,
         )
-        if not out_path:
-            return
-        try:
-            n_bins = 256
-            counts, edges = np.histogram(flat, bins=n_bins)
-            centres = 0.5 * (edges[:-1] + edges[1:])
-            with open(out_path, "w", encoding="utf-8") as fh:
-                fh.write("# ProbeFlow histogram export\n")
-                fh.write(f"# source: {entry.stem}\n")
-                fh.write(f"# channel: {self._ch_cb.currentText()}\n")
-                fh.write(f"# n_samples: {flat.size}\n")
-                fh.write(f"# n_bins: {n_bins}\n")
-                fh.write(f"# unit: {unit}\n")
-                fh.write(f"bin_center_{unit}\tcount\n")
-                for c, n in zip(centres, counts):
-                    fh.write(f"{c:.8g}\t{int(n)}\n")
-            self._status_lbl.setText(f"Histogram → {out_path}")
-        except Exception as exc:
-            self._status_lbl.setText(f"Export error: {exc}")
+        if msg:
+            self._status_lbl.setText(msg)
 
     def _on_channel_changed(self, _: int):
         # Different channels have different physical units — reset manual limits.
@@ -2364,27 +1931,17 @@ class ImageViewerDialog(QDialog):
             return
         base_state = copy.deepcopy(self._processing)
         base_state.pop("align_rows", None)
-        coalesced_align_undo = bool(
-            self._proc_undo_stack and self._proc_undo_stack[-1] == base_state
-        )
-        if coalesced_align_undo:
-            self._proc_redo_stack.clear()
-            self._update_undo_redo_buttons()
-        else:
-            self._push_proc_undo_snapshot()
+        coalesced_align_undo = self._proc_undo_ctrl.try_coalesce(base_state)
+        if not coalesced_align_undo:
+            self._proc_undo_ctrl.push(self._processing)
         if align_value is None:
             self._processing.pop("align_rows", None)
             label = "None"
         else:
             self._processing["align_rows"] = align_value
             label = str(align_value).replace("_", " ").title()
-        if (
-            coalesced_align_undo
-            and self._proc_undo_stack
-            and self._processing == self._proc_undo_stack[-1]
-        ):
-            self._proc_undo_stack.pop()
-            self._update_undo_redo_buttons()
+        if coalesced_align_undo:
+            self._proc_undo_ctrl.discard_last_undo_if_eq(self._processing)
         self._clear_bad_line_preview()
         self._refresh_processing_display()
         if hasattr(self, "_status_lbl"):
@@ -2530,7 +2087,7 @@ class ImageViewerDialog(QDialog):
 
     def _on_reset_processing(self):
         """Clear all processing for the current image and reload raw data."""
-        has_zero = bool(self._zero_plane_points_px)
+        has_zero = bool(self._zero_ctrl.points)
         if not self._processing and not has_zero:
             self._status_lbl.setText("Already showing the original — nothing to reset.")
             return
@@ -2543,8 +2100,7 @@ class ImageViewerDialog(QDialog):
         # Untoggle any active set-zero pick modes so we don't re-pick on reload.
         if self._set_zero_plane_btn.isChecked():
             self._set_zero_plane_btn.setChecked(False)
-        self._zero_plane_points_px = []
-        self._zero_markers_hidden = False
+        self._zero_ctrl.clear()
         self._set_selection_tool("none")
         self._scope_cb.setCurrentIndex(0)
         self._roi_status_lbl.setText("ROI filter scope: whole image")
@@ -2554,20 +2110,8 @@ class ImageViewerDialog(QDialog):
 
     # ── Processing undo / redo ────────────────────────────────────────────────
 
-    _PROC_UNDO_DEPTH = 50
-
     def _push_proc_undo_snapshot(self) -> None:
-        """Record the current processing state for Undo, then clear redo.
-
-        Called by Apply / Reset (after their validation passes) before any
-        mutation of ``self._processing``. The snapshot is a deep copy so
-        nested ROI / geometry dicts don't alias the live state.
-        """
-        self._proc_undo_stack.append(copy.deepcopy(self._processing))
-        if len(self._proc_undo_stack) > self._PROC_UNDO_DEPTH:
-            self._proc_undo_stack.pop(0)
-        self._proc_redo_stack.clear()
-        self._update_undo_redo_buttons()
+        self._proc_undo_ctrl.push(self._processing)
 
     def _restore_processing_state(self, state: dict) -> None:
         """Apply a snapshot to ``self._processing`` and resync the GUI."""
@@ -2577,29 +2121,22 @@ class ImageViewerDialog(QDialog):
         self._refresh_processing_display()
 
     def _on_undo_processing(self) -> None:
-        if not self._proc_undo_stack:
+        state = self._proc_undo_ctrl.undo(self._processing)
+        if state is None:
             return
-        self._proc_redo_stack.append(copy.deepcopy(self._processing))
-        previous = self._proc_undo_stack.pop()
-        self._restore_processing_state(previous)
+        self._restore_processing_state(state)
         self._status_lbl.setText("Undo: restored previous processing.")
-        self._update_undo_redo_buttons()
 
     def _on_redo_processing(self) -> None:
-        if not self._proc_redo_stack:
+        state = self._proc_undo_ctrl.redo(self._processing)
+        if state is None:
             return
-        self._proc_undo_stack.append(copy.deepcopy(self._processing))
-        target = self._proc_redo_stack.pop()
-        self._restore_processing_state(target)
+        self._restore_processing_state(state)
         self._status_lbl.setText("Redo: reapplied processing.")
-        self._update_undo_redo_buttons()
 
     def _update_undo_redo_buttons(self) -> None:
-        if self._proc_undo_btn is not None:
-            self._proc_undo_btn.setEnabled(bool(self._proc_undo_stack))
-        if self._proc_redo_btn is not None:
-            self._proc_redo_btn.setEnabled(bool(self._proc_redo_stack))
-        self._sync_viewer_menu_actions()
+        if self._proc_undo_ctrl is not None:
+            self._proc_undo_ctrl.update_buttons()
 
     def _on_save_png(self):
         entry = self._entries[self._idx]
@@ -2609,8 +2146,6 @@ class ImageViewerDialog(QDialog):
                 f"{self._processing_roi_error}"
             )
             return
-        # Hard-stop export if processing state references ROIs that no longer exist.
-        # (Interactive display silently skips them; export must never silently alter results.)
         try:
             ps = processing_state_from_gui(self._processing or {})
             assert_roi_references_resolved(ps, self._image_roi_set)
@@ -2622,62 +2157,26 @@ class ImageViewerDialog(QDialog):
             "PNG images (*.png)")
         if not out_path:
             return
-        # Save the same array the viewer is displaying (processed if active)
         arr = self._display_arr if self._display_arr is not None else self._raw_arr
         if arr is None:
             self._status_lbl.setText("No data to save.")
             return
-        try:
-            try:
-                _scan = load_scan(entry.path)
-                w_m, h_m = _scan.scan_range_m
-            except Exception:
-                _scan = None
-                w_m = h_m = 0.0
-            vmin, vmax = self._drs.resolve(arr)
-            provenance = None
-            if _scan is not None:
-                try:
-                    ch_idx = self._ch_cb.currentIndex()
-                    ps = processing_state_from_gui(self._processing or {})
-                    provenance = build_scan_export_provenance(
-                        _scan,
-                        channel_index=ch_idx,
-                        channel_name=self._ch_cb.currentText() or None,
-                        processing_state=ps,
-                        display_state=png_display_state(
-                            self._drs,
-                            colormap=self._colormap,
-                            add_scalebar=True,
-                            scalebar_unit="nm",
-                            scalebar_pos="bottom-right",
-                        ),
-                        export_kind="viewer_png",
-                        output_path=out_path,
-                        roi_set=self._image_roi_set,
-                    )
-                except Exception:
-                    pass
-            _proc.export_png(
-                arr, out_path, self._colormap,
-                self._clip_low, self._clip_high,
-                lut_fn=lambda key: _get_lut(key),
-                scan_range_m=(w_m, h_m),
-                vmin=vmin, vmax=vmax,
-                provenance=provenance,
-            )
-            self._status_lbl.setText(f"Saved → {Path(out_path).name}")
-        except Exception as exc:
-            self._status_lbl.setText(f"Export error: {exc}")
+        msg = save_viewer_png(
+            arr, out_path, entry.path,
+            self._colormap, self._clip_low, self._clip_high,
+            self._drs, self._processing, self._image_roi_set,
+            self._ch_cb.currentIndex(), self._ch_cb.currentText() or None,
+        )
+        self._status_lbl.setText(msg)
 
     def _on_send_to_features(self):
-        self._deferred_action = "features"
-        self._deferred_plane_idx = self._ch_cb.currentIndex()
+        self._deferred.action = "features"
+        self._deferred.plane_idx = self._ch_cb.currentIndex()
         self.accept()
 
     def _on_send_to_tv(self):
-        self._deferred_action = "tv"
-        self._deferred_plane_idx = self._ch_cb.currentIndex()
+        self._deferred.action = "tv"
+        self._deferred.plane_idx = self._ch_cb.currentIndex()
         self.accept()
 
     def _on_image_context_menu(self, pos):
@@ -2750,26 +2249,16 @@ class ImageViewerDialog(QDialog):
         op_name: str,
         params: dict | None = None,
     ) -> None:
-        """Keep GUI ROI coordinates in the same frame as display transforms."""
-        if self._image_roi_set is None or not self._image_roi_set.rois:
-            return
-        shape = self._current_array_shape()
-        if shape is None:
-            return
-        params = params or {}
-        invalidated = self._image_roi_set.transform_all(op_name, params, shape)
-        if invalidated:
-            invalid = set(invalidated)
-            self._image_roi_set.rois = [
-                roi for roi in self._image_roi_set.rois if roi.id not in invalid
-            ]
-            if self._image_roi_set.active_roi_id in invalid:
-                self._image_roi_set.active_roi_id = None
-            if hasattr(self, "_status_lbl"):
-                self._status_lbl.setText(
-                    f"{op_name} invalidated {len(invalidated)} ROI(s); removed them."
-                )
-        self._on_image_roi_set_changed()
+        transform_roi_set_for_display_op(
+            self._image_roi_set,
+            op_name,
+            params,
+            self._current_array_shape(),
+            status_fn=(
+                self._status_lbl.setText if hasattr(self, "_status_lbl") else None
+            ),
+            roi_changed_fn=self._on_image_roi_set_changed,
+        )
 
     def _on_export_line_profile_csv(self):
         prof = self._line_profile_panel.profile_data()
@@ -2778,48 +2267,25 @@ class ImageViewerDialog(QDialog):
             return
         x_vals, y_vals, x_label, y_label = prof
         entry = self._entries[self._idx]
-        hdr = self._scan_header or {}
-        bias_mv = None
-        current_a = None
-        for k, v in hdr.items():
-            kl = k.lower()
-            if "biasvolt" in kl or "vgap" in kl:
-                try:
-                    bias_mv = float(str(v).replace(",", "."))
-                except (ValueError, TypeError):
-                    pass
-            elif k == "Current[A]":
-                try:
-                    current_a = float(str(v).replace(",", "."))
-                except (ValueError, TypeError):
-                    pass
-        parts = [entry.stem]
-        if bias_mv is not None:
-            parts.append(f"{bias_mv:.0f}mV")
-        if current_a is not None:
-            parts.append(f"{current_a * 1e12:.0f}pA")
-        suggested_name = "_".join(parts) + "_lineprofile.csv"
-        out_path, _ = QFileDialog.getSaveFileName(
-            self, "Export line profile as CSV",
-            str(Path.home() / suggested_name),
-            "CSV files (*.csv)")
-        if not out_path:
-            return
-        try:
-            import csv
-            with open(out_path, "w", newline="", encoding="utf-8") as fh:
-                w = csv.writer(fh)
-                w.writerow(["# File", entry.stem])
-                if bias_mv is not None:
-                    w.writerow(["# Bias (mV)", f"{bias_mv:.3f}"])
-                if current_a is not None:
-                    w.writerow(["# Setpoint current (A)", f"{current_a:.3e}"])
-                w.writerow([x_label, y_label])
-                for x, y in zip(x_vals, y_vals):
-                    w.writerow([f"{float(x):.6g}", f"{float(y):.6g}"])
-            self._status_lbl.setText(f"Profile → {Path(out_path).name}")
-        except Exception as exc:
-            self._status_lbl.setText(f"CSV export error: {exc}")
+        ok, msg = export_line_profile(
+            x_vals, y_vals, x_label, y_label,
+            entry.stem,
+            self._scan_header or {},
+            parent=self,
+        )
+        if msg:
+            self._status_lbl.setText(msg)
+
+    def closeEvent(self, event):
+        # Invalidate the in-flight worker token so any pending loaded() signal
+        # is dropped rather than delivered to widgets that are being torn down.
+        self._token = object()
+        # Close any modeless child dialogs that hold a reference to self or to
+        # the currently displayed Scan.  Without this they outlive the viewer.
+        stm_dlg = getattr(self, "_stm_background_dialog", None)
+        if stm_dlg is not None and stm_dlg.isVisible():
+            stm_dlg.close()
+        super().closeEvent(event)
 
 
 # ── Browse panels ─────────────────────────────────────────────────────────────
@@ -3838,14 +3304,13 @@ class ProbeFlowWindow(QMainWindow):
                                     initial_plane_idx=initial_plane_idx)
             dlg.exec()
             # Handle "Send to …" actions requested from inside the viewer.
-            action = getattr(dlg, "_deferred_action", "")
-            if action in ("features", "tv"):
-                self._load_from_viewer(dlg, action)
+            if dlg._deferred.is_pending():
+                self._load_from_viewer(dlg, dlg._deferred.action)
 
     def _load_from_viewer(self, dlg, action: str):
         """Load the processed array from a closed ImageViewerDialog into Features or TV."""
         entry = dlg._entries[dlg._idx]
-        plane_idx = getattr(dlg, "_deferred_plane_idx", dlg._ch_cb.currentIndex())
+        plane_idx = dlg._deferred.plane_idx
         arr = dlg._display_arr if dlg._display_arr is not None else dlg._raw_arr
         if arr is None:
             self._status_bar.showMessage("Viewer had no image data to send.")

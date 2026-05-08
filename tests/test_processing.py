@@ -31,6 +31,7 @@ from probeflow.processing import (
     stm_line_background,
     subtract_background,
 )
+from probeflow.processing.image import linear_undistort, set_zero_point
 from probeflow.cli import main as cli_main
 
 
@@ -310,14 +311,24 @@ class TestSTMBackground:
 
         np.testing.assert_array_equal(arr, before)
 
-    def test_unsupported_creep_model_fails_without_modifying_image(self):
+    def test_active_roi_without_mask_raises(self):
         arr = np.ones((10, 10), dtype=float)
-        before = arr.copy()
+        with pytest.raises(ValueError, match="mask"):
+            preview_stm_background(arr, STMBackgroundParams(fit_region="active_roi"))
 
-        with pytest.raises(ValueError, match="STM background model"):
-            preview_stm_background(arr, STMBackgroundParams(model="piezo_creep"))
+    def test_invalid_fit_region_raises(self):
+        arr = np.ones((10, 10), dtype=float)
+        with pytest.raises(ValueError, match="fit_region"):
+            preview_stm_background(arr, STMBackgroundParams(fit_region="bogus"))
 
-        np.testing.assert_array_equal(arr, before)
+    def test_active_roi_with_mask_succeeds(self):
+        arr = np.arange(100, dtype=float).reshape(10, 10)
+        mask = np.zeros((10, 10), dtype=bool)
+        mask[:, :5] = True
+        result = preview_stm_background(
+            arr, STMBackgroundParams(fit_region="active_roi"), mask=mask
+        )
+        assert result.corrected.shape == arr.shape
 
 
 # ─── subtract_background ────────────────────────────────────────────────────
@@ -534,6 +545,27 @@ class TestFacetLevel:
         out = facet_level(arr)
         assert out.shape == arr.shape
 
+    def test_all_nan_returns_array_unchanged(self):
+        arr = np.full((16, 16), np.nan)
+        out = facet_level(arr)
+        assert out.shape == arr.shape
+        assert np.all(np.isnan(out))
+
+    def test_stepped_surface_uses_flat_terraces_only(self):
+        # Two flat terraces separated by a step; the step edge has a large
+        # gradient so facet_level should fit the terraces and leave them flat.
+        arr = np.zeros((32, 32), dtype=np.float64)
+        arr[16:] += 2.0  # upper terrace
+        # Add a gentle global tilt so there is something for facet_level to remove
+        yy, xx = np.mgrid[:32, :32]
+        arr = arr + 0.01 * yy.astype(np.float64)
+        out = facet_level(arr)
+        # Each terrace should be nearly flat (std << step height)
+        std_lower = float(np.std(out[:14]))
+        std_upper = float(np.std(out[18:]))
+        assert std_lower < 0.5
+        assert std_upper < 0.5
+
 
 # ─── fourier_filter ──────────────────────────────────────────────────────────
 
@@ -622,6 +654,18 @@ class TestFftSoftBorder:
     def test_invalid_cutoff_raises(self):
         with pytest.raises(ValueError, match="cutoff"):
             fft_soft_border(np.ones((8, 8)), cutoff=-0.1)
+
+    def test_shape_preserved_for_non_square(self):
+        arr = np.random.default_rng(7).normal(size=(20, 32))
+        out = fft_soft_border(arr, mode="low_pass", cutoff=0.3)
+        assert out.shape == arr.shape
+
+    def test_nan_mask_preserved(self):
+        arr = np.random.default_rng(8).normal(size=(24, 24))
+        arr[5, 10] = np.nan
+        out = fft_soft_border(arr, mode="low_pass", cutoff=0.3)
+        assert out.shape == arr.shape
+        assert np.isnan(out[5, 10])
 
 
 class TestPeriodicNotchFilter:
@@ -856,6 +900,156 @@ class TestPlaneBgCli:
         with patch("probeflow.cli._write_output", side_effect=_capture):
             cli_main(["plane-bg", str(first_sample_dat), "--order", "3"])
         assert captured[0].processing_history[0]["params"]["order"] == 3
+
+
+# ─── linear_undistort ────────────────────────────────────────────────────────
+
+class TestLinearUndistort:
+    def test_identity_when_zero_shear_unit_scale(self):
+        arr = np.arange(100, dtype=float).reshape(10, 10)
+        out = linear_undistort(arr, shear_x=0.0, scale_y=1.0)
+        np.testing.assert_allclose(out, arr, atol=1e-10)
+
+    def test_nonzero_shear_shifts_pixel_columns(self):
+        arr = np.zeros((20, 20), dtype=float)
+        arr[:, 10] = 1.0  # bright column
+        out = linear_undistort(arr, shear_x=4.0, scale_y=1.0)
+        # With positive shear the bright column moves; output differs from input
+        assert not np.allclose(out, arr, atol=0.01)
+
+    def test_scale_y_lt_1_stretches_vertically(self):
+        # scale_y=0.5: src_y = output_row / 0.5 = output_row * 2.
+        # Output row 10 maps to source row 20 (in the 1.0 region).
+        # Output row 0 maps to source row 0 (zero region).
+        arr = np.zeros((40, 10), dtype=float)
+        arr[20:] = 1.0
+        out = linear_undistort(arr, shear_x=0.0, scale_y=0.5)
+        assert float(out[0, 0]) < 0.5   # source row 0 → 0.0
+        assert float(out[10, 0]) > 0.5  # source row 20 → 1.0
+
+    def test_scale_y_le_zero_raises(self):
+        with pytest.raises(ValueError, match="scale_y"):
+            linear_undistort(np.ones((4, 4)), scale_y=0.0)
+
+    def test_non_2d_raises(self):
+        with pytest.raises(ValueError):
+            linear_undistort(np.ones(10))
+
+    def test_nan_mask_preserved(self):
+        arr = np.ones((10, 10), dtype=float)
+        arr[3, 5] = np.nan
+        arr[7, :] = np.nan
+        out = linear_undistort(arr, shear_x=2.0, scale_y=1.0)
+        assert np.isnan(out[3, 5])
+        assert np.all(np.isnan(out[7, :]))
+        assert np.isfinite(out[0, 0])
+
+
+# ─── set_zero_point ──────────────────────────────────────────────────────────
+
+class TestSetZeroPoint:
+    def test_subtracts_patch_mean_at_clicked_pixel(self):
+        arr = np.ones((10, 10), dtype=float) * 5.0
+        out = set_zero_point(arr, y_px=5, x_px=5, patch=1)
+        # The 3×3 patch mean was 5.0; after subtraction the image should be 0.
+        np.testing.assert_allclose(out, 0.0, atol=1e-12)
+
+    def test_relative_differences_preserved(self):
+        arr = np.arange(100, dtype=float).reshape(10, 10)
+        out = set_zero_point(arr, y_px=0, x_px=0, patch=0)
+        # Pixel differences away from anchor are unchanged
+        np.testing.assert_allclose(out[1:, 1:] - out[:-1, :-1],
+                                   arr[1:, 1:] - arr[:-1, :-1],
+                                   atol=1e-12)
+
+    def test_patch_0_subtracts_single_pixel(self):
+        arr = np.zeros((8, 8), dtype=float)
+        arr[3, 4] = 7.0
+        out = set_zero_point(arr, y_px=3, x_px=4, patch=0)
+        assert abs(float(out[3, 4])) < 1e-12
+        assert abs(float(out[0, 0]) - (-7.0)) < 1e-12
+
+    def test_out_of_bounds_coords_clipped(self):
+        arr = np.ones((6, 6), dtype=float) * 3.0
+        # Should not raise even with coordinates far outside array
+        out = set_zero_point(arr, y_px=100, x_px=-50, patch=1)
+        assert out.shape == arr.shape
+        np.testing.assert_allclose(out, 0.0, atol=1e-12)
+
+
+# ─── piezo creep background ───────────────────────────────────────────────────
+
+class TestPiezoCreepBackground:
+    @staticmethod
+    def _make_creep_image(N: int, a: float, b: float, c: float, d: float,
+                          extra: str = "none") -> np.ndarray:
+        """Return an image whose row medians follow a piezo-creep profile."""
+        y = np.linspace(-1.0, 1.0, N)
+        eps = 1e-6
+        profile = a + b * y + c * np.log(np.abs(y - d) + eps)
+        if extra == "quadratic":
+            profile = profile + 0.3 * y ** 2
+        elif extra == "cubic":
+            profile = profile + 0.2 * y ** 3
+        return np.tile(profile[:, None], (1, N)).astype(np.float64)
+
+    def test_piezo_creep_removes_log_ramp(self):
+        arr = self._make_creep_image(40, a=1.0, b=0.5, c=0.8, d=-1.5)
+        result = preview_stm_background(arr, STMBackgroundParams(model="piezo_creep"))
+        row_medians = np.median(result.corrected, axis=1)
+        assert float(np.std(row_medians)) < 0.05
+
+    def test_piezo_creep_x2_removes_log_plus_quadratic(self):
+        arr = self._make_creep_image(40, a=1.0, b=0.3, c=0.6, d=-1.5, extra="quadratic")
+        result = preview_stm_background(arr, STMBackgroundParams(model="piezo_creep_x2"))
+        row_medians = np.median(result.corrected, axis=1)
+        assert float(np.std(row_medians)) < 0.05
+
+    def test_piezo_creep_x3_removes_log_plus_cubic(self):
+        arr = self._make_creep_image(40, a=1.0, b=0.2, c=0.5, d=-1.5, extra="cubic")
+        result = preview_stm_background(arr, STMBackgroundParams(model="piezo_creep_x3"))
+        row_medians = np.median(result.corrected, axis=1)
+        assert float(np.std(row_medians)) < 0.05
+
+    def test_piezo_creep_nan_rows_do_not_break_fit(self):
+        arr = self._make_creep_image(40, a=0.5, b=0.4, c=0.7, d=-1.5)
+        arr[5] = np.nan
+        arr[20] = np.nan
+        result = preview_stm_background(arr, STMBackgroundParams(model="piezo_creep"))
+        assert result.corrected.shape == arr.shape
+
+    def test_piezo_creep_via_stm_background_params(self):
+        arr = self._make_creep_image(32, a=2.0, b=0.1, c=0.4, d=-1.5)
+        out = apply_stm_background(arr, STMBackgroundParams(model="piezo_creep"))
+        assert out.shape == arr.shape
+        assert np.isfinite(out).any()
+
+    def test_piezo_creep_insufficient_data_raises(self):
+        # Fewer than 4 finite rows → fit should raise ValueError
+        arr = np.full((5, 5), np.nan)
+        arr[0] = 1.0
+        arr[1] = 2.0
+        arr[2] = 3.0  # only 3 finite profile values
+        with pytest.raises(ValueError, match="not enough finite"):
+            preview_stm_background(arr, STMBackgroundParams(model="piezo_creep"))
+
+    def test_sqrt_creep_removes_sqrt_background(self):
+        N = 40
+        y = np.linspace(-1.0, 1.0, N)
+        profile = 1.0 + 0.5 * y + 0.6 * np.sqrt(np.abs(y - (-1.5)))
+        arr = np.tile(profile[:, None], (1, N)).astype(np.float64)
+        result = preview_stm_background(arr, STMBackgroundParams(model="sqrt_creep"))
+        row_medians = np.median(result.corrected, axis=1)
+        assert float(np.std(row_medians)) < 0.05
+
+    def test_sqrt_creep_via_stm_background_params(self):
+        N = 32
+        y = np.linspace(-1.0, 1.0, N)
+        profile = 0.5 + 0.3 * np.sqrt(np.abs(y - (-1.5)))
+        arr = np.tile(profile[:, None], (1, N)).astype(np.float64)
+        out = apply_stm_background(arr, STMBackgroundParams(model="sqrt_creep"))
+        assert out.shape == arr.shape
+        assert np.isfinite(out).any()
 
     def test_order5_via_cli_rejected(self, first_sample_dat, tmp_path):
         import sys

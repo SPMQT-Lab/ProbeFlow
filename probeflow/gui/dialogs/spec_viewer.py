@@ -198,10 +198,12 @@ class SpecViewerDialog(QDialog):
 
         sweep = spec.metadata.get("sweep_type", "").replace("_", " ")
         n_pts = spec.metadata.get("n_points", 0)
-        self._status.setText(
-            f"{sweep}  |  {n_pts} points  |  "
-            f"pos ({spec.position[0]*1e9:.2f}, {spec.position[1]*1e9:.2f}) nm"
-        )
+        try:
+            pos = spec.position
+            pos_str = f"pos ({pos[0]*1e9:.2f}, {pos[1]*1e9:.2f}) nm"
+        except (TypeError, IndexError, KeyError):
+            pos_str = "pos unknown"
+        self._status.setText(f"{sweep}  |  {n_pts} points  |  {pos_str}")
 
         self._redraw()
 

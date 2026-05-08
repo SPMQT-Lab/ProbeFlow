@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Optional
+
+_log = logging.getLogger(__name__)
 
 import numpy as np
 from PySide6.QtCore import QObject, QRunnable, Signal
@@ -54,6 +57,7 @@ class ThumbnailLoader(QRunnable):
             )
             arr = scan.planes[plane_idx] if plane_idx < scan.n_planes else None
         except Exception:
+            _log.warning("ThumbnailLoader: failed to load %s", self.entry.path, exc_info=True)
             arr = None
         img = render_scan_image(
             arr=arr,
@@ -103,6 +107,7 @@ class FolderThumbnailLoader(QRunnable):
                 )
                 arr = scan.planes[plane_idx] if plane_idx < scan.n_planes else None
             except Exception:
+                _log.warning("FolderThumbnailLoader: failed to load %s", path, exc_info=True)
                 arr = None
             img = render_scan_image(
                 arr=arr,
@@ -128,8 +133,12 @@ class SpecThumbnailLoader(QRunnable):
         self.dark    = dark
 
     def run(self):
-        img = render_spec_thumbnail(self.entry.path, size=(self.w, self.h),
-                                    dark=self.dark)
+        try:
+            img = render_spec_thumbnail(self.entry.path, size=(self.w, self.h),
+                                        dark=self.dark)
+        except Exception:
+            _log.warning("SpecThumbnailLoader: failed to render %s", self.entry.path, exc_info=True)
+            img = None
         if img is not None:
             self.signals.loaded.emit(self.entry.stem, pil_to_pixmap(img), self.token)
 

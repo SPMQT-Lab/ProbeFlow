@@ -504,11 +504,16 @@ def _normalise_stm_background_model(model: str) -> str:
         "lowpass": "low_pass",
         "line_by_line": "line_by_line",
         "line": "line_by_line",
+        "piezo_creep": "piezo_creep",
+        "piezo_creep_x2": "piezo_creep_x2",
+        "piezo_creep_x3": "piezo_creep_x3",
+        "sqrt_creep": "sqrt_creep",
     }
     if key not in aliases:
         raise ValueError(
             "STM background model must be linear, poly2, poly3, low_pass, "
-            f"or line_by_line, got {model!r}"
+            "line_by_line, piezo_creep, piezo_creep_x2, piezo_creep_x3, "
+            f"or sqrt_creep, got {model!r}"
         )
     return aliases[key]
 
@@ -613,7 +618,35 @@ def fit_scanline_background(
     blur_length: float | None = None,
     jump_threshold: float | None = None,
 ) -> np.ndarray:
-    """Fit or smooth a 1-D scan-line background profile."""
+    """Fit or smooth a 1-D scan-line background profile.
+
+    Models
+    ------
+    linear
+        B(y) = a + b·y  — least-squares line through the row profile.
+    poly2
+        B(y) = a + b·y + c·y²  — least-squares quadratic.
+    poly3
+        B(y) = a + b·y + c·y² + d·y³  — least-squares cubic.
+    low_pass
+        B(y) = Gaussian-smoothed profile (sigma = blur_length px).
+    line_by_line
+        B(y) = raw per-row median/mean; each row zeroed independently.
+    piezo_creep
+        B(y) = a + b·y + c·log(|y − d|)  — models logarithmic creep.
+        d is the fitted singularity anchor (scan-start offset).
+    piezo_creep_x2
+        B(y) = a + b·y + c·log(|y − d|) + e·y²
+    piezo_creep_x3
+        B(y) = a + b·y + c·log(|y − d|) + e·y³
+    sqrt_creep
+        B(y) = a + b·y + c·√|y − d|  — square-root creep variant.
+
+    y is normalised to [−1, 1] across the scan height for all parametric
+    models.  Nonlinear models (piezo_creep, sqrt_creep) are fitted with
+    ``scipy.optimize.curve_fit``; d is constrained to (−3, −0.01) to keep
+    the singularity off-scan.
+    """
     model = _normalise_stm_background_model(model)
     working = _eliminate_profile_jumps(profile, jump_threshold)
     if model == "line_by_line":
@@ -621,6 +654,44 @@ def fit_scanline_background(
     if model == "low_pass":
         sigma = 5.0 if blur_length is None else float(blur_length)
         return _smooth_profile_ignore_nan(working, sigma=sigma)
+
+    if model in {"piezo_creep", "piezo_creep_x2", "piezo_creep_x3", "sqrt_creep"}:
+        from scipy.optimize import curve_fit, OptimizeWarning
+        p = np.asarray(working, dtype=np.float64)
+        y = np.linspace(-1.0, 1.0, p.size, dtype=np.float64)
+        finite = np.isfinite(p)
+        if int(finite.sum()) < 4:
+            raise ValueError(
+                f"not enough finite scan-line values for {model} background fit"
+            )
+        eps = 1e-6
+        if model == "piezo_creep":
+            def _model(y, a, b, c, d):
+                return a + b * y + c * np.log(np.abs(y - d) + eps)
+            p0 = [float(np.nanmean(p[finite])), 0.0, 0.0, -1.5]
+            bounds = ([-np.inf, -np.inf, -np.inf, -3.0], [np.inf, np.inf, np.inf, -0.01])
+        elif model == "piezo_creep_x2":
+            def _model(y, a, b, c, d, e):
+                return a + b * y + c * np.log(np.abs(y - d) + eps) + e * y ** 2
+            p0 = [float(np.nanmean(p[finite])), 0.0, 0.0, -1.5, 0.0]
+            bounds = ([-np.inf, -np.inf, -np.inf, -3.0, -np.inf], [np.inf, np.inf, np.inf, -0.01, np.inf])
+        elif model == "piezo_creep_x3":
+            def _model(y, a, b, c, d, e):
+                return a + b * y + c * np.log(np.abs(y - d) + eps) + e * y ** 3
+            p0 = [float(np.nanmean(p[finite])), 0.0, 0.0, -1.5, 0.0]
+            bounds = ([-np.inf, -np.inf, -np.inf, -3.0, -np.inf], [np.inf, np.inf, np.inf, -0.01, np.inf])
+        else:  # sqrt_creep
+            def _model(y, a, b, c, d):
+                return a + b * y + c * np.sqrt(np.abs(y - d))
+            p0 = [float(np.nanmean(p[finite])), 0.0, 0.0, -1.5]
+            bounds = ([-np.inf, -np.inf, -np.inf, -3.0], [np.inf, np.inf, np.inf, -0.01])
+        try:
+            popt, _ = curve_fit(
+                _model, y[finite], p[finite], p0=p0, bounds=bounds, maxfev=5000
+            )
+        except (RuntimeError, OptimizeWarning) as exc:
+            raise ValueError(f"{model} background fit did not converge: {exc}") from exc
+        return _model(y, *popt).astype(np.float64, copy=False)
 
     p = np.asarray(working, dtype=np.float64)
     x = np.linspace(-1.0, 1.0, p.size, dtype=np.float64)
@@ -681,13 +752,42 @@ def subtract_scanline_background(
     return a - background + reference, background
 
 
+_VALID_FIT_REGIONS = {"whole_image", "active_roi"}
+
+
 def preview_stm_background(
     image: np.ndarray,
     params: STMBackgroundParams | None = None,
     mask: np.ndarray | None = None,
 ) -> STMBackgroundResult:
-    """Return non-destructive STM background preview data."""
+    """Return non-destructive STM background preview data.
+
+    Parameters
+    ----------
+    image
+        2-D scan plane.
+    params
+        Background parameters.  ``params.fit_region`` must be
+        ``"whole_image"`` or ``"active_roi"``.  When ``"active_roi"`` is
+        requested the caller **must** supply ``mask`` — the function cannot
+        resolve a ROI id to a pixel mask on its own.
+    mask
+        Boolean array (same shape as ``image``).  Pixels where ``mask`` is
+        True are used to estimate the background; subtraction is applied to
+        the full image regardless.  Must be provided when
+        ``params.fit_region == "active_roi"``.
+    """
     params = params or STMBackgroundParams()
+    fit_region = str(params.fit_region or "whole_image")
+    if fit_region not in _VALID_FIT_REGIONS:
+        raise ValueError(
+            f"fit_region must be one of {sorted(_VALID_FIT_REGIONS)}, got {fit_region!r}"
+        )
+    if fit_region == "active_roi" and mask is None:
+        raise ValueError(
+            "fit_region='active_roi' requires a mask; pass the ROI pixel mask "
+            "as the mask argument"
+        )
     model = _normalise_stm_background_model(params.model)
     statistic = _normalise_line_statistic(params.line_statistic)
     a = np.asarray(image, dtype=np.float64)
@@ -2348,10 +2448,13 @@ def linear_undistort(
 ) -> np.ndarray:
     """Apply an affine drift/creep correction to a scan plane.
 
-    The forward map shifts column ``c`` by ``shear_x * (row / Ny)`` pixels and
-    rescales the row coordinate by ``scale_y``. Inverse-mapped via
+    The forward map shifts column ``c`` by ``shear_x * (row / (Ny - 1))``
+    pixels and rescales the row coordinate by ``scale_y``. Inverse-mapped via
     ``scipy.ndimage.map_coordinates`` so every output pixel comes from one
     bilinearly-interpolated location in the input.
+
+    NaN and inf pixels are filled with the finite mean before mapping and
+    restored to NaN in the output, so the missing-data mask is preserved.
     """
     from scipy.ndimage import map_coordinates
 
@@ -2371,6 +2474,8 @@ def linear_undistort(
         a, np.vstack([src_y.ravel(), src_x.ravel()]),
         order=1, mode="reflect",
     ).reshape(Ny, Nx)
+    if nan_mask.any():
+        out[nan_mask] = np.nan
     return out
 
 

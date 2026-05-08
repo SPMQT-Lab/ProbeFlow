@@ -375,6 +375,10 @@ def process_dat(
             dat.name,
         )
     elif num_chan == 4:
+        # Createc stores backward rows in display order (left-to-right).
+        # SXM stores backward rows in acquisition order (right-to-left), so
+        # fliplr here matches what the SXM reader undoes on reload — the
+        # round-trip produces byte-identical planes to read_dat().
         BT = np.fliplr(stack[2])
         BC = np.fliplr(stack[3])
     else:

@@ -251,7 +251,7 @@ def test_viewer_align_rows_applies_immediately(qapp, monkeypatch):
 
     assert dlg._processing["align_rows"] == "mean"
     assert refreshes[-1]["align_rows"] == "mean"
-    assert dlg._proc_undo_stack[-1] == {}
+    assert dlg._proc_undo_ctrl._undo_stack[-1] == {}
 
     dlg._processing_panel._align_combo.setCurrentText("None")
 
@@ -573,11 +573,11 @@ def test_viewer_zero_plane_cancel_clears_partial_markers(qapp, monkeypatch):
 
     dlg._set_zero_plane_btn.setChecked(True)
     dlg._on_set_zero_pick(0.0, 0.0)
-    assert dlg._zero_plane_points_px == [(0, 0)]
+    assert dlg._zero_ctrl.points == [(0, 0)]
 
     dlg._set_zero_plane_btn.setChecked(False)
 
-    assert dlg._zero_plane_points_px == []
+    assert dlg._zero_ctrl.points == []
     assert calls["markers"] == []
 
     dlg.close()

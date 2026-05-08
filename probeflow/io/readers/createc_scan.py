@@ -15,15 +15,23 @@ Createc channel layout:
     the best-known names/units from the decode report.
 
 Orientation:
-  * Createc stores backward scan rows in left-to-right display order already
-    (unlike Nanonis .sxm, where backward rows are stored right-to-left).  No
-    horizontal flip is applied here; the planes are returned as-is in display
-    orientation.
+  * Createc stores backward scan rows in **left-to-right display order**
+    (unlike Nanonis .sxm, where backward rows are stored right-to-left in
+    acquisition order and must be flipped by the reader).  This was verified
+    empirically on real 4-channel data: loading the .dat directly and loading
+    an SXM converted from the same .dat via ``createc_dat_to_sxm.process_dat``
+    produce byte-identical backward planes.  No horizontal flip is applied
+    here; the planes are returned as-is.
+
+    Round-trip invariant: the converter applies ``np.fliplr`` to the raw
+    backward planes before writing SXM (so they are stored in Nanonis
+    acquisition order), and the SXM reader flips them back.  The net effect
+    is identity, preserving the display-order orientation that Createc natively
+    uses.
+
   * Vertical origin is kept as Createc stores it (Y flip is not applied
-    here).  This matches the current ``dat→sxm`` conversion convention so
-    that ``load_scan(dat)`` and ``load_scan(sxm_from_dat)`` give identical
-    arrays — a future release can reconsider this if the display convention
-    is unified across formats.
+    here).  This matches the ``dat→sxm`` conversion convention so that
+    ``load_scan(dat)`` and ``load_scan(sxm_from_dat)`` give identical arrays.
 """
 
 from __future__ import annotations
