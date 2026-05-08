@@ -438,7 +438,8 @@ class ImageViewerDialog(QDialog):
         self._viewer_cmap_cb.addItems(CMAP_NAMES)
         self._viewer_cmap_cb.setFont(QFont("Helvetica", 8))
         _initial_cmap_label = next(
-            (lbl for lbl, k in STM_COLORMAPS if k == colormap or lbl == colormap),
+            (lbl for lbl, k in STM_COLORMAPS
+             if k == self._viewer_colormap or lbl == self._viewer_colormap),
             DEFAULT_CMAP_LABEL,
         )
         self._viewer_cmap_cb.setCurrentText(_initial_cmap_label)
