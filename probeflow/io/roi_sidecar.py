@@ -101,13 +101,32 @@ def save_roi_set_sidecar(
     *,
     sidecar: str | Path | None = None,
 ) -> Path:
-    """Write *roi_set* to the canonical ``.rois.json`` sidecar."""
+    """Write *roi_set* to the canonical ``.rois.json`` sidecar.
+
+    Uses a write-to-temp-then-rename strategy so a crash or full disk during
+    the write never leaves a partially-written (corrupt) sidecar.
+    """
+    import tempfile
     target = (
         Path(sidecar)
         if sidecar is not None
         else default_roi_sidecar_path(scan_path)
     )
-    target.write_text(json.dumps(roi_set.to_dict(), indent=2), encoding="utf-8")
+    payload = json.dumps(roi_set.to_dict(), indent=2)
+    # Write to a sibling temp file, then atomically replace the target.
+    tmp_fd, tmp_path = tempfile.mkstemp(
+        dir=target.parent, prefix=target.name + ".tmp", suffix=".json"
+    )
+    try:
+        with open(tmp_fd, "w", encoding="utf-8") as fh:
+            fh.write(payload)
+        Path(tmp_path).replace(target)
+    except Exception:
+        try:
+            Path(tmp_path).unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
     return target
 
 

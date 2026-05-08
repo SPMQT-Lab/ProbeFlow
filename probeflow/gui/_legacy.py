@@ -90,7 +90,10 @@ from probeflow.provenance.export import build_scan_export_provenance, png_displa
 from probeflow.processing.gui_adapter import (
     processing_state_from_gui,
 )
-from probeflow.processing.state import missing_roi_references
+from probeflow.processing.state import (
+    assert_roi_references_resolved,
+    missing_roi_references,
+)
 from probeflow.gui.features import (
     FeaturesPanel,
     FeaturesSidebar,
@@ -1279,8 +1282,8 @@ class ImageViewerDialog(QDialog):
                 self._ch_cb.setCurrentIndex(target)
                 self._ch_cb.blockSignals(False)
                 self._pending_initial_plane_idx = None
-            idx = self._ch_cb.currentIndex()
-            self._raw_arr = _scan.planes[idx] if idx < _scan.n_planes else None
+            idx = max(0, min(self._ch_cb.currentIndex(), _scan.n_planes - 1))
+            self._raw_arr = _scan.planes[idx] if _scan.n_planes > 0 else None
             self._scan_header  = _scan.header or {}
             self._scan_range_m = _scan.scan_range_m
             self._scan_shape   = _scan.planes[0].shape if _scan.planes else None
@@ -1550,7 +1553,26 @@ class ImageViewerDialog(QDialog):
 
         flat = arr[np.isfinite(arr)].ravel()
         if flat.size < 2:
+            # No plottable data — draw a clear "no data" message so the canvas
+            # is not silently blank, and ensure drag handlers find no lines.
+            bg = self._t.get("bg", "#1e1e2e")
+            fg = self._t.get("fg", "#cdd6f4")
+            self._fig.patch.set_facecolor(bg)
+            self._ax.set_facecolor(bg)
+            self._ax.text(
+                0.5, 0.5, "No finite data",
+                transform=self._ax.transAxes,
+                ha="center", va="center",
+                fontsize=8, color=fg,
+            )
+            for spine in self._ax.spines.values():
+                spine.set_edgecolor(self._t.get("sep", "#45475a"))
+            self._fig.subplots_adjust(left=0.02, right=0.98, top=0.97, bottom=0.12)
             self._canvas.draw_idle()
+            self._clip_val_lbl.setText("")
+            # _low_line / _high_line remain None → drag handlers are no-ops
+            self._slider_data_min_si = None
+            self._slider_data_max_si = None
             return
 
         scale, unit, axis_label = self._channel_unit()
@@ -2880,6 +2902,14 @@ class ImageViewerDialog(QDialog):
                 f"Cannot export while processing has stale ROI references. "
                 f"{self._processing_roi_error}"
             )
+            return
+        # Hard-stop export if processing state references ROIs that no longer exist.
+        # (Interactive display silently skips them; export must never silently alter results.)
+        try:
+            ps = processing_state_from_gui(self._processing or {})
+            assert_roi_references_resolved(ps, self._image_roi_set)
+        except ValueError as _roi_err:
+            self._status_lbl.setText(f"Export blocked: {_roi_err}")
             return
         out_path, _ = QFileDialog.getSaveFileName(
             self, "Save PNG", str(Path.home() / f"{entry.stem}_viewer.png"),

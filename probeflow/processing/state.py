@@ -95,6 +95,13 @@ class ProcessingStep:
     op: str
     params: dict[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        if self.op not in _SUPPORTED_OPS:
+            raise ValueError(
+                f"Unknown processing operation {self.op!r}. "
+                f"Supported operations: {sorted(_SUPPORTED_OPS)}"
+            )
+
     @classmethod
     def from_dict(cls, data: dict) -> "ProcessingStep":
         return cls(op=str(data["op"]), params=dict(data.get("params", {})))
@@ -225,6 +232,29 @@ def missing_roi_references(
         if found is None:
             missing.append(ref)
     return missing
+
+
+def assert_roi_references_resolved(
+    state: "ProcessingState",
+    roi_set: "Any | None",
+) -> None:
+    """Raise ``ValueError`` if any ROI reference in *state* cannot be resolved.
+
+    Use this in export paths where silent substitution is not acceptable.
+    Interactive display paths should use :func:`missing_roi_references` and
+    show a warning instead.
+    """
+    missing = missing_roi_references(state, roi_set)
+    if missing:
+        refs = ", ".join(
+            f"{m['param']}={m['value']!r}" for m in missing[:3]
+        )
+        if len(missing) > 3:
+            refs += f", +{len(missing) - 3} more"
+        raise ValueError(
+            f"Processing state references {len(missing)} ROI(s) that are not "
+            f"present in the current ROI set: {refs}. Export aborted."
+        )
 
 
 # ── ROI expression resolver ───────────────────────────────────────────────────
