@@ -2142,8 +2142,7 @@ class ImageViewerDialog(QDialog):
         entry = self._entries[self._idx]
         if getattr(self, "_processing_roi_error", ""):
             self._status_lbl.setText(
-                f"Cannot export while processing has stale ROI references. "
-                f"{self._processing_roi_error}"
+                f"Cannot export while processing has stale ROI references. {self._processing_roi_error}"
             )
             return
         try:
@@ -3640,7 +3639,6 @@ QFrame[frameShape="4"], QFrame[frameShape="5"] {{
 
 # ── Entry point ────────────────────────────────────────────────────────────────
 def main() -> None:
-    import sys
     app    = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("ProbeFlow")
     window = ProbeFlowWindow()
