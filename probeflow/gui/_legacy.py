@@ -47,7 +47,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QComboBox,
     QDialog, QDoubleSpinBox, QFileDialog, QFrame, QGridLayout, QGroupBox,
     QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMenu, QPushButton,
-    QScrollArea, QSizePolicy, QSlider, QSplitter, QStackedWidget,
+    QDockWidget, QScrollArea, QSizePolicy, QSlider, QSplitter, QStackedWidget,
     QStatusBar, QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView,
     QToolTip, QVBoxLayout, QWidget,
 )
@@ -572,20 +572,24 @@ class ImageViewerDialog(QDialog):
             row.addWidget(spin, 1)
             return w, spin
 
-        # histogram
-        hist_lbl = QLabel("Histogram / contrast")
-        hist_lbl.setFont(QFont("Helvetica", 9, QFont.Bold))
-        right_lay.addWidget(hist_lbl)
+        # ── Histogram / contrast panel (built here, placed in its own dock later) ──
+        # Widgets are stored as self._ attributes; the panel widget is stored in
+        # self._hist_panel and docked above the ROI Manager after _viewer_main is
+        # created (see below).  Nothing from here goes into right_lay.
+        _hist_panel = QWidget()
+        _hp_lay = QVBoxLayout(_hist_panel)
+        _hp_lay.setContentsMargins(4, 4, 4, 4)
+        _hp_lay.setSpacing(3)
 
-        self._fig  = Figure(figsize=(3.0, 1.6), dpi=80)
+        self._fig  = Figure(figsize=(2.8, 1.4), dpi=80)
         self._fig.patch.set_alpha(0)
         self._ax   = self._fig.add_subplot(111)
         self._canvas = FigureCanvasQTAgg(self._fig)
-        self._canvas.setFixedHeight(140)
+        self._canvas.setFixedHeight(130)
         self._canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self._canvas.setContextMenuPolicy(Qt.CustomContextMenu)
         self._canvas.customContextMenuRequested.connect(self._on_hist_context_menu)
-        right_lay.addWidget(self._canvas)
+        _hp_lay.addWidget(self._canvas)
 
         # histogram drag state
         self._low_line      = None
@@ -597,20 +601,20 @@ class ImageViewerDialog(QDialog):
         self._canvas.mpl_connect("motion_notify_event",  self._on_hist_motion)
         self._canvas.mpl_connect("button_release_event", self._on_hist_release)
 
-        # ── Display range sliders ────────────────────────────────────────────────
+        # ── Display range sliders ─────────────────────────────────────────────
         def _disp_slider_row(label: str) -> tuple[QWidget, "QSlider", QLabel]:
             w = QWidget()
             rl = QHBoxLayout(w)
             rl.setContentsMargins(0, 0, 0, 0)
             lbl = QLabel(label)
             lbl.setFont(QFont("Helvetica", 8))
-            lbl.setFixedWidth(64)
+            lbl.setFixedWidth(58)
             sl = QSlider(Qt.Horizontal)
             sl.setRange(0, 1000)
             sl.setValue(0)
             val_lbl = QLabel("—")
             val_lbl.setFont(QFont("Helvetica", 8))
-            val_lbl.setFixedWidth(52)
+            val_lbl.setFixedWidth(48)
             val_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
             rl.addWidget(lbl)
             rl.addWidget(sl, 1)
@@ -636,16 +640,16 @@ class ImageViewerDialog(QDialog):
         self._disp_contrast_sl.sliderReleased.connect(
             lambda: self._on_contrast_slider_changed(self._disp_contrast_sl.value()))
 
-        # Live readout while dragging (no full re-render until release)
+        # Live label readout while dragging (no full re-render until release)
         self._disp_min_sl.valueChanged.connect(self._on_disp_min_dragging)
         self._disp_max_sl.valueChanged.connect(self._on_disp_max_dragging)
         self._disp_brightness_sl.valueChanged.connect(self._on_disp_brightness_dragging)
         self._disp_contrast_sl.valueChanged.connect(self._on_disp_contrast_dragging)
 
-        right_lay.addWidget(self._disp_min_w)
-        right_lay.addWidget(self._disp_max_w)
-        right_lay.addWidget(self._disp_brightness_w)
-        right_lay.addWidget(self._disp_contrast_w)
+        _hp_lay.addWidget(self._disp_min_w)
+        _hp_lay.addWidget(self._disp_max_w)
+        _hp_lay.addWidget(self._disp_brightness_w)
+        _hp_lay.addWidget(self._disp_contrast_w)
 
         hist_actions = QHBoxLayout()
         self._auto_clip_btn = QPushButton("Auto")
@@ -663,15 +667,17 @@ class ImageViewerDialog(QDialog):
         hist_actions.addStretch()
         hist_actions.addWidget(self._auto_clip_btn)
         hist_actions.addWidget(self._reset_display_btn)
-        right_lay.addLayout(hist_actions)
+        _hp_lay.addLayout(hist_actions)
 
         # Å / pA value readout for current display bounds
         self._clip_val_lbl = QLabel("")
         self._clip_val_lbl.setFont(QFont("Helvetica", 8))
         self._clip_val_lbl.setAlignment(Qt.AlignCenter)
-        right_lay.addWidget(self._clip_val_lbl)
+        _hp_lay.addWidget(self._clip_val_lbl)
+        _hp_lay.addStretch()
 
-        right_lay.addWidget(_sep())
+        # Keep a reference so the dock can be created after _viewer_main exists
+        self._hist_panel = _hist_panel
 
         self._processing_panel = ProcessingControlPanel("viewer_full")
         self._processing_panel.bad_line_preview_requested.connect(
@@ -946,8 +952,25 @@ class ImageViewerDialog(QDialog):
             },
             parent=self._viewer_main,
         )
+
+        # Histogram / contrast dock — always visible above the ROI Manager
+        self._hist_dock = QDockWidget("Histogram / Contrast", self._viewer_main)
+        self._hist_dock.setWidget(self._hist_panel)
+        self._hist_dock.setFeatures(
+            QDockWidget.DockWidgetClosable
+            | QDockWidget.DockWidgetMovable
+            | QDockWidget.DockWidgetFloatable
+        )
+        self._hist_dock.setMinimumWidth(180)
+
+        # Add histogram dock first, then ROI dock, then split them vertically
+        # so histogram is above ROI Manager in the far-right column.
+        self._viewer_main.addDockWidget(Qt.RightDockWidgetArea, self._hist_dock)
         self._viewer_main.addDockWidget(Qt.RightDockWidgetArea, self._roi_dock)
-        self._viewer_main.resizeDocks([self._roi_dock], [200], Qt.Horizontal)
+        self._viewer_main.splitDockWidget(self._hist_dock, self._roi_dock, Qt.Vertical)
+        self._viewer_main.resizeDocks(
+            [self._hist_dock, self._roi_dock], [220, 220], Qt.Horizontal
+        )
         self._build_viewer_menu_bar()
         root.addWidget(self._viewer_main, 1)
 
