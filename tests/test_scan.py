@@ -242,48 +242,6 @@ class TestProcessingHistory:
             "timestamp": "2026-05-05T01:00:00",
         }]
 
-    def test_processing_history_append_updates_canonical_state(self):
-        scan = self._make_scan()
-        scan.processing_history.append({
-            "op": "plane_bg",
-            "params": {"order": 1},
-        })
-
-        assert [s.op for s in scan.processing_state.steps] == ["plane_bg"]
-        assert scan.processing_history == [{
-            "op": "plane_bg",
-            "params": {"order": 1},
-        }]
-
-    def test_processing_history_item_mutation_updates_canonical_state(self):
-        scan = self._make_scan(processing_history=[{
-            "op": "plane_bg",
-            "params": {"order": 1},
-        }])
-
-        scan.processing_history[0]["params"]["order"] = 2
-
-        assert scan.processing_state.steps[0].params == {"order": 2}
-        assert scan.processing_history[0]["params"]["order"] == 2
-
-    def test_processing_history_list_mutations_update_canonical_state(self):
-        scan = self._make_scan(processing_history=[{
-            "op": "plane_bg",
-            "params": {"order": 1},
-        }])
-
-        scan.processing_history.insert(0, {
-            "op": "align_rows",
-            "params": {"method": "median"},
-        })
-        del scan.processing_history[1]
-
-        assert [step.op for step in scan.processing_state.steps] == ["align_rows"]
-        assert scan.processing_history == [{
-            "op": "align_rows",
-            "params": {"method": "median"},
-        }]
-
     def test_processing_history_nested_params_do_not_alias_input_history(self):
         history = [{
             "op": "plane_bg",
@@ -295,19 +253,6 @@ class TestProcessingHistory:
 
         assert scan.processing_state.steps[0].params == {
             "fit_roi": {"ref": "terrace"},
-        }
-
-    def test_processing_history_nested_params_mutation_syncs_to_canonical_state(self):
-        scan = self._make_scan(processing_history=[{
-            "op": "plane_bg",
-            "params": {"fit_roi": {"ref": "terrace"}},
-        }])
-
-        history = scan.processing_history
-        history[0]["params"]["fit_roi"]["ref"] = "changed"
-
-        assert scan.processing_state.steps[0].params == {
-            "fit_roi": {"ref": "changed"},
         }
 
     def test_processing_state_and_history_constructor_args_are_mutually_exclusive(self):

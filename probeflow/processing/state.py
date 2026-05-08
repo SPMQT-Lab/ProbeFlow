@@ -117,6 +117,7 @@ class ProcessingState:
     """
 
     steps: list[ProcessingStep] = field(default_factory=list)
+    probeflow_version: str | None = field(default=None, compare=False, repr=False)
 
     # ── Serialisation ─────────────────────────────────────────────────────────
 
@@ -126,29 +127,52 @@ class ProcessingState:
         Example output::
 
             {
+              "probeflow_version": "1.2.3",
               "steps": [
                 {"op": "align_rows", "params": {"method": "median"}},
                 {"op": "plane_bg",   "params": {"order": 1}}
               ]
             }
         """
+        try:
+            from probeflow import __version__ as _pf_version
+        except ImportError:
+            _pf_version = None
         return {
+            "probeflow_version": _pf_version,
             "steps": [
                 {"op": step.op, "params": deepcopy(step.params)}
                 for step in self.steps
-            ]
+            ],
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> "ProcessingState":
         """Deserialise from the dict produced by :meth:`to_dict`."""
+        import warnings
+        stored_version = data.get("probeflow_version")
+        if stored_version is not None:
+            try:
+                from probeflow import __version__ as _pf_version
+                stored_major = int(str(stored_version).split(".")[0])
+                current_major = int(str(_pf_version).split(".")[0])
+                if stored_major != current_major:
+                    warnings.warn(
+                        f"Processing state was saved with probeflow {stored_version!r} "
+                        f"but current version is {_pf_version!r}. "
+                        "Results may differ.",
+                        UserWarning,
+                        stacklevel=2,
+                    )
+            except (ValueError, AttributeError, ImportError):
+                pass
         steps = []
         for item in data.get("steps", []):
             steps.append(ProcessingStep(
                 op=str(item["op"]),
                 params=deepcopy(dict(item.get("params", {}))),
             ))
-        return cls(steps=steps)
+        return cls(steps=steps, probeflow_version=stored_version)
 
 
 # ── ROI reference validation ─────────────────────────────────────────────────
@@ -416,6 +440,8 @@ def apply_processing_state(
     arr: np.ndarray,
     state: "ProcessingState",
     roi_set: "Any | None" = None,
+    *,
+    _depth: int = 0,
 ) -> np.ndarray:
     """Apply *state* steps in order to *arr*.
 
@@ -437,7 +463,8 @@ def apply_processing_state(
     Raises
     ------
     ValueError
-        If a step contains an unrecognised operation name.
+        If a step contains an unrecognised operation name, or if ROI-in-ROI
+        nesting exceeds depth 2.
     """
     # Always return a fresh float64 copy so raw Scan planes are never mutated.
     a = arr.astype(np.float64, copy=True)
@@ -553,6 +580,11 @@ def apply_processing_state(
                 patch=int(p.get("patch", 1)),
             )
         elif step.op == "roi":
+            if _depth >= 2:
+                raise ValueError(
+                    "ROI-in-ROI nesting exceeded maximum depth of 2. "
+                    "Nested 'roi' steps inside 'roi' steps are not allowed."
+                )
             try:
                 nested = ProcessingStep.from_dict(p.get("step", {}))
             except (KeyError, TypeError, ValueError):
@@ -589,6 +621,8 @@ def apply_processing_state(
                 lambda image, nested=nested: apply_processing_state(
                     image,
                     ProcessingState(steps=[nested]),
+                    roi_set,
+                    _depth=_depth + 1,
                 ),
                 mask,
             )

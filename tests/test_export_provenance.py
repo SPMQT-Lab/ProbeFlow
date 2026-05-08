@@ -180,7 +180,7 @@ class TestFromScanExport:
     def test_processing_state_empty_by_default(self):
         scan = _make_scan()
         prov = ExportProvenance.from_scan_export(scan, channel_index=0)
-        assert prov.processing_state == {"steps": []}
+        assert prov.processing_state["steps"] == []
 
     def test_processing_state_from_object(self):
         scan = _make_scan()
@@ -622,7 +622,7 @@ class TestPngNoRegression:
         sidecar = out.with_suffix("").with_suffix(".provenance.json")
         data = json.loads(sidecar.read_text(encoding="utf-8"))
         assert data["export_kind"] == "cli_sxm2png"
-        assert data["processing_state"] == {"steps": []}
+        assert data["processing_state"]["steps"] == []
         assert data["display_state"]["mode"] == "percentile"
         assert data["display_state"]["colormap"] == "gray"
         assert data["display_state"]["add_scalebar"] is False
@@ -667,7 +667,7 @@ class TestPngNoRegression:
         sidecar = out.with_suffix("").with_suffix(".provenance.json")
         data = json.loads(sidecar.read_text(encoding="utf-8"))
         assert data["export_kind"] == "prepared_png"
-        assert data["processing_state"] == {"steps": []}
+        assert data["processing_state"]["steps"] == []
         assert data["warnings"]
         assert data["display_state"]["add_scalebar"] is False
 

@@ -135,9 +135,9 @@ def test_viewer_dialog_layout_prioritises_image_and_bounds_side_panels(qapp, mon
     assert splitter.widget(1).maximumWidth() == 380
     assert dlg._roi_dock.minimumWidth() == 160
     assert dlg._roi_dock.maximumWidth() == 280
-    assert dlg._canvas.minimumHeight() == 140
-    assert dlg._canvas.maximumHeight() == 140
-    assert dlg._canvas.sizePolicy().verticalPolicy().name == "Fixed"
+    assert dlg._hist_panel._canvas.minimumHeight() == 140
+    assert dlg._hist_panel._canvas.maximumHeight() == 140
+    assert dlg._hist_panel._canvas.sizePolicy().verticalPolicy().name == "Fixed"
 
     dlg.close()
     dlg.deleteLater()

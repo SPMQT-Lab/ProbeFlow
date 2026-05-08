@@ -194,11 +194,10 @@ class TestOpFactories:
         result = _op_remove_bad_lines(3.0)(arr)
 
         np.testing.assert_array_equal(result, np.ones((4, 4)))
-        assert calls == [{
-            "steps": [{
-                "op": "remove_bad_lines",
-                "params": {"threshold_mad": 3.0},
-            }]
+        assert len(calls) == 1
+        assert calls[0]["steps"] == [{
+            "op": "remove_bad_lines",
+            "params": {"threshold_mad": 3.0},
         }]
 
 

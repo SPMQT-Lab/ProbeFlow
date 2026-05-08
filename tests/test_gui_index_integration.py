@@ -605,9 +605,9 @@ class TestViewerRenderSizing:
 
         dlg._update_histogram()
 
-        x0, x1 = dlg._ax.get_xlim()
-        low_x = dlg._low_line.get_xdata()[0]
-        high_x = dlg._high_line.get_xdata()[0]
+        x0, x1 = dlg._hist_panel._ax.get_xlim()
+        low_x = dlg._hist_panel._low_line.get_xdata()[0]
+        high_x = dlg._hist_panel._high_line.get_xdata()[0]
 
         assert x0 < low_x < x1
         assert x0 < high_x < x1
@@ -640,10 +640,8 @@ class TestViewerRenderSizing:
         dlg._zoom_lbl.zoom_by(0.5)
         qapp.processEvents()
 
-        dlg._dragging = "low"
-        dlg._low_line.set_xdata([10.0, 10.0])
-        dlg._high_line.set_xdata([90.0, 90.0])
-        dlg._on_hist_release(type("Event", (), {})())
+        # Simulate a histogram drag-release by emitting the panel signal directly
+        dlg._hist_panel.rangeReleased.emit(10.0, 90.0)
         qapp.processEvents()
 
         assert dlg._zoom_lbl.zoom() == 0.5

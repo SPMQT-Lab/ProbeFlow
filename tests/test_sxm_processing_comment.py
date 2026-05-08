@@ -50,10 +50,10 @@ class TestBuildComment:
 
     def test_op_without_params_has_no_trailing_space(self):
         scan = self._scan_stub("x.sxm", history=[
-            {"op": "no_param_op", "params": {}, "timestamp": "T"},
+            {"op": "flip_horizontal", "params": {}, "timestamp": "T"},
         ])
         comment = _build_comment(scan)
-        assert "1. no_param_op\n" in comment + "\n"  # not "1. no_param_op \n"
+        assert "1. flip_horizontal\n" in comment + "\n"  # not "1. flip_horizontal \n"
 
 
 # ─── _patch_comment_in_header ─────────────────────────────────────────────────

@@ -32,8 +32,6 @@ import os as _os
 _os.environ.setdefault("QT_API", "pyside6")
 import matplotlib
 matplotlib.use("QtAgg")
-from matplotlib.figure import Figure
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 
 from PySide6.QtCore import (
     Qt, QEvent, QObject, QRect, QRunnable, QThreadPool, QTimer,
@@ -47,7 +45,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QComboBox,
     QDialog, QDoubleSpinBox, QFileDialog, QFrame, QGridLayout, QGroupBox,
     QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMenu, QPushButton,
-    QDockWidget, QScrollArea, QSizePolicy, QSlider, QSplitter, QStackedWidget,
+    QDockWidget, QScrollArea, QSizePolicy, QSplitter, QStackedWidget,
     QStatusBar, QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView,
     QToolTip, QVBoxLayout, QWidget,
 )
@@ -83,9 +81,9 @@ from probeflow import processing as _proc
 from probeflow.processing.display import (
     array_to_uint8 as _array_to_uint8,
     clip_range_from_array as _clip_range_from_array,
-    histogram_from_array as _histogram_from_array,
 )
-from probeflow.processing.display_state import DisplayRangeState
+from probeflow.gui.viewer.display_range import DisplayRangeController
+from probeflow.gui.viewer.histogram import HistogramPanel
 from probeflow.provenance.export import build_scan_export_provenance, png_display_state
 from probeflow.processing.gui_adapter import (
     processing_state_from_gui,
@@ -317,7 +315,7 @@ class ImageViewerDialog(QDialog):
         self._token      = object()
         self._clip_low   = clip_low
         self._clip_high  = clip_high
-        self._drs        = DisplayRangeState(low_pct=clip_low, high_pct=clip_high)
+        self._drs        = DisplayRangeController(clip_low=clip_low, clip_high=clip_high, parent=self)
         self._processing = dict(processing) if processing else {}
         self._processing_roi_error: str = ""
         # Undo / redo stacks for processing state. Each entry is a deep copy
@@ -333,10 +331,7 @@ class ImageViewerDialog(QDialog):
         self._spec_image_map = spec_image_map if spec_image_map is not None else {}
         self._raw_arr: Optional[np.ndarray] = None
         self._display_arr: Optional[np.ndarray] = None  # raw or processed, for histogram/export
-        # Data range bounds used to scale the display sliders (0–1000 integer).
-        # Updated whenever the histogram is redrawn from the 0.1/99.9 percentile.
-        self._slider_data_min_si: Optional[float] = None
-        self._slider_data_max_si: Optional[float] = None
+        # Data range for sliders lives in self._hist_panel.data_min_si / data_max_si
         self._spec_markers: list[dict] = []
         self._spec_roi_set: "object | None" = None  # ROISet when spec positions are loaded
         self._scan_header: dict = {}
@@ -354,6 +349,7 @@ class ImageViewerDialog(QDialog):
         self._deferred_plane_idx: int = 0
 
         self._build()
+        self._drs.rangeChanged.connect(self._refresh_display_range)
         self._processing_panel.set_state(self._processing)
         self._set_advanced_processing_state(self._processing)
         self._load_current()
@@ -467,8 +463,6 @@ class ImageViewerDialog(QDialog):
         drawing_bar.addWidget(drawing_lbl)
         self._drawing_group = QButtonGroup(self)
         self._drawing_group.setExclusive(True)
-        # Keep old name for backward-compat references
-        self._selection_group = self._drawing_group
         for key, label, tip in (
             ("pan",       "✋ Pan",     "Pan (drag to scroll)"),
             ("rectangle", "▭ Rect",    "Rectangle ROI  [R]"),
@@ -575,113 +569,16 @@ class ImageViewerDialog(QDialog):
             row.addWidget(spin, 1)
             return w, spin
 
-        # ── Histogram / contrast panel (built here, placed in its own dock later) ──
-        # Widgets are stored as self._ attributes; the panel widget is stored in
-        # self._hist_panel and docked above the ROI Manager after _viewer_main is
-        # created (see below).  Nothing from here goes into right_lay.
-        _hist_panel = QWidget()
-        _hp_lay = QVBoxLayout(_hist_panel)
-        _hp_lay.setContentsMargins(4, 4, 4, 4)
-        _hp_lay.setSpacing(3)
-
-        self._fig  = Figure(figsize=(2.8, 1.4), dpi=80)
-        self._fig.patch.set_alpha(0)
-        self._ax   = self._fig.add_subplot(111)
-        self._canvas = FigureCanvasQTAgg(self._fig)
-        self._canvas.setFixedHeight(130)
-        self._canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self._canvas.setContextMenuPolicy(Qt.CustomContextMenu)
-        self._canvas.customContextMenuRequested.connect(self._on_hist_context_menu)
-        _hp_lay.addWidget(self._canvas)
-
-        # histogram drag state
-        self._low_line      = None
-        self._high_line     = None
-        self._hist_flat_phys: Optional[np.ndarray] = None
-        self._hist_unit     = ""
-        self._dragging      = None  # 'low' | 'high' | None
-        self._canvas.mpl_connect("button_press_event",   self._on_hist_press)
-        self._canvas.mpl_connect("motion_notify_event",  self._on_hist_motion)
-        self._canvas.mpl_connect("button_release_event", self._on_hist_release)
-
-        # ── Display range sliders ─────────────────────────────────────────────
-        def _disp_slider_row(label: str) -> tuple[QWidget, "QSlider", QLabel]:
-            w = QWidget()
-            rl = QHBoxLayout(w)
-            rl.setContentsMargins(0, 0, 0, 0)
-            lbl = QLabel(label)
-            lbl.setFont(QFont("Helvetica", 8))
-            lbl.setFixedWidth(58)
-            sl = QSlider(Qt.Horizontal)
-            sl.setRange(0, 1000)
-            sl.setValue(0)
-            val_lbl = QLabel("—")
-            val_lbl.setFont(QFont("Helvetica", 8))
-            val_lbl.setFixedWidth(48)
-            val_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            rl.addWidget(lbl)
-            rl.addWidget(sl, 1)
-            rl.addWidget(val_lbl)
-            return w, sl, val_lbl
-
-        self._disp_min_w,        self._disp_min_sl,        self._disp_min_lbl        = _disp_slider_row("Min")
-        self._disp_max_w,        self._disp_max_sl,        self._disp_max_lbl        = _disp_slider_row("Max")
-        self._disp_brightness_w, self._disp_brightness_sl, self._disp_brightness_lbl = _disp_slider_row("Brightness")
-        self._disp_contrast_w,   self._disp_contrast_sl,   self._disp_contrast_lbl   = _disp_slider_row("Contrast")
-
-        self._disp_min_sl.setValue(0)
-        self._disp_max_sl.setValue(1000)
-        self._disp_brightness_sl.setValue(500)
-        self._disp_contrast_sl.setValue(0)
-
-        self._disp_min_sl.sliderReleased.connect(
-            lambda: self._on_min_slider_changed(self._disp_min_sl.value()))
-        self._disp_max_sl.sliderReleased.connect(
-            lambda: self._on_max_slider_changed(self._disp_max_sl.value()))
-        self._disp_brightness_sl.sliderReleased.connect(
-            lambda: self._on_brightness_slider_changed(self._disp_brightness_sl.value()))
-        self._disp_contrast_sl.sliderReleased.connect(
-            lambda: self._on_contrast_slider_changed(self._disp_contrast_sl.value()))
-
-        # Live label readout while dragging (no full re-render until release)
-        self._disp_min_sl.valueChanged.connect(self._on_disp_min_dragging)
-        self._disp_max_sl.valueChanged.connect(self._on_disp_max_dragging)
-        self._disp_brightness_sl.valueChanged.connect(self._on_disp_brightness_dragging)
-        self._disp_contrast_sl.valueChanged.connect(self._on_disp_contrast_dragging)
-
-        _hp_lay.addWidget(self._disp_min_w)
-        _hp_lay.addWidget(self._disp_max_w)
-        _hp_lay.addWidget(self._disp_brightness_w)
-        _hp_lay.addWidget(self._disp_contrast_w)
-
-        hist_actions = QHBoxLayout()
-        self._auto_clip_btn = QPushButton("Auto")
-        self._auto_clip_btn.setFont(QFont("Helvetica", 8))
-        self._auto_clip_btn.setFixedHeight(22)
-        self._auto_clip_btn.setToolTip(
-            "Autoscale display bounds to the current image's 1%–99% percentiles.")
-        self._auto_clip_btn.clicked.connect(self._on_auto_clip)
-        self._reset_display_btn = QPushButton("Reset")
-        self._reset_display_btn.setFont(QFont("Helvetica", 8))
-        self._reset_display_btn.setFixedHeight(22)
-        self._reset_display_btn.setToolTip(
-            "Reset display range to the default (1%–99% percentile).")
-        self._reset_display_btn.clicked.connect(self._on_reset_display)
-        hist_actions.addStretch()
-        hist_actions.addWidget(self._auto_clip_btn)
-        hist_actions.addWidget(self._reset_display_btn)
-        _hp_lay.addLayout(hist_actions)
-
-        # Å / pA value readout for current display bounds
-        self._clip_val_lbl = QLabel("")
-        self._clip_val_lbl.setFont(QFont("Helvetica", 8))
-        self._clip_val_lbl.setAlignment(Qt.AlignCenter)
-        _hp_lay.addWidget(self._clip_val_lbl)
-        _hp_lay.addStretch()
-
-        # Keep a reference so the dock can be created after _viewer_main exists
-        self._hist_panel = _hist_panel
-
+        # ── Histogram / contrast panel (placed in its own dock after _viewer_main) ──
+        self._hist_panel = HistogramPanel(parent=self)
+        self._hist_panel.rangeReleased.connect(self._on_hist_range_released)
+        self._hist_panel.autoClipRequested.connect(self._on_auto_clip)
+        self._hist_panel.resetRequested.connect(self._on_reset_display)
+        self._hist_panel.contextMenuRequested.connect(self._on_hist_context_menu)
+        self._hist_panel.minReleased.connect(self._on_min_slider_changed)
+        self._hist_panel.maxReleased.connect(self._on_max_slider_changed)
+        self._hist_panel.brightnessReleased.connect(self._on_brightness_slider_changed)
+        self._hist_panel.contrastReleased.connect(self._on_contrast_slider_changed)
         self._processing_panel = ProcessingControlPanel("viewer_full")
         self._processing_panel.bad_line_preview_requested.connect(
             self._on_preview_bad_lines)
@@ -1540,48 +1437,19 @@ class ImageViewerDialog(QDialog):
         self._ch_cb.blockSignals(False)
 
     def _update_histogram(self):
-        # Use processed display array so histogram tracks what the user sees
         arr = self._display_arr
-        self._ax.cla()
-        self._low_line  = None
-        self._high_line = None
-        self._hist_flat_phys = None
-
         if arr is None:
-            self._canvas.draw_idle()
+            self._hist_panel.clear(self._t)
             return
 
         flat = arr[np.isfinite(arr)].ravel()
         if flat.size < 2:
-            # No plottable data — draw a clear "no data" message so the canvas
-            # is not silently blank, and ensure drag handlers find no lines.
-            bg = self._t.get("bg", "#1e1e2e")
-            fg = self._t.get("fg", "#cdd6f4")
-            self._fig.patch.set_facecolor(bg)
-            self._ax.set_facecolor(bg)
-            self._ax.text(
-                0.5, 0.5, "No finite data",
-                transform=self._ax.transAxes,
-                ha="center", va="center",
-                fontsize=8, color=fg,
-            )
-            for spine in self._ax.spines.values():
-                spine.set_edgecolor(self._t.get("sep", "#45475a"))
-            self._fig.subplots_adjust(left=0.02, right=0.98, top=0.97, bottom=0.12)
-            self._canvas.draw_idle()
-            self._clip_val_lbl.setText("")
-            # _low_line / _high_line remain None → drag handlers are no-ops
-            self._slider_data_min_si = None
-            self._slider_data_max_si = None
+            self._hist_panel.clear(self._t)
             return
 
         scale, unit, axis_label = self._channel_unit()
         flat_phys = flat.astype(np.float64) * scale
-        self._hist_flat_phys = flat_phys
-        self._hist_unit = unit
 
-        # Clip lines: position from resolved display range (manual or percentile).
-        # arr is in SI; convert to physical display units for the histogram.
         vmin_si, vmax_si = self._drs.resolve(arr)
         if vmin_si is not None:
             lo_phys = float(vmin_si) * scale
@@ -1589,57 +1457,8 @@ class ImageViewerDialog(QDialog):
         else:
             lo_phys, hi_phys = float(flat_phys.min()), float(flat_phys.max())
 
-        bg = self._t.get("bg", "#1e1e2e")
-        fg = self._t.get("fg", "#cdd6f4")
-        self._fig.patch.set_facecolor(bg)
-        self._ax.set_facecolor(bg)
-
-        # Bin over a wide robust range (0.1–99.9 %) so bars represent useful
-        # signal and are not stretched by outliers.  Uses the shared display
-        # pipeline for consistent finite-pixel handling.
-        try:
-            counts, edges = _histogram_from_array(
-                flat_phys, bins=128, clip_percentiles=(0.1, 99.9))
-            x_min, x_max = float(edges[0]), float(edges[-1])
-            # Store SI slider data range (0.1/99.9 percentile)
-            self._slider_data_min_si = x_min / scale if scale else None
-            self._slider_data_max_si = x_max / scale if scale else None
-        except ValueError:
-            counts, edges = np.histogram(flat_phys, bins=128)
-            x_min, x_max = None, None
-            self._slider_data_min_si = float(flat.min())
-            self._slider_data_max_si = float(flat.max())
-
-        counts = np.maximum(counts, 1)
-        centers = (edges[:-1] + edges[1:]) / 2.0
-        widths = np.diff(edges)
-        self._ax.bar(centers, counts, width=widths,
-                     color=self._t.get("accent_bg", "#89b4fa"),
-                     alpha=0.85, linewidth=0)
-        self._ax.set_yscale("log")
-        if x_min is not None:
-            x0 = min(float(x_min), float(lo_phys), float(hi_phys))
-            x1 = max(float(x_max), float(lo_phys), float(hi_phys))
-            span = x1 - x0
-            pad = 0.02 * span if span > 0 else max(abs(x0) * 0.02, 1.0)
-            self._ax.set_xlim(x0 - pad, x1 + pad)
-        self._low_line  = self._ax.axvline(lo_phys, color="#f38ba8",
-                                            linewidth=1.6, picker=6)
-        self._high_line = self._ax.axvline(hi_phys, color="#a6e3a1",
-                                            linewidth=1.6, picker=6)
-
-        self._ax.tick_params(axis="x", colors=fg, labelsize=7)
-        self._ax.tick_params(axis="y", left=False, labelleft=False)
-        self._ax.yaxis.set_visible(False)
-        for spine in self._ax.spines.values():
-            spine.set_edgecolor(self._t.get("sep", "#45475a"))
-        self._ax.set_xlabel(f"{axis_label} [{unit}]", fontsize=7, color=fg)
-        self._fig.subplots_adjust(left=0.02, right=0.98, top=0.97, bottom=0.22)
-        self._canvas.draw_idle()
-
-        self._clip_val_lbl.setText(
-            f"{lo_phys:.3g} {unit}  →  {hi_phys:.3g} {unit}")
-
+        self._hist_panel.render(
+            flat_phys, lo_phys, hi_phys, unit, axis_label, self._t, scale=scale)
         self._update_display_sliders()
 
     # ── Spec position overlay ─────────────────────────────────────────────────
@@ -2163,10 +1982,6 @@ class ImageViewerDialog(QDialog):
             self._status_lbl.setText(_TOOL_HINTS.get(kind, ""))
         self._sync_viewer_menu_actions()
 
-    def _on_selection_tool_clicked(self, button) -> None:
-        """Compat shim kept for any lingering external references."""
-        self._on_drawing_tool_clicked(button)
-
     def _on_drawing_tool_clicked(self, button) -> None:
         if self._set_zero_plane_btn.isChecked():
             self._set_zero_plane_btn.setChecked(False)
@@ -2310,73 +2125,23 @@ class ImageViewerDialog(QDialog):
             "Zero reference markers hidden. Processing is unchanged; use Reset to original to undo leveling."
         )
 
-    # ── Histogram drag handlers ────────────────────────────────────────────────
-    def _on_hist_press(self, event):
-        if (event.inaxes is not self._ax or event.xdata is None
-                or event.button != 1
-                or self._low_line is None or self._high_line is None):
-            return
-        lo = self._low_line.get_xdata()[0]
-        hi = self._high_line.get_xdata()[0]
-        x0, x1 = self._ax.get_xlim()
-        tol = 0.04 * (x1 - x0) if x1 > x0 else 0.0
-        d_lo = abs(event.xdata - lo)
-        d_hi = abs(event.xdata - hi)
-        # pick closest line; if far from both, move the closer one
-        if d_lo <= d_hi:
-            self._dragging = 'low'
-        else:
-            self._dragging = 'high'
-        # only engage drag if within tolerance OR click outside both lines
-        if min(d_lo, d_hi) > tol and (lo <= event.xdata <= hi):
-            self._dragging = None
-
-    def _on_hist_motion(self, event):
-        if (self._dragging is None or event.inaxes is not self._ax
-                or event.xdata is None
-                or self._low_line is None or self._high_line is None):
-            return
-        x = float(event.xdata)
-        lo = self._low_line.get_xdata()[0]
-        hi = self._high_line.get_xdata()[0]
-        if self._dragging == 'low':
-            x = min(x, hi - 1e-12)
-            self._low_line.set_xdata([x, x])
-        else:
-            x = max(x, lo + 1e-12)
-            self._high_line.set_xdata([x, x])
-        if self._hist_flat_phys is not None and self._clip_val_lbl is not None:
-            new_lo = self._low_line.get_xdata()[0]
-            new_hi = self._high_line.get_xdata()[0]
-            self._clip_val_lbl.setText(
-                f"{new_lo:.3g} {self._hist_unit}  →  {new_hi:.3g} {self._hist_unit}")
-        self._canvas.draw_idle()
-
-    def _on_hist_release(self, event):
-        if self._dragging is None or self._hist_flat_phys is None:
-            self._dragging = None
-            return
-        lo_x = float(self._low_line.get_xdata()[0])
-        hi_x = float(self._high_line.get_xdata()[0])
-        # Convert physical display units (Å or pA) back to SI array units.
+    # ── Histogram range and clip handlers ─────────────────────────────────────
+    def _on_hist_range_released(self, lo_phys: float, hi_phys: float) -> None:
+        """Receive drag-release from HistogramPanel and update display range."""
         scale, _, _ = self._channel_unit()
-        vmin_si = lo_x / scale
-        vmax_si = hi_x / scale
-        self._drs.set_manual(vmin_si, vmax_si)
-        self._dragging = None
-        self._refresh_display_range()
+        if not scale:
+            return
+        self._drs.set_manual(lo_phys / scale, hi_phys / scale)
 
     def _on_auto_clip(self):
         """Reset to 1%–99% percentile autoscale."""
-        self._drs.reset()
         self._clip_low  = 1.0
         self._clip_high = 99.0
-        self._refresh_display_range()
+        self._drs.reset()
 
     def _on_reset_display(self):
         """Reset display range to default percentile state."""
         self._drs.reset()
-        self._refresh_display_range()
 
     # ── Per-image colormap ────────────────────────────────────────────────────
     def _on_viewer_colormap_changed(self, label: str) -> None:
@@ -2386,144 +2151,86 @@ class ImageViewerDialog(QDialog):
         self._refresh_viewer_pixmap(reset_zoom=False)
 
     # ── Display range sliders ─────────────────────────────────────────────────
-    def _sl_to_si(self, v: int) -> float:
-        """Map slider integer 0–1000 to an SI value using the stored data range."""
-        lo = self._slider_data_min_si
-        hi = self._slider_data_max_si
-        if lo is None or hi is None or hi <= lo:
-            return 0.0
-        return lo + v / 1000.0 * (hi - lo)
-
-    def _si_to_sl(self, si: float) -> int:
-        """Map an SI value to slider integer 0–1000 using the stored data range."""
-        lo = self._slider_data_min_si
-        hi = self._slider_data_max_si
-        if lo is None or hi is None or hi <= lo:
-            return 0
-        return max(0, min(1000, round((si - lo) / (hi - lo) * 1000)))
 
     def _update_display_sliders(self) -> None:
         """Sync all four display sliders to the current _drs / _display_arr state."""
-        if self._display_arr is None or self._slider_data_min_si is None:
+        if self._display_arr is None or self._hist_panel.data_min_si is None:
             return
         vmin_si, vmax_si = self._drs.resolve(self._display_arr)
         if vmin_si is None:
             return
-        data_range = (self._slider_data_max_si or 0.0) - (self._slider_data_min_si or 0.0)
+        data_min = self._hist_panel.data_min_si
+        data_max = self._hist_panel.data_max_si or 0.0
+        data_range = data_max - data_min
         center = (vmin_si + vmax_si) / 2.0
         width = vmax_si - vmin_si
-
-        # Clamp center to slider range for the Brightness slider
-        center_clamped = max(
-            self._slider_data_min_si, min(self._slider_data_max_si, center)
-        )
-        # Width as fraction of full data range → contrast slider (0=full, 1000=narrow)
+        center_clamped = max(data_min, min(data_max, center))
         if data_range > 0:
             width_frac = max(0.001, min(1.0, width / data_range))
             contrast_sl = max(0, min(1000, round((1.0 - width_frac) * 1000)))
         else:
             contrast_sl = 0
 
-        # Block signals so setting slider positions doesn't trigger handlers
-        for sl in (self._disp_min_sl, self._disp_max_sl,
-                   self._disp_brightness_sl, self._disp_contrast_sl):
-            sl.blockSignals(True)
-        self._disp_min_sl.setValue(self._si_to_sl(vmin_si))
-        self._disp_max_sl.setValue(self._si_to_sl(vmax_si))
-        self._disp_brightness_sl.setValue(self._si_to_sl(center_clamped))
-        self._disp_contrast_sl.setValue(contrast_sl)
-        for sl in (self._disp_min_sl, self._disp_max_sl,
-                   self._disp_brightness_sl, self._disp_contrast_sl):
-            sl.blockSignals(False)
+        self._hist_panel.set_slider_positions(
+            self._hist_panel.si_to_sl(vmin_si),
+            self._hist_panel.si_to_sl(vmax_si),
+            self._hist_panel.si_to_sl(center_clamped),
+            contrast_sl,
+        )
 
-        # Update readout labels
         scale, unit, _ = self._channel_unit()
         if scale:
-            self._disp_min_lbl.setText(f"{vmin_si * scale:.3g} {unit}")
-            self._disp_max_lbl.setText(f"{vmax_si * scale:.3g} {unit}")
-            self._disp_brightness_lbl.setText(f"{center * scale:.3g} {unit}")
-            self._disp_contrast_lbl.setText(f"{width * scale:.3g} {unit}")
-
-    # Live drag readouts (no full re-render — just update labels)
-    def _on_disp_min_dragging(self, v: int) -> None:
-        if self._slider_data_min_si is None:
-            return
-        scale, unit, _ = self._channel_unit()
-        self._disp_min_lbl.setText(f"{self._sl_to_si(v) * scale:.3g} {unit}")
-
-    def _on_disp_max_dragging(self, v: int) -> None:
-        if self._slider_data_min_si is None:
-            return
-        scale, unit, _ = self._channel_unit()
-        self._disp_max_lbl.setText(f"{self._sl_to_si(v) * scale:.3g} {unit}")
-
-    def _on_disp_brightness_dragging(self, v: int) -> None:
-        if self._slider_data_min_si is None:
-            return
-        scale, unit, _ = self._channel_unit()
-        self._disp_brightness_lbl.setText(f"{self._sl_to_si(v) * scale:.3g} {unit}")
-
-    def _on_disp_contrast_dragging(self, v: int) -> None:
-        if self._slider_data_min_si is None or self._display_arr is None:
-            return
-        vmin_si, vmax_si = self._drs.resolve(self._display_arr)
-        if vmin_si is None:
-            return
-        data_range = (self._slider_data_max_si or 0.0) - (self._slider_data_min_si or 0.0)
-        if data_range <= 0:
-            return
-        width_frac = max(0.001, 1.0 - v / 1000.0)
-        new_width = data_range * width_frac
-        scale, unit, _ = self._channel_unit()
-        self._disp_contrast_lbl.setText(f"{new_width * scale:.3g} {unit}")
+            self._hist_panel.set_slider_labels(
+                f"{vmin_si * scale:.3g} {unit}",
+                f"{vmax_si * scale:.3g} {unit}",
+                f"{center * scale:.3g} {unit}",
+                f"{width * scale:.3g} {unit}",
+            )
 
     def _on_min_slider_changed(self, v: int) -> None:
-        if self._display_arr is None or self._slider_data_min_si is None:
+        if self._display_arr is None or self._hist_panel.data_min_si is None:
             return
-        vmin_si = self._sl_to_si(v)
+        vmin_si = self._hist_panel.sl_to_si(v)
         _, vmax_si = self._drs.resolve(self._display_arr)
         if vmax_si is None:
             return
         vmin_si = min(vmin_si, vmax_si - abs(vmax_si) * 1e-9 - 1e-30)
         self._drs.set_manual(vmin_si, vmax_si)
-        self._refresh_display_range()
 
     def _on_max_slider_changed(self, v: int) -> None:
-        if self._display_arr is None or self._slider_data_min_si is None:
+        if self._display_arr is None or self._hist_panel.data_min_si is None:
             return
-        vmax_si = self._sl_to_si(v)
+        vmax_si = self._hist_panel.sl_to_si(v)
         vmin_si, _ = self._drs.resolve(self._display_arr)
         if vmin_si is None:
             return
         vmax_si = max(vmax_si, vmin_si + abs(vmin_si) * 1e-9 + 1e-30)
         self._drs.set_manual(vmin_si, vmax_si)
-        self._refresh_display_range()
 
     def _on_brightness_slider_changed(self, v: int) -> None:
         """Shift display window centre; keep width fixed."""
-        if self._display_arr is None or self._slider_data_min_si is None:
+        if self._display_arr is None or self._hist_panel.data_min_si is None:
             return
         vmin_si, vmax_si = self._drs.resolve(self._display_arr)
         if vmin_si is None:
             return
         width = vmax_si - vmin_si
-        new_center = self._sl_to_si(v)
+        new_center = self._hist_panel.sl_to_si(v)
         new_min = new_center - width / 2.0
         new_max = new_center + width / 2.0
         if new_min >= new_max:
             return
         self._drs.set_manual(new_min, new_max)
-        self._refresh_display_range()
 
     def _on_contrast_slider_changed(self, v: int) -> None:
         """Change display window width; keep centre fixed."""
-        if self._display_arr is None or self._slider_data_min_si is None:
+        if self._display_arr is None or self._hist_panel.data_min_si is None:
             return
         vmin_si, vmax_si = self._drs.resolve(self._display_arr)
         if vmin_si is None:
             return
         center = (vmin_si + vmax_si) / 2.0
-        data_range = (self._slider_data_max_si or 0.0) - (self._slider_data_min_si or 0.0)
+        data_range = (self._hist_panel.data_max_si or 0.0) - self._hist_panel.data_min_si
         if data_range <= 0:
             return
         width_frac = max(0.001, 1.0 - v / 1000.0)
@@ -2533,7 +2240,6 @@ class ImageViewerDialog(QDialog):
         if new_min >= new_max:
             return
         self._drs.set_manual(new_min, new_max)
-        self._refresh_display_range()
 
     # ── Simple background subtraction ─────────────────────────────────────────
     def _on_simple_background(self) -> None:
@@ -2550,7 +2256,7 @@ class ImageViewerDialog(QDialog):
         menu = QMenu(self)
         auto_action = menu.addAction("Auto display range")
         export_action = menu.addAction("Export histogram...")
-        chosen = menu.exec(self._canvas.mapToGlobal(pos))
+        chosen = menu.exec(self._hist_panel._canvas.mapToGlobal(pos))
         if chosen is auto_action:
             self._on_auto_clip()
         elif chosen is export_action:
@@ -2558,12 +2264,12 @@ class ImageViewerDialog(QDialog):
 
     def _on_export_histogram(self):
         """Save the current histogram (bin centres + counts) as a TSV file."""
-        flat = self._hist_flat_phys
+        flat = self._hist_panel.flat_phys
         if flat is None or flat.size < 2:
             self._status_lbl.setText("No histogram data to export.")
             return
         entry = self._entries[self._idx]
-        unit = self._hist_unit or ""
+        unit = self._hist_panel.unit or ""
         out_path, _ = QFileDialog.getSaveFileName(
             self,
             "Export histogram",
@@ -2592,9 +2298,9 @@ class ImageViewerDialog(QDialog):
 
     def _on_channel_changed(self, _: int):
         # Different channels have different physical units — reset manual limits.
-        self._drs.reset(self._clip_low, self._clip_high)
-        self._slider_data_min_si = None
-        self._slider_data_max_si = None
+        # Use reset_silent to avoid a premature refresh with stale channel data.
+        self._drs.reset_silent(self._clip_low, self._clip_high)
+        self._hist_panel.clear(self._t)
         self._load_current(reset_zoom=True)
 
     @Slot(QPixmap, object)

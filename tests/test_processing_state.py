@@ -184,27 +184,19 @@ class TestRoiReferenceValidation:
 
 class TestUnknownOperation:
     def test_raises_value_error(self):
-        state = ProcessingState(steps=[
-            ProcessingStep("magic_filter", {"strength": 9000}),
-        ])
         arr = np.ones((10, 10))
         with pytest.raises(ValueError, match="magic_filter"):
-            apply_processing_state(arr, state)
+            ProcessingStep("magic_filter", {"strength": 9000})
 
     def test_error_message_names_operation(self):
-        state = ProcessingState(steps=[ProcessingStep("nonexistent_op")])
         arr = np.ones((10, 10))
         with pytest.raises(ValueError, match="nonexistent_op"):
-            apply_processing_state(arr, state)
+            ProcessingStep("nonexistent_op")
 
     def test_valid_op_before_invalid_still_raises(self):
-        state = ProcessingState(steps=[
-            ProcessingStep("align_rows", {"method": "median"}),
-            ProcessingStep("bad_op"),
-        ])
         arr = np.ones((10, 10))
         with pytest.raises(ValueError):
-            apply_processing_state(arr, state)
+            ProcessingStep("bad_op")
 
 
 # ── Test D: GUI conversion excludes display-only keys ────────────────────────
