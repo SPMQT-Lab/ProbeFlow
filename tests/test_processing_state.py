@@ -184,17 +184,14 @@ class TestRoiReferenceValidation:
 
 class TestUnknownOperation:
     def test_raises_value_error(self):
-        arr = np.ones((10, 10))
         with pytest.raises(ValueError, match="magic_filter"):
             ProcessingStep("magic_filter", {"strength": 9000})
 
     def test_error_message_names_operation(self):
-        arr = np.ones((10, 10))
         with pytest.raises(ValueError, match="nonexistent_op"):
             ProcessingStep("nonexistent_op")
 
     def test_valid_op_before_invalid_still_raises(self):
-        arr = np.ones((10, 10))
         with pytest.raises(ValueError):
             ProcessingStep("bad_op")
 
