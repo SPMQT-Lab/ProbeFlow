@@ -24,6 +24,7 @@ NUMERIC_PROC_KEYS: tuple[str, ...] = (
     "remove_bad_lines_min_segment_length_px",
     "remove_bad_lines_max_adjacent_bad_lines",
     "align_rows",
+    "plane_bg",
     "stm_background",
     "smooth_sigma",
     "highpass_sigma",
@@ -115,6 +116,12 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
     align = gui_state.get("align_rows")
     if align:
         _append_step(ProcessingStep("align_rows", {"method": str(align)}))
+
+    plane_bg = gui_state.get("plane_bg")
+    if isinstance(plane_bg, dict):
+        _append_step(ProcessingStep("plane_bg", {
+            "order": int(plane_bg.get("order", 1)),
+        }))
 
     stm_bg = gui_state.get("stm_background")
     if isinstance(stm_bg, dict):

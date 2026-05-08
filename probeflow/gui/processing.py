@@ -18,6 +18,7 @@ class ProcessingControlPanel(QWidget):
     bad_line_preview_requested = Signal()
     bad_line_preview_settings_changed = Signal()
     stm_background_requested = Signal()
+    simple_background_requested = Signal()
 
     QUICK_KEYS = ("align_rows", "remove_bad_lines")
 
@@ -208,6 +209,13 @@ class ProcessingControlPanel(QWidget):
         R.setSpacing(3)
 
         _col_lbl("Background", R)
+        self._simple_background_btn = QPushButton("Simple background")
+        self._simple_background_btn.setFont(QFont("Helvetica", 8))
+        self._simple_background_btn.setToolTip(
+            "Automated plane subtraction (order-1 polynomial fit on the whole image)."
+        )
+        self._simple_background_btn.clicked.connect(self.simple_background_requested.emit)
+        R.addWidget(self._simple_background_btn)
         self._stm_background_btn = QPushButton("STM Background...")
         self._stm_background_btn.setFont(QFont("Helvetica", 8))
         self._stm_background_btn.setToolTip(

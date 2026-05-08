@@ -304,6 +304,10 @@ class ImageViewerDialog(QDialog):
 
         self._entries    = entries
         self._colormap   = colormap
+        # Per-image colormap — independent of the global browser colormap.
+        # Inherits the browser colormap at open time, but changes here don't
+        # propagate back to thumbnails.
+        self._viewer_colormap = colormap
         self._t          = t
         self._idx        = next((i for i, e in enumerate(entries) if e.stem == entry.stem), 0)
         self._pool       = QThreadPool.globalInstance()
@@ -326,6 +330,10 @@ class ImageViewerDialog(QDialog):
         self._spec_image_map = spec_image_map if spec_image_map is not None else {}
         self._raw_arr: Optional[np.ndarray] = None
         self._display_arr: Optional[np.ndarray] = None  # raw or processed, for histogram/export
+        # Data range bounds used to scale the display sliders (0–1000 integer).
+        # Updated whenever the histogram is redrawn from the 0.1/99.9 percentile.
+        self._slider_data_min_si: Optional[float] = None
+        self._slider_data_max_si: Optional[float] = None
         self._spec_markers: list[dict] = []
         self._spec_roi_set: "object | None" = None  # ROISet when spec positions are loaded
         self._scan_header: dict = {}
@@ -380,28 +388,30 @@ class ImageViewerDialog(QDialog):
         toolbar.setSpacing(4)
 
         self._zoom_out_btn = QPushButton("−")
-        self._zoom_out_btn.setFixedSize(28, 24)
+        self._zoom_out_btn.setFixedSize(30, 26)
         self._zoom_out_btn.setFont(QFont("Helvetica", 11))
         self._zoom_out_btn.setToolTip("Zoom out")
         self._zoom_out_btn.clicked.connect(lambda: self._zoom_lbl.zoom_by(1 / 1.25))
         toolbar.addWidget(self._zoom_out_btn)
 
         self._zoom_reset_btn = QPushButton("1:1")
-        self._zoom_reset_btn.setFixedSize(36, 24)
+        self._zoom_reset_btn.setMinimumWidth(42)
+        self._zoom_reset_btn.setFixedHeight(26)
         self._zoom_reset_btn.setFont(QFont("Helvetica", 9))
         self._zoom_reset_btn.setToolTip("Reset to native raster size")
         self._zoom_reset_btn.clicked.connect(self._zoom_lbl.reset_zoom)
         toolbar.addWidget(self._zoom_reset_btn)
 
         self._zoom_fit_btn = QPushButton("Fit")
-        self._zoom_fit_btn.setFixedSize(36, 24)
+        self._zoom_fit_btn.setMinimumWidth(40)
+        self._zoom_fit_btn.setFixedHeight(26)
         self._zoom_fit_btn.setFont(QFont("Helvetica", 9))
         self._zoom_fit_btn.setToolTip("Fit image to available space")
         self._zoom_fit_btn.clicked.connect(self._zoom_lbl.fit_to_view)
         toolbar.addWidget(self._zoom_fit_btn)
 
         self._zoom_in_btn = QPushButton("+")
-        self._zoom_in_btn.setFixedSize(28, 24)
+        self._zoom_in_btn.setFixedSize(30, 26)
         self._zoom_in_btn.setFont(QFont("Helvetica", 11))
         self._zoom_in_btn.setToolTip("Zoom in")
         self._zoom_in_btn.clicked.connect(lambda: self._zoom_lbl.zoom_by(1.25))
@@ -418,6 +428,22 @@ class ImageViewerDialog(QDialog):
         self._ch_cb.setMinimumWidth(170)
         self._ch_cb.currentIndexChanged.connect(self._on_channel_changed)
         toolbar.addWidget(self._ch_cb)
+
+        # Per-image colormap — does not affect browser thumbnails
+        cmap_lbl = QLabel("Colormap")
+        cmap_lbl.setFont(QFont("Helvetica", 8, QFont.Bold))
+        toolbar.addSpacing(8)
+        toolbar.addWidget(cmap_lbl)
+        self._viewer_cmap_cb = QComboBox()
+        self._viewer_cmap_cb.addItems(CMAP_NAMES)
+        self._viewer_cmap_cb.setFont(QFont("Helvetica", 8))
+        _initial_cmap_label = next(
+            (lbl for lbl, k in STM_COLORMAPS if k == colormap or lbl == colormap),
+            DEFAULT_CMAP_LABEL,
+        )
+        self._viewer_cmap_cb.setCurrentText(_initial_cmap_label)
+        self._viewer_cmap_cb.currentTextChanged.connect(self._on_viewer_colormap_changed)
+        toolbar.addWidget(self._viewer_cmap_cb)
 
         self._coord_lbl = QLabel("—")
         self._coord_lbl.setFont(QFont("Helvetica", 8))
@@ -570,6 +596,56 @@ class ImageViewerDialog(QDialog):
         self._canvas.mpl_connect("motion_notify_event",  self._on_hist_motion)
         self._canvas.mpl_connect("button_release_event", self._on_hist_release)
 
+        # ── Display range sliders ────────────────────────────────────────────────
+        def _disp_slider_row(label: str) -> tuple[QWidget, "QSlider", QLabel]:
+            w = QWidget()
+            rl = QHBoxLayout(w)
+            rl.setContentsMargins(0, 0, 0, 0)
+            lbl = QLabel(label)
+            lbl.setFont(QFont("Helvetica", 8))
+            lbl.setFixedWidth(64)
+            sl = QSlider(Qt.Horizontal)
+            sl.setRange(0, 1000)
+            sl.setValue(0)
+            val_lbl = QLabel("—")
+            val_lbl.setFont(QFont("Helvetica", 8))
+            val_lbl.setFixedWidth(52)
+            val_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            rl.addWidget(lbl)
+            rl.addWidget(sl, 1)
+            rl.addWidget(val_lbl)
+            return w, sl, val_lbl
+
+        self._disp_min_w,        self._disp_min_sl,        self._disp_min_lbl        = _disp_slider_row("Min")
+        self._disp_max_w,        self._disp_max_sl,        self._disp_max_lbl        = _disp_slider_row("Max")
+        self._disp_brightness_w, self._disp_brightness_sl, self._disp_brightness_lbl = _disp_slider_row("Brightness")
+        self._disp_contrast_w,   self._disp_contrast_sl,   self._disp_contrast_lbl   = _disp_slider_row("Contrast")
+
+        self._disp_min_sl.setValue(0)
+        self._disp_max_sl.setValue(1000)
+        self._disp_brightness_sl.setValue(500)
+        self._disp_contrast_sl.setValue(0)
+
+        self._disp_min_sl.sliderReleased.connect(
+            lambda: self._on_min_slider_changed(self._disp_min_sl.value()))
+        self._disp_max_sl.sliderReleased.connect(
+            lambda: self._on_max_slider_changed(self._disp_max_sl.value()))
+        self._disp_brightness_sl.sliderReleased.connect(
+            lambda: self._on_brightness_slider_changed(self._disp_brightness_sl.value()))
+        self._disp_contrast_sl.sliderReleased.connect(
+            lambda: self._on_contrast_slider_changed(self._disp_contrast_sl.value()))
+
+        # Live readout while dragging (no full re-render until release)
+        self._disp_min_sl.valueChanged.connect(self._on_disp_min_dragging)
+        self._disp_max_sl.valueChanged.connect(self._on_disp_max_dragging)
+        self._disp_brightness_sl.valueChanged.connect(self._on_disp_brightness_dragging)
+        self._disp_contrast_sl.valueChanged.connect(self._on_disp_contrast_dragging)
+
+        right_lay.addWidget(self._disp_min_w)
+        right_lay.addWidget(self._disp_max_w)
+        right_lay.addWidget(self._disp_brightness_w)
+        right_lay.addWidget(self._disp_contrast_w)
+
         hist_actions = QHBoxLayout()
         self._auto_clip_btn = QPushButton("Auto")
         self._auto_clip_btn.setFont(QFont("Helvetica", 8))
@@ -577,8 +653,15 @@ class ImageViewerDialog(QDialog):
         self._auto_clip_btn.setToolTip(
             "Autoscale display bounds to the current image's 1%–99% percentiles.")
         self._auto_clip_btn.clicked.connect(self._on_auto_clip)
+        self._reset_display_btn = QPushButton("Reset")
+        self._reset_display_btn.setFont(QFont("Helvetica", 8))
+        self._reset_display_btn.setFixedHeight(22)
+        self._reset_display_btn.setToolTip(
+            "Reset display range to the default (1%–99% percentile).")
+        self._reset_display_btn.clicked.connect(self._on_reset_display)
         hist_actions.addStretch()
         hist_actions.addWidget(self._auto_clip_btn)
+        hist_actions.addWidget(self._reset_display_btn)
         right_lay.addLayout(hist_actions)
 
         # Å / pA value readout for current display bounds
@@ -596,6 +679,8 @@ class ImageViewerDialog(QDialog):
             self._on_bad_line_preview_settings_changed)
         self._processing_panel.stm_background_requested.connect(
             self._on_open_stm_background)
+        self._processing_panel.simple_background_requested.connect(
+            self._on_simple_background)
         self._processing_panel._align_combo.currentIndexChanged.connect(
             self._on_align_rows_changed)
         right_lay.addWidget(self._processing_panel)
@@ -1393,7 +1478,7 @@ class ImageViewerDialog(QDialog):
         vmin, vmax = self._drs.resolve(self._display_arr) if self._display_arr is not None else (None, None)
         entry = self._entries[self._idx]
         self._token = object()
-        loader = ViewerLoader(entry, self._colormap, self._token, None,
+        loader = ViewerLoader(entry, self._viewer_colormap, self._token, None,
                               self._ch_cb.currentIndex(),
                               self._clip_low, self._clip_high,
                               None,
@@ -1470,9 +1555,14 @@ class ImageViewerDialog(QDialog):
             counts, edges = _histogram_from_array(
                 flat_phys, bins=128, clip_percentiles=(0.1, 99.9))
             x_min, x_max = float(edges[0]), float(edges[-1])
+            # Store SI slider data range (0.1/99.9 percentile)
+            self._slider_data_min_si = x_min / scale if scale else None
+            self._slider_data_max_si = x_max / scale if scale else None
         except ValueError:
             counts, edges = np.histogram(flat_phys, bins=128)
             x_min, x_max = None, None
+            self._slider_data_min_si = float(flat.min())
+            self._slider_data_max_si = float(flat.max())
 
         counts = np.maximum(counts, 1)
         centers = (edges[:-1] + edges[1:]) / 2.0
@@ -1503,6 +1593,8 @@ class ImageViewerDialog(QDialog):
 
         self._clip_val_lbl.setText(
             f"{lo_phys:.3g} {unit}  →  {hi_phys:.3g} {unit}")
+
+        self._update_display_sliders()
 
     # ── Spec position overlay ─────────────────────────────────────────────────
     def _load_spec_markers(self, entry):
@@ -2235,6 +2327,179 @@ class ImageViewerDialog(QDialog):
         self._clip_high = 99.0
         self._refresh_display_range()
 
+    def _on_reset_display(self):
+        """Reset display range to default percentile state."""
+        self._drs.reset()
+        self._refresh_display_range()
+
+    # ── Per-image colormap ────────────────────────────────────────────────────
+    def _on_viewer_colormap_changed(self, label: str) -> None:
+        """Update the viewer colormap without touching browser thumbnails."""
+        from probeflow.gui.rendering import CMAP_KEY as _CMAP_KEY
+        self._viewer_colormap = _CMAP_KEY.get(label, label)
+        self._refresh_viewer_pixmap(reset_zoom=False)
+
+    # ── Display range sliders ─────────────────────────────────────────────────
+    def _sl_to_si(self, v: int) -> float:
+        """Map slider integer 0–1000 to an SI value using the stored data range."""
+        lo = self._slider_data_min_si
+        hi = self._slider_data_max_si
+        if lo is None or hi is None or hi <= lo:
+            return 0.0
+        return lo + v / 1000.0 * (hi - lo)
+
+    def _si_to_sl(self, si: float) -> int:
+        """Map an SI value to slider integer 0–1000 using the stored data range."""
+        lo = self._slider_data_min_si
+        hi = self._slider_data_max_si
+        if lo is None or hi is None or hi <= lo:
+            return 0
+        return max(0, min(1000, round((si - lo) / (hi - lo) * 1000)))
+
+    def _update_display_sliders(self) -> None:
+        """Sync all four display sliders to the current _drs / _display_arr state."""
+        if self._display_arr is None or self._slider_data_min_si is None:
+            return
+        vmin_si, vmax_si = self._drs.resolve(self._display_arr)
+        if vmin_si is None:
+            return
+        data_range = (self._slider_data_max_si or 0.0) - (self._slider_data_min_si or 0.0)
+        center = (vmin_si + vmax_si) / 2.0
+        width = vmax_si - vmin_si
+
+        # Clamp center to slider range for the Brightness slider
+        center_clamped = max(
+            self._slider_data_min_si, min(self._slider_data_max_si, center)
+        )
+        # Width as fraction of full data range → contrast slider (0=full, 1000=narrow)
+        if data_range > 0:
+            width_frac = max(0.001, min(1.0, width / data_range))
+            contrast_sl = max(0, min(1000, round((1.0 - width_frac) * 1000)))
+        else:
+            contrast_sl = 0
+
+        # Block signals so setting slider positions doesn't trigger handlers
+        for sl in (self._disp_min_sl, self._disp_max_sl,
+                   self._disp_brightness_sl, self._disp_contrast_sl):
+            sl.blockSignals(True)
+        self._disp_min_sl.setValue(self._si_to_sl(vmin_si))
+        self._disp_max_sl.setValue(self._si_to_sl(vmax_si))
+        self._disp_brightness_sl.setValue(self._si_to_sl(center_clamped))
+        self._disp_contrast_sl.setValue(contrast_sl)
+        for sl in (self._disp_min_sl, self._disp_max_sl,
+                   self._disp_brightness_sl, self._disp_contrast_sl):
+            sl.blockSignals(False)
+
+        # Update readout labels
+        scale, unit, _ = self._channel_unit()
+        if scale:
+            self._disp_min_lbl.setText(f"{vmin_si * scale:.3g} {unit}")
+            self._disp_max_lbl.setText(f"{vmax_si * scale:.3g} {unit}")
+            self._disp_brightness_lbl.setText(f"{center * scale:.3g} {unit}")
+            self._disp_contrast_lbl.setText(f"{width * scale:.3g} {unit}")
+
+    # Live drag readouts (no full re-render — just update labels)
+    def _on_disp_min_dragging(self, v: int) -> None:
+        if self._slider_data_min_si is None:
+            return
+        scale, unit, _ = self._channel_unit()
+        self._disp_min_lbl.setText(f"{self._sl_to_si(v) * scale:.3g} {unit}")
+
+    def _on_disp_max_dragging(self, v: int) -> None:
+        if self._slider_data_min_si is None:
+            return
+        scale, unit, _ = self._channel_unit()
+        self._disp_max_lbl.setText(f"{self._sl_to_si(v) * scale:.3g} {unit}")
+
+    def _on_disp_brightness_dragging(self, v: int) -> None:
+        if self._slider_data_min_si is None:
+            return
+        scale, unit, _ = self._channel_unit()
+        self._disp_brightness_lbl.setText(f"{self._sl_to_si(v) * scale:.3g} {unit}")
+
+    def _on_disp_contrast_dragging(self, v: int) -> None:
+        if self._slider_data_min_si is None or self._display_arr is None:
+            return
+        vmin_si, vmax_si = self._drs.resolve(self._display_arr)
+        if vmin_si is None:
+            return
+        data_range = (self._slider_data_max_si or 0.0) - (self._slider_data_min_si or 0.0)
+        if data_range <= 0:
+            return
+        width_frac = max(0.001, 1.0 - v / 1000.0)
+        new_width = data_range * width_frac
+        scale, unit, _ = self._channel_unit()
+        self._disp_contrast_lbl.setText(f"{new_width * scale:.3g} {unit}")
+
+    def _on_min_slider_changed(self, v: int) -> None:
+        if self._display_arr is None or self._slider_data_min_si is None:
+            return
+        vmin_si = self._sl_to_si(v)
+        _, vmax_si = self._drs.resolve(self._display_arr)
+        if vmax_si is None:
+            return
+        vmin_si = min(vmin_si, vmax_si - abs(vmax_si) * 1e-9 - 1e-30)
+        self._drs.set_manual(vmin_si, vmax_si)
+        self._refresh_display_range()
+
+    def _on_max_slider_changed(self, v: int) -> None:
+        if self._display_arr is None or self._slider_data_min_si is None:
+            return
+        vmax_si = self._sl_to_si(v)
+        vmin_si, _ = self._drs.resolve(self._display_arr)
+        if vmin_si is None:
+            return
+        vmax_si = max(vmax_si, vmin_si + abs(vmin_si) * 1e-9 + 1e-30)
+        self._drs.set_manual(vmin_si, vmax_si)
+        self._refresh_display_range()
+
+    def _on_brightness_slider_changed(self, v: int) -> None:
+        """Shift display window centre; keep width fixed."""
+        if self._display_arr is None or self._slider_data_min_si is None:
+            return
+        vmin_si, vmax_si = self._drs.resolve(self._display_arr)
+        if vmin_si is None:
+            return
+        width = vmax_si - vmin_si
+        new_center = self._sl_to_si(v)
+        new_min = new_center - width / 2.0
+        new_max = new_center + width / 2.0
+        if new_min >= new_max:
+            return
+        self._drs.set_manual(new_min, new_max)
+        self._refresh_display_range()
+
+    def _on_contrast_slider_changed(self, v: int) -> None:
+        """Change display window width; keep centre fixed."""
+        if self._display_arr is None or self._slider_data_min_si is None:
+            return
+        vmin_si, vmax_si = self._drs.resolve(self._display_arr)
+        if vmin_si is None:
+            return
+        center = (vmin_si + vmax_si) / 2.0
+        data_range = (self._slider_data_max_si or 0.0) - (self._slider_data_min_si or 0.0)
+        if data_range <= 0:
+            return
+        width_frac = max(0.001, 1.0 - v / 1000.0)
+        new_width = data_range * width_frac
+        new_min = center - new_width / 2.0
+        new_max = center + new_width / 2.0
+        if new_min >= new_max:
+            return
+        self._drs.set_manual(new_min, new_max)
+        self._refresh_display_range()
+
+    # ── Simple background subtraction ─────────────────────────────────────────
+    def _on_simple_background(self) -> None:
+        """Apply automated plane subtraction (order-1 polynomial fit, whole image)."""
+        if self._display_arr is None:
+            return
+        self._push_proc_undo_snapshot()
+        self._processing["plane_bg"] = {"order": 1}
+        self._clear_bad_line_preview()
+        self._refresh_processing_display()
+        self._status_lbl.setText("Simple background: plane subtracted.")
+
     def _on_hist_context_menu(self, pos):
         menu = QMenu(self)
         auto_action = menu.addAction("Auto display range")
@@ -2282,6 +2547,8 @@ class ImageViewerDialog(QDialog):
     def _on_channel_changed(self, _: int):
         # Different channels have different physical units — reset manual limits.
         self._drs.reset(self._clip_low, self._clip_high)
+        self._slider_data_min_si = None
+        self._slider_data_max_si = None
         self._load_current(reset_zoom=True)
 
     @Slot(QPixmap, object)
@@ -2494,6 +2761,7 @@ class ImageViewerDialog(QDialog):
                 "periodic_notch_radius",
                 "geometric_ops",
                 "stm_background",
+                "plane_bg",
             )
             if key in self._processing
         }
