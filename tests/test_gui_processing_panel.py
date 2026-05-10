@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -215,8 +216,8 @@ def test_viewer_dialog_menus_mirror_existing_controls(qapp, monkeypatch):
     assert action("ROI", "Rename ROI").isEnabled() is False
     assert action("ROI", "Delete ROI").isEnabled() is False
     assert action("Export", "Save PNG copy").isEnabled() is True
-    assert action("Export", "Save processed image").isEnabled() is False
-    assert action("Export", "Save provenance").isEnabled() is False
+    assert action("Export", "Save processed image").isEnabled() is True
+    assert action("Export", "Save provenance").isEnabled() is True
 
     action("Help", "Definitions").trigger()
     qapp.processEvents()
@@ -944,3 +945,84 @@ def test_viewer_dialog_initializes_panel_from_thumbnail_processing(qapp, monkeyp
         "align_rows": "median",
         "stm_background": {"model": "linear", "line_statistic": "median"},
     }
+
+
+def test_viewer_save_provenance_action_writes_json(qapp, monkeypatch, tmp_path):
+    from probeflow.gui import ImageViewerDialog, SxmFile, THEMES
+    from probeflow.provenance import ProcessingHistory, SourceRecord
+    import probeflow.gui._legacy as gui_mod
+
+    monkeypatch.setattr(ImageViewerDialog, "_load_current", lambda self: None)
+
+    entry = SxmFile(path=Path("/tmp/example.sxm"), stem="example", Nx=8, Ny=8)
+    dlg = ImageViewerDialog(entry, [entry], "gray", THEMES["dark"])
+    history = ProcessingHistory(SourceRecord(
+        source_filename="example.sxm",
+        source_path="/tmp/example.sxm",
+        source_file_type="Nanonis .sxm",
+        channel="Z forward",
+        loader_name="Nanonis .sxm reader",
+        loader_version="0.0.0",
+    ))
+    history.append_step(
+        operation_id="file_load",
+        operation_name="Loaded Nanonis .sxm",
+        parameters={},
+    )
+    dlg._processing_history = history
+    out = tmp_path / "example.probeflow.json"
+    monkeypatch.setattr(
+        gui_mod.QFileDialog,
+        "getSaveFileName",
+        lambda *args, **kwargs: (str(out), ""),
+    )
+
+    dlg._on_save_provenance()
+
+    data = json.loads(out.read_text(encoding="utf-8"))
+    ops = [step["operation_id"] for step in data["processing_history"]["steps"]]
+    assert ops[-1] == "export_provenance_json"
+    assert "Saved provenance" in dlg._status_lbl.text()
+
+    dlg.close()
+    dlg.deleteLater()
+
+
+def test_viewer_save_processed_image_action_dispatches_writer(qapp, monkeypatch, tmp_path):
+    from probeflow.gui import ImageViewerDialog, SxmFile, THEMES
+    import probeflow.gui._legacy as gui_mod
+
+    monkeypatch.setattr(ImageViewerDialog, "_load_current", lambda self: None)
+
+    entry = SxmFile(path=Path("/tmp/example.sxm"), stem="example", Nx=8, Ny=8)
+    dlg = ImageViewerDialog(entry, [entry], "gray", THEMES["dark"])
+    out = tmp_path / "processed.csv"
+    monkeypatch.setattr(
+        gui_mod.QFileDialog,
+        "getSaveFileName",
+        lambda *args, **kwargs: (str(out), ""),
+    )
+    calls = []
+
+    class FakeScan:
+        def save_csv(self, path, plane_idx=0):
+            calls.append(("csv", Path(path), plane_idx))
+
+    monkeypatch.setattr(
+        dlg,
+        "_processed_scan_for_export",
+        lambda: (FakeScan(), 2),
+    )
+    monkeypatch.setattr(
+        dlg,
+        "_write_processed_export_sidecar",
+        lambda scan, path, plane_idx: calls.append(("sidecar", Path(path), plane_idx)),
+    )
+
+    dlg._on_save_processed_image()
+
+    assert calls == [("csv", out, 2), ("sidecar", out, 2)]
+    assert "Saved processed image" in dlg._status_lbl.text()
+
+    dlg.close()
+    dlg.deleteLater()

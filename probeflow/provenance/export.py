@@ -9,11 +9,19 @@ All fields serialise to plain JSON via :meth:`ExportProvenance.to_dict`.
 from __future__ import annotations
 
 import datetime as _dt
+import copy as _copy
 import hashlib as _hashlib
 import json as _json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from probeflow.provenance.records import (
+    ExportRecord,
+    ProcessingHistory,
+    build_export_record,
+    processing_history_from_scan,
+)
 
 if TYPE_CHECKING:
     from probeflow.processing.display_state import DisplayRangeState
@@ -70,6 +78,9 @@ class ExportProvenance:
     artifact_id:        str | None = None
     warnings:           tuple[str, ...] = ()
     rois:               dict[str, Any] | None = None
+    processing_history: dict[str, Any] | None = None
+    export_record:      dict[str, Any] | None = None
+    warning:            str | None = None
 
     # ── Serialisation ─────────────────────────────────────────────────────────
 
@@ -96,7 +107,51 @@ class ExportProvenance:
             "artifact_id":       self.artifact_id,
             "warnings":          list(self.warnings),
             "rois":              self.rois,
+            "processing_history": self.processing_history,
+            "export_record":      self.export_record,
+            "warning":            self.warning,
         }
+
+    def to_export_record_dict(self) -> dict[str, Any]:
+        if self.export_record is not None:
+            return _copy.deepcopy(self.export_record)
+        history = None
+        if self.processing_history is not None:
+            try:
+                history = ProcessingHistory.from_dict(self.processing_history)
+            except Exception:
+                history = None
+        if history is None:
+            source = {
+                "source_filename": Path(self.source_file).name if self.source_file else None,
+                "source_path": self.source_file,
+                "source_file_type": self.source_format,
+                "channel": self.channel_name,
+                "loader_name": None,
+                "loader_version": self.probeflow_version,
+                "metadata": {
+                    "array_shape": list(self.array_shape) if self.array_shape else None,
+                    "scan_range_m": list(self.scan_range_m) if self.scan_range_m else None,
+                    "unit": self.units,
+                },
+                "file_hash": None,
+            }
+            history = ProcessingHistory.from_dict({
+                "source_record": source,
+                "steps": [],
+            })
+        record = build_export_record(
+            history,
+            export_path=self.output_path,
+            export_format=self.export_kind or "export",
+            display_settings=self.display_state,
+            warnings=self.warnings,
+        )
+        data = record.to_dict()
+        if self.warning and self.warning not in data["warnings"]:
+            data["warnings"].insert(0, self.warning)
+            data["warning"] = self.warning
+        return data
 
     # ── Convenience constructor ───────────────────────────────────────────────
 
@@ -116,7 +171,12 @@ class ExportProvenance:
         Defensive: missing or unavailable fields default to None without raising.
         """
         # Source identity
-        source_file   = str(scan.source_path) if getattr(scan, "source_path", None) else None
+        source_path_obj = getattr(scan, "source_path", None)
+        source_file = (
+            source_path_obj.as_posix()
+            if hasattr(source_path_obj, "as_posix")
+            else str(source_path_obj) if source_path_obj else None
+        )
         source_format = getattr(scan, "source_format", None)
 
         # Array shape for the selected channel
@@ -225,6 +285,7 @@ def build_scan_export_provenance(
     output_path=None,
     warnings: tuple[str, ...] | list[str] | None = None,
     roi_set=None,
+    processing_history: ProcessingHistory | dict[str, Any] | None = None,
 ) -> ExportProvenance:
     """Shared provenance constructor for GUI, CLI, writers, and handoffs."""
     if processing_state is None:
@@ -260,6 +321,35 @@ def build_scan_export_provenance(
     )
     out_str = str(output_path) if output_path is not None else None
     artifact_id = _artifact_id(out_str, ps_dict)
+    if processing_history is None:
+        history = processing_history_from_scan(
+            scan,
+            channel_index=channel_index,
+            channel_name=channel_name,
+            processing_state=ps_dict,
+        )
+    elif isinstance(processing_history, ProcessingHistory):
+        history = ProcessingHistory.from_dict(processing_history.to_dict())
+    else:
+        history = ProcessingHistory.from_dict(processing_history)
+    export_kind_str = str(export_kind)
+    export_format = export_kind_str.removeprefix("viewer_").removeprefix("cli_")
+    if "png" in export_kind_str.lower():
+        export_format = "png"
+    elif export_format not in {"png", "sxm", "gwy", "pdf", "csv", "json"}:
+        export_format = export_kind_str
+    conversion = "dat_to_sxm" if (
+        export_format == "sxm" and getattr(scan, "source_format", None) == "dat"
+    ) else None
+    export_record = build_export_record(
+        history,
+        export_path=out_str,
+        export_format=export_format,
+        display_settings=ds_dict,
+        export_parameters={"export_kind": str(export_kind)},
+        warnings=tuple(warnings or ()),
+        conversion=conversion,
+    )
     return ExportProvenance(
         source_file=prov.source_file,
         source_format=prov.source_format,
@@ -281,6 +371,9 @@ def build_scan_export_provenance(
         artifact_id=artifact_id,
         warnings=tuple(warnings or ()),
         rois=roi_set.to_dict() if roi_set is not None else None,
+        processing_history=history.to_dict(),
+        export_record=export_record.to_dict(),
+        warning=export_record.warning,
     )
 
 
@@ -352,3 +445,99 @@ def _artifact_id(output_path: str | None, processing_state: dict[str, Any]) -> s
         return None
     payload = f"{output_path}:{processing_state_hash(processing_state)}"
     return _hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
+def legacy_sidecar_path(out_path) -> Path:
+    """Return the historical ProbeFlow export sidecar path."""
+    return Path(out_path).with_suffix("").with_suffix(".provenance.json")
+
+
+def probeflow_sidecar_path(out_path) -> Path:
+    """Return the current reliable ProbeFlow sidecar path."""
+    return Path(out_path).with_suffix(".probeflow.json")
+
+
+def export_record_dict_from_provenance(
+    provenance,
+    *,
+    out_path=None,
+    export_format: str | None = None,
+) -> dict[str, Any]:
+    """Return an ExportRecord dict from old or new provenance objects."""
+    if isinstance(provenance, ExportRecord):
+        data = provenance.to_dict()
+    elif hasattr(provenance, "to_export_record_dict"):
+        data = provenance.to_export_record_dict()
+    elif hasattr(provenance, "to_dict"):
+        raw = provenance.to_dict()
+        if raw.get("export_record"):
+            data = raw["export_record"]
+        elif raw.get("processing_history"):
+            history = ProcessingHistory.from_dict(raw["processing_history"])
+            data = build_export_record(
+                history,
+                export_path=out_path or raw.get("output_path"),
+                export_format=export_format or raw.get("export_kind") or "export",
+                display_settings=raw.get("display_state") or {},
+                warnings=raw.get("warnings") or (),
+            ).to_dict()
+        else:
+            data = raw
+    else:
+        data = {}
+
+    if out_path is not None:
+        data = _copy.deepcopy(data)
+        data["export_path"] = str(out_path)
+    if export_format is not None:
+        data = _copy.deepcopy(data)
+        data["export_format"] = str(export_format).lower()
+    return data
+
+
+def human_summary_from_provenance(provenance) -> str:
+    """Return the short human-readable provenance summary for embedding."""
+    try:
+        record = export_record_dict_from_provenance(provenance)
+        if record.get("summary"):
+            return str(record["summary"])
+        warnings = record.get("warnings") or []
+        if warnings:
+            return str(warnings[0])
+    except Exception:
+        pass
+    return "This file was exported by ProbeFlow."
+
+
+def write_provenance_sidecars(
+    out_path,
+    provenance,
+    *,
+    legacy: bool = True,
+    probeflow: bool = True,
+    export_format: str | None = None,
+) -> None:
+    """Write provenance sidecars.
+
+    The ``.probeflow.json`` file is the reliable current record.  The older
+    ``.provenance.json`` file is kept for compatibility with existing users and
+    tests.
+    """
+    out = Path(out_path)
+    if legacy and hasattr(provenance, "to_dict"):
+        legacy_sidecar = legacy_sidecar_path(out)
+        legacy_sidecar.write_text(
+            _json.dumps(provenance.to_dict(), indent=2, default=str),
+            encoding="utf-8",
+        )
+    if probeflow:
+        record = export_record_dict_from_provenance(
+            provenance,
+            out_path=out,
+            export_format=export_format,
+        )
+        probeflow_sidecar = probeflow_sidecar_path(out)
+        probeflow_sidecar.write_text(
+            _json.dumps(record, indent=2, default=str),
+            encoding="utf-8",
+        )

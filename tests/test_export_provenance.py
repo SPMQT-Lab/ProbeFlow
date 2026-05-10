@@ -525,9 +525,12 @@ class TestPngNoRegression:
         export_png(arr, out_no_prov, "gray", 1.0, 99.0, **kwargs)
         export_png(arr, out_with_prov, "gray", 1.0, 99.0, **kwargs, provenance=prov)
 
-        # Both PNGs must exist and have identical content
-        assert out_no_prov.read_bytes() == out_with_prov.read_bytes(), (
-            "Passing provenance must not change the PNG pixel content"
+        from PIL import Image
+
+        # Metadata may differ, but pixel content must not.
+        np.testing.assert_array_equal(
+            np.asarray(Image.open(out_no_prov)),
+            np.asarray(Image.open(out_with_prov)),
         )
 
     def test_write_png_passes_provenance_to_export_png(self, tmp_path):

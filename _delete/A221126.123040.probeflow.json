@@ -1,0 +1,159 @@
+{
+  "record_type": "probeflow_export",
+  "schema_version": 1,
+  "export_path": "C:\\Users\\rnpla\\Desktop\\stm\\ProbeFlow\\_delete\\A221126.123040.probeflow.json",
+  "export_format": "provenance_json",
+  "source_info": {
+    "source_filename": "A221126.123040.dat",
+    "source_path": "C:/Users/rnpla/Desktop/stm/ProbeFlow/_delete/A221126.123040.dat",
+    "source_file_type": "Createc .dat",
+    "channel": "Z forward",
+    "loader_name": "Createc .dat reader",
+    "loader_version": "beta",
+    "metadata": {
+      "array_shape": [
+        256,
+        255
+      ],
+      "scan_range_m": [
+        1.5000460000000003e-08,
+        1.5000460000000003e-08
+      ],
+      "unit": "m",
+      "experiment_metadata": {
+        "acquisition_mode": "afm",
+        "feedback_mode": "constant_frequency_shift",
+        "pll_enabled": true,
+        "feedback_channel": 4,
+        "topography_role": "afm_topography",
+        "confidence": "high",
+        "evidence": [
+          "PLLOn=1",
+          "MEMO_STMAFM is non-empty",
+          "FBChannel=4"
+        ]
+      },
+      "header": {
+        "Num.X": "255",
+        "Num.Y": "256",
+        "Biasvolt[mV]": "0.20",
+        "SetPoint": "7.000"
+      }
+    },
+    "file_hash": null
+  },
+  "processing_history": {
+    "schema_version": 1,
+    "source_record": {
+      "source_filename": "A221126.123040.dat",
+      "source_path": "C:/Users/rnpla/Desktop/stm/ProbeFlow/_delete/A221126.123040.dat",
+      "source_file_type": "Createc .dat",
+      "channel": "Z forward",
+      "loader_name": "Createc .dat reader",
+      "loader_version": "beta",
+      "metadata": {
+        "array_shape": [
+          256,
+          255
+        ],
+        "scan_range_m": [
+          1.5000460000000003e-08,
+          1.5000460000000003e-08
+        ],
+        "unit": "m",
+        "experiment_metadata": {
+          "acquisition_mode": "afm",
+          "feedback_mode": "constant_frequency_shift",
+          "pll_enabled": true,
+          "feedback_channel": 4,
+          "topography_role": "afm_topography",
+          "confidence": "high",
+          "evidence": [
+            "PLLOn=1",
+            "MEMO_STMAFM is non-empty",
+            "FBChannel=4"
+          ]
+        },
+        "header": {
+          "Num.X": "255",
+          "Num.Y": "256",
+          "Biasvolt[mV]": "0.20",
+          "SetPoint": "7.000"
+        }
+      },
+      "file_hash": null
+    },
+    "steps": [
+      {
+        "step_id": "step-0001",
+        "operation_id": "file_load",
+        "operation_name": "Loaded Createc .dat",
+        "operation_version": "beta",
+        "parameters": {
+          "source_path": "C:/Users/rnpla/Desktop/stm/ProbeFlow/_delete/A221126.123040.dat",
+          "source_file_type": "Createc .dat",
+          "channel": "Z forward",
+          "loader_name": "Createc .dat reader"
+        },
+        "input_state_id": "source:be7198a405fde50d",
+        "output_state_id": "state:284ab76e98eab1c7",
+        "timestamp": "2026-05-10T12:03:12Z",
+        "warnings": []
+      },
+      {
+        "step_id": "step-0002",
+        "operation_id": "plane_bg",
+        "operation_name": "Background subtraction",
+        "operation_version": "beta",
+        "parameters": {
+          "order": 1
+        },
+        "input_state_id": "state:284ab76e98eab1c7",
+        "output_state_id": "state:34d55cf35b0c092b",
+        "timestamp": "2026-05-10T12:03:21Z",
+        "warnings": []
+      },
+      {
+        "step_id": "step-0003",
+        "operation_id": "export_provenance_json",
+        "operation_name": "Export: PROVENANCE_JSON",
+        "operation_version": "beta",
+        "parameters": {
+          "display_settings": {
+            "mode": "percentile",
+            "low_pct": 1.0,
+            "high_pct": 99.0,
+            "vmin": null,
+            "vmax": null,
+            "colormap": "gray",
+            "add_scalebar": true,
+            "scalebar_unit": "nm",
+            "scalebar_pos": "bottom-right"
+          }
+        },
+        "input_state_id": "state:34d55cf35b0c092b",
+        "output_state_id": "state:b699a02143c115d6",
+        "timestamp": "2026-05-10T12:03:48Z",
+        "warnings": []
+      }
+    ],
+    "current_state_id": "state:b699a02143c115d6"
+  },
+  "display_settings": {
+    "mode": "percentile",
+    "low_pct": 1.0,
+    "high_pct": 99.0,
+    "vmin": null,
+    "vmax": null,
+    "colormap": "gray",
+    "add_scalebar": true,
+    "scalebar_unit": "nm",
+    "scalebar_pos": "bottom-right"
+  },
+  "timestamp": "2026-05-10T12:03:48Z",
+  "warning": "This file was exported by ProbeFlow and is not raw data.\nOriginal file: A221126.123040.dat\nProcessing steps: Background: plane subtraction order=1\nFor critical quantitative measurements, compare against the original raw file.",
+  "warnings": [
+    "This file was exported by ProbeFlow and is not raw data.\nOriginal file: A221126.123040.dat\nProcessing steps: Background: plane subtraction order=1\nFor critical quantitative measurements, compare against the original raw file."
+  ],
+  "summary": "This file was exported by ProbeFlow and is not raw data.\nOriginal file: A221126.123040.dat\nProcessing steps: Background: plane subtraction order=1\nFor critical quantitative measurements, compare against the original raw file."
+}

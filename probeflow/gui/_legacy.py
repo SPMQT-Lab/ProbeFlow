@@ -86,6 +86,13 @@ from probeflow.processing.state import (
     assert_roi_references_resolved,
     missing_roi_references,
 )
+from probeflow.provenance import (
+    ProcessingHistory,
+    append_processing_state,
+    build_export_record,
+    display_lines,
+    processing_history_from_scan,
+)
 from probeflow.gui.features import (
     FeaturesPanel,
     FeaturesSidebar,
@@ -344,6 +351,9 @@ class ImageViewerDialog(QDialog):
         self._spec_image_map = spec_image_map if spec_image_map is not None else {}
         self._raw_arr: Optional[np.ndarray] = None
         self._display_arr: Optional[np.ndarray] = None  # raw or processed, for histogram/export
+        self._source_processing_history: Optional[ProcessingHistory] = None
+        self._processing_history: Optional[ProcessingHistory] = None
+        self._last_export_record = None
         # Data range for sliders lives in self._hist_panel.data_min_si / data_max_si
         self._scan_header: dict = {}
         self._scan_range_m: Optional[tuple] = None
@@ -604,6 +614,18 @@ class ImageViewerDialog(QDialog):
         self._processing_panel._align_combo.currentIndexChanged.connect(
             self._on_align_rows_changed)
         right_lay.addWidget(self._processing_panel)
+
+        right_lay.addWidget(_sep())
+
+        history_hdr = QLabel("History")
+        history_hdr.setFont(QFont("Helvetica", 7, QFont.Bold))
+        history_hdr.setAlignment(Qt.AlignCenter)
+        right_lay.addWidget(history_hdr)
+        self._history_text = QLabel("")
+        self._history_text.setFont(QFont("Helvetica", 8))
+        self._history_text.setWordWrap(True)
+        self._history_text.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        right_lay.addWidget(self._history_text)
 
         right_lay.addWidget(_sep())
 
@@ -1058,10 +1080,10 @@ class ImageViewerDialog(QDialog):
         save_png_action.triggered.connect(self._on_save_png)
         export_menu.addAction(save_png_action)
         save_processed_action = QAction("Save processed image", self)
-        save_processed_action.setEnabled(False)
+        save_processed_action.triggered.connect(self._on_save_processed_image)
         export_menu.addAction(save_processed_action)
         save_provenance_action = QAction("Save provenance", self)
-        save_provenance_action.setEnabled(False)
+        save_provenance_action.triggered.connect(self._on_save_provenance)
         export_menu.addAction(save_provenance_action)
 
         help_menu = menu_bar.addMenu("Help")
@@ -1217,6 +1239,12 @@ class ImageViewerDialog(QDialog):
             self._scan_format  = entry.source_format
             self._scan_plane_names = list(_scan.plane_names)
             self._scan_plane_units = list(_scan.plane_units)
+            self._source_processing_history = processing_history_from_scan(
+                _scan,
+                channel_index=idx,
+                channel_name=self._ch_cb.currentText() or None,
+                processing_state={"steps": []},
+            )
         except Exception:
             self._raw_arr      = None
             self._scan_header  = {}
@@ -1225,6 +1253,32 @@ class ImageViewerDialog(QDialog):
             self._scan_format  = ""
             self._scan_plane_names = list(PLANE_NAMES)
             self._scan_plane_units = ["m", "m", "A", "A"]
+            self._source_processing_history = None
+        self._rebuild_processing_history()
+
+    def _rebuild_processing_history(self) -> None:
+        if self._source_processing_history is None:
+            self._processing_history = None
+            self._sync_history_panel()
+            return
+        history = ProcessingHistory.from_dict(self._source_processing_history.to_dict())
+        try:
+            append_processing_state(
+                history,
+                processing_state_from_gui(self._processing or {}),
+            )
+        except Exception:
+            pass
+        self._processing_history = history
+        self._sync_history_panel()
+
+    def _sync_history_panel(self) -> None:
+        if not hasattr(self, "_history_text"):
+            return
+        if self._processing_history is None:
+            self._history_text.setText("Source: unknown\nChannel: unknown")
+            return
+        self._history_text.setText("\n".join(display_lines(self._processing_history)))
 
     def _refresh_display_array(self, reset_zoom_if_shape_changed: bool = False):
         old_shape = self._display_arr.shape if self._display_arr is not None else None
@@ -1277,6 +1331,7 @@ class ImageViewerDialog(QDialog):
     def _refresh_processing_display(self):
         entry = self._entries[self._idx]
         self._refresh_display_array(reset_zoom_if_shape_changed=True)
+        self._rebuild_processing_history()
         self._refresh_histogram_and_markers(entry)
         self._refresh_viewer_pixmap(reset_zoom=False)
         self._sync_line_profile_visibility()
@@ -2165,8 +2220,195 @@ class ImageViewerDialog(QDialog):
             self._colormap, self._clip_low, self._clip_high,
             self._drs, self._processing, self._image_roi_set,
             self._ch_cb.currentIndex(), self._ch_cb.currentText() or None,
+            processing_history=(
+                self._processing_history.to_dict()
+                if self._processing_history is not None else None
+            ),
         )
+        if msg.startswith("Saved") and self._processing_history is not None:
+            self._mark_history_export(out_path)
         self._status_lbl.setText(msg)
+
+    def _assert_exportable_processing(self) -> bool:
+        if getattr(self, "_processing_roi_error", ""):
+            self._status_lbl.setText(
+                f"Cannot export while processing has stale ROI references. {self._processing_roi_error}"
+            )
+            return False
+        try:
+            ps = processing_state_from_gui(self._processing or {})
+            assert_roi_references_resolved(ps, self._image_roi_set)
+        except ValueError as _roi_err:
+            self._status_lbl.setText(f"Export blocked: {_roi_err}")
+            return False
+        return True
+
+    def _current_display_settings(self) -> dict:
+        from probeflow.provenance.export import png_display_state
+
+        return png_display_state(
+            self._drs,
+            clip_low=self._clip_low,
+            clip_high=self._clip_high,
+            colormap=self._viewer_colormap,
+            add_scalebar=True,
+            scalebar_unit="nm",
+            scalebar_pos="bottom-right",
+        )
+
+    def _processed_scan_for_export(self):
+        entry = self._entries[self._idx]
+        arr = self._display_arr if self._display_arr is not None else self._raw_arr
+        if arr is None:
+            raise ValueError("No image data loaded.")
+        scan = load_scan(entry.path)
+        idx = max(0, min(self._ch_cb.currentIndex(), scan.n_planes - 1))
+        scan.planes[idx] = np.asarray(arr, dtype=np.float64).copy()
+        state = processing_state_from_gui(self._processing or {})
+        if state.steps:
+            scan.record_processing_state(state)
+        return scan, idx
+
+    def _write_processed_export_sidecar(self, scan, out_path, plane_idx: int) -> None:
+        suffix = Path(out_path).suffix.lower().lstrip(".") or "export"
+        if suffix == "png":
+            return
+        from probeflow.provenance.export import (
+            build_scan_export_provenance,
+            write_provenance_sidecars,
+        )
+
+        prov = build_scan_export_provenance(
+            scan,
+            channel_index=plane_idx,
+            channel_name=(
+                scan.plane_names[plane_idx]
+                if plane_idx < len(scan.plane_names) else self._ch_cb.currentText()
+            ),
+            processing_state=scan.processing_state,
+            display_state=self._current_display_settings(),
+            export_kind=f"viewer_{suffix}",
+            output_path=out_path,
+            roi_set=self._image_roi_set,
+            processing_history=(
+                self._processing_history.to_dict()
+                if self._processing_history is not None else None
+            ),
+        )
+        write_provenance_sidecars(
+            out_path,
+            prov,
+            legacy=False,
+            probeflow=True,
+            export_format=suffix,
+        )
+
+    def _on_save_processed_image(self):
+        if not self._assert_exportable_processing():
+            return
+        entry = self._entries[self._idx]
+        out_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save processed image",
+            str(Path.home() / f"{entry.stem}_processed.sxm"),
+            (
+                "Supported images (*.sxm *.png *.csv *.pdf *.gwy);;"
+                "Nanonis SXM (*.sxm);;PNG images (*.png);;"
+                "CSV grids (*.csv);;PDF figures (*.pdf);;Gwyddion (*.gwy)"
+            ),
+        )
+        if not out_path:
+            return
+        out = Path(out_path)
+        if not out.suffix:
+            out = out.with_suffix(".sxm")
+        try:
+            scan, plane_idx = self._processed_scan_for_export()
+            suffix = out.suffix.lower()
+            if suffix == ".png":
+                scan.save_png(
+                    out,
+                    plane_idx=plane_idx,
+                    colormap=self._viewer_colormap,
+                    clip_low=self._clip_low,
+                    clip_high=self._clip_high,
+                    add_scalebar=True,
+                )
+            elif suffix == ".pdf":
+                scan.save_pdf(
+                    out,
+                    plane_idx=plane_idx,
+                    colormap=self._viewer_colormap,
+                    clip_low=self._clip_low,
+                    clip_high=self._clip_high,
+                )
+                self._write_processed_export_sidecar(scan, out, plane_idx)
+            elif suffix == ".csv":
+                scan.save_csv(out, plane_idx=plane_idx)
+                self._write_processed_export_sidecar(scan, out, plane_idx)
+            elif suffix == ".gwy":
+                scan.save_gwy(out, plane_idx=plane_idx)
+                self._write_processed_export_sidecar(scan, out, plane_idx)
+            elif suffix == ".sxm":
+                scan.save_sxm(out)
+            else:
+                self._status_lbl.setText(
+                    "Unsupported processed image format. Use .sxm, .png, .csv, .pdf, or .gwy."
+                )
+                return
+            self._status_lbl.setText(f"Saved processed image -> {out.name}")
+        except Exception as exc:
+            self._status_lbl.setText(f"Save processed image error: {exc}")
+
+    def _on_save_provenance(self):
+        if not self._assert_exportable_processing():
+            return
+        if self._processing_history is None:
+            self._status_lbl.setText("No provenance available to save.")
+            return
+        entry = self._entries[self._idx]
+        out_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save provenance",
+            str(Path.home() / f"{entry.stem}.probeflow.json"),
+            "ProbeFlow provenance (*.probeflow.json *.json)",
+        )
+        if not out_path:
+            return
+        out = Path(out_path)
+        if not out.suffix:
+            out = out.with_suffix(".probeflow.json")
+        try:
+            record = build_export_record(
+                self._processing_history,
+                export_path=out,
+                export_format="provenance_json",
+                display_settings=self._current_display_settings(),
+            )
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text(record.to_json(indent=2, default=str), encoding="utf-8")
+            self._last_export_record = record
+            self._history_text.setText(
+                "\n".join(display_lines(record.processing_history))
+            )
+            self._status_lbl.setText(f"Saved provenance -> {out.name}")
+        except Exception as exc:
+            self._status_lbl.setText(f"Save provenance error: {exc}")
+
+    def _mark_history_export(self, out_path: str) -> None:
+        try:
+            record = build_export_record(
+                self._processing_history,
+                export_path=out_path,
+                export_format="png",
+                display_settings=self._current_display_settings(),
+            )
+            self._last_export_record = record
+            self._history_text.setText(
+                "\n".join(display_lines(record.processing_history))
+            )
+        except Exception:
+            pass
 
     def _on_send_to_features(self):
         self._deferred.action = "features"

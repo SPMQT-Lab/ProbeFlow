@@ -1760,6 +1760,7 @@ def export_png(
     If *provenance* is provided, a ``<stem>.provenance.json`` sidecar is written.
     """
     from PIL import Image as _Image, ImageDraw as _IDraw, ImageFont as _IFont
+    from PIL.PngImagePlugin import PngInfo as _PngInfo
 
     from probeflow.processing.display import array_to_uint8 as _array_to_uint8, clip_range_from_array as _clip_range
 
@@ -1827,16 +1828,28 @@ def export_png(
 
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    img.save(str(out_path), format="PNG")
+    pnginfo = None
+    if provenance is not None:
+        try:
+            from probeflow.provenance.export import human_summary_from_provenance
+
+            pnginfo = _PngInfo()
+            pnginfo.add_text(
+                "ProbeFlow provenance",
+                human_summary_from_provenance(provenance),
+            )
+        except Exception:
+            pnginfo = None
+    if pnginfo is not None:
+        img.save(str(out_path), format="PNG", pnginfo=pnginfo)
+    else:
+        img.save(str(out_path), format="PNG")
 
     if provenance is not None:
-        import json as _json
-        sidecar = out_path.with_suffix("").with_suffix(".provenance.json")
         try:
-            sidecar.write_text(
-                _json.dumps(provenance.to_dict(), indent=2, default=str),
-                encoding="utf-8",
-            )
+            from probeflow.provenance.export import write_provenance_sidecars
+
+            write_provenance_sidecars(out_path, provenance, export_format="png")
         except Exception:
             pass  # sidecar failure must never break the PNG export
 

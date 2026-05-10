@@ -22,7 +22,11 @@ from pathlib import Path
 import numpy as np
 
 from probeflow.io.common import check_overwrite
-from probeflow.provenance.export import build_scan_export_provenance
+from probeflow.provenance.export import (
+    build_scan_export_provenance,
+    human_summary_from_provenance,
+    write_provenance_sidecars,
+)
 from probeflow.core.scan_model import PLANE_CANON_NAMES, PLANE_CANON_UNITS, Scan
 from probeflow.io.sxm_io import write_sxm_with_planes
 
@@ -42,6 +46,10 @@ def _build_comment(scan: Scan, out_path=None) -> str:
     if prov.artifact_id:
         lines.append(f"ArtifactId: {prov.artifact_id}")
     lines.append(f"ProcessingStateHash: {prov.processing_state_hash}")
+    summary = human_summary_from_provenance(prov)
+    if summary:
+        lines.append("")
+        lines.append(summary)
     if scan.processing_history:
         lines.append("Operations:")
         for i, entry in enumerate(scan.processing_history, 1):
@@ -78,6 +86,12 @@ def write_sxm(
         raise ValueError(
             f"Cannot write .sxm from source_format={scan.source_format!r}"
         )
+    _write_sxm_probeflow_sidecar(
+        scan,
+        out_path,
+        clip_low=clip_low,
+        clip_high=clip_high,
+    )
 
 
 # ─── SXM-sourced fast path ──────────────────────────────────────────────────
@@ -171,4 +185,30 @@ def _is_canonical_dat_sxm_layout(scan: Scan) -> bool:
         scan.n_planes == 4
         and tuple(scan.plane_names) == PLANE_CANON_NAMES
         and tuple(scan.plane_units) == PLANE_CANON_UNITS
+    )
+
+
+def _write_sxm_probeflow_sidecar(
+    scan: Scan,
+    out_path: Path,
+    *,
+    clip_low: float,
+    clip_high: float,
+) -> None:
+    prov = build_scan_export_provenance(
+        scan,
+        channel_index=None,
+        display_state={
+            "clip_low": float(clip_low),
+            "clip_high": float(clip_high),
+        },
+        export_kind="sxm",
+        output_path=out_path,
+    )
+    write_provenance_sidecars(
+        out_path,
+        prov,
+        legacy=False,
+        probeflow=True,
+        export_format="sxm",
     )

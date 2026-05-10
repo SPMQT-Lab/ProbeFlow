@@ -28,6 +28,19 @@ from probeflow.provenance.graph import (
     graph_to_dict,
     materialize_image,
 )
+from probeflow.provenance.records import (
+    DAT_TO_SXM_CONVERSION_WARNING,
+    PROCESSED_EXPORT_WARNING,
+    ExportRecord,
+    ProcessingHistory,
+    ProcessingStep,
+    SourceRecord,
+    append_processing_state,
+    build_export_record,
+    display_lines,
+    processing_history_from_scan,
+    source_record_from_scan,
+)
 
 globals().update({
     name: value
@@ -44,4 +57,15 @@ __all__ = [
     "graph_from_dict",
     "graph_to_dict",
     "materialize_image",
+    "DAT_TO_SXM_CONVERSION_WARNING",
+    "PROCESSED_EXPORT_WARNING",
+    "ExportRecord",
+    "ProcessingHistory",
+    "ProcessingStep",
+    "SourceRecord",
+    "append_processing_state",
+    "build_export_record",
+    "display_lines",
+    "processing_history_from_scan",
+    "source_record_from_scan",
 ]
