@@ -991,3 +991,165 @@ class TestFftLatticeSymmetry:
                 f"Angular gap {i}: {gap:.1f}°, expected 60° ± 10°.  "
                 f"Sorted peak angles: {[f'{a:.0f}°' for a in angles]}."
             )
+
+
+# ── anisotropic images ────────────────────────────────────────────────────────
+
+class TestAnisotropicImages:
+    """Axis-handling correctness for highly non-square images (32×512 / 512×32).
+
+    Each function below targets a different hidden-assumption category:
+    - subtract_background: separate Ny and Nx normalisations
+    - gaussian_smooth: reflect boundary on the short axis, intensity conservation
+    - measure_periodicity: fy uses Ny (not Nx) and pixel_size_y_m (not pixel_size_x_m)
+    """
+
+    # ── subtract_background ───────────────────────────────────────────────────
+
+    @pytest.mark.parametrize("Ny,Nx", [(32, 512), (512, 32)])
+    def test_plane_subtraction_exact_on_wide_and_tall_images(self, Ny: int, Nx: int):
+        """order-1 plane subtraction must be exact on both wide and tall images.
+
+        The polynomial coordinates are normalised by separate linspace calls:
+        xs = linspace(−1, 1, Nx) and ys = linspace(−1, 1, Ny).  A regression
+        that normalised both axes by the same size would make the design matrix
+        rank-deficient on a 16:1 aspect image, inflating the residual far above
+        1e-8.
+        """
+        arr = _tilted_plane(Ny, Nx, slope_x=0.13, slope_y=0.07, offset=4.2)
+        out = subtract_background(arr, order=1)
+        assert float(np.ptp(out)) < 1e-8, (
+            f"{Ny}×{Nx}: plane residual ptp = {np.ptp(out):.2e}; expected < 1e-8.  "
+            "Polynomial normalisation may use the same scale for both axes."
+        )
+
+    @pytest.mark.parametrize("Ny,Nx", [(32, 512), (512, 32)])
+    def test_step_height_preserved_on_wide_and_tall_images(self, Ny: int, Nx: int):
+        """Step height must be recovered exactly on non-square images.
+
+        The lower-terrace fit_mask covers half the columns regardless of whether
+        the image is wide (32×512) or tall (512×32).  A mask-indexing bug that
+        confuses row and column count would give the wrong number of fit pixels.
+        """
+        step_col = Nx // 2
+        step_h   = 2.0
+        arr = (
+            _step_terrace(Ny, Nx, step_col=step_col, step_height=step_h)
+            + _tilted_plane(Ny, Nx, slope_x=0.08, slope_y=0.03, offset=0.0)
+        )
+        lower_mask = np.zeros((Ny, Nx), dtype=bool)
+        lower_mask[:, :step_col] = True
+        out = subtract_background(arr, order=1, fit_mask=lower_mask)
+
+        recovered = (
+            float(np.median(out[:, step_col:]))
+            - float(np.median(out[:, :step_col]))
+        )
+        assert abs(recovered - step_h) < 1e-8, (
+            f"{Ny}×{Nx}: recovered step {recovered:.10f}, true {step_h}; "
+            f"diff {abs(recovered - step_h):.2e}."
+        )
+
+    # ── gaussian_smooth ───────────────────────────────────────────────────────
+
+    @pytest.mark.parametrize("Ny,Nx", [(32, 512), (512, 32)])
+    def test_gaussian_smooth_impulse_centroid_and_intensity_on_anisotropic_image(
+        self, Ny: int, Nx: int
+    ):
+        """Impulse response must peak at the centre and conserve intensity on
+        a non-square image.
+
+        For 32×512 with sigma = 4 px the short dimension is only 8σ wide; the
+        nearest boundary-reflected impulse copy is 32 px away, contributing
+        exp(−32²/32) ≈ 10⁻¹⁴ — negligible.  Both the centroid and the sum
+        must therefore agree with the square-image result to < 1e-10.
+        """
+        cy, cx = Ny // 2, Nx // 2
+        arr = np.zeros((Ny, Nx))
+        arr[cy, cx] = 1.0
+
+        out = gaussian_smooth(arr, sigma_px=4.0)
+
+        peak = np.unravel_index(np.argmax(out), out.shape)
+        assert peak == (cy, cx), (
+            f"{Ny}×{Nx}: impulse peak at {peak}, expected ({cy},{cx}).  "
+            "Kernel centroid may be off-centre in the short dimension."
+        )
+        assert abs(out.sum() - 1.0) < 1e-10, (
+            f"{Ny}×{Nx}: total intensity = {out.sum():.12f}; expected 1.  "
+            "Kernel normalisation broken for high-aspect-ratio images."
+        )
+
+    # ── measure_periodicity ───────────────────────────────────────────────────
+
+    @pytest.mark.parametrize("Ny,Nx,period_px", [
+        (32, 512, 8),    # 4 cycles in the short (y) dimension
+        (512, 32, 64),   # 8 cycles in the long (y) dimension
+    ])
+    def test_fft_period_correct_for_y_grating_on_anisotropic_image(
+        self, Ny: int, Nx: int, period_px: int
+    ):
+        """measure_periodicity must use Ny (not Nx) when computing fy for a
+        y-direction grating on a non-square image.
+
+        32×512, period_px = 8:  ky_bin = Ny/period_px = 4.
+          Bug: fy = 4/512 instead of 4/32 → period 16× too large.
+        512×32, period_px = 64: ky_bin = Ny/period_px = 8.
+          Bug: fy = 8/32 instead of 8/512  → period 16× too small.
+
+        Both errors are factors of Nx/Ny = 16, far beyond the 2 % tolerance.
+        """
+        px_m = 0.1e-9
+        arr  = _sine_wave(Ny, Nx, fx=0.0, fy=1.0 / period_px, amp=1.0)
+        peaks = measure_periodicity(
+            arr,
+            pixel_size_x_m=px_m,
+            pixel_size_y_m=px_m,
+            n_peaks=3,
+        )
+        assert peaks, (
+            f"No peaks found on {Ny}×{Nx} image (period_px = {period_px})."
+        )
+
+        found    = peaks[0]["period_m"]
+        expected = period_px * px_m
+        rel_err  = abs(found - expected) / expected
+        assert rel_err < 0.02, (
+            f"{Ny}×{Nx}, period_px = {period_px}: period {found * 1e9:.4f} nm, "
+            f"expected {expected * 1e9:.4f} nm ({rel_err * 100:.1f} % error).  "
+            "fy may be computed as ky_bin/Nx instead of ky_bin/Ny."
+        )
+
+    def test_fft_period_uses_pixel_size_y_not_x_on_anisotropic_image(self):
+        """When pixel_size_x_m ≠ pixel_size_y_m, a y-direction grating must
+        return a period computed from pixel_size_y_m.
+
+        Image: 32×512, y-direction grating, period_px = 8.
+        pixel_size_x = 0.1 nm, pixel_size_y = 0.5 nm (5× difference).
+        Expected period = 8 × 0.5 nm = 4.0 nm.
+        Swapped pixel_size gives 8 × 0.1 nm = 0.8 nm — a 5× error, far
+        beyond the 2 % tolerance.
+        """
+        Ny, Nx    = 32, 512
+        period_px = 8
+        px_size_x = 0.1e-9   # 0.1 nm/px in x
+        px_size_y = 0.5e-9   # 0.5 nm/px in y (5× coarser)
+        expected  = period_px * px_size_y   # 4.0 nm
+
+        arr = _sine_wave(Ny, Nx, fx=0.0, fy=1.0 / period_px, amp=1.0)
+        peaks = measure_periodicity(
+            arr,
+            pixel_size_x_m=px_size_x,
+            pixel_size_y_m=px_size_y,
+            n_peaks=3,
+        )
+        assert peaks, "No peaks found."
+
+        found   = peaks[0]["period_m"]
+        rel_err = abs(found - expected) / expected
+        assert rel_err < 0.02, (
+            f"Period {found * 1e9:.4f} nm, expected {expected * 1e9:.4f} nm "
+            f"({rel_err * 100:.1f} % error).  "
+            f"If pixel_size_x and pixel_size_y are swapped the result is "
+            f"{period_px * px_size_x * 1e9:.1f} nm (5× wrong)."
+        )
