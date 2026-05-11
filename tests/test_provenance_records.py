@@ -93,6 +93,41 @@ def test_processing_history_json_roundtrip(tmp_path):
     assert restored.steps[1].parameters == {"method": "median"}
 
 
+def test_processing_history_from_scan_with_empty_steps_dict(tmp_path):
+    scan = _scan(tmp_path)
+    scan.processing_state = None
+    history = processing_history_from_scan(
+        scan, channel_index=0, processing_state={"steps": []}
+    )
+    assert [step.operation_id for step in history.steps] == ["file_load"]
+    assert history.current_state_id is not None
+
+
+def test_step_summary_roi_branch(tmp_path):
+    from probeflow.provenance.records import ProcessingHistory, SourceRecord
+
+    history = ProcessingHistory(
+        SourceRecord(
+            source_filename="scan.dat",
+            source_path="/data/scan.dat",
+            source_file_type="Createc .dat",
+            channel="FT",
+            loader_name="Createc .dat reader",
+            loader_version="1.0",
+        )
+    )
+    history.append_step(
+        operation_id="roi",
+        operation_name="ROI-scoped Gaussian blur/smoothing",
+        parameters={"step": {"op": "smooth", "params": {"sigma_px": 1.5}}, "roi": "bg"},
+    )
+
+    summary = history.short_summary()
+    assert "ROI-scoped" in summary
+    assert "bg" in summary
+    assert "{'op'" not in summary
+
+
 def test_png_export_writes_probeflow_sidecar_with_history(tmp_path):
     from probeflow.io.writers.png import write_png
 

@@ -630,6 +630,15 @@ def _step_summary(step: ProcessingStep) -> str:
         return f"Background: {p.get('model', 'linear')} ({p.get('line_statistic', 'median')})"
     if op == "smooth":
         return f"Gaussian blur/smoothing: sigma={p.get('sigma_px', 1.0)} px"
+    if op == "roi":
+        nested = p.get("step") if isinstance(p, dict) else None
+        if isinstance(nested, dict):
+            nested_op = str(nested.get("op") or "")
+            nested_params = dict(nested.get("params") or {})
+            nested_name = _operation_name(nested_op, nested_params)
+            roi_label = p.get("roi") or "ROI"
+            return f"ROI-scoped {nested_name} ({roi_label})"
+        return "ROI-scoped processing"
     if op.startswith("export_"):
         fmt = op.removeprefix("export_").upper()
         display = p.get("display_settings") if isinstance(p, dict) else None

@@ -79,5 +79,11 @@ class DisplayRangeController(QObject):
         self.rangeChanged.emit()
 
     def reset_silent(self, low_pct: float = 1.0, high_pct: float = 99.0) -> None:
-        """Reset without emitting rangeChanged — for callers that manage refresh."""
+        """Reset without emitting rangeChanged — for callers that manage refresh.
+
+        Only percentile-mode reset has a silent variant.  If a future caller
+        needs to set manual limits without triggering rangeChanged, it must call
+        ``self._drs._state.set_manual(vmin, vmax)`` directly, or a new
+        ``set_manual_silent`` method should be added here first.
+        """
         self._state.reset(low_pct, high_pct)

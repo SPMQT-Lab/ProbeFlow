@@ -2226,7 +2226,7 @@ class ImageViewerDialog(QDialog):
             ),
         )
         if msg.startswith("Saved") and self._processing_history is not None:
-            self._mark_history_export(out_path)
+            self._mark_history_export(out_path, export_parameters={"export_kind": "viewer_png"})
         self._status_lbl.setText(msg)
 
     def _assert_exportable_processing(self) -> bool:
@@ -2395,13 +2395,14 @@ class ImageViewerDialog(QDialog):
         except Exception as exc:
             self._status_lbl.setText(f"Save provenance error: {exc}")
 
-    def _mark_history_export(self, out_path: str) -> None:
+    def _mark_history_export(self, out_path: str, export_parameters: dict | None = None) -> None:
         try:
             record = build_export_record(
                 self._processing_history,
                 export_path=out_path,
                 export_format="png",
                 display_settings=self._current_display_settings(),
+                export_parameters=export_parameters,
             )
             self._last_export_record = record
             self._history_text.setText(
