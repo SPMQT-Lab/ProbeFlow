@@ -140,6 +140,13 @@ class FeaturesPanel(QWidget):
         self._cropping   = False
         self._crop_start = None
         self._crop_rect  = None
+        self._current_mode: str = "particles"
+        self._params_signature = None
+        self._params_meta: dict | None = None
+        self._sample_armed: bool = False
+        self._sample_labels: dict = {}     # particle_index → {"name": str, "color": tuple}
+        self._classifications: list = []
+        self._classification_meta: dict | None = None
         self._build()
 
     def _build(self):
@@ -207,8 +214,60 @@ class FeaturesPanel(QWidget):
     def current_pixel_size(self):
         return self._pixel_size_m
 
-    def set_particles(self, particles):
+    def set_mode(self, mode: str) -> None:
+        self._current_mode = mode
+
+    def set_sample_selection_armed(self, armed: bool) -> None:
+        self._sample_armed = armed
+
+    def has_sample_labels(self) -> bool:
+        return bool(self._sample_labels)
+
+    def sample_label_rows(self) -> list:
+        return [
+            {
+                "class_name": v["name"],
+                "color_rgb": list(v["color"]),
+                "particle_index": k,
+            }
+            for k, v in self._sample_labels.items()
+        ]
+
+    def clear_sample_labels(self) -> None:
+        self._sample_labels = {}
+
+    def _prompt_sample_label(
+        self, current_name: str = "", current_color: tuple = (255, 255, 255)
+    ) -> dict | None:
+        from PySide6.QtWidgets import QInputDialog
+        name, ok = QInputDialog.getText(self, "Label", "Class name:", text=current_name)
+        if not ok or not name.strip():
+            return None
+        return {"name": name.strip(), "color": current_color}
+
+    def _edit_sample_label(self, particle) -> None:
+        existing = self._sample_labels.get(particle.index, {})
+        result = self._prompt_sample_label(
+            current_name=existing.get("name", ""),
+            current_color=existing.get("color", (255, 255, 255)),
+        )
+        if result is not None:
+            self._sample_labels[particle.index] = {
+                "name": result["name"],
+                "color": tuple(result["color"]),
+            }
+
+    def set_classifications(self, classifications: list, meta: dict | None = None) -> None:
+        self._classifications = classifications
+        self._classification_meta = meta
+
+    def get_classifications(self) -> list:
+        return list(self._classifications)
+
+    def set_particles(self, particles, *, params_signature=None, params_meta=None):
         self._particles    = particles
+        self._params_signature = params_signature
+        self._params_meta = params_meta
         self._overlay_mode = "particles"
         self._redraw()
         self._results_table.setColumnCount(4)
@@ -381,7 +440,8 @@ class FeaturesPanel(QWidget):
 class FeaturesSidebar(QWidget):
     """Right sidebar for Features-tab analysis parameters."""
 
-    mode_changed          = Signal(str)      # "particles" / "template" / "lattice"
+    mode_changed          = Signal(str)      # "particles" / "template" / "lattice" / "classify"
+    classify_params_changed = Signal()
     load_from_browse_requested = Signal()
     run_requested         = Signal(str)      # mode
     export_requested      = Signal(str)      # mode
@@ -435,7 +495,8 @@ class FeaturesSidebar(QWidget):
         self._mode_btns = {}
         for key, label in [("particles", "Particles"),
                            ("template",  "Template"),
-                           ("lattice",   "Lattice")]:
+                           ("lattice",   "Lattice"),
+                           ("classify",  "Classify")]:
             b = QPushButton(label)
             b.setCheckable(True)
             b.setFont(QFont("Helvetica", 9))
@@ -451,6 +512,7 @@ class FeaturesSidebar(QWidget):
         self._mode_stack.addWidget(self._build_particles_tab())
         self._mode_stack.addWidget(self._build_template_tab())
         self._mode_stack.addWidget(self._build_lattice_tab())
+        self._mode_stack.addWidget(self._build_classify_tab())
         lay.addWidget(self._mode_stack)
 
         lay.addWidget(_sep())
@@ -572,6 +634,39 @@ class FeaturesSidebar(QWidget):
         l.addWidget(hint)
         return w
 
+    def _build_classify_tab(self) -> QWidget:
+        w = QWidget()
+        l = QVBoxLayout(w)
+        l.setContentsMargins(0, 4, 0, 4)
+        l.setSpacing(4)
+
+        info = QLabel(
+            "Segment particles, then label examples by clicking them.\n"
+            "Run to classify all particles by similarity to your labels.")
+        info.setFont(QFont("Helvetica", 9))
+        info.setWordWrap(True)
+        l.addWidget(info)
+
+        l.addWidget(QLabel("Threshold"))
+        self._cls_thr_cb = QComboBox()
+        self._cls_thr_cb.addItems(["otsu", "manual", "adaptive"])
+        l.addWidget(self._cls_thr_cb)
+
+        self._cls_invert_cb = QCheckBox("Invert (segment dark features)")
+        l.addWidget(self._cls_invert_cb)
+
+        row = QHBoxLayout()
+        row.addWidget(QLabel("min area (nm²):"))
+        self._cls_min_area_spin = QDoubleSpinBox()
+        self._cls_min_area_spin.setRange(0.0, 1e6)
+        self._cls_min_area_spin.setDecimals(2)
+        self._cls_min_area_spin.setValue(0.5)
+        self._cls_min_area_spin.valueChanged.connect(lambda _: self.classify_params_changed.emit())
+        row.addWidget(self._cls_min_area_spin)
+        l.addLayout(row)
+
+        return w
+
     def _build_lattice_tab(self) -> QWidget:
         w = QWidget()
         l = QVBoxLayout(w)
@@ -589,7 +684,7 @@ class FeaturesSidebar(QWidget):
     def _select_mode(self, key: str):
         for k, b in self._mode_btns.items():
             b.setChecked(k == key)
-        idx = {"particles": 0, "template": 1, "lattice": 2}[key]
+        idx = {"particles": 0, "template": 1, "lattice": 2, "classify": 3}[key]
         self._mode_stack.setCurrentIndex(idx)
         self.mode_changed.emit(key)
 
@@ -622,6 +717,13 @@ class FeaturesSidebar(QWidget):
             "min_correlation": self._corr_spin.value(),
             "min_distance_m":  None if self._dist_spin.value() <= 0
                                else self._dist_spin.value() * 1e-9,
+        }
+
+    def classify_segmentation_params(self) -> dict:
+        return {
+            "threshold":    self._cls_thr_cb.currentText(),
+            "invert":       self._cls_invert_cb.isChecked(),
+            "min_area_nm2": self._cls_min_area_spin.value(),
         }
 
     def set_status(self, text: str):

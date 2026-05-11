@@ -2793,6 +2793,8 @@ class ProbeFlowWindow(QMainWindow):
         self._features_sidebar.export_requested.connect(self._on_features_export)
         self._features_sidebar.crop_template_requested.connect(
             self._features_panel.begin_template_crop)
+        self._features_sidebar.classify_params_changed.connect(
+            self._on_classify_params_changed)
 
         # Status bar
         self._status_bar = QStatusBar()
@@ -3382,6 +3384,12 @@ class ProbeFlowWindow(QMainWindow):
             params["template"] = tmpl
         elif mode == "lattice":
             params = {}
+        elif mode == "classify":
+            if not self._features_panel.has_sample_labels():
+                self._features_sidebar.set_status(
+                    "Label at least one target molecule before running classify.")
+                return
+            params = self._features_sidebar.classify_segmentation_params()
         else:
             self._features_sidebar.set_status(f"Unknown mode {mode!r}")
             return
@@ -3410,23 +3418,43 @@ class ProbeFlowWindow(QMainWindow):
                 f"|b|={result.b_length_m * 1e9:.3f} nm  "
                 f"γ={result.gamma_deg:.1f}°")
 
+    def _features_segmentation_signature(self, params: dict) -> tuple:
+        return tuple(sorted(params.items()))
+
+    def _on_classify_params_changed(self) -> None:
+        self._features_panel.clear_sample_labels()
+        self._features_sidebar.set_status(
+            "Segmentation parameters changed — sample labels cleared.")
+
     def _on_features_export(self, mode: str):
         if mode == "particles":
             items = self._features_panel.get_particles()
             kind  = "particles"
+            extra_meta = {"source": None}
         elif mode == "template":
             items = self._features_panel.get_detections()
             kind  = "detections"
+            extra_meta = {"source": None}
         elif mode == "lattice":
             lat = self._features_panel.get_lattice()
             items = [lat] if lat is not None else []
             kind  = "lattice"
+            extra_meta = {"source": None}
+        elif mode == "classify":
+            items = self._features_panel.get_classifications()
+            kind  = "classifications"
+            extra_meta = {
+                "samples": self._features_panel.sample_label_rows(),
+                "classification": self._features_panel._classification_meta,
+            }
         else:
             return
+        entry = self._features_panel.current_entry()
+        if mode != "classify":
+            extra_meta["source"] = str(entry.path) if entry else None
         if not items:
             self._features_sidebar.set_status("Nothing to export — run an analysis first.")
             return
-        entry = self._features_panel.current_entry()
         suggested = (Path.home() / f"{entry.stem if entry else 'features'}_{kind}.json")
         out_path, _ = QFileDialog.getSaveFileName(
             self, f"Export {kind} JSON", str(suggested), "JSON (*.json)")
@@ -3434,8 +3462,7 @@ class ProbeFlowWindow(QMainWindow):
             return
         try:
             from probeflow.io.writers.json import write_json
-            write_json(out_path, items, kind=kind,
-                       extra_meta={"source": str(entry.path) if entry else None})
+            write_json(out_path, items, kind=kind, extra_meta=extra_meta)
             self._features_sidebar.set_status(f"Exported → {out_path}")
             self._status_bar.showMessage(f"Exported {kind} → {out_path}")
         except Exception as exc:
