@@ -32,6 +32,8 @@ _BRUSH_HOVER    = QBrush(QColor(249, 226, 175, 45))
 _BRUSH_NONE     = QBrush(Qt.NoBrush)
 _LABEL_FONT     = QFont("Helvetica", 8)
 _LABEL_COLOR    = QColor("#cdd6f4")
+_PEN_HANDLE     = QPen(QColor("#22D3EE"), 1.5)
+_BRUSH_HANDLE   = QBrush(QColor(34, 211, 238, 200))
 
 
 # ── Per-kind item builders ────────────────────────────────────────────────────
@@ -80,6 +82,17 @@ def _build_multipolygon_path(roi: "ROI") -> QGraphicsPathItem:
 def _build_line(roi: "ROI") -> QGraphicsLineItem:
     g = roi.geometry
     return QGraphicsLineItem(g["x1"], g["y1"], g["x2"], g["y2"])
+
+
+def _make_endpoint_handle(x: float, y: float) -> QGraphicsEllipseItem:
+    """Fixed-screen-size filled circle for dragging a line ROI endpoint."""
+    h = QGraphicsEllipseItem(-5, -5, 10, 10)
+    h.setPos(QPointF(x, y))
+    h.setPen(_PEN_HANDLE)
+    h.setBrush(_BRUSH_HANDLE)
+    h.setFlag(QGraphicsItem.ItemIgnoresTransformations, True)
+    h.setZValue(12)
+    return h
 
 
 class PointROIItem(QGraphicsItem):
@@ -193,6 +206,26 @@ def make_roi_item(roi: "ROI", active: bool = False) -> QGraphicsItemGroup:
         group.addToGroup(shape)
         group.addToGroup(label)
 
+    if kind == "line":
+        g = roi.geometry
+        line_width = int(g.get("width", 1))
+        group.setData(4, line_width)
+        if line_width > 1:
+            for child in group.childItems():
+                if isinstance(child, QGraphicsLineItem):
+                    pen = child.pen()
+                    pen.setWidthF(float(line_width))
+                    child.setPen(pen)
+                    break
+        h1 = _make_endpoint_handle(float(g["x1"]), float(g["y1"]))
+        h2 = _make_endpoint_handle(float(g["x2"]), float(g["y2"]))
+        h1.setParentItem(group)
+        h2.setParentItem(group)
+        h1.setVisible(active)
+        h2.setVisible(active)
+        group.setData(2, h1)
+        group.setData(3, h2)
+
     return group
 
 
@@ -204,8 +237,13 @@ def update_roi_item_style(item: QGraphicsItemGroup, active: bool,
         point_item.set_active(active or hover)
         return
 
+    h1, h2 = item.data(2), item.data(3)
+    line_width = item.data(4) or 1
+
     for child in item.childItems():
         if isinstance(child, QGraphicsTextItem):
+            continue
+        if child is h1 or child is h2:
             continue
         if hover and not active:
             pen = _PEN_HOVER
@@ -215,3 +253,12 @@ def update_roi_item_style(item: QGraphicsItemGroup, active: bool,
                 child.setBrush(brush)
         else:
             _apply_style(child, active)
+        if isinstance(child, QGraphicsLineItem) and line_width > 1:
+            pen = child.pen()
+            pen.setWidthF(float(line_width))
+            child.setPen(pen)
+
+    if h1 is not None:
+        h1.setVisible(active)
+    if h2 is not None:
+        h2.setVisible(active)

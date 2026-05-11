@@ -119,6 +119,59 @@ def roi_canvas_moved(
     on_changed()
 
 
+def roi_line_set_width(
+    roi_set,
+    roi_id: str,
+    width: int,
+    on_changed: Callable,
+) -> None:
+    """Update the averaging width stored in a line ROI's geometry."""
+    if roi_set is None:
+        return
+    roi = roi_set.get(roi_id)
+    if roi is None or roi.kind != "line":
+        return
+    from probeflow.core.roi import ROI as _ROI
+    new_geom = dict(roi.geometry)
+    new_geom["width"] = max(1, int(width))
+    new_roi = _ROI(
+        id=roi.id, name=roi.name, kind="line",
+        geometry=new_geom,
+        coord_system=roi.coord_system, linked_file=roi.linked_file,
+    )
+    roi_set.remove(roi_id)
+    roi_set.add(new_roi)
+    roi_set.set_active(roi_id)
+    on_changed()
+
+
+def roi_line_endpoint_changed(
+    roi_set,
+    roi_id: str,
+    x1: float,
+    y1: float,
+    x2: float,
+    y2: float,
+    on_changed: Callable,
+) -> None:
+    """Handle an endpoint drag on a line ROI: update geometry in place."""
+    if roi_set is None:
+        return
+    roi = roi_set.get(roi_id)
+    if roi is None or roi.kind != "line":
+        return
+    from probeflow.core.roi import ROI as _ROI
+    new_roi = _ROI(
+        id=roi.id, name=roi.name, kind="line",
+        geometry={"x1": x1, "y1": y1, "x2": x2, "y2": y2},
+        coord_system=roi.coord_system, linked_file=roi.linked_file,
+    )
+    roi_set.remove(roi_id)
+    roi_set.add(new_roi)
+    roi_set.set_active(roi_id)
+    on_changed()
+
+
 # ── Pure queries ──────────────────────────────────────────────────────────────
 
 def active_roi_id(roi_set) -> str | None:

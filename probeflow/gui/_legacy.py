@@ -136,6 +136,8 @@ from probeflow.gui.viewer import (
     resolve_channel_unit,
     roi_canvas_created,
     roi_canvas_moved,
+    roi_line_endpoint_changed,
+    roi_line_set_width,
     save_roi_set,
     save_viewer_png,
     select_nth_roi,
@@ -838,9 +840,15 @@ class ImageViewerDialog(QDialog):
         self._zoom_lbl.pixel_hovered.connect(self._on_pixel_hovered)
         self._zoom_lbl.roi_created.connect(self._on_canvas_roi_created)
         self._zoom_lbl.roi_move_requested.connect(self._on_canvas_roi_move)
+        self._zoom_lbl.roi_line_preview.connect(self._on_line_roi_preview)
+        self._zoom_lbl.roi_line_geometry_changed.connect(self._on_line_roi_geometry_changed)
+        self._zoom_lbl.roi_delete_requested.connect(self._on_canvas_roi_delete)
+        self._zoom_lbl.roi_copy_requested.connect(self._on_canvas_roi_copy)
+        self._zoom_lbl.roi_paste_requested.connect(self._on_canvas_roi_paste)
         self._zoom_lbl.tool_changed.connect(self._on_canvas_tool_changed)
         self._zoom_lbl.roi_context_menu_requested.connect(self._on_roi_canvas_context_menu)
         self._line_profile_panel.export_csv_clicked.connect(self._on_export_line_profile_csv)
+        self._line_profile_panel.width_changed.connect(self._on_line_profile_width_changed)
 
         self._status_lbl = QLabel("")
         self._status_lbl.setFont(QFont("Helvetica", 8))
@@ -863,6 +871,7 @@ class ImageViewerDialog(QDialog):
         self._viewer_main.setDockNestingEnabled(False)
 
         self._image_roi_set = None
+        self._copy_roi_buffer = None  # ROI object held for Ctrl+V paste
         self._roi_dock = ROIManagerDock(
             roi_set_getter=lambda: self._image_roi_set,
             callbacks={
@@ -1618,6 +1627,7 @@ class ImageViewerDialog(QDialog):
         roi = self._image_roi_set.get(roi_id) if self._image_roi_set else None
         if roi is None or roi.kind != "line" or self._display_arr is None:
             return
+        self._line_profile_panel.set_width(int(roi.geometry.get("width", 1)))
         plot_roi_line_profile(
             roi, self._display_arr,
             self._pixel_size_xy_m(),
@@ -1625,6 +1635,70 @@ class ImageViewerDialog(QDialog):
             self._line_profile_panel,
             self._t,
         )
+
+    def _on_line_roi_preview(
+        self, roi_id: str, x1: float, y1: float, x2: float, y2: float,
+    ) -> None:
+        """Live endpoint drag: update profile without touching the data model."""
+        if self._display_arr is None:
+            return
+        from probeflow.core.roi import ROI as _ROI
+        tmp_roi = _ROI(
+            id=roi_id, name="", kind="line",
+            geometry={"x1": x1, "y1": y1, "x2": x2, "y2": y2},
+        )
+        plot_roi_line_profile(
+            tmp_roi, self._display_arr,
+            self._pixel_size_xy_m(),
+            self._channel_unit,
+            self._line_profile_panel,
+            self._t,
+        )
+
+    def _on_line_roi_geometry_changed(
+        self, roi_id: str, x1: float, y1: float, x2: float, y2: float,
+    ) -> None:
+        """Endpoint drag released: commit new geometry and persist."""
+        roi_line_endpoint_changed(
+            self._image_roi_set, roi_id, x1, y1, x2, y2,
+            self._on_image_roi_set_changed,
+        )
+
+    def _on_line_profile_width_changed(self, width: int) -> None:
+        """Width spinbox changed: update active line ROI geometry and re-plot."""
+        roi_id = self._active_line_roi_id()
+        if roi_id is None:
+            return
+        roi_line_set_width(
+            self._image_roi_set, roi_id, width,
+            self._on_image_roi_set_changed,
+        )
+
+    def _on_canvas_roi_delete(self, roi_id: str) -> None:
+        if self._image_roi_set is None:
+            return
+        self._image_roi_set.remove(roi_id)
+        self._on_image_roi_set_changed()
+
+    def _on_canvas_roi_copy(self, roi_id: str) -> None:
+        roi = self._image_roi_set.get(roi_id) if self._image_roi_set else None
+        if roi is not None:
+            self._copy_roi_buffer = roi
+
+    def _on_canvas_roi_paste(self) -> None:
+        roi = self._copy_roi_buffer
+        if roi is None or self._image_roi_set is None:
+            return
+        from probeflow.core.roi import ROI as _ROI, translate as _translate
+        # Create a new ROI (new id) offset by 10 pixels so it doesn't overlap
+        offset_roi = _translate(roi, 10.0, 10.0)
+        pasted = _ROI.new(
+            offset_roi.kind, offset_roi.geometry,
+            name=f"{roi.name}_copy",
+        )
+        self._image_roi_set.add(pasted)
+        self._image_roi_set.set_active(pasted.id)
+        self._on_image_roi_set_changed()
 
     def _on_map_spectra_here(self):
         """Open the per-image spec→this-image mapping dialog."""

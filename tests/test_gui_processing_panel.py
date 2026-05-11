@@ -634,6 +634,9 @@ def test_viewer_line_profile_uses_display_array_and_physical_units(qapp):
         def setVisible(self, visible):
             self.visible = visible
 
+        def set_width(self, width):
+            pass
+
         def plot_profile(self, x_vals, values, *, x_label="Distance [nm]",
                          y_label, theme=None):
             self.profile = (np.asarray(x_vals), np.asarray(values), x_label, y_label)

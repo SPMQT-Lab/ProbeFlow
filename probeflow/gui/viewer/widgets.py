@@ -10,7 +10,7 @@ from PySide6.QtCore import Qt, QRect, Signal
 from PySide6.QtGui import (
     QBrush, QColor, QFont, QPainter, QPen,
 )
-from PySide6.QtWidgets import QHBoxLayout, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QSpinBox, QVBoxLayout, QWidget
 
 # ── Physical-axis ruler (top / left of the image) ───────────────────────────
 class RulerWidget(QWidget):
@@ -220,12 +220,32 @@ class LineProfilePanel(QWidget):
     """Compact live profile plot for viewer line selections."""
 
     export_csv_clicked = Signal()
+    width_changed      = Signal(int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 2, 0, 0)
         lay.setSpacing(2)
+
+        ctrl_row = QHBoxLayout()
+        ctrl_row.setContentsMargins(0, 0, 0, 0)
+        ctrl_row.setSpacing(4)
+        _lbl = QLabel("Width:")
+        _lbl.setFont(QFont("Helvetica", 8))
+        ctrl_row.addWidget(_lbl)
+        self._width_spin = QSpinBox()
+        self._width_spin.setRange(1, 500)
+        self._width_spin.setValue(1)
+        self._width_spin.setSuffix(" px")
+        self._width_spin.setFixedWidth(70)
+        self._width_spin.setFont(QFont("Helvetica", 8))
+        self._width_spin.setToolTip("Averaging width perpendicular to the line (pixels)")
+        self._width_spin.valueChanged.connect(self.width_changed)
+        ctrl_row.addWidget(self._width_spin)
+        ctrl_row.addStretch()
+        lay.addLayout(ctrl_row)
+
         self._fig = Figure(figsize=(5.0, 1.8), dpi=80)
         self._fig.patch.set_alpha(0)
         self._ax = self._fig.add_subplot(111)
@@ -251,6 +271,12 @@ class LineProfilePanel(QWidget):
         self._y_label = ""
         self._source_label = ""
         self.show_empty()
+
+    def set_width(self, width: int) -> None:
+        """Set spinbox to *width* without firing width_changed."""
+        self._width_spin.blockSignals(True)
+        self._width_spin.setValue(max(1, int(width)))
+        self._width_spin.blockSignals(False)
 
     def profile_data(self):
         """Return (x_vals, y_vals, x_label, y_label) or None if no profile."""

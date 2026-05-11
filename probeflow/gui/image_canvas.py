@@ -21,7 +21,7 @@ import numpy as np
 
 from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import (
-    QBrush, QColor, QFont, QPainter, QPainterPath, QPen,
+    QBrush, QColor, QFont, QKeySequence, QPainter, QPainterPath, QPen,
     QPixmap, QTransform,
 )
 from PySide6.QtWidgets import (
@@ -57,6 +57,15 @@ class ImageCanvas(QGraphicsView):
     roi_move_requested        = Signal(str, int, int) # (roi_id, dx, dy)
     tool_changed              = Signal(str)
     roi_context_menu_requested = Signal(str, object)  # (roi_id, global_pos)
+
+    # Line-ROI endpoint drag signals
+    roi_line_preview          = Signal(str, float, float, float, float)  # (roi_id, x1, y1, x2, y2) — live
+    roi_line_geometry_changed = Signal(str, float, float, float, float)  # (roi_id, x1, y1, x2, y2) — committed
+
+    # Keyboard action signals (active ROI operations)
+    roi_delete_requested      = Signal(str)   # roi_id
+    roi_copy_requested        = Signal(str)   # roi_id
+    roi_paste_requested       = Signal()
 
     # ── inner items ──────────────────────────────────────────────────────────
 
@@ -185,6 +194,11 @@ class ImageCanvas(QGraphicsView):
         self._move_scene_start: Optional[QPointF] = None
         self._move_item_start_pos: QPointF = QPointF(0, 0)
         self._move_point_start_pos: Optional[QPointF] = None
+
+        # Endpoint drag state (line ROI endpoint editing)
+        self._ep_roi_id: Optional[str] = None
+        self._ep_idx: int = 0
+        self._ep_base_geom: dict = {}
 
         # Hover state
         self._hover_roi_id: Optional[str] = None
@@ -700,6 +714,25 @@ class ImageCanvas(QGraphicsView):
 
         # ── pan tool ──────────────────────────────────────────────────────────
         if tool == "pan":
+            # Check for line-ROI endpoint handle hit before generic ROI drag
+            if self._image_roi_set:
+                active_id = self._image_roi_set.active_roi_id
+                if active_id:
+                    roi = self._image_roi_set.get(active_id)
+                    if roi and roi.kind == "line":
+                        g = roi.geometry
+                        vpos = event.pos()
+                        for ep_idx, (ex, ey) in enumerate(
+                            [(g["x1"], g["y1"]), (g["x2"], g["y2"])]
+                        ):
+                            vp = self.mapFromScene(QPointF(float(ex), float(ey)))
+                            if abs(vp.x() - vpos.x()) <= 12 and abs(vp.y() - vpos.y()) <= 12:
+                                self._ep_roi_id = active_id
+                                self._ep_idx = ep_idx
+                                self._ep_base_geom = dict(g)
+                                self.setCursor(Qt.CrossCursor)
+                                event.accept()
+                                return
             roi_id = self._roi_at_pos(event.pos())
             active_id = self._image_roi_set.active_roi_id if self._image_roi_set else None
             if roi_id and roi_id == active_id:
@@ -756,6 +789,32 @@ class ImageCanvas(QGraphicsView):
             self._scroll_by(-delta.x(), -delta.y())
             event.accept()
             # fall through to update pixel readout below (don't return early)
+
+        # ── line-ROI endpoint drag ────────────────────────────────────────────
+        elif self._ep_roi_id is not None and event.buttons() & Qt.LeftButton:
+            scene_pos = self.mapToScene(event.pos())
+            g = self._ep_base_geom
+            if self._ep_idx == 0:
+                x1, y1 = scene_pos.x(), scene_pos.y()
+                x2, y2 = float(g["x2"]), float(g["y2"])
+            else:
+                x1, y1 = float(g["x1"]), float(g["y1"])
+                x2, y2 = scene_pos.x(), scene_pos.y()
+            item = self._roi_items.get(self._ep_roi_id)
+            if item:
+                for child in item.childItems():
+                    if isinstance(child, QGraphicsLineItem):
+                        child.setLine(x1, y1, x2, y2)
+                        break
+                h1 = item.data(2)
+                h2 = item.data(3)
+                if h1 is not None:
+                    h1.setPos(QPointF(x1, y1))
+                if h2 is not None:
+                    h2.setPos(QPointF(x2, y2))
+            self.roi_line_preview.emit(self._ep_roi_id, x1, y1, x2, y2)
+            event.accept()
+            return
 
         # ── active-ROI drag-move ──────────────────────────────────────────────
         elif self._move_roi_id is not None and event.buttons() & Qt.LeftButton:
@@ -851,6 +910,25 @@ class ImageCanvas(QGraphicsView):
 
         if event.button() != Qt.LeftButton:
             super().mouseReleaseEvent(event)
+            return
+
+        # ── finish endpoint drag ──────────────────────────────────────────────
+        if self._ep_roi_id is not None:
+            scene_pos = self.mapToScene(event.pos())
+            g = self._ep_base_geom
+            if self._ep_idx == 0:
+                x1, y1 = scene_pos.x(), scene_pos.y()
+                x2, y2 = float(g["x2"]), float(g["y2"])
+            else:
+                x1, y1 = float(g["x1"]), float(g["y1"])
+                x2, y2 = scene_pos.x(), scene_pos.y()
+            roi_id = self._ep_roi_id
+            self._ep_roi_id = None
+            self._ep_idx = 0
+            self._ep_base_geom = {}
+            self.setCursor(Qt.ArrowCursor)
+            self.roi_line_geometry_changed.emit(roi_id, x1, y1, x2, y2)
+            event.accept()
             return
 
         # ── finish active-ROI drag-move ───────────────────────────────────────
@@ -969,6 +1047,20 @@ class ImageCanvas(QGraphicsView):
             return
         if k in (Qt.Key_Return, Qt.Key_Enter) and self._tool == "polygon" and self._draw_pts:
             self._finish_polygon()
+            event.accept()
+            return
+        active_id = self._image_roi_set.active_roi_id if self._image_roi_set else None
+        if active_id:
+            if k in (Qt.Key_Delete, Qt.Key_Backspace):
+                self.roi_delete_requested.emit(active_id)
+                event.accept()
+                return
+            if event.matches(QKeySequence.Copy):
+                self.roi_copy_requested.emit(active_id)
+                event.accept()
+                return
+        if event.matches(QKeySequence.Paste):
+            self.roi_paste_requested.emit()
             event.accept()
             return
         super().keyPressEvent(event)

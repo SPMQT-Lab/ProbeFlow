@@ -26,6 +26,8 @@ from probeflow.gui.viewer.roi_ops import (
     rename_roi,
     roi_canvas_created,
     roi_canvas_moved,
+    roi_line_endpoint_changed,
+    roi_line_set_width,
     select_nth_roi,
     selected_or_active_roi_id,
 )
@@ -56,6 +58,8 @@ __all__ = [
     "resolve_channel_unit",
     "roi_canvas_created",
     "roi_canvas_moved",
+    "roi_line_endpoint_changed",
+    "roi_line_set_width",
     "save_roi_set",
     "save_viewer_png",
     "select_nth_roi",

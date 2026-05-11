@@ -62,9 +62,11 @@ def plot_roi_line_profile(
     try:
         px_x, px_y = pixel_size_xy_m
         from probeflow.processing.image import line_profile
+        width_px = float(roi.geometry.get("width", 1)) if roi.geometry else 1.0
         s_m, values = line_profile(
             display_arr, roi=roi,
             pixel_size_x_m=px_x, pixel_size_y_m=px_y,
+            width_px=max(1.0, width_px),
         )
         scale, unit, name = channel_unit_fn()
         x_scale, x_unit = choose_display_unit("m", s_m)
