@@ -74,10 +74,7 @@ _LEGACY_EXPORTS = {
     "STMBackgroundDialog",
     "THEMES",
     "ThumbnailGrid",
-    "ViewerSpecMappingDialog",
-    "_DEFINITIONS_HTML",
     "_DefinitionsDialog",
-    "_DefinitionsPanel",
     "_DevSidebar",
     "_TerminalPane",
     "_build_qss",
@@ -86,6 +83,14 @@ _LEGACY_EXPORTS = {
     "load_config",
     "normalise_gui_font_size",
     "save_config",
+}
+
+# Names that have been fully extracted to probeflow.gui.dialogs.
+# Exposed here for backward compatibility without loading _legacy.
+_DIALOGS_EXPORTS = {
+    "ViewerSpecMappingDialog",
+    "_DEFINITIONS_HTML",
+    "_DefinitionsPanel",
 }
 
 
@@ -110,6 +115,9 @@ def _load_legacy():
 
 
 def __getattr__(name: str) -> Any:
+    if name in _DIALOGS_EXPORTS:
+        from probeflow.gui import dialogs as _dialogs
+        return getattr(_dialogs, name)
     if name in _LEGACY_EXPORTS:
         return getattr(_load_legacy(), name)
     raise AttributeError(f"module 'probeflow.gui' has no attribute {name!r}")

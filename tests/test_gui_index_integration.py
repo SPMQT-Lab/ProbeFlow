@@ -534,13 +534,16 @@ class TestViewerRenderSizing:
         monkeypatch.setattr(worker_mod, "load_scan", lambda _path: FakeScan())
         monkeypatch.setattr(worker_mod, "render_scan_image", fake_render)
 
+        from probeflow.gui.workers import (
+            ChannelLoader, ChannelSignals, ThumbnailLoader,
+        )
         entry = SxmFile(path=Path("scan.dat"), stem="scan")
-        gui_mod.ThumbnailLoader(
+        ThumbnailLoader(
             entry, "gray", object(), 148, 116,
             thumbnail_channel="Current",
         ).run()
-        gui_mod.ChannelLoader(
-            entry, 1, "gray", object(), 124, 98, gui_mod.ChannelSignals(),
+        ChannelLoader(
+            entry, 1, "gray", object(), 124, 98, ChannelSignals(),
         ).run()
         gui_mod.ViewerLoader(
             entry, "gray", object(), None, plane_idx=1,

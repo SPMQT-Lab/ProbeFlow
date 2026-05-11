@@ -18,15 +18,12 @@ here — those belong in `io/`, `processing/`, `analysis/`, `core/`, or
 from __future__ import annotations
 
 import copy
-import io
 import json
 import sys
-from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import Optional
 
 import numpy as np
-from PIL import Image
 
 import os as _os
 _os.environ.setdefault("QT_API", "pyside6")
@@ -34,20 +31,20 @@ import matplotlib
 matplotlib.use("QtAgg")
 
 from PySide6.QtCore import (
-    Qt, QObject, QRect, QRunnable, QThreadPool, QTimer,
-    QSize, Signal, Slot,
+    Qt, QThreadPool,
+    Signal, Slot,
 )
 from PySide6.QtGui import (
-    QAction, QActionGroup, QBrush, QColor, QCursor, QFont, QImage, QKeySequence, QMovie,
-    QPainter, QPen, QPixmap, QShortcut,
+    QAction, QActionGroup, QCursor, QFont, QKeySequence,
+    QPixmap, QShortcut,
 )
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QComboBox,
-    QDialog, QDoubleSpinBox, QFileDialog, QFrame, QGridLayout, QGroupBox,
-    QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMenu, QPushButton,
+    QDialog, QDoubleSpinBox, QFileDialog, QFrame, QGridLayout,
+    QHBoxLayout, QLabel, QMainWindow, QMenu, QPushButton,
     QDockWidget, QScrollArea, QSizePolicy, QSplitter, QStackedWidget,
-    QStatusBar, QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView,
-    QToolTip, QVBoxLayout, QWidget,
+    QStatusBar, QTableWidget, QTableWidgetItem, QHeaderView,
+    QVBoxLayout, QWidget,
 )
 import shutil
 import subprocess
@@ -106,7 +103,7 @@ from probeflow.gui.features.tv import (
     _TVWorkerSignals,
 )
 from probeflow.gui.processing import ProcessingControlPanel
-from probeflow.gui.terminal import DeveloperTerminalWidget, _TerminalPane
+from probeflow.gui.terminal import DeveloperTerminalWidget
 from probeflow.gui.dialogs import (
     AboutDialog,
     FFTViewerDialog,
@@ -114,9 +111,8 @@ from probeflow.gui.dialogs import (
     SpecMappingDialog,
     SpecViewerDialog,
     STMBackgroundDialog,
-    ViewerSpecMappingDialog,
 )
-from probeflow.core.scan_loader import SUPPORTED_SUFFIXES, load_scan
+from probeflow.core.scan_loader import load_scan
 from probeflow.gui.viewer import (
     BadLinePreviewController,
     DeferredPlaneAction,
@@ -234,11 +230,7 @@ from probeflow.gui.models import (
     FolderEntry,
     SxmFile,
     VertFile,
-    _card_meta_str,
-    _scan_items_to_sxm,
-    _spec_items_to_vert,
     scan_image_folder,
-    scan_vert_folder,
 )
 from probeflow.gui.rendering import (
     CMAP_KEY,
@@ -251,16 +243,10 @@ from probeflow.gui.rendering import (
     _apply_processing,
 )
 from probeflow.gui.workers import (
-    ChannelLoader,
-    ChannelSignals,
-    ConversionSignals,
     ConversionWorker,
-    ThumbnailLoader,
-    ThumbnailSignals,
     ViewerLoader,
-    ViewerSignals,
 )
-from probeflow.gui.browse import ScanCard, SpecCard, ThumbnailGrid, _BrowseCard
+from probeflow.gui.browse import ThumbnailGrid
 from probeflow.gui.viewer.widgets import (
     LineProfilePanel,
     RulerWidget,
@@ -2643,11 +2629,7 @@ class Navbar(QWidget):
 
 
 # ── Processing definitions panel ──────────────────────────────────────────────
-from probeflow.gui.dialogs.definitions import (
-    _DEFINITIONS_HTML,
-    _DefinitionsDialog,
-    _DefinitionsPanel,
-)
+from probeflow.gui.dialogs.definitions import _DefinitionsDialog
 
 # ── Developer terminal sidebar ────────────────────────────────────────────────
 from probeflow.gui.terminal import _DevSidebar

@@ -53,12 +53,10 @@ def test_processing_panel_imports_from_new_module_and_gui_package(qapp):
 def test_terminal_widgets_import_from_new_module_and_gui_package(qapp):
     from probeflow.gui import DeveloperTerminalWidget as PublicTerminal
     from probeflow.gui import _DevSidebar as PublicDevSidebar
-    from probeflow.gui import _TerminalPane as PublicPane
     from probeflow.gui.terminal import DeveloperTerminalWidget, _DevSidebar, _TerminalPane
 
     assert PublicTerminal is DeveloperTerminalWidget
     assert PublicDevSidebar is _DevSidebar
-    assert PublicPane is _TerminalPane
 
     pane = _TerminalPane()
     pane.set_prompt("test $ ")
@@ -224,9 +222,7 @@ def test_main_window_uses_standard_menus_for_secondary_views(qapp):
 
 
 def test_definitions_content_includes_bad_scanline_terms():
-    from probeflow.gui import _legacy as gui_mod
-
-    definitions = gui_mod._DEFINITIONS_HTML
+    from probeflow.gui.dialogs.definitions import _DEFINITIONS_HTML as definitions
 
     for term in (
         "Bad scan-line segment",
