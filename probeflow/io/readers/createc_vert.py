@@ -13,7 +13,6 @@ import numpy as np
 
 from probeflow.io.common import (
     _f,
-    find_hdr,
     get_dac_bits,
     i_scale_a_per_dac,
     v_per_dac,

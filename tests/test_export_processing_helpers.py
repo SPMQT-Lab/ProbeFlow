@@ -11,8 +11,8 @@ from probeflow.processing.gui_adapter import (
     NUMERIC_PROC_KEYS,
     apply_processing_state_to_scan,
     gui_state_has_numeric_processing,
-    processing_history_entries_from_state,
 )
+from probeflow.processing.history import processing_history_entries_from_state
 from probeflow.processing.state import ProcessingState, ProcessingStep
 from probeflow.core.scan_model import Scan
 from probeflow.core.scan_loader import load_scan

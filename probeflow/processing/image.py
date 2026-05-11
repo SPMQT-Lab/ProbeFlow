@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Any, Optional
 
 import numpy as np
-from PIL import Image
 from scipy.ndimage import (
     gaussian_filter,
     label as _nd_label,
@@ -2367,10 +2366,6 @@ def fft_magnitude(
     produces a 64×64 FFT; the k-space *range* shrinks but the pixel size (and
     therefore the Nyquist limit) is unchanged.
     """
-    from typing import TYPE_CHECKING
-    if TYPE_CHECKING:
-        from probeflow.core.roi import ROI
-
     _AREA_KINDS = {"rectangle", "ellipse", "polygon", "freehand"}
     _INVALID_KINDS = {"line", "point"}
 

@@ -5,10 +5,8 @@ No Qt imports — this module can be tested without a running Qt event loop.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 import warnings
-
-from probeflow.processing.history import processing_history_entries_from_state
 
 if TYPE_CHECKING:
     from probeflow.core.scan_model import Scan

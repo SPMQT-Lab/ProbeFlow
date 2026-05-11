@@ -15,7 +15,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QGraphicsEllipseItem, QGraphicsItem, QGraphicsItemGroup,
-    QGraphicsLineItem, QGraphicsPathItem, QGraphicsPixmapItem,
+    QGraphicsLineItem, QGraphicsPathItem,
     QGraphicsRectItem, QGraphicsTextItem,
 )
 
