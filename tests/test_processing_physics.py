@@ -648,3 +648,215 @@ class TestBackgroundSubtractionSecondPass:
             "or the coordinate normalisation is computed over all pixels "
             "rather than only the masked subset."
         )
+
+
+# ── second-pass FFT / periodicity ─────────────────────────────────────────────
+
+class TestMeasurePeriodicitySecondPass:
+    """Physical-unit and lattice-orientation second-pass checks for measure_periodicity."""
+
+    # ── A: physical units ─────────────────────────────────────────────────────
+
+    def test_y_grating_period_recovered_in_physical_metres(self):
+        """The physical period must match wavelength × pixel_size, not just
+        the pixel count.
+
+        Synthetic: 128×128 image, 16-px period, pixel_size = 0.1 nm/px.
+        Expected period = 16 × 0.1 nm = 1.6 nm = 1.6 × 10⁻⁹ m.
+
+        Passing pixel_size = 1 (no unit) while keeping the same grating would
+        give period = 16 m — a 10⁸ × error caught by this test.  Swapping
+        pixel_size_x_m and pixel_size_y_m for an isotropic image makes no
+        difference here; test B covers that distinction.
+        """
+        Ny, Nx = 128, 128
+        period_px    = 16
+        pixel_size_m = 0.1e-9   # 0.1 nm/px
+
+        arr = _sine_wave(Ny, Nx, fx=0.0, fy=1.0 / period_px, amp=1.0)
+        peaks = measure_periodicity(
+            arr,
+            pixel_size_x_m=pixel_size_m,
+            pixel_size_y_m=pixel_size_m,
+            n_peaks=3,
+        )
+        assert peaks, "No peaks found."
+
+        found    = peaks[0]["period_m"]
+        expected = period_px * pixel_size_m
+        rel_err  = abs(found - expected) / expected
+        assert rel_err < 0.02, (
+            f"Period {found * 1e9:.4f} nm, expected {expected * 1e9:.4f} nm "
+            f"({rel_err * 100:.1f} % error).  "
+            "pixel_size_m may not be applied to the frequency axis."
+        )
+
+    @pytest.mark.parametrize("pixel_size_nm,expected_period_nm", [
+        (0.10, 1.6),
+        (0.20, 3.2),
+    ])
+    def test_physical_period_scales_linearly_with_pixel_size(
+        self, pixel_size_nm: float, expected_period_nm: float
+    ):
+        """Changing pixel size while keeping the grating in pixels must scale
+        the recovered physical period proportionally.
+
+        Same 16-px grating, two pixel sizes: 0.1 nm → 1.6 nm, 0.2 nm → 3.2 nm.
+
+        A fixed-scale bug (e.g., pixel_size hard-coded to 1 nm) would give
+        16 nm for both cases instead of the correct values, failing at least
+        one branch.  A factor-of-2 error in pixel_size handling would swap
+        the two expected results.
+        """
+        Ny, Nx = 128, 128
+        period_px    = 16
+        pixel_size_m = pixel_size_nm * 1e-9
+        expected_m   = expected_period_nm * 1e-9
+
+        arr = _sine_wave(Ny, Nx, fx=0.0, fy=1.0 / period_px, amp=1.0)
+        peaks = measure_periodicity(
+            arr,
+            pixel_size_x_m=pixel_size_m,
+            pixel_size_y_m=pixel_size_m,
+            n_peaks=3,
+        )
+        assert peaks, f"No peaks found for pixel_size = {pixel_size_nm} nm."
+
+        found   = peaks[0]["period_m"]
+        rel_err = abs(found - expected_m) / expected_m
+        assert rel_err < 0.02, (
+            f"pixel_size = {pixel_size_nm} nm: period {found * 1e9:.4f} nm, "
+            f"expected {expected_m * 1e9:.4f} nm ({rel_err * 100:.1f} % error)."
+        )
+
+    def test_physical_period_preserved_when_pixel_count_changes_at_fixed_scan_size(self):
+        """The same physical wavelength must be recovered from grids of
+        different pixel count when the scan size is held constant.
+
+        Scan size = 12.8 nm.  Two resolutions:
+        - 64 px  → pixel_size = 0.200 nm → grating period = 8 px → 1.6 nm
+        - 128 px → pixel_size = 0.100 nm → grating period = 16 px → 1.6 nm
+
+        Period bins land exactly at integer FFT bins in both cases so there
+        is no discretisation error; a wrong frequency-axis indexing (e.g.,
+        treating the bin index as cycles/image rather than cycles/px) would
+        give different periods for the two resolutions.
+        """
+        scan_m           = 12.8e-9   # fixed scan size
+        true_period_m    = 1.6e-9    # fixed physical wavelength
+
+        for Ny, Nx in [(64, 64), (128, 128)]:
+            pixel_size_m = scan_m / Ny
+            period_px    = round(true_period_m / pixel_size_m)   # integer by construction
+
+            arr = _sine_wave(Ny, Nx, fx=0.0, fy=1.0 / period_px, amp=1.0)
+            peaks = measure_periodicity(
+                arr,
+                pixel_size_x_m=pixel_size_m,
+                pixel_size_y_m=pixel_size_m,
+                n_peaks=3,
+            )
+            assert peaks, f"No peaks found for {Ny}×{Nx} grid."
+
+            found   = peaks[0]["period_m"]
+            rel_err = abs(found - true_period_m) / true_period_m
+            assert rel_err < 0.02, (
+                f"{Ny}×{Nx} (pixel_size = {pixel_size_m * 1e9:.3f} nm): "
+                f"period {found * 1e9:.4f} nm, expected {true_period_m * 1e9:.4f} nm "
+                f"({rel_err * 100:.1f} % error)."
+            )
+
+    # ── B: lattice orientation ────────────────────────────────────────────────
+
+    def test_grating_at_non_trivial_angle_recovered_within_five_degrees(self):
+        """A grating whose wave-vector is not 45° must be recovered correctly.
+
+        Grating vector (kx_bin, ky_bin) = (4, 3) on a 128×128 grid.
+        These are integer FFT bins so there is no frequency discretisation
+        error.  The physical angle is atan2(3, 4) ≈ 36.87°.
+
+        The function searches the upper half-plane (negative fy) and finds
+        the conjugate peak at (kx = −4, ky = −3) → atan2(−3, −4) ≈ −143°
+        → mod 180° ≈ 37°.
+
+        Error signatures:
+        - Transposed array: bins (3, 4) found → atan2(4, 3) ≈ 53° (wrong).
+        - Mirrored array: angle → 180° − 37° = 143° (wrong mod 180°).
+        Both errors exceed the 5° tolerance.
+        """
+        Ny, Nx = 128, 128
+        kx_bin, ky_bin = 4, 3
+        px_m = 1e-9
+        expected_angle = float(np.degrees(np.arctan2(ky_bin, kx_bin)))   # ≈ 36.87°
+
+        arr = _sine_wave(Ny, Nx, fx=kx_bin / Nx, fy=ky_bin / Ny, amp=1.0)
+        peaks = measure_periodicity(
+            arr,
+            pixel_size_x_m=px_m,
+            pixel_size_y_m=px_m,
+            n_peaks=3,
+        )
+        assert peaks, "No peaks found for 37° grating."
+
+        angle_mod = peaks[0]["angle_deg"] % 180.0
+        assert abs(angle_mod - expected_angle) < 5.0, (
+            f"Angle {peaks[0]['angle_deg']:.1f}° (mod 180° = {angle_mod:.1f}°), "
+            f"expected {expected_angle:.1f}° ± 5°.  "
+            "Array may be transposed (gives ≈53°) or mirrored (gives ≈143°)."
+        )
+
+    def test_square_lattice_gives_two_perpendicular_peaks(self):
+        """A square lattice must produce two 90°-separated FFT peaks.
+
+        Lattice: sum of two equal-amplitude sines with grating vectors
+        (kx, ky) = (4, 3) and (−3, 4) in FFT bins — perpendicular by
+        construction (dot product = 0).  Both conjugates land at distinct
+        positions in the upper-half search mask, separated by
+        sqrt(50) ≈ 7.1 px > suppress_r = 6 px, so both are returned.
+
+        The expected angles are atan2(3, 4) ≈ 36.87° and atan2(4, −3)
+        ≈ 126.87°, differing by exactly 90°.
+
+        This test catches axis swaps that affect only one direction (a pure
+        90° offset shifts both angles equally and the separation remains 90°,
+        but individual angles would each fail their expected-value check).
+        """
+        Ny, Nx = 128, 128
+        px_m = 1e-9
+        kx1, ky1 =  4,  3   # angle ≈  36.87°
+        kx2, ky2 = -3,  4   # angle ≈ 126.87°; conjugate at (3, −4) in upper half
+
+        arr = (
+            _sine_wave(Ny, Nx, fx=kx1 / Nx, fy=ky1 / Ny, amp=1.0)
+            + _sine_wave(Ny, Nx, fx=kx2 / Nx, fy=ky2 / Ny, amp=1.0)
+        )
+        peaks = measure_periodicity(
+            arr,
+            pixel_size_x_m=px_m,
+            pixel_size_y_m=px_m,
+            n_peaks=4,
+        )
+        assert len(peaks) >= 2, (
+            f"Expected ≥ 2 peaks for a square lattice, got {len(peaks)}."
+        )
+
+        angles_mod = sorted(p["angle_deg"] % 180.0 for p in peaks[:2])
+        raw_sep    = abs(angles_mod[1] - angles_mod[0])
+        # Map to [0°, 90°]: angles mod 180° live on a semicircle.
+        angle_sep  = min(raw_sep, 180.0 - raw_sep)
+
+        assert abs(angle_sep - 90.0) < 5.0, (
+            f"Peak separation {angle_sep:.1f}° (from angles mod 180°: "
+            f"{angles_mod[0]:.1f}°, {angles_mod[1]:.1f}°); expected 90° ± 5°."
+        )
+
+        expected1 = float(np.degrees(np.arctan2(ky1, kx1)))   # ≈  36.87°
+        expected2 = float(np.degrees(np.arctan2(ky2, kx2))) % 180.0   # ≈ 126.87°
+
+        for ang in angles_mod:
+            nearest_error = min(abs(ang - expected1), abs(ang - expected2))
+            assert nearest_error < 5.0, (
+                f"Peak at {ang:.1f}° does not match expected {expected1:.1f}° "
+                f"or {expected2:.1f}° within 5°.  "
+                "One lattice direction may be misidentified."
+            )
