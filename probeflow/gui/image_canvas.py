@@ -66,6 +66,7 @@ class ImageCanvas(QGraphicsView):
     roi_delete_requested      = Signal(str)   # roi_id
     roi_copy_requested        = Signal(str)   # roi_id
     roi_paste_requested       = Signal()
+    roi_activate_requested    = Signal(str)   # roi_id
 
     # ── inner items ──────────────────────────────────────────────────────────
 
@@ -714,27 +715,31 @@ class ImageCanvas(QGraphicsView):
 
         # ── pan tool ──────────────────────────────────────────────────────────
         if tool == "pan":
-            # Check for line-ROI endpoint handle hit before generic ROI drag
-            if self._image_roi_set:
-                active_id = self._image_roi_set.active_roi_id
-                if active_id:
-                    roi = self._image_roi_set.get(active_id)
-                    if roi and roi.kind == "line":
-                        g = roi.geometry
-                        vpos = event.pos()
-                        for ep_idx, (ex, ey) in enumerate(
-                            [(g["x1"], g["y1"]), (g["x2"], g["y2"])]
-                        ):
-                            vp = self.mapFromScene(QPointF(float(ex), float(ey)))
-                            if abs(vp.x() - vpos.x()) <= 12 and abs(vp.y() - vpos.y()) <= 12:
-                                self._ep_roi_id = active_id
-                                self._ep_idx = ep_idx
-                                self._ep_base_geom = dict(g)
-                                self.setCursor(Qt.CrossCursor)
-                                event.accept()
-                                return
             roi_id = self._roi_at_pos(event.pos())
             active_id = self._image_roi_set.active_roi_id if self._image_roi_set else None
+
+            # Check for endpoint handle hit on the clicked line ROI (or the
+            # active one when no other ROI is under the cursor).
+            line_candidate_id = roi_id if roi_id else active_id
+            if self._image_roi_set and line_candidate_id:
+                line_roi = self._image_roi_set.get(line_candidate_id)
+                if line_roi and line_roi.kind == "line":
+                    g = line_roi.geometry
+                    vpos = event.pos()
+                    for ep_idx, (ex, ey) in enumerate(
+                        [(g["x1"], g["y1"]), (g["x2"], g["y2"])]
+                    ):
+                        vp = self.mapFromScene(QPointF(float(ex), float(ey)))
+                        if abs(vp.x() - vpos.x()) <= 12 and abs(vp.y() - vpos.y()) <= 12:
+                            if line_candidate_id != active_id:
+                                self.roi_activate_requested.emit(line_candidate_id)
+                            self._ep_roi_id = line_candidate_id
+                            self._ep_idx = ep_idx
+                            self._ep_base_geom = dict(g)
+                            self.setCursor(Qt.CrossCursor)
+                            event.accept()
+                            return
+
             if roi_id and roi_id == active_id:
                 # Start drag-move for active ROI
                 item = self._roi_items.get(roi_id)
@@ -744,6 +749,9 @@ class ImageCanvas(QGraphicsView):
                 point = item.data(1) if item else None
                 self._move_point_start_pos = point.pos() if point else None
                 self.setCursor(Qt.SizeAllCursor)
+            elif roi_id:
+                # Click on a non-active ROI — activate it
+                self.roi_activate_requested.emit(roi_id)
             else:
                 self._left_pan_start = event.pos()
                 self.setCursor(Qt.ClosedHandCursor)

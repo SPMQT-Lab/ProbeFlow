@@ -845,6 +845,7 @@ class ImageViewerDialog(QDialog):
         self._zoom_lbl.roi_delete_requested.connect(self._on_canvas_roi_delete)
         self._zoom_lbl.roi_copy_requested.connect(self._on_canvas_roi_copy)
         self._zoom_lbl.roi_paste_requested.connect(self._on_canvas_roi_paste)
+        self._zoom_lbl.roi_activate_requested.connect(self._on_canvas_roi_activate)
         self._zoom_lbl.tool_changed.connect(self._on_canvas_tool_changed)
         self._zoom_lbl.roi_context_menu_requested.connect(self._on_roi_canvas_context_menu)
         self._line_profile_panel.export_csv_clicked.connect(self._on_export_line_profile_csv)
@@ -1673,6 +1674,12 @@ class ImageViewerDialog(QDialog):
             self._image_roi_set, roi_id, width,
             self._on_image_roi_set_changed,
         )
+
+    def _on_canvas_roi_activate(self, roi_id: str) -> None:
+        if self._image_roi_set is None:
+            return
+        self._image_roi_set.set_active(roi_id)
+        self._on_image_roi_set_changed()
 
     def _on_canvas_roi_delete(self, roi_id: str) -> None:
         if self._image_roi_set is None:

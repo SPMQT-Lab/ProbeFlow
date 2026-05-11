@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Callable
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, Qt
 from PySide6.QtWidgets import (
     QAbstractItemView, QComboBox, QDockWidget, QGridLayout, QHBoxLayout,
     QInputDialog, QLabel, QListWidget, QListWidgetItem, QMenu, QPushButton,
@@ -115,9 +115,20 @@ class ROIManagerDock(QDockWidget):
         self._list.itemSelectionChanged.connect(self._on_item_selection_changed)
         self._list.setContextMenuPolicy(Qt.CustomContextMenu)
         self._list.customContextMenuRequested.connect(self._show_context_menu)
+        self._list.installEventFilter(self)
         lay.addWidget(self._list)
 
         self.setWidget(contents)
+
+    # ── event filter ─────────────────────────────────────────────────────────
+
+    def eventFilter(self, obj, event) -> bool:
+        if obj is self._list and event.type() == QEvent.KeyPress:
+            if event.key() in (Qt.Key_Delete, Qt.Key_Backspace):
+                if self._delete_btn.isEnabled():
+                    self._on_delete()
+                    return True
+        return super().eventFilter(obj, event)
 
     # ── public ───────────────────────────────────────────────────────────────
 
