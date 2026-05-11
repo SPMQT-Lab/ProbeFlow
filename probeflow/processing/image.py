@@ -1710,7 +1710,7 @@ _NICE_STEPS_NM = [
 ]
 
 
-def _pick_scalebar_length(width_m: float, image_px: int,
+def _pick_scalebar_length(width_m: float,
                           target_frac: float = 0.20,
                           unit: str = 'nm') -> tuple[float, str]:
     unit_factors = {'nm': 1e9, 'Å': 1e10, 'pm': 1e12}
@@ -1778,7 +1778,7 @@ def export_png(
 
     if add_scalebar and width_m > 0:
         bar_m, bar_label = _pick_scalebar_length(
-            width_m, Nx, target_frac=0.20, unit=scalebar_unit)
+            width_m, target_frac=0.20, unit=scalebar_unit)
 
         bar_px = int(round(bar_m / width_m * Nx))
         bar_px = max(4, min(bar_px, Nx - 20))

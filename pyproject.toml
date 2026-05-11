@@ -20,7 +20,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev      = ["pytest"]
+dev      = ["pytest", "vulture"]
 features = ["opencv-python", "scikit-learn"]
 gwyddion = ["gwyfile"]
 all      = ["opencv-python", "scikit-learn", "gwyfile", "pytest"]

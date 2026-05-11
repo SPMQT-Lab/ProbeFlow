@@ -177,7 +177,7 @@ class TestMaterialize:
         calls = {"n": 0}
 
         def registry(name):
-            def op(arr, **kw):
+            def op(arr, **_kw):
                 calls["n"] += 1
                 return arr + 1.0
             return op
@@ -197,7 +197,7 @@ class TestMaterialize:
         calls = {"n": 0}
 
         def registry(name):
-            def op(arr, **kw):
+            def op(arr, **_kw):
                 calls["n"] += 1
                 return arr + 1.0
             return op

@@ -350,7 +350,7 @@ class DeveloperTerminalWidget(QWidget):
         if text:
             self._pane.append_output(text)
 
-    def _on_finished(self, exit_code: int, exit_status):
+    def _on_finished(self, exit_code: int, _exit_status):
         if exit_code != 0:
             self._pane.append_error(f"[exited {exit_code}]\n")
         self._pane.show_prompt()

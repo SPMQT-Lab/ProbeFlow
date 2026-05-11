@@ -94,7 +94,7 @@ class PointROIItem(QGraphicsItem):
     def boundingRect(self) -> QRectF:
         return QRectF(-6, -6, 12, 12)
 
-    def paint(self, painter: QPainter, option, widget=None):
+    def paint(self, painter: QPainter, _option, widget=None):
         color = QColor("#22D3EE") if self._active else QColor("#89b4fa")
         painter.setPen(Qt.NoPen)
         painter.setBrush(QBrush(color))

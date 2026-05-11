@@ -80,7 +80,7 @@ class ImageCanvas(QGraphicsView):
         def boundingRect(self) -> QRectF:
             return QRectF(-9, -9, 18, 18)
 
-        def paint(self, painter: QPainter, option, widget=None):
+        def paint(self, painter: QPainter, _option, widget=None):
             painter.setBrush(QBrush(QColor("#FFD700")))
             painter.setPen(QPen(QColor("black"), 1.5))
             painter.drawEllipse(QPointF(0, 0), 7, 7)
@@ -100,7 +100,7 @@ class ImageCanvas(QGraphicsView):
         def boundingRect(self) -> QRectF:
             return QRectF(-14, -14, 28, 28)
 
-        def paint(self, painter: QPainter, option, widget=None):
+        def paint(self, painter: QPainter, _option, widget=None):
             r = 8
             painter.setPen(QPen(QColor(0, 0, 0, 200), 1))
             painter.drawLine(-r - 4, 0, -r, 0)

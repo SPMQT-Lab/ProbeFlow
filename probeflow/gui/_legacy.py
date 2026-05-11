@@ -34,12 +34,12 @@ import matplotlib
 matplotlib.use("QtAgg")
 
 from PySide6.QtCore import (
-    Qt, QEvent, QObject, QRect, QRunnable, QThreadPool, QTimer,
+    Qt, QObject, QRect, QRunnable, QThreadPool, QTimer,
     QSize, Signal, Slot,
 )
 from PySide6.QtGui import (
     QAction, QActionGroup, QBrush, QColor, QCursor, QFont, QImage, QKeySequence, QMovie,
-    QPainter, QPen, QPixmap, QShortcut, QWheelEvent,
+    QPainter, QPen, QPixmap, QShortcut,
 )
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QComboBox,
