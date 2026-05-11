@@ -610,7 +610,7 @@ def _eliminate_profile_jumps(profile: np.ndarray, threshold: float | None) -> np
     return p
 
 
-def fit_scanline_background(
+def _fit_scanline_background(
     profile: np.ndarray,
     model: str = "linear",
     *,
@@ -720,7 +720,7 @@ def _linear_x_background(image: np.ndarray, mask: np.ndarray | None = None) -> n
     return bg
 
 
-def subtract_scanline_background(
+def _subtract_scanline_background(
     image: np.ndarray,
     fitted_profile: np.ndarray,
     *,
@@ -796,13 +796,13 @@ def preview_stm_background(
     x_bg = _linear_x_background(a, m) if params.linear_x_first else None
     working = a - x_bg if x_bg is not None else a
     profile = compute_scanline_profile(working, m, statistic)
-    fitted = fit_scanline_background(
+    fitted = _fit_scanline_background(
         profile,
         model,
         blur_length=params.blur_length,
         jump_threshold=params.jump_threshold,
     )
-    corrected, background = subtract_scanline_background(
+    corrected, background = _subtract_scanline_background(
         a,
         fitted,
         x_background=x_bg,
