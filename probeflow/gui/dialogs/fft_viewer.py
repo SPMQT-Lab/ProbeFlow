@@ -412,8 +412,8 @@ class FFTViewerDialog(QDialog):
     def _zoom_centre(self):
         qx_half = (float(self._qx[-1]) - float(self._qx[0])) * 0.25
         qy_half = (float(self._qy[-1]) - float(self._qy[0])) * 0.25
-        self._fft_xlim = (-qx_half,  qx_half)
-        self._fft_ylim = (-qy_half, qy_half)
+        self._fft_xlim = (-qx_half, qx_half)
+        self._fft_ylim = (qy_half, -qy_half)
         self._ax_fft.set_xlim(*self._fft_xlim)
         self._ax_fft.set_ylim(*self._fft_ylim)
         self._canvas_fft.draw_idle()
