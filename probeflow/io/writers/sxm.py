@@ -23,6 +23,7 @@ import numpy as np
 
 from probeflow.io.common import check_overwrite
 from probeflow.provenance.export import (
+    ExportProvenance,
     build_scan_export_provenance,
     human_summary_from_provenance,
     write_provenance_sidecars,
@@ -31,16 +32,10 @@ from probeflow.core.scan_model import PLANE_CANON_NAMES, PLANE_CANON_UNITS, Scan
 from probeflow.io.sxm_io import write_sxm_with_planes
 
 
-def _build_comment(scan: Scan, out_path=None) -> str:
-    """Format scan.processing_history into a human-readable COMMENT string."""
+def _build_comment(scan: Scan, prov: ExportProvenance) -> str:
+    """Format provenance fields into a human-readable COMMENT string."""
     source_name = scan.source_path.name if scan.source_path else "unknown"
     lines = [f"Source: {source_name}"]
-    prov = build_scan_export_provenance(
-        scan,
-        channel_index=None,
-        export_kind="sxm",
-        output_path=out_path,
-    )
     if prov.source_id:
         lines.append(f"SourceId: {prov.source_id}")
     if prov.artifact_id:
@@ -72,12 +67,23 @@ def write_sxm(
     out_path = Path(out_path)
     if scan.source_path is not None:
         check_overwrite(scan.source_path, out_path)
+    prov = build_scan_export_provenance(
+        scan,
+        channel_index=None,
+        display_state={
+            "clip_low": float(clip_low),
+            "clip_high": float(clip_high),
+        },
+        export_kind="sxm",
+        output_path=out_path,
+    )
     if scan.source_format == "sxm":
-        _write_from_sxm(scan, out_path)
+        _write_from_sxm(scan, out_path, prov)
     elif scan.source_format == "dat":
         _write_from_dat(
             scan,
             out_path,
+            prov,
             cushion_dir=cushion_dir,
             clip_low=clip_low,
             clip_high=clip_high,
@@ -86,20 +92,21 @@ def write_sxm(
         raise ValueError(
             f"Cannot write .sxm from source_format={scan.source_format!r}"
         )
-    _write_sxm_probeflow_sidecar(
-        scan,
+    write_provenance_sidecars(
         out_path,
-        clip_low=clip_low,
-        clip_high=clip_high,
+        prov,
+        legacy=False,
+        probeflow=True,
+        export_format="sxm",
     )
 
 
 # ─── SXM-sourced fast path ──────────────────────────────────────────────────
 
-def _write_from_sxm(scan: Scan, out_path: Path) -> None:
+def _write_from_sxm(scan: Scan, out_path: Path, prov: ExportProvenance) -> None:
     write_sxm_with_planes(
         scan.source_path, out_path, scan.planes,
-        comment_override=_build_comment(scan, out_path),
+        comment_override=_build_comment(scan, prov),
     )
 
 
@@ -108,6 +115,7 @@ def _write_from_sxm(scan: Scan, out_path: Path) -> None:
 def _write_from_dat(
     scan: Scan,
     out_path: Path,
+    prov: ExportProvenance,
     *,
     cushion_dir=None,
     clip_low: float = 1.0,
@@ -152,7 +160,7 @@ def _write_from_dat(
         hdr, scan.source_path, num_chan_for_header,
         clip_low=clip_low, clip_high=clip_high,
     )
-    sxm_hdr["COMMENT"] = _build_comment(scan, out_path)
+    sxm_hdr["COMMENT"] = _build_comment(scan, prov)
 
     Ny2, Nx2 = FT.shape
     sxm_hdr["SCAN_PIXELS"] = f"{Nx2}{' ' * 7}{Ny2}"
@@ -185,30 +193,4 @@ def _is_canonical_dat_sxm_layout(scan: Scan) -> bool:
         scan.n_planes == 4
         and tuple(scan.plane_names) == PLANE_CANON_NAMES
         and tuple(scan.plane_units) == PLANE_CANON_UNITS
-    )
-
-
-def _write_sxm_probeflow_sidecar(
-    scan: Scan,
-    out_path: Path,
-    *,
-    clip_low: float,
-    clip_high: float,
-) -> None:
-    prov = build_scan_export_provenance(
-        scan,
-        channel_index=None,
-        display_state={
-            "clip_low": float(clip_low),
-            "clip_high": float(clip_high),
-        },
-        export_kind="sxm",
-        output_path=out_path,
-    )
-    write_provenance_sidecars(
-        out_path,
-        prov,
-        legacy=False,
-        probeflow=True,
-        export_format="sxm",
     )

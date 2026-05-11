@@ -10,6 +10,7 @@ import pytest
 from probeflow.core.scan_loader import load_scan
 from probeflow.io.sxm_io import _patch_comment_in_header, parse_sxm_header
 from probeflow.io.writers.sxm import _build_comment
+from probeflow.provenance.export import build_scan_export_provenance
 
 
 # ─── _build_comment ──────────────────────────────────────────────────────────
@@ -29,9 +30,12 @@ class TestBuildComment:
             processing_history=history or [],
         )
 
+    def _prov(self, scan):
+        return build_scan_export_provenance(scan, channel_index=None, export_kind="sxm")
+
     def test_no_history_gives_source_only(self):
         scan = self._scan_stub("scan.sxm")
-        comment = _build_comment(scan)
+        comment = _build_comment(scan, self._prov(scan))
         assert comment.startswith("Source: scan.sxm")
         assert "ProcessingStateHash:" in comment
         assert "SourceId:" in comment
@@ -42,7 +46,7 @@ class TestBuildComment:
             {"op": "plane_bg",   "params": {"order": 1},         "timestamp": "T"},
             {"op": "align_rows", "params": {"method": "median"},  "timestamp": "T"},
         ])
-        comment = _build_comment(scan)
+        comment = _build_comment(scan, self._prov(scan))
         assert comment.startswith("Source: scan.sxm")
         assert "Operations:" in comment
         assert "1. plane_bg order=1" in comment
@@ -52,7 +56,7 @@ class TestBuildComment:
         scan = self._scan_stub("x.sxm", history=[
             {"op": "flip_horizontal", "params": {}, "timestamp": "T"},
         ])
-        comment = _build_comment(scan)
+        comment = _build_comment(scan, self._prov(scan))
         assert "1. flip_horizontal\n" in comment + "\n"  # not "1. flip_horizontal \n"
 
 
