@@ -39,15 +39,25 @@ Working today:
 
 Still evolving:
 
-- The GUI and CLI are usable but still largely implemented in large historical
-  files: `probeflow/gui/_legacy.py` and `probeflow/cli/_legacy.py`.
+- The main window (`ProbeFlowWindow`) and most CLI command runners still live
+  in `probeflow/gui/_legacy.py` and `probeflow/cli/_legacy.py`. Many widgets
+  and dialogs have already been extracted to dedicated submodules (`gui/browse/`,
+  `gui/workers/`, `gui/models/`, `gui/terminal/`, `gui/dialogs/`, `gui/viewer/`,
+  `gui/rendering/`, `gui/image_canvas/`, `gui/roi_items/`, `gui/features/`);
+  extraction is ongoing and opportunistic.
+- CLI command runners are being moved to `probeflow/cli/commands/` submodules.
+  The submodules exist as extraction targets and re-export the runners from
+  `_legacy` while the migration is in progress; the active parser entry point
+  is still `cli/_legacy.py`.
 - `ProcessingState` is the canonical processing model, but
   `Scan.processing_history` remains as a compatibility representation for some
   writers and CLI paths.
 - `ScanGraph` dataclasses exist in `probeflow/provenance/graph.py` and are tested,
   but the GUI/CLI do not yet use the graph as the runtime source of truth.
-- The plugin registry exists as a foundation, but in-tree operations are not yet
-  discovered from it.
+- The plugin registry and `PluginSpec` API exist as a foundation
+  (`probeflow/plugins/`), but in-tree operations are not yet discovered from
+  the registry at runtime. `plugins/manifest.py` is scaffolding for the wiring
+  step.
 - Full session persistence, a provenance panel, a measurement table, and
   DisplayLayer-style per-region display settings are planned, not implemented.
 
@@ -298,15 +308,34 @@ assets/          # logo artwork
 
 ### Current Architecture Reality
 
-The package tree shows the intended decomposition, but the active GUI and CLI
-are still mostly in:
+The package tree shows the intended decomposition.  The bulk of the main window
+and CLI parser remain in the two `_legacy` files, but significant extraction has
+already happened:
 
-- `probeflow/gui/_legacy.py`
-- `probeflow/cli/_legacy.py`
+| Area | Extracted to |
+|---|---|
+| Browse cards, thumbnail grid | `gui/browse/` |
+| Background workers | `gui/workers/` |
+| File-list models | `gui/models/` |
+| Developer terminal | `gui/terminal/` |
+| Dialogs (FFT, ROI, spec, about…) | `gui/dialogs/` |
+| Viewer controllers and panels | `gui/viewer/` |
+| Colormap rendering helpers | `gui/rendering/` |
+| Image canvas and ROI graphics items | `gui/image_canvas/`, `gui/roi_items/` |
+| Feature-counting and TV-denoise panels | `gui/features/` |
+| Processing control panel | `gui/processing/` |
+
+What remains in `gui/_legacy.py`: `ProbeFlowWindow`, `Navbar`,
+`BrowseInfoPanel`, `BrowseToolPanel`, `ConvertPanel`, `ConvertSidebar`, and
+config helpers (`load_config`, `save_config`).
 
 The `_legacy` suffix is historical. These files are not deprecated. Cleanup is
 happening opportunistically: extract one class or helper when a real feature or
 bug fix already touches it.
+
+CLI command runners are moving to `probeflow/cli/commands/` submodules as they
+are touched.  Until a runner is fully moved the submodule re-exports it from
+`_legacy`; see `cli/commands/__init__.py` for the migration protocol.
 
 ## Testing And Development
 
@@ -323,6 +352,18 @@ permissive ruff check. Pre-commit hooks are available:
 pip install pre-commit
 pre-commit install
 ```
+
+Dead-code checks (install `vulture` via `pip install -e ".[dev]"`):
+
+```bash
+vulture probeflow/ tests/ whitelist.py --min-confidence 80
+python scripts/find_orphan_modules.py
+```
+
+`whitelist.py` at the repo root suppresses known false positives (Qt override
+methods, plugin API entry points). `scripts/find_orphan_modules.py` reports
+`.py` files that no other file imports. `docs/dead_code_audit.md` documents
+the current findings and per-symbol verdicts.
 
 ## Notes
 

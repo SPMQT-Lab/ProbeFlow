@@ -1,9 +1,13 @@
-"""Helpers for future plugin manifests.
+"""Plugin manifest serialisation helpers.
 
-Manifests should describe operation metadata for parser, transformation,
-measurement, and writer plugins so the CLI, GUI, and provenance layer can share
-one source of truth. Keep manifest serialization here; do not add operation
-implementations, graph node dataclasses, or UI behavior.
+Status: scaffolding — not yet wired.  ``PluginRegistry`` and ``PluginSpec``
+exist but in-tree operations are not discovered from the registry at runtime.
+This module will be called once the registry is wired into the CLI/GUI loader.
+
+Manifests describe operation metadata for parser, transformation, measurement,
+and writer plugins so the CLI, GUI, and provenance layer can share one source
+of truth.  Keep manifest serialisation here; do not add operation
+implementations, graph node dataclasses, or UI behaviour.
 """
 
 from __future__ import annotations
