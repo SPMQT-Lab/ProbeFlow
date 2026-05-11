@@ -217,10 +217,20 @@ class ScaleBarWidget(QWidget):
 
 
 class LineProfilePanel(QWidget):
-    """Compact live profile plot for viewer line selections."""
+    """Compact live profile plot for viewer line selections.
+
+    Hovering over the plot shows a crosshair.  Clicking places a coloured
+    marker; a second click places a second marker and displays the lateral
+    distance (Δx) and height difference (Δy) between the two points.  A
+    third click starts a new measurement cycle.
+    """
 
     export_csv_clicked = Signal()
     width_changed      = Signal(int)
+
+    # Catppuccin Mocha colours used for measurement markers
+    _MEAS_COLORS = ("#f38ba8", "#a6e3a1")  # red, green
+    _CONN_COLOR  = "#fab387"               # peach connecting line
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -253,6 +263,13 @@ class LineProfilePanel(QWidget):
         self._canvas.setFixedHeight(150)
         lay.addWidget(self._canvas)
 
+        self._meas_label = QLabel("")
+        self._meas_label.setFont(QFont("Helvetica", 8))
+        self._meas_label.setAlignment(Qt.AlignCenter)
+        self._meas_label.setStyleSheet("color: #cdd6f4;")
+        self._meas_label.setVisible(False)
+        lay.addWidget(self._meas_label)
+
         btn_row = QHBoxLayout()
         btn_row.setContentsMargins(0, 0, 0, 0)
         btn_row.addStretch()
@@ -270,7 +287,21 @@ class LineProfilePanel(QWidget):
         self._x_label = ""
         self._y_label = ""
         self._source_label = ""
+
+        # Measurement state
+        self._meas_pts: list = []       # [(x1,y1), (x2,y2)] in data coords
+        self._meas_artists: list = []   # matplotlib artists (cleared on each cla())
+        self._crosshair_v = None        # Line2D spanning full axis height
+        self._crosshair_h = None        # Line2D spanning full axis width
+
         self.show_empty()
+
+        # Connect matplotlib canvas events (persist for widget lifetime)
+        self._canvas.mpl_connect("motion_notify_event", self._on_profile_motion)
+        self._canvas.mpl_connect("button_press_event",  self._on_profile_click)
+        self._canvas.mpl_connect("axes_leave_event",    self._on_profile_axes_leave)
+
+    # ── width spinbox ─────────────────────────────────────────────────────────
 
     def set_width(self, width: int) -> None:
         """Set spinbox to *width* without firing width_changed."""
@@ -278,20 +309,29 @@ class LineProfilePanel(QWidget):
         self._width_spin.setValue(max(1, int(width)))
         self._width_spin.blockSignals(False)
 
+    # ── data access ───────────────────────────────────────────────────────────
+
     def profile_data(self):
         """Return (x_vals, y_vals, x_label, y_label) or None if no profile."""
         if self._x_vals is None:
             return None
         return self._x_vals, self._y_vals, self._x_label, self._y_label
 
+    # ── plot lifecycle ────────────────────────────────────────────────────────
+
     def show_empty(self, message: str = "Draw a line to show profile.",
                    theme: Optional[dict] = None) -> None:
         theme = theme or {}
-        bg = theme.get("bg", "#1e1e2e")
-        fg = theme.get("fg", "#cdd6f4")
+        bg  = theme.get("bg",  "#1e1e2e")
+        fg  = theme.get("fg",  "#cdd6f4")
         sep = theme.get("sep", "#45475a")
         self._fig.patch.set_facecolor(bg)
         self._ax.cla()
+        # cla() destroys all artists — reset references before _setup_crosshair
+        self._meas_pts.clear()
+        self._meas_artists.clear()
+        if hasattr(self, "_meas_label"):
+            self._meas_label.setVisible(False)
         self._ax.set_facecolor(bg)
         self._ax.text(0.5, 0.5, message, ha="center", va="center",
                       transform=self._ax.transAxes, color=fg, fontsize=9)
@@ -301,6 +341,7 @@ class LineProfilePanel(QWidget):
         for spine in self._ax.spines.values():
             spine.set_edgecolor(sep)
         self._fig.tight_layout(pad=0.35)
+        self._setup_crosshair()
         self._canvas.draw_idle()
         self._x_vals = None
         self._y_vals = None
@@ -310,12 +351,16 @@ class LineProfilePanel(QWidget):
     def plot_profile(self, x_vals, values, *, x_label: str = "Distance [nm]",
                      y_label: str, theme: Optional[dict] = None) -> None:
         theme = theme or {}
-        bg = theme.get("bg", "#1e1e2e")
-        fg = theme.get("fg", "#cdd6f4")
-        sep = theme.get("sep", "#45475a")
-        accent = theme.get("accent_bg", "#89b4fa")
+        bg     = theme.get("bg",         "#1e1e2e")
+        fg     = theme.get("fg",         "#cdd6f4")
+        sep    = theme.get("sep",        "#45475a")
+        accent = theme.get("accent_bg",  "#89b4fa")
         self._fig.patch.set_facecolor(bg)
         self._ax.cla()
+        # cla() destroys all artists — clear stale measurement references
+        self._meas_pts.clear()
+        self._meas_artists.clear()
+        self._meas_label.setVisible(False)
         self._ax.set_facecolor(bg)
         self._ax.plot(x_vals, values, color=accent, linewidth=1.1)
         self._ax.set_xlabel(x_label, fontsize=8, color=fg)
@@ -324,6 +369,7 @@ class LineProfilePanel(QWidget):
         for spine in self._ax.spines.values():
             spine.set_edgecolor(sep)
         self._fig.tight_layout(pad=0.35)
+        self._setup_crosshair()
         self._canvas.draw_idle()
         self._x_vals = x_vals
         self._y_vals = values
@@ -342,3 +388,98 @@ class LineProfilePanel(QWidget):
         self._ax.set_title(self._source_label, fontsize=8, color=fg)
         self._fig.tight_layout(pad=0.35)
         self._canvas.draw_idle()
+
+    # ── crosshair ─────────────────────────────────────────────────────────────
+
+    def _setup_crosshair(self) -> None:
+        """(Re-)create crosshair Line2D artists after each axes.cla() call."""
+        from matplotlib.transforms import blended_transform_factory
+        tv = blended_transform_factory(self._ax.transData, self._ax.transAxes)
+        th = blended_transform_factory(self._ax.transAxes,  self._ax.transData)
+        (self._crosshair_v,) = self._ax.plot(
+            [0, 0], [0, 1], transform=tv,
+            color="#585b70", lw=0.9, ls="--", visible=False,
+        )
+        (self._crosshair_h,) = self._ax.plot(
+            [0, 1], [0, 0], transform=th,
+            color="#585b70", lw=0.9, ls="--", visible=False,
+        )
+
+    def _on_profile_motion(self, event) -> None:
+        if self._crosshair_v is None or self._x_vals is None:
+            return
+        if event.inaxes != self._ax:
+            if self._crosshair_v.get_visible():
+                self._crosshair_v.set_visible(False)
+                self._crosshair_h.set_visible(False)
+                self._canvas.draw_idle()
+            return
+        self._canvas.setCursor(Qt.CrossCursor)
+        self._crosshair_v.set_xdata([event.xdata, event.xdata])
+        self._crosshair_h.set_ydata([event.ydata, event.ydata])
+        self._crosshair_v.set_visible(True)
+        self._crosshair_h.set_visible(True)
+        self._canvas.draw_idle()
+
+    def _on_profile_axes_leave(self, event) -> None:
+        if self._crosshair_v is not None:
+            self._crosshair_v.set_visible(False)
+            self._crosshair_h.set_visible(False)
+            self._canvas.draw_idle()
+        self._canvas.setCursor(Qt.ArrowCursor)
+
+    # ── two-point measurement ─────────────────────────────────────────────────
+
+    def _on_profile_click(self, event) -> None:
+        if self._x_vals is None or event.inaxes != self._ax or event.button != 1:
+            return
+        if len(self._meas_pts) >= 2:
+            # Third click: begin a new measurement cycle
+            self._meas_pts.clear()
+            self._clear_meas_artists()
+            self._meas_label.setVisible(False)
+        self._meas_pts.append((event.xdata, event.ydata))
+        self._redraw_meas()
+        if len(self._meas_pts) == 2:
+            self._update_meas_label()
+        self._canvas.draw_idle()
+
+    def _clear_meas_artists(self) -> None:
+        for a in self._meas_artists:
+            try:
+                a.remove()
+            except Exception:
+                pass
+        self._meas_artists.clear()
+
+    def _redraw_meas(self) -> None:
+        self._clear_meas_artists()
+        for i, (x, y) in enumerate(self._meas_pts):
+            col = self._MEAS_COLORS[i]
+            vl = self._ax.axvline(x, color=col, lw=0.9, ls=":", alpha=0.9)
+            (mk,) = self._ax.plot(x, y, "o", color=col, ms=5, zorder=5)
+            self._meas_artists.extend([vl, mk])
+        if len(self._meas_pts) == 2:
+            (x1, y1), (x2, y2) = self._meas_pts
+            (conn,) = self._ax.plot(
+                [x1, x2], [y1, y2],
+                color=self._CONN_COLOR, lw=0.9, ls="--", alpha=0.85,
+            )
+            self._meas_artists.append(conn)
+
+    @staticmethod
+    def _extract_unit(label: str) -> str:
+        if "[" in label and "]" in label:
+            return label[label.index("[") + 1 : label.rindex("]")]
+        return ""
+
+    def _update_meas_label(self) -> None:
+        (x1, y1), (x2, y2) = self._meas_pts
+        dx = abs(x2 - x1)
+        dy = y2 - y1
+        x_unit = self._extract_unit(self._x_label)
+        y_unit = self._extract_unit(self._y_label)
+        x_str = f"Δx = {dx:.4g} {x_unit}" if x_unit else f"Δx = {dx:.4g}"
+        y_str = f"Δy = {dy:+.4g} {y_unit}" if y_unit else f"Δy = {dy:+.4g}"
+        self._meas_label.setText(f"{x_str}     {y_str}")
+        self._meas_label.setVisible(True)
