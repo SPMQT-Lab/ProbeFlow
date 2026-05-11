@@ -56,7 +56,7 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, List, Optional
 
 import numpy as np
 from PIL import Image
@@ -66,15 +66,6 @@ from probeflow.io.common import setup_logging
 from probeflow.processing.state import ProcessingState, ProcessingStep
 from probeflow.core.scan_loader import load_scan
 from probeflow.core.scan_model import Scan
-from probeflow.io.sxm_io import (
-    parse_sxm_header,
-    read_all_sxm_planes,
-    read_sxm_plane,
-    sxm_dims,
-    sxm_scan_range,
-    write_sxm_with_planes,
-)
-
 log = logging.getLogger(__name__)
 
 
