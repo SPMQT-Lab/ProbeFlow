@@ -9,8 +9,10 @@ __pycache__/
 build/
 dist/
 
-data/output_png/*
-!data/output_png/.gitkeep
+test_data/output_png/*
+!test_data/output_png/.gitkeep
 
-data/output_sxm/*
-!data/output_sxm/.gitkeep
+test_data/output_sxm/*
+!test_data/output_sxm/.gitkeep
+
+*.rois.json
