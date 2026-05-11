@@ -292,8 +292,8 @@ probeflow/
 `-- plugins/     # Plugin API/registry foundation
 
 tests/           # pytest suite
+test_data/       # sample/manual input data
 assets/          # logo artwork
-data/            # sample/manual input data
 ```
 
 ### Current Architecture Reality
