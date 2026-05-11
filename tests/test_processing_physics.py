@@ -860,3 +860,134 @@ class TestMeasurePeriodicitySecondPass:
                 f"or {expected2:.1f}° within 5°.  "
                 "One lattice direction may be misidentified."
             )
+
+
+# ── FFT lattice symmetry ──────────────────────────────────────────────────────
+
+class TestFftLatticeSymmetry:
+    """FFT power spectrum symmetry for square and hexagonal atomic corrugations."""
+
+    @staticmethod
+    def _power_peaks(arr: np.ndarray, n_peaks: int) -> list[tuple[int, int]]:
+        """Hanning-windowed FFT power; return (row_offset, col_offset) tuples
+        of the n_peaks strongest peaks, excluding a DC disc of radius 2 px."""
+        Ny, Nx = arr.shape
+        win2d = np.outer(np.hanning(Ny), np.hanning(Nx))
+        power = np.abs(np.fft.fftshift(np.fft.fft2(arr * win2d))) ** 2
+
+        cy, cx = Ny // 2, Nx // 2
+        Y, X   = np.mgrid[:Ny, :Nx]
+        power[(Y - cy) ** 2 + (X - cx) ** 2 < 4.0] = 0.0   # DC disc r < 2
+
+        peaks    = []
+        suppress = max(3, min(Ny, Nx) // 20)
+        p        = power.copy()
+        for _ in range(n_peaks):
+            idx    = int(np.argmax(p))
+            py, px = divmod(idx, Nx)
+            if p[py, px] <= 0:
+                break
+            peaks.append((py - cy, px - cx))
+            yl = max(0, py - suppress); yh = min(Ny, py + suppress + 1)
+            xl = max(0, px - suppress); xh = min(Nx, px + suppress + 1)
+            p[yl:yh, xl:xh] = 0.0
+        return peaks
+
+    def test_square_lattice_gives_fourfold_fft_symmetry(self):
+        """z = cos(2πx/a) + cos(2πy/a) must give 4 FFT peaks at 90° intervals.
+
+        Physical context: square surface reconstructions (Si(001), oxide
+        interfaces) display two orthogonal corrugations; their STM FFT has
+        fourfold rotational symmetry.
+
+        Period 16 px on 128×128 → k_bin = 8 (exact integer FFT bin, zero
+        discretisation error).  Expected peak positions in (row_offset,
+        col_offset) coordinates from DC: (0,±8) and (±8,0).
+
+        Each angle must fall within 5° of a multiple of 90°.  A missing
+        cosine term (only one direction) would give 2 peaks (180° spacing),
+        not 4 (90° spacing), failing this test.
+        """
+        Ny, Nx = 128, 128
+        period_px = 16
+        k_expected = float(Nx // period_px)   # 8.0
+
+        Y, X = np.mgrid[:Ny, :Nx]
+        arr = (
+            np.cos(2.0 * np.pi * X / period_px)
+            + np.cos(2.0 * np.pi * Y / period_px)
+        ).astype(np.float64)
+
+        peaks = self._power_peaks(arr, n_peaks=4)
+        assert len(peaks) == 4, f"Expected 4 peaks, found {len(peaks)}."
+
+        for i, (dy, dx) in enumerate(peaks):
+            radius = float(np.hypot(dy, dx))
+            assert abs(radius - k_expected) < 0.5, (
+                f"Peak {i} at offset ({dy},{dx}): radius {radius:.2f} px, "
+                f"expected {k_expected:.1f} ± 0.5 px."
+            )
+            angle = float(np.degrees(np.arctan2(dy, dx)))
+            dev   = float(abs(angle % 90.0))
+            dev   = min(dev, 90.0 - dev)
+            assert dev < 5.0, (
+                f"Peak {i} at ({dy},{dx}), angle {angle:.1f}°: {dev:.1f}° from "
+                "nearest 90° multiple; expected fourfold (square) symmetry.  "
+                "A missing cosine direction gives 2-fold (180°) symmetry."
+            )
+
+    def test_hexagonal_lattice_gives_sixfold_fft_symmetry(self):
+        """Three equal-amplitude plane waves at 120° intervals must give 6
+        FFT peaks at 60° intervals, all on the same reciprocal circle.
+
+        Physical context: hexagonal close-packed surfaces (Cu(111), Au(111),
+        graphene, MoS₂) display sixfold symmetry in the STM FFT.
+
+        Wave vectors (magnitude 1/a, at 0°/120°/240°):
+            k₁ = (1/a, 0)
+            k₂ = (−1/(2a), √3/(2a))
+            k₃ = (−1/(2a), −√3/(2a))
+        Each cosine contributes two FFT peaks (±k), giving 6 peaks total.
+        All six lie on the circle |k| = 1/a → FFT radius = Nx/a = 8 bins.
+
+        The ky bins for k₂/k₃ fall at ±4√3 ≈ ±6.928 (non-integer); the
+        nearest integer bin is 7, so detected radius = √(7²+4²) ≈ 8.06 px.
+        Radius tolerance ±1 px and angle tolerance ±10° accommodate this.
+
+        Adjacent-peak separation ≥ 8 px > suppress_r = 6 px, so all six
+        peaks are found independently.
+        """
+        Ny, Nx = 128, 128
+        period_px = 16.0
+        k_expected = float(Nx) / period_px   # 8.0
+
+        Y, X      = np.mgrid[:Ny, :Nx]
+        sq3_half  = np.sqrt(3.0) / 2.0
+        arr = (
+            np.cos(2.0 * np.pi * X / period_px)
+            + np.cos(2.0 * np.pi * (-0.5 * X + sq3_half * Y) / period_px)
+            + np.cos(2.0 * np.pi * (-0.5 * X - sq3_half * Y) / period_px)
+        ).astype(np.float64)
+
+        peaks = self._power_peaks(arr, n_peaks=6)
+        assert len(peaks) == 6, f"Expected 6 peaks, found {len(peaks)}."
+
+        for i, (dy, dx) in enumerate(peaks):
+            radius = float(np.hypot(dy, dx))
+            assert abs(radius - k_expected) < 1.0, (
+                f"Peak {i} at ({dy},{dx}): radius {radius:.3f} px, "
+                f"expected {k_expected:.1f} ± 1 px.  "
+                "All 6 peaks should lie on the same reciprocal circle."
+            )
+
+        angles = sorted(
+            float(np.degrees(np.arctan2(dy, dx))) % 360.0
+            for dy, dx in peaks
+        )
+        gaps = [angles[i + 1] - angles[i] for i in range(5)]
+        gaps.append(360.0 - angles[5] + angles[0])
+        for i, gap in enumerate(gaps):
+            assert abs(gap - 60.0) < 10.0, (
+                f"Angular gap {i}: {gap:.1f}°, expected 60° ± 10°.  "
+                f"Sorted peak angles: {[f'{a:.0f}°' for a in angles]}."
+            )
