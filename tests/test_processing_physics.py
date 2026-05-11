@@ -9,6 +9,7 @@ future reader understands *why* the tolerance is what it is, not just
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from probeflow.processing import (
     edge_detect,
@@ -54,6 +55,19 @@ def _sine_wave(
     """z = amp * sin(2π*(fx*col + fy*row)), frequencies in cycles/pixel."""
     Y, X = np.mgrid[:Ny, :Nx]
     return (amp * np.sin(2.0 * np.pi * (fx * X + fy * Y))).astype(np.float64)
+
+
+def _gaussian_bump(
+    Ny: int, Nx: int,
+    *,
+    cy: int,
+    cx: int,
+    sigma: float,
+    amp: float = 1.0,
+) -> np.ndarray:
+    """z = amp * exp(-((row−cy)² + (col−cx)²) / (2σ²))."""
+    Y, X = np.mgrid[:Ny, :Nx]
+    return (amp * np.exp(-((Y - cy) ** 2 + (X - cx) ** 2) / (2.0 * sigma ** 2))).astype(np.float64)
 
 
 # ── polynomial background subtraction ────────────────────────────────────────
@@ -329,4 +343,308 @@ class TestMeasurePeriodicityPhysics:
             f"Angle {angle:.1f}° (mod 180° = {angle_mod:.1f}°), "
             f"expected 45° ± 5°.  "
             "atan2 argument order or pixel_size_x/y may be swapped."
+        )
+
+
+# ── second-pass background subtraction ───────────────────────────────────────
+
+class TestBackgroundSubtractionSecondPass:
+    """Harder subtract_background scenarios: steps, adsorbates, ROIs, outliers."""
+
+    # ── A: step-position robustness ──────────────────────────────────────────
+
+    @pytest.mark.parametrize("step_frac", [0.25, 0.50, 0.75])
+    def test_step_height_robust_to_step_position(self, step_frac: float):
+        """Step height must be exact regardless of step position in the image.
+
+        Physical context: a real STM image may show a step anywhere; the
+        lower-terrace fit mask covers 25 %–75 % of the image depending on
+        where the step falls.  Least-squares on a linear plane is always
+        rank-complete for any flat region with ≥ 3 pixels, so the recovered
+        step height must be exact to floating-point precision regardless of
+        terrace area asymmetry.
+
+        A failure here (error > 1e-8) indicates that coordinate normalisation
+        breaks when the fit domain covers only a sub-region of the image, or
+        that the mask indexing is wrong.
+        """
+        Ny, Nx = 64, 64
+        step_col = max(4, min(int(round(step_frac * Nx)), Nx - 4))
+        step_h = 2.0
+
+        arr = (
+            _step_terrace(Ny, Nx, step_col=step_col, step_height=step_h)
+            + _tilted_plane(Ny, Nx, slope_x=0.08, slope_y=0.03, offset=0.0)
+        )
+
+        lower_mask = np.zeros((Ny, Nx), dtype=bool)
+        lower_mask[:, :step_col] = True
+        out = subtract_background(arr, order=1, fit_mask=lower_mask)
+
+        lower_median = float(np.median(out[:, :step_col]))
+        upper_median = float(np.median(out[:, step_col:]))
+        recovered = upper_median - lower_median
+
+        assert abs(recovered - step_h) < 1e-8, (
+            f"step_frac={step_frac}: recovered step {recovered:.10f}, "
+            f"true {step_h}; diff {abs(recovered - step_h):.2e}."
+        )
+
+    def test_each_terrace_is_flat_after_lower_terrace_fit(self):
+        """Both terraces must have zero residual slope after subtracting
+        the plane fitted on the lower terrace only.
+
+        Physical context: subtracting the exact linear background leaves both
+        terraces flat (their true surface is horizontal).  Non-zero ptp within
+        a terrace reveals a residual tilt, which indicates the fit is
+        numerically unstable or the normalisation is computed on the wrong
+        subset of coordinates.
+
+        Tolerance 1e-8: for a pure tilted plane the fit is rank-complete and
+        the residual is limited by floating-point arithmetic only.
+        """
+        Ny, Nx = 64, 64
+        step_col = Nx // 2
+        arr = (
+            _step_terrace(Ny, Nx, step_col=step_col, step_height=2.0)
+            + _tilted_plane(Ny, Nx, slope_x=0.12, slope_y=0.06, offset=1.0)
+        )
+
+        lower_mask = np.zeros((Ny, Nx), dtype=bool)
+        lower_mask[:, :step_col] = True
+        out = subtract_background(arr, order=1, fit_mask=lower_mask)
+
+        lower_ptp = float(np.ptp(out[:, :step_col]))
+        upper_ptp = float(np.ptp(out[:, step_col:]))
+
+        assert lower_ptp < 1e-8, (
+            f"Lower terrace ptp = {lower_ptp:.2e}; expected < 1e-8."
+        )
+        assert upper_ptp < 1e-8, (
+            f"Upper terrace ptp = {upper_ptp:.2e}; expected < 1e-8."
+        )
+
+    # ── B: Gaussian adsorbates ───────────────────────────────────────────────
+
+    def test_gaussian_adsorbate_peak_amplitudes_preserved_with_substrate_mask(self):
+        """Adsorbate peak heights must equal their true amplitude when the fit
+        mask confines the polynomial fit to clean substrate pixels.
+
+        Physical context: adsorbed molecules appear as Gaussian protrusions.
+        Fitting the background on substrate pixels (outside the adsorbates)
+        gives an unbiased plane; after subtraction the adsorbate height equals
+        the true amplitude to floating-point precision.
+
+        Tolerance 1 % accounts for the Gaussian tail outside the exclusion
+        radius contributing a small positive offset to the substrate fit.
+
+        Contrast: a global fit (including adsorbate pixels) absorbs part of
+        the adsorbate signal into the background, underestimating peak heights
+        by the fraction bump_area / image_area × amp (≈ 7 % here).
+        """
+        Ny, Nx = 64, 64
+        bump_amp   = 3.0
+        bump_sigma = 4.0
+        positions  = [(16, 16), (16, 48), (48, 32)]
+
+        arr = _tilted_plane(Ny, Nx, slope_x=0.05, slope_y=0.03, offset=0.0)
+        for cy, cx in positions:
+            arr += _gaussian_bump(Ny, Nx, cy=cy, cx=cx, sigma=bump_sigma, amp=bump_amp)
+
+        # Exclude a disc of radius 3σ around each adsorbate from the fit.
+        fit_mask = np.ones((Ny, Nx), dtype=bool)
+        Y, X = np.mgrid[:Ny, :Nx]
+        for cy, cx in positions:
+            fit_mask[(Y - cy) ** 2 + (X - cx) ** 2 <= (3.0 * bump_sigma) ** 2] = False
+
+        out = subtract_background(arr, order=1, fit_mask=fit_mask)
+
+        for cy, cx in positions:
+            recovered = float(out[cy, cx])
+            assert abs(recovered - bump_amp) < 0.01 * bump_amp, (
+                f"Bump at ({cy},{cx}): recovered {recovered:.6f}, "
+                f"true {bump_amp}; diff {abs(recovered - bump_amp):.4f} "
+                f"({abs(recovered - bump_amp) / bump_amp * 100:.2f} %)."
+            )
+
+    def test_substrate_background_flat_after_adsorbate_masked_fit(self):
+        """Substrate residual after masked fit must be bounded by Gaussian
+        tail leakage through the exclusion boundary.
+
+        With a 3σ exclusion disc, the Gaussian tail amplitude at the boundary
+        is bump_amp × exp(−4.5) ≈ 0.011 × bump_amp.  Substrate pixels near
+        the boundary carry these tails and prevent a machine-precision result.
+        The ptp across the substrate must nevertheless be well below
+        bump_amp (< 5 %), confirming the dominant background tilt is removed.
+
+        Contrast: a global fit (no mask) incorporates the full bump integrals
+        (≈ 2πσ² × bump_amp per bump), biasing the fitted plane and leaving a
+        tilted residual across the substrate that can exceed 10 % of bump_amp.
+        The masked fit must be at least 3× flatter than the global fit.
+
+        A failure here indicates that the fit_mask does not actually exclude
+        the adsorbate pixels from the least-squares system.
+        """
+        Ny, Nx = 64, 64
+        bump_amp   = 3.0
+        bump_sigma = 4.0
+        exclude_nsigma = 3.0
+        positions  = [(16, 16), (16, 48), (48, 32)]
+
+        arr = _tilted_plane(Ny, Nx, slope_x=0.05, slope_y=0.03, offset=0.0)
+        for cy, cx in positions:
+            arr += _gaussian_bump(Ny, Nx, cy=cy, cx=cx, sigma=bump_sigma, amp=bump_amp)
+
+        fit_mask = np.ones((Ny, Nx), dtype=bool)
+        Y, X = np.mgrid[:Ny, :Nx]
+        for cy, cx in positions:
+            fit_mask[(Y - cy) ** 2 + (X - cx) ** 2 <= (exclude_nsigma * bump_sigma) ** 2] = False
+
+        masked_out = subtract_background(arr, order=1, fit_mask=fit_mask)
+        global_out = subtract_background(arr, order=1)
+
+        masked_ptp = float(np.ptp(masked_out[fit_mask]))
+        global_ptp = float(np.ptp(global_out[fit_mask]))
+
+        # Substrate residual is bounded by Gaussian tail at the exclusion boundary.
+        tail_at_boundary = bump_amp * float(np.exp(-0.5 * exclude_nsigma ** 2))
+        assert masked_ptp < 5.0 * tail_at_boundary, (
+            f"Masked substrate ptp = {masked_ptp:.4f}; "
+            f"Gaussian tail at {exclude_nsigma}σ = {tail_at_boundary:.4f}; "
+            f"tolerance = 5× tail = {5.0 * tail_at_boundary:.4f}."
+        )
+        # Masked fit must be substantially flatter than the global fit.
+        assert masked_ptp < global_ptp / 3.0, (
+            f"Masked substrate ptp ({masked_ptp:.4f}) not 3× better than "
+            f"global substrate ptp ({global_ptp:.4f}); fit_mask may be ignored."
+        )
+
+    # ── C: ROI mask changes the result ──────────────────────────────────────
+
+    def test_substrate_mask_gives_accurate_island_height(self):
+        """Background-only fit_mask must recover island height to machine precision.
+
+        Physical context: a 2D material island (graphene, MoS₂, etc.) covers
+        half the image.  The global fit absorbs the island into the polynomial,
+        biasing both slope and offset; a substrate-only mask gives an exact fit.
+
+        Two assertions:
+        1. Masked fit recovers step height to 1e-8 (exact for linear input).
+        2. Global fit gives a measurably different step height (> 1 % error),
+           confirming the fit_mask is not a no-op.
+        """
+        Ny, Nx = 64, 64
+        step_col = Nx // 2
+        island_h = 5.0
+
+        arr = (
+            _step_terrace(Ny, Nx, step_col=step_col, step_height=island_h)
+            + _tilted_plane(Ny, Nx, slope_x=0.10, slope_y=0.04, offset=0.0)
+        )
+
+        substrate_mask = np.zeros((Ny, Nx), dtype=bool)
+        substrate_mask[:, :step_col] = True
+
+        masked_out = subtract_background(arr, order=1, fit_mask=substrate_mask)
+        global_out = subtract_background(arr, order=1)
+
+        masked_step = (
+            float(np.median(masked_out[:, step_col:]))
+            - float(np.median(masked_out[:, :step_col]))
+        )
+        global_step = (
+            float(np.median(global_out[:, step_col:]))
+            - float(np.median(global_out[:, :step_col]))
+        )
+
+        assert abs(masked_step - island_h) < 1e-8, (
+            f"Masked fit: recovered step {masked_step:.10f}, true {island_h}; "
+            f"diff {abs(masked_step - island_h):.2e}."
+        )
+        assert abs(global_step - island_h) > 0.01 * island_h, (
+            f"Global fit recovered step {global_step:.4f}, same as masked "
+            f"({masked_step:.4f}) within 1 %; expected a visible bias from "
+            "the island pixels being included in the global fit."
+        )
+
+    # ── D: outlier / hot-pixel robustness ────────────────────────────────────
+
+    def test_single_hot_pixel_inflates_background_residual(self):
+        """One extreme outlier must measurably inflate the background residual.
+
+        Physical context: tip crashes and detector glitches produce isolated
+        pixels with values hundreds of times larger than the surface.
+        subtract_background() uses unconstrained least squares, which is not
+        outlier-robust: the fitted plane tilts toward the spike, leaving the
+        remaining background slightly non-flat.
+
+        This is a *documentation test*: it records a known limitation, not a
+        bug.  Failure would mean the implementation accidentally became robust
+        (e.g., via median-based fitting), which would be fine but unexpected.
+
+        The clean-plane ptp is < 1e-8 (machine precision).  The hot-pixel
+        ptp on the good pixels is ≳ 0.1 (computed from leverage theory for a
+        64×64 grid with one point at value 1000).  The 1e-4 threshold is a
+        conservative lower bound that proves the residual is inflated above
+        floating-point noise.
+        """
+        Ny, Nx = 64, 64
+        hot_val = 1000.0
+        hy, hx = Ny // 4, Nx // 4
+
+        arr_clean = _tilted_plane(Ny, Nx, slope_x=0.08, slope_y=0.03, offset=0.0)
+        arr_hot   = arr_clean.copy()
+        arr_hot[hy, hx] = hot_val
+
+        out_clean = subtract_background(arr_clean, order=1)
+        out_hot   = subtract_background(arr_hot,   order=1)
+
+        good = np.ones((Ny, Nx), dtype=bool)
+        good[hy, hx] = False
+
+        clean_ptp = float(np.ptp(out_clean[good]))
+        hot_ptp   = float(np.ptp(out_hot[good]))
+
+        assert hot_ptp > 1e-4, (
+            f"Background ptp with hot pixel = {hot_ptp:.2e}; "
+            "expected > 1e-4 (global fit should be biased by the outlier)."
+        )
+        assert hot_ptp > 1000 * clean_ptp, (
+            f"Hot-pixel background ptp ({hot_ptp:.2e}) is less than 1000× "
+            f"the clean-plane ptp ({clean_ptp:.2e}); "
+            "the bias is smaller than expected from least-squares theory."
+        )
+
+    def test_fit_mask_excluding_hot_pixel_recovers_plane_exactly(self):
+        """Masking the hot pixel must restore machine-precision flatness.
+
+        Physical context: the standard STM workflow is to identify bad pixels
+        visually and exclude them before background subtraction.  With the
+        outlier masked, the remaining fit domain is a pure tilted plane, so
+        the residual must be zero to floating-point precision.
+
+        Tolerance 1e-8 (same as the clean-plane first-pass test).  A failure
+        here indicates the fit_mask logic breaks when a single pixel is
+        excluded — e.g., if the mask indexing uses the wrong boolean sense or
+        the coordinate normalisation is computed over the unmasked full grid
+        rather than the masked sub-grid.
+        """
+        Ny, Nx = 64, 64
+        hot_val = 1000.0
+        hy, hx = Ny // 4, Nx // 4
+
+        arr = _tilted_plane(Ny, Nx, slope_x=0.08, slope_y=0.03, offset=0.0)
+        arr[hy, hx] = hot_val
+
+        good_mask = np.ones((Ny, Nx), dtype=bool)
+        good_mask[hy, hx] = False
+
+        out = subtract_background(arr, order=1, fit_mask=good_mask)
+
+        residual_ptp = float(np.ptp(out[good_mask]))
+        assert residual_ptp < 1e-8, (
+            f"Residual ptp with hot pixel masked = {residual_ptp:.2e}; "
+            "expected < 1e-8.  fit_mask may not correctly exclude the pixel "
+            "or the coordinate normalisation is computed over all pixels "
+            "rather than only the masked subset."
         )
