@@ -1157,11 +1157,6 @@ class ImageViewerDialog(QDialog):
             self.accept()
             return
 
-        # Return closes the dialog (when not drawing)
-        if k == Qt.Key_Return:
-            self.accept()
-            return
-
         # ── ROI keyboard actions ──────────────────────────────────────────────
         if k == Qt.Key_Delete and not event.modifiers():
             self._delete_active_image_roi()

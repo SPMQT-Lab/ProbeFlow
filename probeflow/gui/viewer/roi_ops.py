@@ -161,9 +161,12 @@ def roi_line_endpoint_changed(
     if roi is None or roi.kind != "line":
         return
     from probeflow.core.roi import ROI as _ROI
+    new_geom = {k: v for k, v in roi.geometry.items()
+                if k not in ("x1", "y1", "x2", "y2")}
+    new_geom.update({"x1": x1, "y1": y1, "x2": x2, "y2": y2})
     new_roi = _ROI(
         id=roi.id, name=roi.name, kind="line",
-        geometry={"x1": x1, "y1": y1, "x2": x2, "y2": y2},
+        geometry=new_geom,
         coord_system=roi.coord_system, linked_file=roi.linked_file,
     )
     roi_set.remove(roi_id)
