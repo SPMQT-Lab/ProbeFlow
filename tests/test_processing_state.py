@@ -751,6 +751,33 @@ class TestApplyKnownSteps:
         np.testing.assert_array_equal(result[~mask], arr[~mask])
         assert not np.allclose(result[mask], arr[mask])
 
+    def test_roi_smooth_by_roi_name_matches_validation_lookup(self):
+        from probeflow.core.roi import ROI, ROISet
+
+        rng = np.random.default_rng(6)
+        arr = np.zeros((16, 16), dtype=float)
+        arr[5:11, 5:11] = rng.normal(size=(6, 6))
+        roi_set = ROISet(image_id="img")
+        roi = ROI.new(
+            "rectangle",
+            {"x": 5.0, "y": 5.0, "width": 6.0, "height": 6.0},
+            name="terrace",
+        )
+        roi_set.add(roi)
+        state = ProcessingState(steps=[
+            ProcessingStep("roi", {
+                "roi_id": "terrace",
+                "step": {"op": "smooth", "params": {"sigma_px": 1.0}},
+            }),
+        ])
+
+        assert missing_roi_references(state, roi_set) == []
+        result = apply_processing_state(arr, state, roi_set=roi_set)
+
+        mask = roi.to_mask(arr.shape)
+        np.testing.assert_array_equal(result[~mask], arr[~mask])
+        assert not np.allclose(result[mask], arr[mask])
+
     def test_roi_wrapper_ignores_nonlocal_nested_operation(self):
         x = np.linspace(0, 1, 12)
         arr = np.outer(np.ones(12), x)

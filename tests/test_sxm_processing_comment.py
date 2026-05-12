@@ -224,3 +224,19 @@ class TestDatSourcedComment:
         reloaded = load_scan(out)
         assert reloaded.source_format == "sxm"
         assert reloaded.dims == scan.dims
+
+    def test_renamed_dat_output_readable_by_probeflow_reader(self, tmp_path):
+        dat = Path(__file__).parent.parent / "test_data" / "createc_scan_atomic_11nm.dat"
+        scan = load_scan(dat)
+        out = tmp_path / "renamed-dat.sxm"
+
+        scan.save_sxm(out)
+
+        hdr = parse_sxm_header(out)
+        assert hdr.get("REC_DATE")
+        assert hdr.get("REC_TIME")
+        assert f"Source: {dat.name}" in hdr.get("COMMENT", "")
+
+        reloaded = load_scan(out)
+        assert reloaded.source_format == "sxm"
+        assert reloaded.dims == scan.dims

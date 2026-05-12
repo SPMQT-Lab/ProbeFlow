@@ -142,6 +142,39 @@ def parse_dat_timestamp(fname: str) -> datetime:
         ) from exc
 
 
+def _parse_dat_header_timestamp(dat_hdr: Dict[str, str]) -> datetime | None:
+    """Best-effort fallback timestamp from Createc header metadata."""
+    raw = str(dat_hdr.get("PSTMAFM.EXE_Date", "")).strip()
+    if not raw:
+        return None
+
+    match = re.search(
+        r"(\d{1,2}/\d{1,2}/\d{2,4})\s+(\d{1,2}:\d{2}:\d{2})",
+        raw,
+    )
+    if not match:
+        return None
+
+    stamp = f"{match.group(1)} {match.group(2)}"
+    for fmt in ("%d/%m/%Y %H:%M:%S", "%d/%m/%y %H:%M:%S"):
+        try:
+            return datetime.strptime(stamp, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def resolve_dat_timestamp(dat_hdr: Dict[str, str], dat_path: Path) -> datetime:
+    """Resolve an SXM recording timestamp without requiring a raw filename."""
+    try:
+        return parse_dat_timestamp(dat_path.name)
+    except ValueError:
+        header_dt = _parse_dat_header_timestamp(dat_hdr)
+        if header_dt is not None:
+            return header_dt
+        return datetime.fromtimestamp(Path(dat_path).stat().st_mtime)
+
+
 def construct_hdr(
     dat_hdr: Dict[str, str],
     dat_path: Path,
@@ -155,7 +188,7 @@ def construct_hdr(
         s = f"{float(x):.{dec}E}".upper()
         return re.sub(r"E([+-])0?(\d+)$", lambda m: f"E{m.group(1)}{int(m.group(2))}", s)
 
-    dt = parse_dat_timestamp(dat_path.name)
+    dt = resolve_dat_timestamp(dat_hdr, dat_path)
     date = dt.strftime("%d.%m.%Y")
     time_str = dt.strftime("%H:%M:%S")
 

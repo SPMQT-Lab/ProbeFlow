@@ -603,7 +603,10 @@ def apply_processing_state(
                     stacklevel=2,
                 )
                 continue
-            roi_obj = roi_set.get(roi_id)
+            roi_ref = str(roi_id)
+            roi_obj = roi_set.get(roi_ref)
+            if roi_obj is None and hasattr(roi_set, "get_by_name"):
+                roi_obj = roi_set.get_by_name(roi_ref)
             if roi_obj is None:
                 import warnings
                 warnings.warn(
