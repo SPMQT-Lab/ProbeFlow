@@ -146,14 +146,14 @@ from probeflow.gui.viewer import (
     show_roi_histogram,
     transform_roi_set_for_display_op,
 )
+from probeflow.core.resources import FILE_CUSHIONS_DIR, asset_path
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 CONFIG_PATH     = Path.home() / ".probeflow_config.json"
-REPO_ROOT       = Path(__file__).resolve().parents[2]
-DEFAULT_CUSHION = REPO_ROOT / "src" / "file_cushions"
-LOGO_PATH       = REPO_ROOT / "assets" / "logo.png"
-LOGO_GIF_PATH   = REPO_ROOT / "assets" / "logo.gif"
-LOGO_NAV_PATH   = REPO_ROOT / "assets" / "logo_nav.png"
+DEFAULT_CUSHION = FILE_CUSHIONS_DIR
+LOGO_PATH       = asset_path("logo.png")
+LOGO_GIF_PATH   = asset_path("logo.gif")
+LOGO_NAV_PATH   = asset_path("logo_nav.png")
 GITHUB_URL      = "https://github.com/SPMQT-Lab/ProbeFlow"
 
 NAVBAR_DARK_BG  = "#3273dc"

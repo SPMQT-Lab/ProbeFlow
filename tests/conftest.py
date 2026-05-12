@@ -9,7 +9,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SAMPLE_DIR = REPO_ROOT / "test_data" / "sample_input"
-CUSHION_DIR = REPO_ROOT / "src" / "file_cushions"
+CUSHION_DIR = REPO_ROOT / "probeflow" / "data" / "file_cushions"
 
 GUI_TEST_MODULES = {
     "test_gui_smoke.py",

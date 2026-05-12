@@ -3,16 +3,15 @@ from __future__ import annotations
 import shutil
 import subprocess
 import webbrowser
-from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, QUrl
 from PySide6.QtGui import QCursor, QDesktopServices, QFont, QMovie, QPixmap
 from PySide6.QtWidgets import QDialog, QFrame, QLabel, QPushButton, QVBoxLayout
 
+from probeflow.core.resources import asset_path
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-LOGO_PATH = REPO_ROOT / "assets" / "logo.png"
-LOGO_GIF_PATH = REPO_ROOT / "assets" / "logo.gif"
+LOGO_PATH = asset_path("logo.png")
+LOGO_GIF_PATH = asset_path("logo.gif")
 GITHUB_URL = "https://github.com/SPMQT-Lab/ProbeFlow"
 
 

@@ -7,7 +7,7 @@ the CLI, tests, and batch scripts without pulling in the GUI stack.
 An ``.sxm`` file is a text header followed by a binary block of one or more
 big-endian float32 image planes.  The text header ends with the marker
 ``:SCANIT_END:``; fixed cushion bytes after that marker are recorded in
-``src/file_cushions`` and used to locate the payload.
+``probeflow/data/file_cushions`` and used to locate the payload.
 
 The public API:
     parse_sxm_header(path) -> dict
@@ -28,11 +28,12 @@ from typing import List, Optional, Tuple
 
 import numpy as np
 
+from probeflow.core.resources import FILE_CUSHIONS_DIR
+
 # ── Binary layout ────────────────────────────────────────────────────────────
 # Cushion byte lengths are read lazily to avoid repeated file I/O.
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-_DEFAULT_CUSHION_DIR = _REPO_ROOT / "src" / "file_cushions"
+_DEFAULT_CUSHION_DIR = FILE_CUSHIONS_DIR
 
 _POST_END_BYTES_CACHE: Optional[bytes] = None
 _PRE_PAYLOAD_BYTES_CACHE: Optional[bytes] = None

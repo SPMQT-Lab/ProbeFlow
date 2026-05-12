@@ -19,13 +19,14 @@ from probeflow.io.readers.createc_dat import (
 )
 from probeflow.core.scan_loader import load_scan
 from probeflow.io.writers.sxm import write_sxm
+from probeflow.core.resources import FILE_CUSHIONS_DIR
 
 log = logging.getLogger(__name__)
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_INPUT_DIR = REPO_ROOT / "test_data" / "sample_input"
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "test_data" / "output_sxm"
-DEFAULT_CUSHION_DIR = REPO_ROOT / "src" / "file_cushions"
+DEFAULT_CUSHION_DIR = FILE_CUSHIONS_DIR
 
 # ─────────────────────────────────────────────────────────────────────────────
 # General helpers
@@ -581,7 +582,7 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--cushion-dir", dest="cushion_dir", default=None,
-        help="Directory containing file cushion layout files (default: src/file_cushions)",
+        help="Directory containing file cushion layout files (default: packaged ProbeFlow data)",
     )
     p.add_argument(
         "--clip-low", dest="clip_low", type=float, default=1.0,

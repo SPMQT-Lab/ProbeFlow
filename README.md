@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.gif" alt="ProbeFlow logo" width="100%"/>
+  <img src="probeflow/assets/logo.gif" alt="ProbeFlow logo" width="100%"/>
 </p>
 
 # ProbeFlow
@@ -304,6 +304,8 @@ dzdv = numeric_derivative(spec.x_array, z_smooth)
 ```text
 probeflow/
 |-- core/        # Scan model, loading dispatch, metadata, ROI, validation
+|-- assets/      # Packaged logo artwork
+|-- data/        # Packaged runtime resources such as SXM cushion bytes
 |-- io/          # File sniffing, readers, writers, converters, sidecar helpers
 |-- processing/  # GUI-free numerical processing and ProcessingState
 |-- analysis/    # Particles, lattice, spectroscopy plotting, feature tools
@@ -314,7 +316,6 @@ probeflow/
 
 tests/           # pytest suite
 test_data/       # sample/manual input data
-assets/          # logo artwork
 ```
 
 ### Current Architecture Reality
@@ -379,8 +380,8 @@ the current findings and per-symbol verdicts.
 ## Notes
 
 - Failed batch conversions are logged to `errors.json`.
-- The `.sxm` writer uses a reference Nanonis byte layout captured under
-  `src/file_cushions/`; converted files should still be checked in target
+- The `.sxm` writer uses a packaged reference Nanonis byte layout under
+  `probeflow/data/file_cushions/`; converted files should still be checked in target
   software when scientific output depends on interoperability.
 - Sidecar formats are intentionally JSON and version-light while the project is
   beta. Avoid treating them as a permanent project file format.

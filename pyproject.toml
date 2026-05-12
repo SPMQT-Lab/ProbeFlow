@@ -7,8 +7,7 @@ name = "probeflow"
 version = "0.0.0b0"  # beta — surfaces and on-disk formats may change
 description = "ProbeFlow — STM scan browser, processor, and Createc↔Nanonis toolkit. Browse .sxm scans with colormaps, apply line corrections / background subtraction / smoothing / FFT / grain detection, and convert Createc .dat files to Nanonis .sxm + PNG from either a GUI or a bash-friendly CLI."
 readme = "README.md"
-license = "MIT"
-license-files = ["LICENSE"]
+license = {text = "MIT"}
 requires-python = ">=3.11"
 dependencies = [
   "numpy",
@@ -31,10 +30,19 @@ dat-sxm   = "probeflow.io.converters.createc_dat_to_sxm:main"
 dat-png   = "probeflow.io.converters.createc_dat_to_png:main"
 
 [tool.setuptools]
-include-package-data = false
+include-package-data = true
 
 [tool.setuptools.packages.find]
 include = ["probeflow", "probeflow.*"]
+
+[tool.setuptools.package-data]
+probeflow = [
+  "assets/*.gif",
+  "assets/*.png",
+  "data/file_cushions/*.bin",
+  "data/file_cushions/*.json",
+  "data/file_cushions/*.txt",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -43,7 +51,7 @@ testpaths = ["tests"]
 line-length = 100
 target-version = "py311"
 extend-exclude = [
-  "src/file_cushions",
+  "probeflow/data/file_cushions",
   "test_data",
 ]
 

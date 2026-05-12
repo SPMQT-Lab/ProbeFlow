@@ -13,6 +13,7 @@ from PySide6.QtCore import QObject, QRunnable, Signal
 from PySide6.QtGui import QPixmap
 
 from probeflow.gui.models import SxmFile, VertFile
+from probeflow.core.resources import FILE_CUSHIONS_DIR
 from probeflow.gui.rendering import (
     THUMBNAIL_CHANNEL_DEFAULT,
     pil_to_pixmap,
@@ -22,8 +23,7 @@ from probeflow.gui.rendering import (
 )
 from probeflow.core.scan_loader import load_scan
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_CUSHION = REPO_ROOT / "src" / "file_cushions"
+DEFAULT_CUSHION = FILE_CUSHIONS_DIR
 
 # ── Worker: thumbnail ─────────────────────────────────────────────────────────
 class ThumbnailSignals(QObject):
