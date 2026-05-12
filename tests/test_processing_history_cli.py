@@ -230,3 +230,41 @@ class TestPipelineHistory:
     def test_pipeline_history_params_correct(self, first_sample_dat, tmp_path):
         scan = self._run_pipeline(first_sample_dat, tmp_path, ["smooth:2.0"])
         assert scan.processing_history[0]["params"] == {"sigma_px": 2.0}
+
+
+# ─── CLI output safety ───────────────────────────────────────────────────────
+
+class TestCliOutputSafety:
+    def test_single_op_default_uses_command_suffix(self, first_sample_dat, tmp_path):
+        src = tmp_path / first_sample_dat.name
+        src.write_bytes(first_sample_dat.read_bytes())
+        existing = tmp_path / f"{src.stem}.sxm"
+        existing.write_bytes(b"sentinel")
+
+        rc = main(["smooth", str(src)])
+
+        assert rc == 0
+        assert existing.read_bytes() == b"sentinel"
+        assert (tmp_path / f"{src.stem}_smooth.sxm").exists()
+
+    def test_existing_explicit_output_requires_force(self, first_sample_dat, tmp_path):
+        src = tmp_path / first_sample_dat.name
+        src.write_bytes(first_sample_dat.read_bytes())
+        out = tmp_path / "processed.sxm"
+        out.write_bytes(b"sentinel")
+
+        with pytest.raises(ValueError, match="already exists"):
+            main(["smooth", str(src), "-o", str(out)])
+
+        assert out.read_bytes() == b"sentinel"
+
+    def test_force_allows_explicit_output_replacement(self, first_sample_dat, tmp_path):
+        src = tmp_path / first_sample_dat.name
+        src.write_bytes(first_sample_dat.read_bytes())
+        out = tmp_path / "processed.sxm"
+        out.write_bytes(b"sentinel")
+
+        rc = main(["smooth", str(src), "-o", str(out), "--force"])
+
+        assert rc == 0
+        assert out.read_bytes() != b"sentinel"

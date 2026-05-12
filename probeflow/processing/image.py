@@ -1749,6 +1749,7 @@ def export_png(
     vmin:          float | None  = None,
     vmax:          float | None  = None,
     provenance                   = None,   # ExportProvenance | None
+    overwrite_sidecars: bool     = False,
 ) -> None:
     """
     Export a full-resolution colourised image with an optional scale bar.
@@ -1827,6 +1828,14 @@ def export_png(
 
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    if provenance is not None:
+        from probeflow.provenance.export import check_provenance_sidecar_collisions
+
+        check_provenance_sidecar_collisions(
+            out_path,
+            legacy=hasattr(provenance, "to_dict"),
+            overwrite=overwrite_sidecars,
+        )
     pnginfo = None
     if provenance is not None:
         try:
@@ -1848,9 +1857,16 @@ def export_png(
         try:
             from probeflow.provenance.export import write_provenance_sidecars
 
-            write_provenance_sidecars(out_path, provenance, export_format="png")
+            write_provenance_sidecars(
+                out_path,
+                provenance,
+                export_format="png",
+                overwrite=overwrite_sidecars,
+            )
+        except FileExistsError:
+            raise
         except Exception:
-            pass  # sidecar failure must never break the PNG export
+            pass  # unexpected sidecar failure must never break the PNG export
 
 
 # ═════════════════════════════════════════════════════════════════════════════

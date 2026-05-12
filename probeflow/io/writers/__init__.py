@@ -42,7 +42,12 @@ def save_scan(scan, out_path, plane_idx: int = 0, **kwargs) -> None:
     suffix = out_path.suffix.lower()
 
     if suffix == ".sxm":
-        write_sxm(scan, out_path)
+        sxm_kwargs = {
+            key: kwargs[key]
+            for key in ("cushion_dir", "clip_low", "clip_high", "overwrite_sidecars")
+            if key in kwargs
+        }
+        write_sxm(scan, out_path, **sxm_kwargs)
     elif suffix == ".gwy":
         write_gwy(scan, out_path, plane_idx=plane_idx, **kwargs)
     elif suffix == ".png":

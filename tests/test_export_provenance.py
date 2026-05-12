@@ -13,10 +13,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Tuple
-from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
@@ -499,6 +496,19 @@ class TestPngSidecar:
         out = tmp_path / "test.png"
         self._export(arr, out, prov=self._make_prov())
         assert out.exists() and out.stat().st_size > 0
+
+    def test_existing_sidecar_blocks_export_before_artifact_overwrite(self, tmp_path):
+        arr = np.random.default_rng(0).standard_normal((32, 32))
+        out = tmp_path / "test.png"
+        current_sidecar = out.with_suffix(".probeflow.json")
+        out.write_bytes(b"artifact sentinel")
+        current_sidecar.write_text("sidecar sentinel", encoding="utf-8")
+
+        with pytest.raises(FileExistsError, match="Provenance sidecar"):
+            self._export(arr, out, prov=self._make_prov())
+
+        assert out.read_bytes() == b"artifact sentinel"
+        assert current_sidecar.read_text(encoding="utf-8") == "sidecar sentinel"
 
 
 # ── F: No visual regression in PNG export ────────────────────────────────────

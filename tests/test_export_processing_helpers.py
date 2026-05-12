@@ -56,6 +56,23 @@ class TestOverwriteProtection:
         scan2.save_sxm(out_b)  # must not raise
         assert out_b.exists()
 
+    def test_save_sxm_existing_sidecar_blocks_before_artifact_overwrite(
+        self,
+        tmp_path,
+        first_sample_dat,
+    ):
+        scan = load_scan(first_sample_dat)
+        out = tmp_path / "out.sxm"
+        sidecar = out.with_suffix(".probeflow.json")
+        out.write_bytes(b"artifact sentinel")
+        sidecar.write_text("sidecar sentinel", encoding="utf-8")
+
+        with pytest.raises(FileExistsError, match="Provenance sidecar"):
+            scan.save_sxm(out)
+
+        assert out.read_bytes() == b"artifact sentinel"
+        assert sidecar.read_text(encoding="utf-8") == "sidecar sentinel"
+
     def test_save_png_to_same_path_raises(self, tmp_path):
         plane = np.ones((8, 8))
         out = tmp_path / "test.png"

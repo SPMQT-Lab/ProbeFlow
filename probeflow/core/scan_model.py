@@ -189,10 +189,10 @@ class Scan:
         Ny, Nx = self.planes[0].shape
         return (Nx, Ny)
 
-    def save_sxm(self, out_path) -> None:
+    def save_sxm(self, out_path, **kwargs) -> None:
         """Write this Scan to a Nanonis ``.sxm`` file."""
         from probeflow.io.writers.sxm import write_sxm
-        write_sxm(self, out_path)
+        write_sxm(self, out_path, **kwargs)
 
     def save_png(
         self,
@@ -206,6 +206,7 @@ class Scan:
         scalebar_unit: str = "nm",
         scalebar_pos: str = "bottom-right",
         provenance=None,
+        overwrite_sidecars: bool = False,
     ) -> None:
         """Render one plane to a colourised PNG with an optional scale bar."""
         from probeflow.io.writers.png import write_png
@@ -215,6 +216,7 @@ class Scan:
             add_scalebar=add_scalebar,
             scalebar_unit=scalebar_unit, scalebar_pos=scalebar_pos,
             provenance=provenance,
+            overwrite_sidecars=overwrite_sidecars,
         )
 
     def save_pdf(self, out_path, plane_idx: int = 0, **kwargs) -> None:

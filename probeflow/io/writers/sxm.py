@@ -25,6 +25,7 @@ from probeflow.io.common import check_overwrite
 from probeflow.provenance.export import (
     ExportProvenance,
     build_scan_export_provenance,
+    check_provenance_sidecar_collisions,
     human_summary_from_provenance,
     write_provenance_sidecars,
 )
@@ -63,6 +64,7 @@ def write_sxm(
     cushion_dir=None,
     clip_low: float = 1.0,
     clip_high: float = 99.0,
+    overwrite_sidecars: bool = False,
 ) -> None:
     out_path = Path(out_path)
     if scan.source_path is not None:
@@ -76,6 +78,12 @@ def write_sxm(
         },
         export_kind="sxm",
         output_path=out_path,
+    )
+    check_provenance_sidecar_collisions(
+        out_path,
+        legacy=False,
+        probeflow=True,
+        overwrite=overwrite_sidecars,
     )
     if scan.source_format == "sxm":
         _write_from_sxm(scan, out_path, prov)
@@ -98,6 +106,7 @@ def write_sxm(
         legacy=False,
         probeflow=True,
         export_format="sxm",
+        overwrite=overwrite_sidecars,
     )
 
 

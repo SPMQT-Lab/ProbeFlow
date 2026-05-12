@@ -457,6 +457,48 @@ def probeflow_sidecar_path(out_path) -> Path:
     return Path(out_path).with_suffix(".probeflow.json")
 
 
+def provenance_sidecar_paths(
+    out_path,
+    *,
+    legacy: bool = True,
+    probeflow: bool = True,
+) -> tuple[Path, ...]:
+    """Return sidecar paths that would be written for an export artifact."""
+    out = Path(out_path)
+    paths: list[Path] = []
+    if legacy:
+        paths.append(legacy_sidecar_path(out))
+    if probeflow:
+        paths.append(probeflow_sidecar_path(out))
+    return tuple(paths)
+
+
+def check_provenance_sidecar_collisions(
+    out_path,
+    *,
+    legacy: bool = True,
+    probeflow: bool = True,
+    overwrite: bool = False,
+) -> None:
+    """Raise if provenance sidecars would overwrite existing files."""
+    if overwrite:
+        return
+    existing = [
+        path for path in provenance_sidecar_paths(
+            out_path,
+            legacy=legacy,
+            probeflow=probeflow,
+        )
+        if path.exists()
+    ]
+    if existing:
+        names = ", ".join(str(path) for path in existing)
+        raise FileExistsError(
+            f"Provenance sidecar already exists: {names}. "
+            "Choose a different output path or pass overwrite=True/--force."
+        )
+
+
 def export_record_dict_from_provenance(
     provenance,
     *,
@@ -516,14 +558,21 @@ def write_provenance_sidecars(
     legacy: bool = True,
     probeflow: bool = True,
     export_format: str | None = None,
+    overwrite: bool = False,
 ) -> None:
     """Write provenance sidecars.
 
     The ``.probeflow.json`` file is the reliable current record.  The older
     ``.provenance.json`` file is kept for compatibility with existing users and
-    tests.
+    tests. Existing sidecars are preserved unless ``overwrite`` is true.
     """
     out = Path(out_path)
+    check_provenance_sidecar_collisions(
+        out,
+        legacy=legacy and hasattr(provenance, "to_dict"),
+        probeflow=probeflow,
+        overwrite=overwrite,
+    )
     if legacy and hasattr(provenance, "to_dict"):
         legacy_sidecar = legacy_sidecar_path(out)
         legacy_sidecar.write_text(

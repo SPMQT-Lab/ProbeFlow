@@ -138,7 +138,13 @@ def _add_common_io(sub: argparse.ArgumentParser, *, out_suffix: str) -> None:
     sub.add_argument("--scalebar-unit", choices=("nm", "Å", "pm"), default="nm")
     sub.add_argument("--scalebar-pos",
                      choices=("bottom-right", "bottom-left"), default="bottom-right")
+    sub.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite an existing output file and provenance sidecars",
+    )
     sub.add_argument("--verbose", action="store_true", help="Debug logging")
+    sub.set_defaults(default_output_suffix=out_suffix)
 
 
 def _derive_output(args: argparse.Namespace, suffix: str) -> Path:
@@ -148,6 +154,26 @@ def _derive_output(args: argparse.Namespace, suffix: str) -> Path:
     stem = args.input.stem
     parent = args.input.parent
     return parent / f"{stem}{suffix}"
+
+
+def _default_output_suffix(args: argparse.Namespace, fallback: str) -> str:
+    return getattr(args, "default_output_suffix", fallback) or fallback
+
+
+def _png_output_suffix(suffix: str) -> str:
+    if suffix == ".sxm":
+        return ".png"
+    if suffix.endswith(".sxm"):
+        return f"{suffix[:-4]}.png"
+    return suffix
+
+
+def _ensure_output_available(out_path: Path, *, force: bool = False) -> None:
+    if out_path.exists() and not force:
+        raise ValueError(
+            f"Output path already exists: {out_path}. "
+            "Choose a different -o/--output path or pass --force."
+        )
 
 
 def _apply_to_plane(
@@ -176,9 +202,11 @@ def _write_output(
     default_suffix: str,
 ) -> Path:
     """Write either an .sxm (all planes) or a colorised PNG (selected plane)."""
+    default_suffix = _default_output_suffix(args, default_suffix)
+    force = bool(getattr(args, "force", False))
     if args.png:
-        out_path = _derive_output(args, ".png" if default_suffix == ".sxm"
-                                   else default_suffix)
+        out_path = _derive_output(args, _png_output_suffix(default_suffix))
+        _ensure_output_available(out_path, force=force)
         provenance = _cli_png_provenance(scan, args.plane, args, out_path, "cli_png")
         scan.save_png(
             out_path,
@@ -190,10 +218,12 @@ def _write_output(
             scalebar_unit=args.scalebar_unit,
             scalebar_pos=args.scalebar_pos,
             provenance=provenance,
+            overwrite_sidecars=force,
         )
     else:
         out_path = _derive_output(args, default_suffix)
-        scan.save_sxm(out_path)
+        _ensure_output_available(out_path, force=force)
+        scan.save_sxm(out_path, overwrite_sidecars=force)
     log.info("[OK] %s → %s", args.input.name, out_path)
     return out_path
 
@@ -467,6 +497,8 @@ def _cmd_sxm2png(args) -> int:
                   args.plane, scan.n_planes)
         return 1
     out = args.output or args.input.with_suffix(".png")
+    force = bool(getattr(args, "force", False))
+    _ensure_output_available(out, force=force)
     provenance = _cli_png_provenance(scan, args.plane, args, out, "cli_sxm2png")
     scan.save_png(
         out, plane_idx=args.plane,
@@ -476,6 +508,7 @@ def _cmd_sxm2png(args) -> int:
         scalebar_unit=args.scalebar_unit,
         scalebar_pos=args.scalebar_pos,
         provenance=provenance,
+        overwrite_sidecars=force,
     )
     log.info("[OK] %s → %s", args.input.name, out)
     return 0
@@ -573,6 +606,8 @@ def _cmd_prepare_png(args) -> int:
         scan.record_processing_state(state)
 
     from probeflow.provenance.prepared_export import write_prepared_png
+    force = bool(getattr(args, "force", False))
+    _ensure_output_available(args.output, force=force)
     write_prepared_png(
         scan,
         args.output,
@@ -582,6 +617,7 @@ def _cmd_prepare_png(args) -> int:
         clip_low=args.clip_low,
         clip_high=args.clip_high,
         add_scalebar=not args.no_scalebar,
+        overwrite_sidecars=force,
     )
     log.info("[OK] prepared PNG → %s", args.output)
     return 0
@@ -1651,6 +1687,11 @@ def _build_parser() -> argparse.ArgumentParser:
     sxm2png_p.add_argument("--scalebar-unit", choices=("nm", "Å", "pm"), default="nm")
     sxm2png_p.add_argument("--scalebar-pos",
                            choices=("bottom-right", "bottom-left"), default="bottom-right")
+    sxm2png_p.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite an existing output file and provenance sidecars",
+    )
     sxm2png_p.add_argument("--verbose", action="store_true")
     sxm2png_p.set_defaults(func=_cmd_sxm2png)
 
@@ -2024,8 +2065,13 @@ def _build_parser() -> argparse.ArgumentParser:
     pipe.add_argument("--scalebar-unit", choices=("nm", "Å", "pm"), default="nm")
     pipe.add_argument("--scalebar-pos",
                       choices=("bottom-right", "bottom-left"), default="bottom-right")
+    pipe.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite an existing output file and provenance sidecars",
+    )
     pipe.add_argument("--verbose", action="store_true")
-    pipe.set_defaults(func=_cmd_pipeline)
+    pipe.set_defaults(func=_cmd_pipeline, default_output_suffix="_pipeline.sxm")
 
     # ── prepared downstream handoff ──
     prep = sub.add_parser("prepare-png",
@@ -2044,6 +2090,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Disable scale bar on the prepared PNG (default; PNG handoffs often prefer raw image content)")
     prep.add_argument("--with-scalebar", dest="no_scalebar", action="store_false",
         help="Include a visual scale bar in the PNG")
+    prep.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite an existing output file and provenance sidecars",
+    )
     prep.add_argument("--verbose", action="store_true")
     prep.set_defaults(func=_cmd_prepare_png)
 

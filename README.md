@@ -179,6 +179,11 @@ probeflow pipeline scan.sxm \
     -o scan_processed.sxm
 ```
 
+Processing commands that derive an output path use command-specific suffixes,
+for example `smooth` writes `<input-stem>_smooth.sxm` by default and `pipeline`
+writes `<input-stem>_pipeline.sxm`. CLI exports refuse to overwrite an existing
+output artifact or provenance sidecar unless `--force` is provided.
+
 ## GUI Overview
 
 The GUI currently has six tabs:
@@ -262,6 +267,12 @@ PNG/JSON-style exports can include a provenance sidecar recording:
 
 This is not yet a complete lab notebook or graph-backed session model. It is a
 linear export record intended to make routine image preparation auditable.
+
+ProbeFlow preserves existing provenance sidecars by default. Reusing an output
+path that already has a `.provenance.json` or `.probeflow.json` sidecar raises an
+error before the artifact is written; pass `--force` in CLI export paths, or
+`overwrite=True` / `overwrite_sidecars=True` in writer APIs, only when replacing
+the artifact and its sidecars is intentional.
 
 ## Python Use
 
