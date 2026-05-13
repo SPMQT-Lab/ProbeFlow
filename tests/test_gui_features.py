@@ -53,6 +53,7 @@ def test_features_sidebar_exposes_classify_mode(qapp):
 
 
 def test_features_panel_sample_label_flow(qapp, monkeypatch):
+    pytest.importorskip("cv2")
     from probeflow.analysis.features import segment_particles
     from probeflow.gui.features import FeaturesPanel
 
@@ -83,6 +84,7 @@ def test_features_panel_sample_label_flow(qapp, monkeypatch):
 
 
 def test_features_window_classify_requires_labels(qapp):
+    pytest.importorskip("cv2")
     from probeflow.analysis.features import segment_particles
     from probeflow.gui._legacy import ProbeFlowWindow
 
@@ -108,6 +110,7 @@ def test_features_window_classify_requires_labels(qapp):
 
 
 def test_features_window_segmentation_change_clears_labels(qapp, monkeypatch):
+    pytest.importorskip("cv2")
     from probeflow.analysis.features import segment_particles
     from probeflow.gui._legacy import ProbeFlowWindow
 
@@ -143,6 +146,7 @@ def test_features_window_segmentation_change_clears_labels(qapp, monkeypatch):
 
 
 def test_features_window_classify_export_includes_samples(qapp, monkeypatch, tmp_path):
+    pytest.importorskip("cv2")
     from probeflow.analysis.features import Classification, segment_particles
     from probeflow.gui._legacy import ProbeFlowWindow
 

@@ -30,6 +30,7 @@ def write_prepared_png(
     clip_low: float = 1.0,
     clip_high: float = 99.0,
     add_scalebar: bool = False,
+    overwrite: bool = False,
     overwrite_sidecars: bool = False,
 ) -> None:
     """Write a PNG plus provenance sidecar for AISurf-style handoff.
@@ -73,5 +74,6 @@ def write_prepared_png(
         clip_high=clip_high,
         add_scalebar=add_scalebar,
         provenance=prov,
+        overwrite=overwrite,
         overwrite_sidecars=overwrite_sidecars,
     )

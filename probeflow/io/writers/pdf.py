@@ -11,8 +11,13 @@ from typing import Optional
 
 import numpy as np
 
-from probeflow.io.common import check_overwrite
+from probeflow.io.common import check_output_available, check_overwrite
 from probeflow.core.scan_model import Scan
+from probeflow.provenance.export import (
+    build_scan_export_provenance,
+    check_provenance_sidecar_collisions,
+    write_provenance_sidecars,
+)
 
 
 def write_pdf(
@@ -29,6 +34,9 @@ def write_pdf(
     show_colorbar: bool = True,
     show_scalebar: bool = True,
     scalebar_length_nm: Optional[float] = None,
+    provenance=None,
+    overwrite: bool = False,
+    overwrite_sidecars: bool = False,
 ) -> None:
     """Write a PDF figure of one Scan plane with axes, colorbar, and scale bar.
 
@@ -58,6 +66,28 @@ def write_pdf(
             f"plane_idx={plane_idx} out of range for Scan with "
             f"{scan.n_planes} plane(s)"
         )
+    out_path = Path(out_path)
+    if provenance is None:
+        provenance = build_scan_export_provenance(
+            scan,
+            channel_index=plane_idx,
+            display_state={
+                "colormap": colormap,
+                "clip_low": float(clip_low),
+                "clip_high": float(clip_high),
+                "show_colorbar": bool(show_colorbar),
+                "show_scalebar": bool(show_scalebar),
+                "scalebar_length_nm": scalebar_length_nm,
+            },
+            export_kind="pdf",
+            output_path=out_path,
+        )
+    check_provenance_sidecar_collisions(
+        out_path,
+        legacy=hasattr(provenance, "to_dict"),
+        overwrite=overwrite_sidecars,
+    )
+    check_output_available(out_path, overwrite=overwrite)
 
     arr = scan.planes[plane_idx]
     finite = arr[np.isfinite(arr)]
@@ -127,10 +157,15 @@ def write_pdf(
         )
 
     fig.tight_layout()
-    out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, format="pdf")
     plt.close(fig)
+    write_provenance_sidecars(
+        out_path,
+        provenance,
+        export_format="pdf",
+        overwrite=overwrite_sidecars,
+    )
 
 
 _NICE_NM = [0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000]

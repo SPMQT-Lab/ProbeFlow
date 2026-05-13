@@ -11,7 +11,7 @@ import json
 
 import numpy as np
 
-from probeflow.io.common import check_overwrite
+from probeflow.io.common import check_output_available, check_overwrite
 from probeflow.provenance.export import build_scan_export_provenance
 from probeflow.core.scan_model import Scan
 
@@ -78,6 +78,7 @@ def write_gwy(
     plane_idx: int = 0,
     *,
     include_meta: bool = True,
+    overwrite: bool = False,
 ) -> None:
     """Write one plane of *scan* to a Gwyddion ``.gwy`` file.
 
@@ -100,6 +101,7 @@ def write_gwy(
             f"plane_idx={plane_idx} out of range for Scan with "
             f"{scan.n_planes} plane(s)"
         )
+    check_output_available(out_path, overwrite=overwrite)
 
     GwyContainer, GwyDataField = _import_gwyfile()
 

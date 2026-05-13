@@ -67,8 +67,8 @@ def save_viewer_png(
                     roi_set=image_roi_set,
                     processing_history=processing_history,
                 )
-            except Exception:
-                pass
+            except Exception as exc:
+                return f"Export error: provenance could not be built: {exc}"
 
         _proc.export_png(
             arr, out_path, colormap,

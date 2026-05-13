@@ -4,8 +4,10 @@ import json
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from probeflow.core.scan_model import Scan
+from probeflow.core.roi import ROI, ROISet
 from probeflow.processing.state import ProcessingState, ProcessingStep as StateStep
 from probeflow.provenance import (
     ProcessingHistory,
@@ -156,6 +158,113 @@ def test_png_export_writes_probeflow_sidecar_with_history(tmp_path):
     }
     assert data["display_settings"]["add_scalebar"] is False
     assert "not raw data" in data["warning"]
+
+
+def test_probeflow_sidecar_preserves_rois_for_lookup(tmp_path):
+    from probeflow.io.roi_sidecar import load_roi_set_sidecar
+    from probeflow.io.writers.png import write_png
+    from probeflow.provenance.export import build_scan_export_provenance
+
+    scan = _scan(tmp_path)
+    roi = ROI.new("rectangle", {"x": 1.0, "y": 2.0, "width": 3.0, "height": 4.0},
+                  name="terrace")
+    roi_set = ROISet(image_id=str(scan.source_path))
+    roi_set.add(roi)
+    out = tmp_path / "image.png"
+    prov = build_scan_export_provenance(
+        scan,
+        channel_index=0,
+        roi_set=roi_set,
+        export_kind="viewer_png",
+        output_path=out,
+    )
+
+    write_png(scan, out, provenance=prov, add_scalebar=False)
+
+    data = json.loads(out.with_suffix(".probeflow.json").read_text(encoding="utf-8"))
+    assert data["rois"]["image_id"] == str(scan.source_path)
+    loaded, used = load_roi_set_sidecar(out)
+    assert used == out.with_suffix(".probeflow.json")
+    assert loaded.get_by_name("terrace").id == roi.id
+
+
+def test_provenance_sidecar_write_failure_preserves_existing_file(
+    monkeypatch,
+    tmp_path,
+):
+    import probeflow.provenance.export as export_mod
+    from probeflow.provenance.export import (
+        build_scan_export_provenance,
+        write_provenance_sidecars,
+    )
+
+    scan = _scan(tmp_path)
+    out = tmp_path / "image.png"
+    sidecar = out.with_suffix(".probeflow.json")
+    sidecar.write_text("sidecar sentinel", encoding="utf-8")
+    prov = build_scan_export_provenance(
+        scan,
+        channel_index=0,
+        export_kind="png",
+        output_path=out,
+    )
+
+    def fail_dump(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(export_mod._json, "dump", fail_dump)
+
+    with pytest.raises(OSError, match="disk full"):
+        write_provenance_sidecars(
+            out,
+            prov,
+            legacy=False,
+            probeflow=True,
+            export_format="png",
+            overwrite=True,
+        )
+
+    assert sidecar.read_text(encoding="utf-8") == "sidecar sentinel"
+    assert not list(tmp_path.glob("*.probeflow.json.tmp*.json"))
+
+
+def test_viewer_png_export_reports_provenance_build_failure(monkeypatch, tmp_path):
+    from probeflow.gui.viewer.png_export import save_viewer_png
+
+    scan = _scan(tmp_path)
+
+    class DisplayRange:
+        def resolve(self, arr):
+            return float(np.nanmin(arr)), float(np.nanmax(arr))
+
+    def fail_provenance(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    def fail_if_exported(*args, **kwargs):
+        raise AssertionError("PNG export should stop when provenance fails")
+
+    monkeypatch.setattr("probeflow.core.scan_loader.load_scan", lambda path: scan)
+    monkeypatch.setattr(
+        "probeflow.provenance.export.build_scan_export_provenance",
+        fail_provenance,
+    )
+    monkeypatch.setattr("probeflow.processing.export_png", fail_if_exported)
+
+    msg = save_viewer_png(
+        np.ones((4, 4), dtype=float),
+        str(tmp_path / "viewer.png"),
+        scan.source_path,
+        "gray",
+        1.0,
+        99.0,
+        DisplayRange(),
+        {},
+        None,
+        0,
+        "FT",
+    )
+
+    assert msg.startswith("Export error: provenance could not be built:")
 
 
 def test_png_export_embeds_human_summary(tmp_path):

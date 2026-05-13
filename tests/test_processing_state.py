@@ -554,17 +554,27 @@ class TestApplyKnownSteps:
         apply_processing_state(arr, state)
         np.testing.assert_array_equal(arr, original)
 
-    def test_plane_bg_step_tolerance_runs(self):
-        # Tilted plane with a sharp step edge superimposed.
-        x = np.linspace(0, 1, 40)
-        arr = np.outer(np.ones(40), x).copy()
-        arr[:, 25:] += 0.5  # step
+    def test_plane_bg_forwards_step_tolerance(self, monkeypatch):
+        arr = np.ones((8, 8), dtype=float)
+        seen = {}
+
+        def fake_subtract_background(input_arr, **kwargs):
+            seen.update(kwargs)
+            return input_arr + 7.0
+
+        monkeypatch.setattr(
+            "probeflow.processing.subtract_background",
+            fake_subtract_background,
+        )
         state = ProcessingState(steps=[
             ProcessingStep("plane_bg", {"order": 1, "step_tolerance": True}),
         ])
         result = apply_processing_state(arr, state)
         assert result.shape == arr.shape
         assert result.dtype == np.float64
+        assert seen["step_tolerance"] is True
+        assert seen["order"] == 1
+        np.testing.assert_array_equal(result, arr + 7.0)
 
     def test_plane_bg_fit_rect_runs(self):
         y = np.linspace(-1.0, 1.0, 20)
@@ -823,13 +833,15 @@ class TestApplyKnownSteps:
         result = apply_processing_state(arr, state)
         assert float(np.std(result)) < float(np.std(arr)) * 0.35
 
-    def test_linear_undistort_preserves_shape(self):
-        arr = np.ones((20, 20)) * 3.0
+    def test_linear_undistort_forwards_scale_y(self):
+        yy, _ = np.indices((20, 20), dtype=float)
+        arr = yy.copy()
         state = ProcessingState(steps=[ProcessingStep("linear_undistort", {
-            "shear_x": 1.0, "scale_y": 0.95,
+            "shear_x": 0.0, "scale_y": 2.0,
         })])
         result = apply_processing_state(arr, state)
         assert result.shape == arr.shape
+        np.testing.assert_allclose(result, yy / 2.0, atol=1e-12)
 
     def test_set_zero_point_anchors_pixel_to_zero(self):
         arr = np.full((10, 10), 42.0)

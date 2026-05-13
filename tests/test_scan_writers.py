@@ -7,7 +7,6 @@ exercised end-to-end on realistic data.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import numpy as np
 import pytest
@@ -44,6 +43,11 @@ class TestPdf:
         assert out.exists() and out.stat().st_size > 0
         # PDF files start with the magic %PDF
         assert out.read_bytes()[:4] == b"%PDF"
+        sidecar = out.with_suffix(".probeflow.json")
+        assert sidecar.exists()
+        data = json.loads(sidecar.read_text(encoding="utf-8"))
+        assert data["export_format"] == "pdf"
+        assert data["source_info"]["channel"] == dat_scan.plane_names[0]
 
     def test_via_save_method(self, dat_scan, tmp_path):
         out = tmp_path / "via_save.pdf"
@@ -59,6 +63,11 @@ class TestCsv:
         arr = np.loadtxt(out, delimiter=",")
         # Shape should match the plane (after stripping comment header)
         assert arr.shape == dat_scan.planes[0].shape
+        sidecar = out.with_suffix(".probeflow.json")
+        assert sidecar.exists()
+        data = json.loads(sidecar.read_text(encoding="utf-8"))
+        assert data["export_format"] == "csv"
+        assert data["source_info"]["channel"] == dat_scan.plane_names[0]
 
     def test_header_line_present(self, dat_scan, tmp_path):
         out = tmp_path / "out.csv"

@@ -206,6 +206,7 @@ class Scan:
         scalebar_unit: str = "nm",
         scalebar_pos: str = "bottom-right",
         provenance=None,
+        overwrite: bool = False,
         overwrite_sidecars: bool = False,
     ) -> None:
         """Render one plane to a colourised PNG with an optional scale bar."""
@@ -216,6 +217,7 @@ class Scan:
             add_scalebar=add_scalebar,
             scalebar_unit=scalebar_unit, scalebar_pos=scalebar_pos,
             provenance=provenance,
+            overwrite=overwrite,
             overwrite_sidecars=overwrite_sidecars,
         )
 

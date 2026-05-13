@@ -29,8 +29,10 @@ def roi_sidecar_candidates(scan_path: str | Path) -> tuple[Path, ...]:
     stem_path = path.with_suffix("")
     candidates = (
         stem_path.with_suffix(".rois.json"),
+        stem_path.with_suffix(".probeflow.json"),
         stem_path.with_suffix(".provenance.json"),
         path.parent / f"{path.stem}.rois.json",
+        path.parent / f"{path.stem}.probeflow.json",
         path.parent / f"{path.stem}.provenance.json",
     )
     seen: set[Path] = set()

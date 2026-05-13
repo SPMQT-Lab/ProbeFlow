@@ -12,7 +12,12 @@ from pathlib import Path
 
 import numpy as np
 
-from probeflow.io.common import check_overwrite
+from probeflow.io.common import check_output_available, check_overwrite
+from probeflow.provenance.export import (
+    build_scan_export_provenance,
+    check_provenance_sidecar_collisions,
+    write_provenance_sidecars,
+)
 
 
 def write_csv(
@@ -22,6 +27,9 @@ def write_csv(
     *,
     delimiter: str = ",",
     fmt: str = "%.6e",
+    provenance=None,
+    overwrite: bool = False,
+    overwrite_sidecars: bool = False,
 ) -> None:
     if scan.source_path is not None:
         check_overwrite(scan.source_path, out_path)
@@ -34,17 +42,38 @@ def write_csv(
     arr = scan.planes[plane_idx]
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    if provenance is None:
+        provenance = build_scan_export_provenance(
+            scan,
+            channel_index=plane_idx,
+            display_state={"delimiter": delimiter, "fmt": fmt},
+            export_kind="csv",
+            output_path=out_path,
+        )
+    check_provenance_sidecar_collisions(
+        out_path,
+        legacy=hasattr(provenance, "to_dict"),
+        overwrite=overwrite_sidecars,
+    )
+    check_output_available(out_path, overwrite=overwrite)
 
     w_m, h_m = scan.scan_range_m
     Ny, Nx = arr.shape
     unit = scan.plane_units[plane_idx] if plane_idx < len(scan.plane_units) else ""
     name = scan.plane_names[plane_idx] if plane_idx < len(scan.plane_names) else f"plane {plane_idx}"
+    source_name = scan.source_path.name if scan.source_path is not None else "unknown"
 
     header = (
         f"plane={name} units={unit} "
         f"Nx={Nx} Ny={Ny} "
         f"width_m={w_m:.6e} height_m={h_m:.6e} "
-        f"source={scan.source_path.name}"
+        f"source={source_name}"
     )
     np.savetxt(out_path, arr, fmt=fmt, delimiter=delimiter,
                header=header, comments="# ")
+    write_provenance_sidecars(
+        out_path,
+        provenance,
+        export_format="csv",
+        overwrite=overwrite_sidecars,
+    )

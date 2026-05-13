@@ -44,7 +44,13 @@ def save_scan(scan, out_path, plane_idx: int = 0, **kwargs) -> None:
     if suffix == ".sxm":
         sxm_kwargs = {
             key: kwargs[key]
-            for key in ("cushion_dir", "clip_low", "clip_high", "overwrite_sidecars")
+            for key in (
+                "cushion_dir",
+                "clip_low",
+                "clip_high",
+                "overwrite",
+                "overwrite_sidecars",
+            )
             if key in kwargs
         }
         write_sxm(scan, out_path, **sxm_kwargs)

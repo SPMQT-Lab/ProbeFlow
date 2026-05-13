@@ -218,12 +218,13 @@ def _write_output(
             scalebar_unit=args.scalebar_unit,
             scalebar_pos=args.scalebar_pos,
             provenance=provenance,
+            overwrite=force,
             overwrite_sidecars=force,
         )
     else:
         out_path = _derive_output(args, default_suffix)
         _ensure_output_available(out_path, force=force)
-        scan.save_sxm(out_path, overwrite_sidecars=force)
+        scan.save_sxm(out_path, overwrite=force, overwrite_sidecars=force)
     log.info("[OK] %s → %s", args.input.name, out_path)
     return out_path
 
@@ -508,6 +509,7 @@ def _cmd_sxm2png(args) -> int:
         scalebar_unit=args.scalebar_unit,
         scalebar_pos=args.scalebar_pos,
         provenance=provenance,
+        overwrite=force,
         overwrite_sidecars=force,
     )
     log.info("[OK] %s → %s", args.input.name, out)
@@ -617,6 +619,7 @@ def _cmd_prepare_png(args) -> int:
         clip_low=args.clip_low,
         clip_high=args.clip_high,
         add_scalebar=not args.no_scalebar,
+        overwrite=force,
         overwrite_sidecars=force,
     )
     log.info("[OK] prepared PNG → %s", args.output)

@@ -438,6 +438,24 @@ class TestJsonExportProvenance:
         data = json.loads(out.read_text())
         assert "items" in data
 
+    def test_existing_json_requires_explicit_overwrite(self, tmp_path):
+        out = tmp_path / "out.json"
+        out.write_text("sentinel", encoding="utf-8")
+
+        with pytest.raises(FileExistsError, match="Output path already exists"):
+            write_json(out, [], kind="particles")
+
+        assert out.read_text(encoding="utf-8") == "sentinel"
+
+    def test_existing_json_can_be_overwritten_explicitly(self, tmp_path):
+        out = tmp_path / "out.json"
+        out.write_text("sentinel", encoding="utf-8")
+
+        write_json(out, [], kind="particles", overwrite=True)
+
+        data = json.loads(out.read_text(encoding="utf-8"))
+        assert data["meta"]["kind"] == "particles"
+
 
 # ── E: PNG sidecar provenance ─────────────────────────────────────────────────
 

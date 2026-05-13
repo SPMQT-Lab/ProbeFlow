@@ -12,6 +12,7 @@ import datetime as _dt
 import copy as _copy
 import hashlib as _hashlib
 import json as _json
+import tempfile as _tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -349,6 +350,7 @@ def build_scan_export_provenance(
         export_parameters={"export_kind": str(export_kind)},
         warnings=tuple(warnings or ()),
         conversion=conversion,
+        rois=roi_set.to_dict() if roi_set is not None else None,
     )
     return ExportProvenance(
         source_file=prov.source_file,
@@ -514,6 +516,9 @@ def export_record_dict_from_provenance(
         raw = provenance.to_dict()
         if raw.get("export_record"):
             data = raw["export_record"]
+            if raw.get("rois") is not None and "rois" not in data:
+                data = _copy.deepcopy(data)
+                data["rois"] = raw["rois"]
         elif raw.get("processing_history"):
             history = ProcessingHistory.from_dict(raw["processing_history"])
             data = build_export_record(
@@ -573,12 +578,28 @@ def write_provenance_sidecars(
         probeflow=probeflow,
         overwrite=overwrite,
     )
+
+    def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_fd, tmp_path = _tempfile.mkstemp(
+            dir=path.parent,
+            prefix=path.name + ".tmp",
+            suffix=".json",
+        )
+        try:
+            with open(tmp_fd, "w", encoding="utf-8") as fh:
+                _json.dump(payload, fh, indent=2, default=str)
+            Path(tmp_path).replace(path)
+        except Exception:
+            try:
+                Path(tmp_path).unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise
+
     if legacy and hasattr(provenance, "to_dict"):
         legacy_sidecar = legacy_sidecar_path(out)
-        legacy_sidecar.write_text(
-            _json.dumps(provenance.to_dict(), indent=2, default=str),
-            encoding="utf-8",
-        )
+        _write_json_atomic(legacy_sidecar, provenance.to_dict())
     if probeflow:
         record = export_record_dict_from_provenance(
             provenance,
@@ -586,7 +607,4 @@ def write_provenance_sidecars(
             export_format=export_format,
         )
         probeflow_sidecar = probeflow_sidecar_path(out)
-        probeflow_sidecar.write_text(
-            _json.dumps(record, indent=2, default=str),
-            encoding="utf-8",
-        )
+        _write_json_atomic(probeflow_sidecar, record)

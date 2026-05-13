@@ -2331,16 +2331,11 @@ class ImageViewerDialog(QDialog):
             scan.record_processing_state(state)
         return scan, idx
 
-    def _write_processed_export_sidecar(self, scan, out_path, plane_idx: int) -> None:
+    def _processed_export_provenance(self, scan, out_path, plane_idx: int):
         suffix = Path(out_path).suffix.lower().lstrip(".") or "export"
-        if suffix == "png":
-            return
-        from probeflow.provenance.export import (
-            build_scan_export_provenance,
-            write_provenance_sidecars,
-        )
+        from probeflow.provenance.export import build_scan_export_provenance
 
-        prov = build_scan_export_provenance(
+        return build_scan_export_provenance(
             scan,
             channel_index=plane_idx,
             channel_name=(
@@ -2357,6 +2352,34 @@ class ImageViewerDialog(QDialog):
                 if self._processing_history is not None else None
             ),
         )
+
+    def _preflight_processed_export_sidecar(self, out_path) -> None:
+        suffix = Path(out_path).suffix.lower().lstrip(".") or "export"
+        if suffix == "png":
+            return
+        from probeflow.provenance.export import check_provenance_sidecar_collisions
+
+        check_provenance_sidecar_collisions(
+            out_path,
+            legacy=False,
+            probeflow=True,
+        )
+
+    def _write_processed_export_sidecar(
+        self,
+        scan,
+        out_path,
+        plane_idx: int,
+        provenance=None,
+    ) -> None:
+        suffix = Path(out_path).suffix.lower().lstrip(".") or "export"
+        if suffix == "png":
+            return
+        from probeflow.provenance.export import write_provenance_sidecars
+
+        prov = provenance
+        if prov is None:
+            prov = self._processed_export_provenance(scan, out_path, plane_idx)
         write_provenance_sidecars(
             out_path,
             prov,
@@ -2387,6 +2410,10 @@ class ImageViewerDialog(QDialog):
         try:
             scan, plane_idx = self._processed_scan_for_export()
             suffix = out.suffix.lower()
+            provenance = None
+            if suffix not in {".png", ".sxm"}:
+                provenance = self._processed_export_provenance(scan, out, plane_idx)
+                self._preflight_processed_export_sidecar(out)
             if suffix == ".png":
                 scan.save_png(
                     out,
@@ -2403,14 +2430,18 @@ class ImageViewerDialog(QDialog):
                     colormap=self._viewer_colormap,
                     clip_low=self._clip_low,
                     clip_high=self._clip_high,
+                    provenance=provenance,
                 )
-                self._write_processed_export_sidecar(scan, out, plane_idx)
             elif suffix == ".csv":
-                scan.save_csv(out, plane_idx=plane_idx)
-                self._write_processed_export_sidecar(scan, out, plane_idx)
+                scan.save_csv(out, plane_idx=plane_idx, provenance=provenance)
             elif suffix == ".gwy":
                 scan.save_gwy(out, plane_idx=plane_idx)
-                self._write_processed_export_sidecar(scan, out, plane_idx)
+                self._write_processed_export_sidecar(
+                    scan,
+                    out,
+                    plane_idx,
+                    provenance=provenance,
+                )
             elif suffix == ".sxm":
                 scan.save_sxm(out)
             else:

@@ -95,6 +95,63 @@ class TestOverwriteProtection:
         with pytest.raises(ValueError, match="overwrite"):
             scan.save_pdf(out)
 
+    @pytest.mark.parametrize("suffix,save_name", [
+        (".csv", "save_csv"),
+        (".pdf", "save_pdf"),
+    ])
+    def test_csv_pdf_existing_sidecar_blocks_before_artifact_overwrite(
+        self,
+        tmp_path,
+        suffix,
+        save_name,
+    ):
+        plane = np.ones((8, 8))
+        scan = _make_scan(plane)
+        out = tmp_path / f"out{suffix}"
+        sidecar = out.with_suffix(".probeflow.json")
+        out.write_bytes(b"artifact sentinel")
+        sidecar.write_text("sidecar sentinel", encoding="utf-8")
+
+        with pytest.raises(FileExistsError, match="Provenance sidecar"):
+            getattr(scan, save_name)(out)
+
+        assert out.read_bytes() == b"artifact sentinel"
+        assert sidecar.read_text(encoding="utf-8") == "sidecar sentinel"
+
+    @pytest.mark.parametrize("suffix,save_name", [
+        (".sxm", "save_sxm"),
+        (".png", "save_png"),
+        (".csv", "save_csv"),
+        (".pdf", "save_pdf"),
+        (".gwy", "save_gwy"),
+    ])
+    def test_existing_output_artifact_requires_explicit_overwrite(
+        self,
+        tmp_path,
+        suffix,
+        save_name,
+        first_sample_dat,
+    ):
+        scan = load_scan(first_sample_dat)
+        out = tmp_path / f"existing{suffix}"
+        out.write_bytes(b"artifact sentinel")
+
+        with pytest.raises(FileExistsError, match="Output path already exists"):
+            getattr(scan, save_name)(out)
+
+        assert out.read_bytes() == b"artifact sentinel"
+
+    def test_csv_existing_output_artifact_can_be_overwritten_explicitly(self, tmp_path):
+        plane = np.ones((8, 8))
+        scan = _make_scan(plane)
+        out = tmp_path / "existing.csv"
+        out.write_text("artifact sentinel", encoding="utf-8")
+
+        scan.save_csv(out, overwrite=True)
+
+        assert "artifact sentinel" not in out.read_text(encoding="utf-8")
+        assert out.with_suffix(".probeflow.json").exists()
+
     def test_save_dispatch_to_same_path_raises(self, tmp_path, first_sample_dat):
         scan = load_scan(first_sample_dat)
         out = tmp_path / "out.sxm"

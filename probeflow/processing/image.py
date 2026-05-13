@@ -1749,6 +1749,7 @@ def export_png(
     vmin:          float | None  = None,
     vmax:          float | None  = None,
     provenance                   = None,   # ExportProvenance | None
+    overwrite: bool              = False,
     overwrite_sidecars: bool     = False,
 ) -> None:
     """
@@ -1836,6 +1837,9 @@ def export_png(
             legacy=hasattr(provenance, "to_dict"),
             overwrite=overwrite_sidecars,
         )
+    from probeflow.io.common import check_output_available
+
+    check_output_available(out_path, overwrite=overwrite)
     pnginfo = None
     if provenance is not None:
         try:

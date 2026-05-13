@@ -93,6 +93,25 @@ class TestCliRoiSidecarLookup:
         assert loaded is not None
         assert loaded.id == roi.id
 
+    def test_load_named_roi_falls_back_to_probeflow_sidecar(self, tmp_path):
+        scan_path = tmp_path / "scan.sxm"
+        scan_path.write_bytes(b"")
+        roi = ROI.new("rectangle", {"x": 1.0, "y": 2.0, "width": 3.0, "height": 4.0},
+                      name="terrace")
+        roi_set = ROISet(image_id=str(scan_path))
+        roi_set.add(roi)
+
+        import json
+        (tmp_path / "scan.probeflow.json").write_text(
+            json.dumps({"record_type": "probeflow_export", "rois": roi_set.to_dict()}),
+            encoding="utf-8",
+        )
+
+        loaded = _load_named_roi(scan_path, "terrace")
+
+        assert loaded is not None
+        assert loaded.id == roi.id
+
     def test_carries_name_and_params(self):
         op = _Op("plane_bg", {"order": 1}, lambda a: a)
         assert op.name == "plane_bg"

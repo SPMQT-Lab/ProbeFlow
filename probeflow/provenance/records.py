@@ -270,6 +270,7 @@ class ExportRecord:
     timestamp: str
     warning: str | None = None
     warnings: tuple[str, ...] = ()
+    rois: dict[str, Any] | None = None
     schema_version: int = SCHEMA_VERSION
     summary: str | None = None
 
@@ -288,6 +289,7 @@ class ExportRecord:
             "timestamp": self.timestamp,
             "warning": self.warning,
             "warnings": warnings,
+            "rois": _json_safe(self.rois),
             "summary": self.summary,
         }
 
@@ -304,6 +306,7 @@ class ExportRecord:
             timestamp=str(data.get("timestamp") or _utc_now()),
             warning=data.get("warning"),
             warnings=tuple(str(w) for w in data.get("warnings") or ()),
+            rois=data.get("rois") if isinstance(data.get("rois"), dict) else None,
             schema_version=int(data.get("schema_version") or SCHEMA_VERSION),
             summary=data.get("summary"),
         )
@@ -471,6 +474,7 @@ def build_export_record(
     export_parameters: dict[str, Any] | None = None,
     warnings: list[str] | tuple[str, ...] | None = None,
     conversion: str | None = None,
+    rois: dict[str, Any] | None = None,
 ) -> ExportRecord:
     """Build the sidecar ExportRecord and append export/conversion steps."""
 
@@ -539,6 +543,7 @@ def build_export_record(
         timestamp=_utc_now(),
         warning=primary_warning,
         warnings=tuple(warning_list),
+        rois=copy.deepcopy(rois) if rois is not None else None,
         summary=summary,
     )
 

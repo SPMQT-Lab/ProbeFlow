@@ -42,6 +42,7 @@ def write_png(
     scalebar_unit: str = "nm",
     scalebar_pos: str = "bottom-right",
     provenance=None,  # ExportProvenance | None
+    overwrite: bool = False,
     overwrite_sidecars: bool = False,
 ) -> None:
     """Write a single plane of ``scan`` as a colourised PNG."""
@@ -76,5 +77,6 @@ def write_png(
         scalebar_unit=scalebar_unit,
         scalebar_pos=scalebar_pos,
         provenance=provenance,
+        overwrite=overwrite,
         overwrite_sidecars=overwrite_sidecars,
     )

@@ -12,6 +12,8 @@ import json
 from pathlib import Path
 from typing import Iterable, Optional
 
+from probeflow.io.common import check_output_available
+
 
 def _encode(obj):
     """Small fallback encoder for numpy scalars / arrays."""
@@ -31,6 +33,7 @@ def write_json(
     scan=None,
     extra_meta: Optional[dict] = None,
     provenance=None,  # ExportProvenance | None
+    overwrite: bool = False,
 ) -> None:
     """Write a list of dataclass-like objects to JSON with scan provenance.
 
@@ -56,6 +59,7 @@ def write_json(
     """
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    check_output_available(out_path, overwrite=overwrite)
 
     meta: dict = {"kind": kind}
     if scan is not None:
@@ -90,5 +94,20 @@ def write_json(
         it.to_dict() if hasattr(it, "to_dict") else dict(it) for it in items
     ]
 
-    with out_path.open("w", encoding="utf-8") as f:
-        json.dump(payload, f, indent=2, default=_encode)
+    import tempfile
+
+    tmp_fd, tmp_path = tempfile.mkstemp(
+        dir=out_path.parent,
+        prefix=out_path.name + ".tmp",
+        suffix=".json",
+    )
+    try:
+        with open(tmp_fd, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2, default=_encode)
+        Path(tmp_path).replace(out_path)
+    except Exception:
+        try:
+            Path(tmp_path).unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise

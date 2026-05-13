@@ -198,3 +198,12 @@ def check_overwrite(input_path: Path, output_path: Path) -> None:
         raise ValueError(
             f"Output path would overwrite the source: {output_path!r}"
         )
+
+
+def check_output_available(output_path: Path, *, overwrite: bool = False) -> None:
+    """Raise FileExistsError when an output artifact already exists."""
+    out = Path(output_path)
+    if out.exists() and not overwrite:
+        raise FileExistsError(
+            f"Output path already exists: {out}. Pass overwrite=True/--force."
+        )

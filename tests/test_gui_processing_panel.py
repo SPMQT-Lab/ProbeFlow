@@ -1008,8 +1008,8 @@ def test_viewer_save_processed_image_action_dispatches_writer(qapp, monkeypatch,
     calls = []
 
     class FakeScan:
-        def save_csv(self, path, plane_idx=0):
-            calls.append(("csv", Path(path), plane_idx))
+        def save_csv(self, path, plane_idx=0, provenance=None):
+            calls.append(("csv", Path(path), plane_idx, provenance))
 
     monkeypatch.setattr(
         dlg,
@@ -1018,13 +1018,18 @@ def test_viewer_save_processed_image_action_dispatches_writer(qapp, monkeypatch,
     )
     monkeypatch.setattr(
         dlg,
-        "_write_processed_export_sidecar",
-        lambda scan, path, plane_idx: calls.append(("sidecar", Path(path), plane_idx)),
+        "_processed_export_provenance",
+        lambda scan, path, plane_idx: "prov",
+    )
+    monkeypatch.setattr(
+        dlg,
+        "_preflight_processed_export_sidecar",
+        lambda path: calls.append(("preflight", Path(path))),
     )
 
     dlg._on_save_processed_image()
 
-    assert calls == [("csv", out, 2), ("sidecar", out, 2)]
+    assert calls == [("preflight", out), ("csv", out, 2, "prov")]
     assert "Saved processed image" in dlg._status_lbl.text()
 
     dlg.close()
