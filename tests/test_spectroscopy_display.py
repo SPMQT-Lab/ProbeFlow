@@ -12,6 +12,11 @@ from probeflow.spectroscopy.export import (
     displayed_spectra_to_json_text,
 )
 from probeflow.spectroscopy.models import SpectrumDisplayOptions, SpectrumTrace
+from probeflow.spectroscopy.normalization import (
+    normalization_formula_text,
+    normalize_mode,
+)
+from probeflow.spectroscopy.smoothing import savgol_validation_message
 from probeflow.spectroscopy.transforms import (
     apply_normalization,
     apply_outlier_mask,
@@ -52,6 +57,23 @@ def test_smoothing_does_not_mutate_raw_input():
 def test_savgol_requires_odd_window():
     with pytest.raises(ValueError, match="odd"):
         apply_smoothing(np.arange(8, dtype=float), mode="savgol", points=4, polyorder=2)
+
+
+def test_savgol_validation_helper_reports_gui_errors():
+    assert savgol_validation_message("Savitzky-Golay", 3, 2, 9) is None
+    assert "window must be odd" in savgol_validation_message("savgol", 4, 2, 9)
+    assert "polynomial order must be smaller" in savgol_validation_message(
+        "Savitzky-Golay",
+        5,
+        5,
+        9,
+    )
+    assert "must not exceed available points" in savgol_validation_message(
+        "Savitzky-Golay",
+        11,
+        2,
+        9,
+    )
 
 
 def test_mad_outlier_mask_detects_single_spike():
@@ -105,6 +127,31 @@ def test_constant_normalization_and_vertical_offset():
 def test_zero_constant_normalization_rejected():
     with pytest.raises(ValueError, match="finite non-zero constant"):
         apply_normalization(np.array([1.0, 2.0]), mode="constant", constant=0.0)
+
+
+def test_normalization_ui_helpers_are_pure_and_consistent():
+    assert normalize_mode("Channel") == "channel"
+    assert normalize_mode("Max abs") == "max_abs"
+    assert (
+        normalization_formula_text(
+            derivative=False,
+            mode_label="Max abs",
+            constant=1.0,
+            channel="",
+            offset=0.0,
+        )
+        == "y / max(abs(y))"
+    )
+    assert (
+        normalization_formula_text(
+            derivative=True,
+            mode_label="Constant",
+            constant=2.0,
+            channel="",
+            offset=0.5,
+        )
+        == "dy/dx / 2 + 0.5"
+    )
 
 
 def test_setpoint_normalization_uses_metadata_value():

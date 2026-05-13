@@ -14,6 +14,17 @@ from probeflow.spectroscopy.models import (
     SpectrumDisplayOptions,
     SpectrumTrace,
 )
+from probeflow.spectroscopy.normalization import (
+    NORMALIZATION_LABELS,
+    apply_normalization,
+    normalization_formula_text,
+    normalize_mode,
+)
+from probeflow.spectroscopy.outliers import apply_outlier_mask
+from probeflow.spectroscopy.smoothing import (
+    apply_smoothing,
+    savgol_validation_message,
+)
 from probeflow.spectroscopy.measurement import (
     SpectrumDeltaMeasurement,
     SpectrumMeasurementPoint,
@@ -24,9 +35,6 @@ from probeflow.spectroscopy.measurement import (
     nearest_point_across_traces,
 )
 from probeflow.spectroscopy.transforms import (
-    apply_normalization,
-    apply_outlier_mask,
-    apply_smoothing,
     apply_vertical_offset,
     make_displayed_spectrum,
     numerical_derivative,
@@ -34,6 +42,7 @@ from probeflow.spectroscopy.transforms import (
 
 __all__ = [
     "DisplayedSpectrum",
+    "NORMALIZATION_LABELS",
     "SpectrumDeltaMeasurement",
     "SpectrumDisplayOptions",
     "SpectrumMeasurementPoint",
@@ -55,5 +64,8 @@ __all__ = [
     "measurement_to_tsv",
     "nearest_finite_point",
     "nearest_point_across_traces",
+    "normalization_formula_text",
+    "normalize_mode",
     "numerical_derivative",
+    "savgol_validation_message",
 ]

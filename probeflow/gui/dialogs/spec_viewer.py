@@ -36,6 +36,12 @@ from probeflow.spectroscopy.models import (
     SpectrumDisplayOptions,
     SpectrumTrace,
 )
+from probeflow.spectroscopy.normalization import (
+    NORMALIZATION_LABELS,
+    normalization_formula_text,
+    normalize_mode,
+)
+from probeflow.spectroscopy.smoothing import savgol_validation_message
 from probeflow.spectroscopy.transforms import make_displayed_spectrum
 
 
@@ -54,20 +60,6 @@ _NORMALIZATION_TOOLTIP = (
     "spectrum metadata setpoint, a user constant, max(abs(y)), or a denominator "
     "channel."
 )
-_NORMALIZE_LABELS = [
-    "Off",
-    "Setpoint",
-    "Constant",
-    "Max abs",
-    "Channel",
-]
-_NORMALIZE_LABEL_TO_MODE = {
-    "Off": "none",
-    "Setpoint": "setpoint",
-    "Constant": "constant",
-    "Max abs": "max_abs",
-    "Channel": "channel",
-}
 
 
 def _plain_button(text: str) -> QPushButton:
@@ -87,60 +79,8 @@ def _shorten_filename(name: str, max_chars: int = 36) -> str:
     return f"{name[:prefix_len]}...{name[-suffix_len:]}"
 
 
-def _normalize_mode(label: str) -> str:
-    return _NORMALIZE_LABEL_TO_MODE.get(label, "none")
-
-
 def _trace_key(trace: DisplayedSpectrum) -> tuple[str, str, str]:
     return (trace.source_file, trace.spectrum_id, trace.y_channel)
-
-
-def _savgol_validation_message(
-    smoothing_label: str,
-    window: int,
-    polyorder: int,
-    point_count: int | None,
-) -> str | None:
-    if smoothing_label != "Savitzky-Golay":
-        return None
-    if window < 3:
-        return "Savitzky-Golay window must be at least 3 points."
-    if window % 2 == 0:
-        return "Savitzky-Golay window must be odd and greater than the polynomial order."
-    if polyorder < 0:
-        return "Savitzky-Golay polynomial order must be non-negative."
-    if polyorder >= window:
-        return "Savitzky-Golay polynomial order must be smaller than the window length."
-    if point_count is not None and window > point_count:
-        return f"Savitzky-Golay window must not exceed available points ({point_count})."
-    return None
-
-
-def _normalization_formula_text(
-    *,
-    derivative: bool,
-    mode_label: str,
-    constant: float,
-    channel: str,
-    offset: float,
-) -> str:
-    base = "dy/dx" if derivative else "y"
-    mode = _normalize_mode(mode_label)
-    if mode == "none":
-        expr = base
-    elif mode == "setpoint":
-        expr = f"{base} / setpoint"
-    elif mode == "constant":
-        expr = f"{base} / {constant:.6g}"
-    elif mode == "max_abs":
-        expr = f"{base} / max(abs({base}))"
-    elif mode == "channel":
-        expr = f"{base} / {channel or 'channel'}"
-    else:
-        expr = f"{base} / {mode}"
-    if offset != 0.0:
-        expr = f"{expr} + {offset:.6g}"
-    return expr
 
 
 def _focus_in_parameter_inputs(focus: QWidget | None, inputs: list[QWidget]) -> bool:
@@ -314,7 +254,7 @@ class SpecViewerDialog(QDialog):
         self._derivative_cb.currentTextChanged.connect(self._on_processing_changed)
 
         self._normalize_cb = QComboBox()
-        self._normalize_cb.addItems(_NORMALIZE_LABELS)
+        self._normalize_cb.addItems(NORMALIZATION_LABELS)
         self._normalize_cb.setFont(QFont("Helvetica", 9))
         self._normalize_cb.setToolTip(_NORMALIZATION_TOOLTIP)
         self._normalize_cb.currentTextChanged.connect(self._on_processing_changed)
@@ -637,7 +577,7 @@ class SpecViewerDialog(QDialog):
         n_points = point_count
         if n_points is None and self._spec is not None:
             n_points = int(len(self._spec.x_array))
-        return _savgol_validation_message(
+        return savgol_validation_message(
             self._smoothing_cb.currentText(),
             int(self._smooth_points_spin.value()),
             int(self._savgol_order_spin.value()),
@@ -649,7 +589,7 @@ class SpecViewerDialog(QDialog):
             self._formula_lbl.setText(f"Display: {self._normalization_formula()}")
 
     def _normalization_formula(self) -> str:
-        return _normalization_formula_text(
+        return normalization_formula_text(
             derivative=self._derivative_cb.currentText() == "dI/dV",
             mode_label=self._normalize_cb.currentText(),
             constant=float(self._norm_constant_spin.value()),
@@ -664,7 +604,7 @@ class SpecViewerDialog(QDialog):
             "Savitzky-Golay": "savgol",
         }.get(self._smoothing_cb.currentText(), "none")
 
-        normalize = _normalize_mode(self._normalize_cb.currentText())
+        normalize = normalize_mode(self._normalize_cb.currentText())
 
         outliers = {
             "Off": "none",
@@ -1393,7 +1333,7 @@ class SpecOverlayDialog(QDialog):
         ctrl_lay.addWidget(self._derivative_cb)
 
         self._normalize_cb = QComboBox()
-        self._normalize_cb.addItems(_NORMALIZE_LABELS)
+        self._normalize_cb.addItems(NORMALIZATION_LABELS)
         self._normalize_cb.setToolTip(_NORMALIZATION_TOOLTIP)
         self._normalize_cb.currentTextChanged.connect(self._redraw)
         ctrl_lay.addWidget(QLabel("Normalize"))
@@ -1560,7 +1500,7 @@ class SpecOverlayDialog(QDialog):
     def _savgol_validation_error(self) -> str | None:
         _ref_entry, ref_spec = self._reference_for_channel(self._channel_cb.currentText())
         n_points = int(len(ref_spec.x_array)) if ref_spec is not None else None
-        return _savgol_validation_message(
+        return savgol_validation_message(
             self._smoothing_cb.currentText(),
             int(self._smooth_points_spin.value()),
             int(self._savgol_order_spin.value()),
@@ -1572,7 +1512,7 @@ class SpecOverlayDialog(QDialog):
             self._formula_lbl.setText(f"Display: {self._normalization_formula()}")
 
     def _normalization_formula(self) -> str:
-        return _normalization_formula_text(
+        return normalization_formula_text(
             derivative=self._derivative_cb.currentText() == "dI/dV",
             mode_label=self._normalize_cb.currentText(),
             constant=float(self._norm_constant_spin.value()),
@@ -1623,7 +1563,7 @@ class SpecOverlayDialog(QDialog):
             "Gaussian": "gaussian",
             "Savitzky-Golay": "savgol",
         }.get(self._smoothing_cb.currentText(), "none")
-        normalize = _normalize_mode(self._normalize_cb.currentText())
+        normalize = normalize_mode(self._normalize_cb.currentText())
         outliers = {
             "Off": "none",
             "MAD": "mad",
