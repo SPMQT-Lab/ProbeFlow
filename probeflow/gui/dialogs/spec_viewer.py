@@ -23,6 +23,14 @@ from probeflow.spectroscopy.export import (
     displayed_spectra_to_json_text,
     displayed_spectra_to_txt_text,
 )
+from probeflow.spectroscopy.measurement import (
+    SpectrumDeltaMeasurement,
+    SpectrumMeasurementPoint,
+    format_measurement_summary,
+    measure_delta,
+    measurement_to_tsv,
+    nearest_point_across_traces,
+)
 from probeflow.spectroscopy.models import (
     DisplayedSpectrum,
     SpectrumDisplayOptions,
@@ -31,11 +39,108 @@ from probeflow.spectroscopy.models import (
 from probeflow.spectroscopy.transforms import make_displayed_spectrum
 
 
+_DISPLAY_PIPELINE_TOOLTIP = (
+    "Displayed/exported spectra are derived copies: raw x/y -> smoothing -> "
+    "derivative -> normalization -> outlier mask -> vertical offset. "
+    "The loaded raw spectroscopy arrays and source files are not modified."
+)
+_SMOOTHING_TOOLTIP = (
+    "Smoothing is applied only to displayed copies. Savitzky-Golay uses an odd "
+    "window length greater than the polynomial order; invalid GUI values are "
+    "rejected before plotting."
+)
+_NORMALIZATION_TOOLTIP = (
+    "Normalization is applied only to displayed copies. Options divide by the "
+    "spectrum metadata setpoint, a user constant, max(abs(y)), or a denominator "
+    "channel."
+)
+_NORMALIZE_LABELS = [
+    "Off",
+    "Setpoint",
+    "Constant",
+    "Max abs",
+    "Channel",
+]
+_NORMALIZE_LABEL_TO_MODE = {
+    "Off": "none",
+    "Setpoint": "setpoint",
+    "Constant": "constant",
+    "Max abs": "max_abs",
+    "Channel": "channel",
+}
+
+
 def _plain_button(text: str) -> QPushButton:
     button = QPushButton(text)
     button.setDefault(False)
     button.setAutoDefault(False)
     return button
+
+
+def _shorten_filename(name: str, max_chars: int = 36) -> str:
+    if len(name) <= max_chars:
+        return name
+    if max_chars < 9:
+        return name[:max_chars]
+    suffix_len = max(10, max_chars // 2)
+    prefix_len = max_chars - suffix_len - 3
+    return f"{name[:prefix_len]}...{name[-suffix_len:]}"
+
+
+def _normalize_mode(label: str) -> str:
+    return _NORMALIZE_LABEL_TO_MODE.get(label, "none")
+
+
+def _trace_key(trace: DisplayedSpectrum) -> tuple[str, str, str]:
+    return (trace.source_file, trace.spectrum_id, trace.y_channel)
+
+
+def _savgol_validation_message(
+    smoothing_label: str,
+    window: int,
+    polyorder: int,
+    point_count: int | None,
+) -> str | None:
+    if smoothing_label != "Savitzky-Golay":
+        return None
+    if window < 3:
+        return "Savitzky-Golay window must be at least 3 points."
+    if window % 2 == 0:
+        return "Savitzky-Golay window must be odd and greater than the polynomial order."
+    if polyorder < 0:
+        return "Savitzky-Golay polynomial order must be non-negative."
+    if polyorder >= window:
+        return "Savitzky-Golay polynomial order must be smaller than the window length."
+    if point_count is not None and window > point_count:
+        return f"Savitzky-Golay window must not exceed available points ({point_count})."
+    return None
+
+
+def _normalization_formula_text(
+    *,
+    derivative: bool,
+    mode_label: str,
+    constant: float,
+    channel: str,
+    offset: float,
+) -> str:
+    base = "dy/dx" if derivative else "y"
+    mode = _normalize_mode(mode_label)
+    if mode == "none":
+        expr = base
+    elif mode == "setpoint":
+        expr = f"{base} / setpoint"
+    elif mode == "constant":
+        expr = f"{base} / {constant:.6g}"
+    elif mode == "max_abs":
+        expr = f"{base} / max(abs({base}))"
+    elif mode == "channel":
+        expr = f"{base} / {channel or 'channel'}"
+    else:
+        expr = f"{base} / {mode}"
+    if offset != 0.0:
+        expr = f"{expr} + {offset:.6g}"
+    return expr
 
 
 def _focus_in_parameter_inputs(focus: QWidget | None, inputs: list[QWidget]) -> bool:
@@ -77,6 +182,12 @@ class SpecViewerDialog(QDialog):
         self._canvas = None
         self._fig = None
         self._displayed_traces: list[DisplayedSpectrum] = []
+        self._displayed_trace_axes = []
+        self._measure_enabled = False
+        self._measure_points: list[SpectrumMeasurementPoint] = []
+        self._measurement: SpectrumDeltaMeasurement | None = None
+        self._measurement_artists = []
+        self._crosshair_artists = []
         self._parameter_inputs: list[QWidget] = []
         # Unit-override choice per base SI unit. "Auto" means use
         # choose_display_unit; otherwise lookup_unit_scale picks a fixed scale.
@@ -149,29 +260,38 @@ class SpecViewerDialog(QDialog):
 
         analysis_box = QGroupBox("Spectrum display")
         analysis_box.setFont(QFont("Helvetica", 9, QFont.Bold))
+        analysis_box.setToolTip(_DISPLAY_PIPELINE_TOOLTIP)
         analysis_lay = QGridLayout(analysis_box)
         analysis_lay.setContentsMargins(6, 4, 6, 4)
         analysis_lay.setSpacing(3)
 
-        self._file_lbl = QLabel(self._entry.path.name)
+        self._file_lbl = QLabel(_shorten_filename(self._entry.path.name))
         self._file_lbl.setFont(QFont("Helvetica", 8))
-        self._file_lbl.setWordWrap(True)
+        self._file_lbl.setWordWrap(False)
+        self._file_lbl.setToolTip(str(self._entry.path))
         self._x_axis_lbl = QLabel("x: —")
         self._x_axis_lbl.setFont(QFont("Helvetica", 8))
 
         self._signal_cb = QComboBox()
         self._signal_cb.setFont(QFont("Helvetica", 9))
+        self._signal_cb.setToolTip("Choose the channel to plot/export as displayed data.")
         self._signal_cb.currentTextChanged.connect(self._on_signal_changed)
 
         self._smoothing_cb = QComboBox()
         self._smoothing_cb.addItems(["None", "Gaussian", "Savitzky-Golay"])
         self._smoothing_cb.setFont(QFont("Helvetica", 9))
+        self._smoothing_cb.setToolTip(_SMOOTHING_TOOLTIP)
         self._smoothing_cb.currentTextChanged.connect(self._on_processing_changed)
 
         self._smooth_points_spin = QSpinBox()
-        self._smooth_points_spin.setRange(1, 9999)
+        self._smooth_points_spin.setRange(3, 9999)
+        self._smooth_points_spin.setSingleStep(2)
         self._smooth_points_spin.setValue(7)
         self._smooth_points_spin.setFont(QFont("Helvetica", 9))
+        self._smooth_points_spin.setToolTip(
+            "Smoothing window in points. Savitzky-Golay requires an odd value "
+            "greater than the polynomial order."
+        )
         self._smooth_points_spin.valueChanged.connect(self._on_processing_changed)
         self._smooth_points_spin.editingFinished.connect(self._on_processing_changed)
 
@@ -179,17 +299,24 @@ class SpecViewerDialog(QDialog):
         self._savgol_order_spin.setRange(0, 12)
         self._savgol_order_spin.setValue(2)
         self._savgol_order_spin.setFont(QFont("Helvetica", 9))
+        self._savgol_order_spin.setToolTip(
+            "Savitzky-Golay polynomial order. Must be smaller than the odd window length."
+        )
         self._savgol_order_spin.valueChanged.connect(self._on_processing_changed)
         self._savgol_order_spin.editingFinished.connect(self._on_processing_changed)
 
         self._derivative_cb = QComboBox()
         self._derivative_cb.addItems(["Off", "dI/dV"])
         self._derivative_cb.setFont(QFont("Helvetica", 9))
+        self._derivative_cb.setToolTip(
+            "Show numerical dy/dx on displayed copies; for current-vs-bias this is dI/dV."
+        )
         self._derivative_cb.currentTextChanged.connect(self._on_processing_changed)
 
         self._normalize_cb = QComboBox()
-        self._normalize_cb.addItems(["Off", "Setpoint", "Constant", "Channel"])
+        self._normalize_cb.addItems(_NORMALIZE_LABELS)
         self._normalize_cb.setFont(QFont("Helvetica", 9))
+        self._normalize_cb.setToolTip(_NORMALIZATION_TOOLTIP)
         self._normalize_cb.currentTextChanged.connect(self._on_processing_changed)
 
         self._norm_constant_spin = QDoubleSpinBox()
@@ -198,16 +325,31 @@ class SpecViewerDialog(QDialog):
         self._norm_constant_spin.setSingleStep(1.0)
         self._norm_constant_spin.setValue(1.0)
         self._norm_constant_spin.setFont(QFont("Helvetica", 9))
+        self._norm_constant_spin.setToolTip(
+            "Constant normalization uses y_display = y_input / constant. "
+            "The original data are not changed."
+        )
         self._norm_constant_spin.valueChanged.connect(self._on_processing_changed)
         self._norm_constant_spin.editingFinished.connect(self._on_processing_changed)
 
         self._norm_channel_cb = QComboBox()
         self._norm_channel_cb.setFont(QFont("Helvetica", 9))
+        self._norm_channel_cb.setToolTip(
+            "Channel normalization uses y_display = y_input / selected_channel."
+        )
         self._norm_channel_cb.currentTextChanged.connect(self._on_processing_changed)
+
+        self._formula_lbl = QLabel("Display: y")
+        self._formula_lbl.setFont(QFont("Helvetica", 8))
+        self._formula_lbl.setWordWrap(True)
+        self._formula_lbl.setToolTip(_DISPLAY_PIPELINE_TOOLTIP)
 
         self._outlier_cb = QComboBox()
         self._outlier_cb.addItems(["Off", "MAD", "Jump"])
         self._outlier_cb.setFont(QFont("Helvetica", 9))
+        self._outlier_cb.setToolTip(
+            "Mask outliers from displayed/exported arrays; original loaded data stay intact."
+        )
         self._outlier_cb.currentTextChanged.connect(self._on_processing_changed)
 
         self._outlier_threshold_spin = QDoubleSpinBox()
@@ -216,12 +358,14 @@ class SpecViewerDialog(QDialog):
         self._outlier_threshold_spin.setSingleStep(0.5)
         self._outlier_threshold_spin.setValue(6.0)
         self._outlier_threshold_spin.setFont(QFont("Helvetica", 9))
+        self._outlier_threshold_spin.setToolTip("Robust outlier threshold for display masking.")
         self._outlier_threshold_spin.valueChanged.connect(self._on_processing_changed)
         self._outlier_threshold_spin.editingFinished.connect(self._on_processing_changed)
 
         self._plot_mode_cb = QComboBox()
         self._plot_mode_cb.addItems(["Separate", "Overlay", "Waterfall"])
         self._plot_mode_cb.setFont(QFont("Helvetica", 9))
+        self._plot_mode_cb.setToolTip("Choose separate axes, overlaid traces, or waterfall offset.")
         self._plot_mode_cb.currentTextChanged.connect(self._redraw)
 
         self._offset_spin = QDoubleSpinBox()
@@ -230,7 +374,9 @@ class SpecViewerDialog(QDialog):
         self._offset_spin.setSingleStep(1.0)
         self._offset_spin.setValue(0.0)
         self._offset_spin.setFont(QFont("Helvetica", 9))
-        self._offset_spin.setToolTip("Vertical offset for Waterfall mode, in displayed Y units.")
+        self._offset_spin.setToolTip(
+            "Vertical offset applied last, in displayed Y units. Raw data are unchanged."
+        )
         self._offset_spin.valueChanged.connect(self._redraw)
         self._offset_spin.editingFinished.connect(self._redraw)
 
@@ -269,14 +415,16 @@ class SpecViewerDialog(QDialog):
         analysis_lay.addWidget(self._norm_constant_spin, 8, 1)
         analysis_lay.addWidget(QLabel("Norm ch:"), 9, 0)
         analysis_lay.addWidget(self._norm_channel_cb, 9, 1)
-        analysis_lay.addWidget(QLabel("Outliers:"), 10, 0)
-        analysis_lay.addWidget(self._outlier_cb, 10, 1)
-        analysis_lay.addWidget(QLabel("Threshold:"), 11, 0)
-        analysis_lay.addWidget(self._outlier_threshold_spin, 11, 1)
-        analysis_lay.addWidget(QLabel("Plot:"), 12, 0)
-        analysis_lay.addWidget(self._plot_mode_cb, 12, 1)
-        analysis_lay.addWidget(QLabel("Offset:"), 13, 0)
-        analysis_lay.addWidget(self._offset_spin, 13, 1)
+        analysis_lay.addWidget(QLabel("Formula:"), 10, 0)
+        analysis_lay.addWidget(self._formula_lbl, 10, 1)
+        analysis_lay.addWidget(QLabel("Outliers:"), 11, 0)
+        analysis_lay.addWidget(self._outlier_cb, 11, 1)
+        analysis_lay.addWidget(QLabel("Threshold:"), 12, 0)
+        analysis_lay.addWidget(self._outlier_threshold_spin, 12, 1)
+        analysis_lay.addWidget(QLabel("Plot:"), 13, 0)
+        analysis_lay.addWidget(self._plot_mode_cb, 13, 1)
+        analysis_lay.addWidget(QLabel("Offset:"), 14, 0)
+        analysis_lay.addWidget(self._offset_spin, 14, 1)
         self._channels_lay.addWidget(analysis_box)
         self._channels_lay.addStretch(1)
 
@@ -310,6 +458,36 @@ class SpecViewerDialog(QDialog):
         self._cursor_lbl = QLabel("Cursor: —")
         self._cursor_lbl.setFont(QFont("Helvetica", 9))
         lay.addWidget(self._cursor_lbl)
+
+        self._measure_lbl = QLabel("Measurement: off")
+        self._measure_lbl.setFont(QFont("Helvetica", 9))
+        self._measure_lbl.setWordWrap(True)
+        self._measure_lbl.setToolTip(
+            "Crosshair measurements use the displayed trace, not the raw spectrum."
+        )
+        lay.addWidget(self._measure_lbl)
+
+        measure_row = QHBoxLayout()
+        self._measure_btn = _plain_button("Measure Δ")
+        self._measure_btn.setCheckable(True)
+        self._measure_btn.setFixedWidth(110)
+        self._measure_btn.setToolTip(
+            "Enable crosshair measurement on displayed spectrum data."
+        )
+        self._measure_btn.toggled.connect(self._set_measure_mode)
+        measure_row.addWidget(self._measure_btn)
+
+        self._copy_measure_btn = _plain_button("Copy measurement")
+        self._copy_measure_btn.setFixedWidth(150)
+        self._copy_measure_btn.clicked.connect(self._copy_measurement)
+        measure_row.addWidget(self._copy_measure_btn)
+
+        self._clear_measure_btn = _plain_button("Clear measurement")
+        self._clear_measure_btn.setFixedWidth(150)
+        self._clear_measure_btn.clicked.connect(self._clear_measurement)
+        measure_row.addWidget(self._clear_measure_btn)
+        measure_row.addStretch(1)
+        lay.addLayout(measure_row)
 
         btn_row = QHBoxLayout()
         self._raw_btn = _plain_button("Show raw data")
@@ -358,6 +536,10 @@ class SpecViewerDialog(QDialog):
         lay.addLayout(btn_row)
 
     def keyPressEvent(self, event) -> None:
+        if event.key() == Qt.Key_Escape and self._measure_enabled:
+            self._clear_measurement()
+            event.accept()
+            return
         if event.key() in (Qt.Key_Return, Qt.Key_Enter) and _focus_in_parameter_inputs(
             self.focusWidget(), self._parameter_inputs
         ):
@@ -423,6 +605,7 @@ class SpecViewerDialog(QDialog):
             pos_str = "pos unknown"
         self._status.setText(f"{sweep}  |  {n_pts} points  |  {pos_str}")
 
+        self._refresh_formula()
         self._redraw()
 
     # ── Plotting ────────────────────────────────────────────────────────
@@ -442,8 +625,37 @@ class SpecViewerDialog(QDialog):
         self._redraw()
 
     def _on_processing_changed(self, _value: str = "") -> None:
+        self._refresh_formula()
+        error = self._savgol_validation_error()
+        if error is not None:
+            self._status.setText(error)
+            return
         self._refresh_channel_labels()
         self._redraw()
+
+    def _savgol_validation_error(self, point_count: int | None = None) -> str | None:
+        n_points = point_count
+        if n_points is None and self._spec is not None:
+            n_points = int(len(self._spec.x_array))
+        return _savgol_validation_message(
+            self._smoothing_cb.currentText(),
+            int(self._smooth_points_spin.value()),
+            int(self._savgol_order_spin.value()),
+            n_points,
+        )
+
+    def _refresh_formula(self) -> None:
+        if hasattr(self, "_formula_lbl"):
+            self._formula_lbl.setText(f"Display: {self._normalization_formula()}")
+
+    def _normalization_formula(self) -> str:
+        return _normalization_formula_text(
+            derivative=self._derivative_cb.currentText() == "dI/dV",
+            mode_label=self._normalize_cb.currentText(),
+            constant=float(self._norm_constant_spin.value()),
+            channel=self._norm_channel_cb.currentText(),
+            offset=float(self._offset_spin.value()),
+        )
 
     def _display_options(self, vertical_offset: float = 0.0) -> SpectrumDisplayOptions:
         smoothing = {
@@ -452,12 +664,7 @@ class SpecViewerDialog(QDialog):
             "Savitzky-Golay": "savgol",
         }.get(self._smoothing_cb.currentText(), "none")
 
-        normalize = {
-            "Off": "none",
-            "Setpoint": "setpoint",
-            "Constant": "constant",
-            "Channel": "channel",
-        }.get(self._normalize_cb.currentText(), "none")
+        normalize = _normalize_mode(self._normalize_cb.currentText())
 
         outliers = {
             "Off": "none",
@@ -465,10 +672,13 @@ class SpecViewerDialog(QDialog):
             "Jump": "jump",
         }.get(self._outlier_cb.currentText(), "none")
 
+        points = int(self._smooth_points_spin.value())
+        polyorder = int(self._savgol_order_spin.value())
+
         return SpectrumDisplayOptions(
             smoothing_mode=smoothing,
-            smoothing_points=int(self._smooth_points_spin.value()),
-            savgol_polyorder=int(self._savgol_order_spin.value()),
+            smoothing_points=points,
+            savgol_polyorder=polyorder,
             derivative=self._derivative_cb.currentText() == "dI/dV",
             normalize_mode=normalize,
             normalize_constant=float(self._norm_constant_spin.value()),
@@ -496,6 +706,7 @@ class SpecViewerDialog(QDialog):
                 "source_file": str(self._entry.path),
                 "spectrum_label": self._entry.stem,
                 "raw_points": int(len(self._spec.x_array)),
+                "setpoint_a": self._spec.metadata.get("setpoint_a"),
             },
         )
 
@@ -572,7 +783,14 @@ class SpecViewerDialog(QDialog):
     def _redraw(self) -> None:
         if self._spec is None:
             return
+        self._refresh_formula()
+        error = self._savgol_validation_error()
+        if error is not None:
+            self._status.setText(error)
+            return
         self._displayed_traces = []
+        self._displayed_trace_axes = []
+        self._reset_measurement_state()
         # Remove existing canvas if present.
         if self._canvas is not None:
             self._canvas_lay.removeWidget(self._canvas)
@@ -590,6 +808,7 @@ class SpecViewerDialog(QDialog):
             self._canvas = canvas
             self._fig = fig
             canvas.mpl_connect("motion_notify_event", self._on_cursor_motion)
+            canvas.mpl_connect("button_press_event", self._on_canvas_click)
             return
 
         fig = Figure(figsize=(8.5, 4.5), tight_layout=True)
@@ -617,6 +836,7 @@ class SpecViewerDialog(QDialog):
                     self._status.setText(f"Plot error for {ch}: {exc}")
                     continue
                 self._displayed_traces.append(displayed)
+                self._displayed_trace_axes.append((displayed, ax))
                 y_disp, disp_unit = displayed.y_display, displayed.y_unit
                 units.append(disp_unit)
                 label = displayed.y_label
@@ -641,6 +861,7 @@ class SpecViewerDialog(QDialog):
                     self._status.setText(f"Plot error for {ch}: {exc}")
                     continue
                 self._displayed_traces.append(displayed)
+                self._displayed_trace_axes.append((displayed, ax))
                 y_disp, disp_unit = displayed.y_display, displayed.y_unit
 
                 ax.set_facecolor(self._BG)
@@ -663,6 +884,7 @@ class SpecViewerDialog(QDialog):
         self._canvas = canvas
         self._fig = fig
         canvas.mpl_connect("motion_notify_event", self._on_cursor_motion)
+        canvas.mpl_connect("button_press_event", self._on_canvas_click)
 
     # ── Export ──────────────────────────────────────────────────────────
 
@@ -688,6 +910,7 @@ class SpecViewerDialog(QDialog):
         return rows
 
     def _on_cursor_motion(self, event) -> None:
+        self._update_crosshair(event)
         if event.inaxes is None or event.xdata is None or event.ydata is None:
             self._cursor_lbl.setText("Cursor: —")
             return
@@ -695,30 +918,189 @@ class SpecViewerDialog(QDialog):
             self._cursor_lbl.setText("Cursor: —")
             return
 
-        best = None
-        for trace in self._displayed_traces:
-            if trace.x_display.size == 0 or trace.y_display.size == 0:
-                continue
-            idx = int(np.nanargmin(np.abs(trace.x_display - event.xdata)))
-            x_val = float(trace.x_display[idx])
-            y_val = float(trace.y_display[idx])
-            x_span = float(np.nanmax(trace.x_display) - np.nanmin(trace.x_display)) or 1.0
-            y_span = float(np.nanmax(trace.y_display) - np.nanmin(trace.y_display)) or 1.0
-            dist = ((x_val - event.xdata) / x_span) ** 2 + ((y_val - event.ydata) / y_span) ** 2
-            if best is None or dist < best[0]:
-                best = (dist, trace, x_val, y_val)
-        if best is None:
+        point = nearest_point_across_traces(
+            self._traces_for_axis(event.inaxes),
+            event.xdata,
+            event.ydata,
+            max_normalized_distance=None,
+        )
+        if point is None:
             self._cursor_lbl.setText("Cursor: —")
             return
 
-        _dist, trace, x_val, y_val = best
-        x_unit = f" {trace.x_unit}" if trace.x_unit else ""
-        y_unit = f" {trace.y_unit}" if trace.y_unit else ""
+        x_unit = f" {point.x_unit}" if point.x_unit else ""
+        y_unit = f" {point.y_unit}" if point.y_unit else ""
         self._cursor_lbl.setText(
-            f"Cursor: {trace.x_label} = {x_val:.6g}{x_unit}, "
-            f"{trace.y_label} = {y_val:.6g}{y_unit}  |  "
-            f"Trace: {Path(trace.source_file).name} | channel: {trace.y_channel}"
+            f"Cursor (displayed): {point.x_label} = {point.x:.6g}{x_unit}, "
+            f"{point.y_label} = {point.y:.6g}{y_unit}  |  "
+            f"Trace: {Path(point.source_file).name} | channel: {point.y_channel}"
         )
+
+    def _set_measure_mode(self, checked: bool) -> None:
+        self._measure_enabled = checked
+        self._remove_crosshair_artists()
+        if checked:
+            self._measure_lbl.setText("Measurement: click point 1 on a displayed trace.")
+            self._status.setText("Crosshair measurements use displayed data, not raw data.")
+        else:
+            self._measure_lbl.setText(
+                format_measurement_summary(self._measurement)
+                if self._measurement is not None else "Measurement: off"
+            )
+        if self._canvas is not None:
+            self._canvas.draw_idle()
+
+    def _on_canvas_click(self, event) -> None:
+        if not self._measure_enabled:
+            return
+        if getattr(event, "button", 1) == 3:
+            self._clear_measurement()
+            return
+        if event.inaxes is None or event.xdata is None or event.ydata is None:
+            self._status.setText("Click inside a spectrum axis to set a measurement point.")
+            return
+
+        traces = self._traces_for_axis(event.inaxes)
+        if len(self._measure_points) == 1:
+            key = self._measure_points[0].trace_key
+            traces = [trace for trace in traces if _trace_key(trace) == key]
+        point = nearest_point_across_traces(
+            traces,
+            event.xdata,
+            event.ydata,
+            max_normalized_distance=0.08,
+        )
+        if point is None:
+            self._status.setText("No finite displayed point close enough to measure.")
+            return
+
+        if len(self._measure_points) != 1:
+            self._measure_points = [point]
+            self._measurement = None
+            self._measure_lbl.setText(
+                f"Measurement point 1: {point.trace_name}, "
+                f"{point.x_label}={point.x:.6g} {point.x_unit}, "
+                f"{point.y_label}={point.y:.6g} {point.y_unit}"
+            )
+            self._status.setText("Measurement point 1 set; click point 2 on the same trace.")
+        else:
+            try:
+                self._measurement = measure_delta(self._measure_points[0], point)
+            except ValueError as exc:
+                self._status.setText(str(exc))
+                return
+            self._measure_points.append(point)
+            self._measure_lbl.setText(format_measurement_summary(self._measurement))
+            self._status.setText("Displayed trace measurement complete.")
+        self._draw_measurement_artists()
+
+    def _copy_measurement(self) -> None:
+        if self._measurement is None:
+            self._status.setText("No completed crosshair measurement to copy.")
+            return
+        QApplication.clipboard().setText(measurement_to_tsv(self._measurement))
+        self._status.setText("Copied displayed-trace measurement.")
+
+    def _clear_measurement(self) -> None:
+        self._measure_points.clear()
+        self._measurement = None
+        self._remove_measurement_artists()
+        self._measure_lbl.setText(
+            "Measurement: click point 1 on a displayed trace."
+            if self._measure_enabled else "Measurement: off"
+        )
+        if self._canvas is not None:
+            self._canvas.draw_idle()
+
+    def _reset_measurement_state(self) -> None:
+        self._measure_points.clear()
+        self._measurement = None
+        self._remove_measurement_artists()
+        self._remove_crosshair_artists()
+        if hasattr(self, "_measure_lbl"):
+            self._measure_lbl.setText(
+                "Measurement: click point 1 on a displayed trace."
+                if self._measure_enabled else "Measurement: off"
+            )
+
+    def _traces_for_axis(self, axis) -> list[DisplayedSpectrum]:
+        traces = [
+            trace
+            for trace, trace_axis in getattr(self, "_displayed_trace_axes", [])
+            if trace_axis is axis
+        ]
+        return traces or list(self._displayed_traces)
+
+    def _axis_for_point(self, point: SpectrumMeasurementPoint):
+        for trace, axis in getattr(self, "_displayed_trace_axes", []):
+            if _trace_key(trace) == point.trace_key:
+                return axis
+        return None
+
+    def _update_crosshair(self, event) -> None:
+        if not self._measure_enabled:
+            return
+        self._remove_crosshair_artists()
+        if event.inaxes is None or event.xdata is None or event.ydata is None:
+            return
+        axis = event.inaxes
+        self._crosshair_artists = [
+            axis.axvline(event.xdata, color="#f9e2af", linewidth=0.8, alpha=0.85),
+            axis.axhline(event.ydata, color="#f9e2af", linewidth=0.8, alpha=0.85),
+        ]
+        if self._canvas is not None:
+            self._canvas.draw_idle()
+
+    def _draw_measurement_artists(self) -> None:
+        self._remove_measurement_artists()
+        axes_and_points = [
+            (self._axis_for_point(point), point)
+            for point in self._measure_points
+        ]
+        axes_and_points = [(axis, point) for axis, point in axes_and_points if axis is not None]
+        for axis, point in axes_and_points:
+            marker = axis.plot(
+                [point.x],
+                [point.y],
+                marker="o",
+                markersize=5,
+                color="#f38ba8",
+                markeredgecolor="#11111b",
+                linestyle="None",
+                zorder=6,
+            )[0]
+            self._measurement_artists.append(marker)
+        if len(axes_and_points) == 2 and axes_and_points[0][0] is axes_and_points[1][0]:
+            axis = axes_and_points[0][0]
+            p1 = axes_and_points[0][1]
+            p2 = axes_and_points[1][1]
+            line = axis.plot(
+                [p1.x, p2.x],
+                [p1.y, p2.y],
+                color="#f38ba8",
+                linewidth=1.0,
+                alpha=0.9,
+                zorder=5,
+            )[0]
+            self._measurement_artists.append(line)
+        if self._canvas is not None:
+            self._canvas.draw_idle()
+
+    def _remove_crosshair_artists(self) -> None:
+        for artist in getattr(self, "_crosshair_artists", []):
+            try:
+                artist.remove()
+            except ValueError:
+                pass
+        self._crosshair_artists = []
+
+    def _remove_measurement_artists(self) -> None:
+        for artist in getattr(self, "_measurement_artists", []):
+            try:
+                artist.remove()
+            except ValueError:
+                pass
+        self._measurement_artists = []
 
     def _selected_channels_in_display_units(self):
         for displayed in self._current_displayed_spectra():
@@ -926,6 +1308,12 @@ class SpecOverlayDialog(QDialog):
         self._canvas = None
         self._fig = None
         self._displayed_traces: list[DisplayedSpectrum] = []
+        self._displayed_trace_axes = []
+        self._measure_enabled = False
+        self._measure_points: list[SpectrumMeasurementPoint] = []
+        self._measurement: SpectrumDeltaMeasurement | None = None
+        self._measurement_artists = []
+        self._crosshair_artists = []
         self._parameter_inputs: list[QWidget] = []
         self._build()
         self._load()
@@ -946,6 +1334,7 @@ class SpecOverlayDialog(QDialog):
         controls.setMinimumWidth(300)
         controls.setMaximumWidth(400)
         controls.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+        controls.setToolTip(_DISPLAY_PIPELINE_TOOLTIP)
         self._controls_panel = controls
         ctrl_lay = QVBoxLayout(controls)
         ctrl_lay.setContentsMargins(6, 6, 6, 6)
@@ -958,19 +1347,26 @@ class SpecOverlayDialog(QDialog):
 
         self._channel_cb = QComboBox()
         self._channel_cb.setFont(QFont("Helvetica", 9))
+        self._channel_cb.setToolTip("Common signal channel to overlay/export as displayed data.")
         self._channel_cb.currentTextChanged.connect(self._redraw)
         ctrl_lay.addWidget(QLabel("Signal axis"))
         ctrl_lay.addWidget(self._channel_cb)
 
         self._smoothing_cb = QComboBox()
         self._smoothing_cb.addItems(["None", "Gaussian", "Savitzky-Golay"])
+        self._smoothing_cb.setToolTip(_SMOOTHING_TOOLTIP)
         self._smoothing_cb.currentTextChanged.connect(self._redraw)
         ctrl_lay.addWidget(QLabel("Smoothing"))
         ctrl_lay.addWidget(self._smoothing_cb)
 
         self._smooth_points_spin = QSpinBox()
-        self._smooth_points_spin.setRange(1, 9999)
+        self._smooth_points_spin.setRange(3, 9999)
+        self._smooth_points_spin.setSingleStep(2)
         self._smooth_points_spin.setValue(7)
+        self._smooth_points_spin.setToolTip(
+            "Smoothing window in points. Savitzky-Golay requires an odd value "
+            "greater than the polynomial order."
+        )
         self._smooth_points_spin.valueChanged.connect(self._redraw)
         self._smooth_points_spin.editingFinished.connect(self._redraw)
         ctrl_lay.addWidget(QLabel("Window/points"))
@@ -979,6 +1375,9 @@ class SpecOverlayDialog(QDialog):
         self._savgol_order_spin = QSpinBox()
         self._savgol_order_spin.setRange(0, 12)
         self._savgol_order_spin.setValue(2)
+        self._savgol_order_spin.setToolTip(
+            "Savitzky-Golay polynomial order. Must be smaller than the odd window length."
+        )
         self._savgol_order_spin.valueChanged.connect(self._redraw)
         self._savgol_order_spin.editingFinished.connect(self._redraw)
         ctrl_lay.addWidget(QLabel("Poly order"))
@@ -986,12 +1385,16 @@ class SpecOverlayDialog(QDialog):
 
         self._derivative_cb = QComboBox()
         self._derivative_cb.addItems(["Off", "dI/dV"])
+        self._derivative_cb.setToolTip(
+            "Show numerical dy/dx on displayed copies; for current-vs-bias this is dI/dV."
+        )
         self._derivative_cb.currentTextChanged.connect(self._redraw)
         ctrl_lay.addWidget(QLabel("Derivative"))
         ctrl_lay.addWidget(self._derivative_cb)
 
         self._normalize_cb = QComboBox()
-        self._normalize_cb.addItems(["Off", "Setpoint", "Constant", "Channel"])
+        self._normalize_cb.addItems(_NORMALIZE_LABELS)
+        self._normalize_cb.setToolTip(_NORMALIZATION_TOOLTIP)
         self._normalize_cb.currentTextChanged.connect(self._redraw)
         ctrl_lay.addWidget(QLabel("Normalize"))
         ctrl_lay.addWidget(self._normalize_cb)
@@ -1001,18 +1404,35 @@ class SpecOverlayDialog(QDialog):
         self._norm_constant_spin.setDecimals(6)
         self._norm_constant_spin.setSingleStep(1.0)
         self._norm_constant_spin.setValue(1.0)
+        self._norm_constant_spin.setToolTip(
+            "Constant normalization uses y_display = y_input / constant. "
+            "The original data are not changed."
+        )
         self._norm_constant_spin.valueChanged.connect(self._redraw)
         self._norm_constant_spin.editingFinished.connect(self._redraw)
         ctrl_lay.addWidget(QLabel("Constant"))
         ctrl_lay.addWidget(self._norm_constant_spin)
 
         self._norm_channel_cb = QComboBox()
+        self._norm_channel_cb.setToolTip(
+            "Channel normalization uses y_display = y_input / selected_channel."
+        )
         self._norm_channel_cb.currentTextChanged.connect(self._redraw)
         ctrl_lay.addWidget(QLabel("Norm channel"))
         ctrl_lay.addWidget(self._norm_channel_cb)
 
+        self._formula_lbl = QLabel("Display: y")
+        self._formula_lbl.setFont(QFont("Helvetica", 8))
+        self._formula_lbl.setWordWrap(True)
+        self._formula_lbl.setToolTip(_DISPLAY_PIPELINE_TOOLTIP)
+        ctrl_lay.addWidget(QLabel("Formula"))
+        ctrl_lay.addWidget(self._formula_lbl)
+
         self._outlier_cb = QComboBox()
         self._outlier_cb.addItems(["Off", "MAD", "Jump"])
+        self._outlier_cb.setToolTip(
+            "Mask outliers from displayed/exported arrays; original loaded data stay intact."
+        )
         self._outlier_cb.currentTextChanged.connect(self._redraw)
         ctrl_lay.addWidget(QLabel("Outliers"))
         ctrl_lay.addWidget(self._outlier_cb)
@@ -1022,6 +1442,7 @@ class SpecOverlayDialog(QDialog):
         self._outlier_threshold_spin.setDecimals(2)
         self._outlier_threshold_spin.setSingleStep(0.5)
         self._outlier_threshold_spin.setValue(6.0)
+        self._outlier_threshold_spin.setToolTip("Robust outlier threshold for display masking.")
         self._outlier_threshold_spin.valueChanged.connect(self._redraw)
         self._outlier_threshold_spin.editingFinished.connect(self._redraw)
         ctrl_lay.addWidget(QLabel("Threshold"))
@@ -1032,11 +1453,37 @@ class SpecOverlayDialog(QDialog):
         self._offset_spin.setDecimals(4)
         self._offset_spin.setSingleStep(1.0)
         self._offset_spin.setValue(0.0)
-        self._offset_spin.setToolTip("Vertical offset between spectra, in displayed Y units.")
+        self._offset_spin.setToolTip(
+            "Vertical offset applied last, in displayed Y units. Raw data are unchanged."
+        )
         self._offset_spin.valueChanged.connect(self._redraw)
         self._offset_spin.editingFinished.connect(self._redraw)
         ctrl_lay.addWidget(QLabel("Waterfall offset"))
         ctrl_lay.addWidget(self._offset_spin)
+
+        self._measure_lbl = QLabel("Measurement: off")
+        self._measure_lbl.setFont(QFont("Helvetica", 9))
+        self._measure_lbl.setWordWrap(True)
+        self._measure_lbl.setToolTip(
+            "Crosshair measurements use the displayed trace, not the raw spectrum."
+        )
+        ctrl_lay.addWidget(self._measure_lbl)
+
+        self._measure_btn = _plain_button("Measure Δ")
+        self._measure_btn.setCheckable(True)
+        self._measure_btn.setToolTip(
+            "Enable crosshair measurement on displayed spectrum data."
+        )
+        self._measure_btn.toggled.connect(self._set_measure_mode)
+        ctrl_lay.addWidget(self._measure_btn)
+
+        self._copy_measure_btn = _plain_button("Copy measurement")
+        self._copy_measure_btn.clicked.connect(self._copy_measurement)
+        ctrl_lay.addWidget(self._copy_measure_btn)
+
+        self._clear_measure_btn = _plain_button("Clear measurement")
+        self._clear_measure_btn.clicked.connect(self._clear_measurement)
+        ctrl_lay.addWidget(self._clear_measure_btn)
 
         self._parameter_inputs.extend([
             self._channel_cb,
@@ -1098,6 +1545,10 @@ class SpecOverlayDialog(QDialog):
         lay.addLayout(row)
 
     def keyPressEvent(self, event) -> None:
+        if event.key() == Qt.Key_Escape and self._measure_enabled:
+            self._clear_measurement()
+            event.accept()
+            return
         if event.key() in (Qt.Key_Return, Qt.Key_Enter) and _focus_in_parameter_inputs(
             self.focusWidget(), self._parameter_inputs
         ):
@@ -1105,6 +1556,29 @@ class SpecOverlayDialog(QDialog):
             event.accept()
             return
         super().keyPressEvent(event)
+
+    def _savgol_validation_error(self) -> str | None:
+        _ref_entry, ref_spec = self._reference_for_channel(self._channel_cb.currentText())
+        n_points = int(len(ref_spec.x_array)) if ref_spec is not None else None
+        return _savgol_validation_message(
+            self._smoothing_cb.currentText(),
+            int(self._smooth_points_spin.value()),
+            int(self._savgol_order_spin.value()),
+            n_points,
+        )
+
+    def _refresh_formula(self) -> None:
+        if hasattr(self, "_formula_lbl"):
+            self._formula_lbl.setText(f"Display: {self._normalization_formula()}")
+
+    def _normalization_formula(self) -> str:
+        return _normalization_formula_text(
+            derivative=self._derivative_cb.currentText() == "dI/dV",
+            mode_label=self._normalize_cb.currentText(),
+            constant=float(self._norm_constant_spin.value()),
+            channel=self._norm_channel_cb.currentText(),
+            offset=float(self._offset_spin.value()),
+        )
 
     def _load(self) -> None:
         from probeflow.io.spectroscopy import read_spec_file
@@ -1140,6 +1614,7 @@ class SpecOverlayDialog(QDialog):
         self._norm_channel_cb.clear()
         self._norm_channel_cb.addItems(ordered)
         self._norm_channel_cb.blockSignals(False)
+        self._refresh_formula()
         self._redraw()
 
     def _display_options(self, vertical_offset: float = 0.0) -> SpectrumDisplayOptions:
@@ -1148,12 +1623,7 @@ class SpecOverlayDialog(QDialog):
             "Gaussian": "gaussian",
             "Savitzky-Golay": "savgol",
         }.get(self._smoothing_cb.currentText(), "none")
-        normalize = {
-            "Off": "none",
-            "Setpoint": "setpoint",
-            "Constant": "constant",
-            "Channel": "channel",
-        }.get(self._normalize_cb.currentText(), "none")
+        normalize = _normalize_mode(self._normalize_cb.currentText())
         outliers = {
             "Off": "none",
             "MAD": "mad",
@@ -1190,6 +1660,7 @@ class SpecOverlayDialog(QDialog):
                 "source_file": str(entry.path),
                 "spectrum_label": entry.stem,
                 "raw_points": int(len(spec.x_array)),
+                "setpoint_a": spec.metadata.get("setpoint_a"),
             },
         )
 
@@ -1248,7 +1719,14 @@ class SpecOverlayDialog(QDialog):
         return None
 
     def _redraw(self) -> None:
+        self._refresh_formula()
+        error = self._savgol_validation_error()
+        if error is not None:
+            self._status.setText(error)
+            return
         self._displayed_traces = []
+        self._displayed_trace_axes = []
+        self._reset_measurement_state()
         if self._canvas is not None:
             self._canvas_lay.removeWidget(self._canvas)
             self._canvas.setParent(None)
@@ -1278,6 +1756,7 @@ class SpecOverlayDialog(QDialog):
                 self._status.setText(f"Plot error: {exc}")
                 continue
             self._displayed_traces.append(displayed)
+            self._displayed_trace_axes.append((displayed, ax))
             units.append(displayed.y_unit)
             ax.plot(
                 displayed.x_display,
@@ -1309,6 +1788,7 @@ class SpecOverlayDialog(QDialog):
         self._canvas = canvas
         self._fig = fig
         canvas.mpl_connect("motion_notify_event", self._on_cursor_motion)
+        canvas.mpl_connect("button_press_event", self._on_canvas_click)
 
     def _current_displayed_spectra(self) -> list[DisplayedSpectrum]:
         channel = self._channel_cb.currentText()
@@ -1345,6 +1825,39 @@ class SpecOverlayDialog(QDialog):
 
     def _on_cursor_motion(self, event) -> None:
         SpecViewerDialog._on_cursor_motion(self, event)
+
+    def _on_canvas_click(self, event) -> None:
+        SpecViewerDialog._on_canvas_click(self, event)
+
+    def _set_measure_mode(self, checked: bool) -> None:
+        SpecViewerDialog._set_measure_mode(self, checked)
+
+    def _copy_measurement(self) -> None:
+        SpecViewerDialog._copy_measurement(self)
+
+    def _clear_measurement(self) -> None:
+        SpecViewerDialog._clear_measurement(self)
+
+    def _reset_measurement_state(self) -> None:
+        SpecViewerDialog._reset_measurement_state(self)
+
+    def _traces_for_axis(self, axis) -> list[DisplayedSpectrum]:
+        return SpecViewerDialog._traces_for_axis(self, axis)
+
+    def _axis_for_point(self, point: SpectrumMeasurementPoint):
+        return SpecViewerDialog._axis_for_point(self, point)
+
+    def _update_crosshair(self, event) -> None:
+        SpecViewerDialog._update_crosshair(self, event)
+
+    def _draw_measurement_artists(self) -> None:
+        SpecViewerDialog._draw_measurement_artists(self)
+
+    def _remove_crosshair_artists(self) -> None:
+        SpecViewerDialog._remove_crosshair_artists(self)
+
+    def _remove_measurement_artists(self) -> None:
+        SpecViewerDialog._remove_measurement_artists(self)
 
     def _copy_csv(self) -> None:
         text = displayed_spectra_to_clipboard_text(self._current_displayed_spectra())

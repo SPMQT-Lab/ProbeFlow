@@ -14,6 +14,15 @@ from probeflow.spectroscopy.models import (
     SpectrumDisplayOptions,
     SpectrumTrace,
 )
+from probeflow.spectroscopy.measurement import (
+    SpectrumDeltaMeasurement,
+    SpectrumMeasurementPoint,
+    format_measurement_summary,
+    measure_delta,
+    measurement_to_tsv,
+    nearest_finite_point,
+    nearest_point_across_traces,
+)
 from probeflow.spectroscopy.transforms import (
     apply_normalization,
     apply_outlier_mask,
@@ -25,7 +34,9 @@ from probeflow.spectroscopy.transforms import (
 
 __all__ = [
     "DisplayedSpectrum",
+    "SpectrumDeltaMeasurement",
     "SpectrumDisplayOptions",
+    "SpectrumMeasurementPoint",
     "SpectrumTrace",
     "apply_normalization",
     "apply_outlier_mask",
@@ -38,6 +49,11 @@ __all__ = [
     "export_displayed_spectra_csv",
     "export_displayed_spectra_json",
     "export_displayed_spectra_txt",
+    "format_measurement_summary",
     "make_displayed_spectrum",
+    "measure_delta",
+    "measurement_to_tsv",
+    "nearest_finite_point",
+    "nearest_point_across_traces",
     "numerical_derivative",
 ]

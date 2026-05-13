@@ -1218,6 +1218,145 @@ class TestSpecViewerRawData:
         dlg.close()
         dlg.deleteLater()
 
+    def test_viewer_shortens_long_filename_but_keeps_full_tooltip(self, qapp, monkeypatch):
+        from probeflow.gui import SpecViewerDialog, THEMES
+
+        monkeypatch.setattr(SpecViewerDialog, "_load", lambda self: None)
+        path = Path("/tmp/createc_vert_didz_extremely_long_sample_identifier_image_state.VERT")
+        dlg = SpecViewerDialog(VertFile(path=path, stem=path.stem), THEMES["dark"])
+
+        assert dlg._file_lbl.text().startswith("createc_vert")
+        assert "..." in dlg._file_lbl.text()
+        assert dlg._file_lbl.text().endswith("_image_state.VERT")
+        assert len(dlg._file_lbl.text()) < len(path.name)
+        assert dlg._file_lbl.toolTip() == str(path)
+
+        dlg.close()
+        dlg.deleteLater()
+
+    def test_viewer_rejects_invalid_savgol_without_replacing_valid_plot(
+        self, qapp, monkeypatch
+    ):
+        from PySide6.QtWidgets import QCheckBox
+        from probeflow.gui import SpecViewerDialog, THEMES
+        from probeflow.io.spectroscopy import SpecData
+
+        monkeypatch.setattr(SpecViewerDialog, "_load", lambda self: None)
+        entry = VertFile(path=TESTDATA / "spectrum_time_trace_5k.VERT", stem="spec")
+        dlg = SpecViewerDialog(entry, THEMES["dark"])
+        x = np.linspace(-1.0, 1.0, 9)
+        dlg._spec = SpecData(
+            header={},
+            channels={"I": x * x},
+            x_array=x,
+            x_label="Bias (V)",
+            x_unit="V",
+            y_units={"I": "A"},
+            position=(0.0, 0.0),
+            metadata={"n_points": 9, "sweep_type": "bias_sweep", "setpoint_a": 2.0},
+            channel_order=["I"],
+            default_channels=["I"],
+        )
+        cb = QCheckBox("I")
+        cb.setChecked(True)
+        dlg._checkboxes = {"I": cb}
+        dlg._smoothing_cb.setCurrentText("Savitzky-Golay")
+        dlg._smooth_points_spin.setValue(3)
+        dlg._savgol_order_spin.setValue(2)
+        dlg._redraw()
+        assert dlg._displayed_traces
+        canvas = dlg._canvas
+        valid_y = dlg._displayed_traces[0].y_display.copy()
+
+        dlg._smooth_points_spin.setValue(4)
+
+        assert dlg._canvas is canvas
+        np.testing.assert_allclose(dlg._displayed_traces[0].y_display, valid_y)
+        assert "window must be odd" in dlg._status.text()
+
+        dlg._smooth_points_spin.setValue(5)
+        dlg._savgol_order_spin.setValue(5)
+        assert "polynomial order must be smaller" in dlg._status.text()
+
+        dlg._savgol_order_spin.setValue(2)
+        dlg._smooth_points_spin.setValue(99)
+        assert "must not exceed available points" in dlg._status.text()
+
+        dlg.close()
+        dlg.deleteLater()
+
+    def test_viewer_normalization_formula_is_visible(self, qapp, monkeypatch):
+        from probeflow.gui import SpecViewerDialog, THEMES
+
+        monkeypatch.setattr(SpecViewerDialog, "_load", lambda self: None)
+        entry = VertFile(path=TESTDATA / "spectrum_time_trace_5k.VERT", stem="spec")
+        dlg = SpecViewerDialog(entry, THEMES["dark"])
+
+        dlg._normalize_cb.setCurrentText("Max abs")
+        assert dlg._formula_lbl.text() == "Display: y / max(abs(y))"
+        dlg._normalize_cb.setCurrentText("Constant")
+        dlg._norm_constant_spin.setValue(2.0)
+        assert dlg._formula_lbl.text() == "Display: y / 2"
+        dlg._normalize_cb.setCurrentText("Setpoint")
+        assert dlg._formula_lbl.text() == "Display: y / setpoint"
+        assert "y_input / constant" in dlg._norm_constant_spin.toolTip()
+        assert "y_input / selected_channel" in dlg._norm_channel_cb.toolTip()
+
+        dlg.close()
+        dlg.deleteLater()
+
+    def test_viewer_crosshair_measures_displayed_trace(self, qapp, monkeypatch):
+        from PySide6.QtWidgets import QCheckBox
+        from probeflow.gui import SpecViewerDialog, THEMES
+        from probeflow.io.spectroscopy import SpecData
+
+        monkeypatch.setattr(SpecViewerDialog, "_load", lambda self: None)
+        entry = VertFile(path=TESTDATA / "spectrum_time_trace_5k.VERT", stem="spec")
+        dlg = SpecViewerDialog(entry, THEMES["dark"])
+        x = np.array([0.0, 1.0, 2.0, 3.0])
+        dlg._spec = SpecData(
+            header={},
+            channels={"I": np.array([0.0, 2.0, 4.0, 6.0])},
+            x_array=x,
+            x_label="Bias (V)",
+            x_unit="V",
+            y_units={"I": "A"},
+            position=(0.0, 0.0),
+            metadata={"n_points": 4, "sweep_type": "bias_sweep", "setpoint_a": 2.0},
+            channel_order=["I"],
+            default_channels=["I"],
+        )
+        cb = QCheckBox("I")
+        cb.setChecked(True)
+        dlg._checkboxes = {"I": cb}
+        dlg._normalize_cb.setCurrentText("Constant")
+        dlg._norm_constant_spin.setValue(2.0)
+        dlg._redraw()
+        dlg._set_measure_mode(True)
+        axis = dlg._fig.axes[0]
+
+        class Event:
+            inaxes = axis
+            button = 1
+
+            def __init__(self, xdata, ydata):
+                self.xdata = xdata
+                self.ydata = ydata
+
+        dlg._on_canvas_click(Event(1.0, 1.0))
+        dlg._on_canvas_click(Event(3.0, 3.0))
+
+        assert dlg._measurement is not None
+        assert dlg._measurement.dx == pytest.approx(2.0)
+        assert dlg._measurement.dy == pytest.approx(2.0)
+        assert dlg._measurement.slope == pytest.approx(1.0)
+        assert "Displayed trace measurement" in dlg._measure_lbl.text()
+        dlg._copy_measurement()
+        assert "trace\tx1\ty1" in qapp.clipboard().text()
+
+        dlg.close()
+        dlg.deleteLater()
+
     def test_overlay_dialog_exports_long_csv(self, qapp):
         from PySide6.QtWidgets import QPushButton
         from probeflow.gui import SpecOverlayDialog, THEMES

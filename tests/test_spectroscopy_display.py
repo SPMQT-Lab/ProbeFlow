@@ -13,13 +13,14 @@ from probeflow.spectroscopy.export import (
 )
 from probeflow.spectroscopy.models import SpectrumDisplayOptions, SpectrumTrace
 from probeflow.spectroscopy.transforms import (
+    apply_normalization,
     apply_outlier_mask,
     apply_smoothing,
     make_displayed_spectrum,
 )
 
 
-def _trace(y=None) -> SpectrumTrace:
+def _trace(y=None, *, metadata=None) -> SpectrumTrace:
     x = np.linspace(-1.0, 1.0, 9)
     if y is None:
         y = x + 2.0
@@ -34,6 +35,7 @@ def _trace(y=None) -> SpectrumTrace:
         y_label="Current",
         x_unit="V",
         y_unit="A",
+        metadata=metadata or {},
     )
 
 
@@ -100,6 +102,49 @@ def test_constant_normalization_and_vertical_offset():
     assert displayed.options.vertical_offset == -1.0
 
 
+def test_zero_constant_normalization_rejected():
+    with pytest.raises(ValueError, match="finite non-zero constant"):
+        apply_normalization(np.array([1.0, 2.0]), mode="constant", constant=0.0)
+
+
+def test_setpoint_normalization_uses_metadata_value():
+    trace = _trace(np.array([2.0, 4.0, 6.0]), metadata={"setpoint_a": 2.0})
+    trace = SpectrumTrace(
+        **{**trace.__dict__, "x_raw": np.array([0.0, 1.0, 2.0])}
+    )
+
+    displayed = make_displayed_spectrum(
+        trace,
+        SpectrumDisplayOptions(normalize_mode="setpoint"),
+    )
+
+    np.testing.assert_allclose(displayed.y_display, [1.0, 2.0, 3.0])
+    assert "setpoint" in displayed.y_label
+    assert displayed.metadata["display_pipeline"][3] == "normalization=setpoint"
+
+
+def test_setpoint_normalization_fails_without_metadata_value():
+    with pytest.raises(ValueError, match="setpoint"):
+        make_displayed_spectrum(_trace(), SpectrumDisplayOptions(normalize_mode="setpoint"))
+
+
+def test_max_abs_normalization_uses_largest_absolute_value_without_mutating_raw():
+    y = np.array([-2.0, 1.0, 4.0])
+    before = y.copy()
+    trace = _trace(y)
+    trace = SpectrumTrace(
+        **{**trace.__dict__, "x_raw": np.array([0.0, 1.0, 2.0])}
+    )
+
+    displayed = make_displayed_spectrum(
+        trace,
+        SpectrumDisplayOptions(normalize_mode="max_abs"),
+    )
+
+    np.testing.assert_allclose(displayed.y_display, [-0.5, 0.25, 1.0])
+    np.testing.assert_array_equal(y, before)
+
+
 def test_channel_normalization_uses_matching_denominator():
     trace = _trace(np.array([2.0, 4.0, 8.0]))
     trace = SpectrumTrace(
@@ -114,6 +159,20 @@ def test_channel_normalization_uses_matching_denominator():
     )
 
     np.testing.assert_allclose(displayed.y_display, [1.0, 2.0, 2.0])
+
+
+def test_channel_normalization_rejects_incompatible_length():
+    trace = _trace(np.array([2.0, 4.0, 8.0]))
+    trace = SpectrumTrace(
+        **{**trace.__dict__, "x_raw": np.array([0.0, 1.0, 2.0])}
+    )
+
+    with pytest.raises(ValueError, match="match the selected trace length"):
+        make_displayed_spectrum(
+            trace,
+            SpectrumDisplayOptions(normalize_mode="channel", normalize_channel="denominator"),
+            channel_lookup={"denominator": np.array([2.0, 2.0])},
+        )
 
 
 def test_didv_trace_preserves_length_and_units():

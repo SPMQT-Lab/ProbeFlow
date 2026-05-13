@@ -261,6 +261,7 @@ def _metadata_from_vert_report(
         None,
     )
     bias_mv = _f(bias_raw)
+    setpoint_a = _createc_setpoint_a(hdr)
     comment = hdr.get("Titel", "").strip() or None
     measurement = createc_vert_measurement_metadata(
         report,
@@ -278,6 +279,7 @@ def _metadata_from_vert_report(
     metadata: dict[str, Any] = {
         "filename": report.path.name,
         "bias_mv": float(bias_mv) if bias_mv is not None else None,
+        "setpoint_a": setpoint_a,
         "spec_freq_hz": _f(find_hdr(hdr, "SpecFreq", "1000"), 1000.0),
         "gain_pre_exp": float(_f(find_hdr(hdr, "GainPre 10^", "9"), 9.0)),
         "fb_log": hdr.get("FBLog", "0").strip() == "1",
@@ -315,6 +317,17 @@ def _metadata_from_vert_report(
         units,
         channel_info,
     )
+
+
+def _createc_setpoint_a(hdr: dict[str, str]) -> float | None:
+    for key in ("Current[A]", "SetPoint"):
+        value = _f(find_hdr(hdr, key, None))
+        if value is not None and value > 0:
+            return float(value)
+    fb_log_pA = _f(find_hdr(hdr, "FBLogI", None))
+    if fb_log_pA is not None and fb_log_pA > 0:
+        return float(fb_log_pA) * 1e-12
+    return None
 
 
 def _scaled_channels_from_vert_report(

@@ -69,6 +69,7 @@ def apply_normalization(
     *,
     mode: str = "none",
     constant: float | None = None,
+    setpoint: float | None = None,
     channel: str | None = None,
     channel_lookup: Mapping[str, np.ndarray] | None = None,
 ) -> np.ndarray:
@@ -78,16 +79,29 @@ def apply_normalization(
     if mode in {"none", "off"}:
         return arr
 
+    finite = arr[np.isfinite(arr)]
+
     if mode == "setpoint":
-        finite = arr[np.isfinite(arr) & (arr != 0)]
-        if finite.size == 0:
-            raise ValueError("setpoint normalization requires a finite non-zero value")
-        return arr / float(finite[0])
+        try:
+            setpoint_value = float(setpoint) if setpoint is not None else np.nan
+        except (TypeError, ValueError):
+            setpoint_value = np.nan
+        if not np.isfinite(setpoint_value) or setpoint_value == 0.0:
+            raise ValueError("setpoint normalization requires a finite non-zero setpoint")
+        return arr / setpoint_value
 
     if mode == "constant":
         if constant is None or not np.isfinite(constant) or float(constant) == 0.0:
             raise ValueError("constant normalization requires a finite non-zero constant")
         return arr / float(constant)
+
+    if mode in {"max_abs", "maxabs", "max"}:
+        if finite.size == 0:
+            raise ValueError("max-absolute normalization requires at least one finite value")
+        scale = float(np.nanmax(np.abs(finite)))
+        if scale == 0.0:
+            raise ValueError("max-absolute normalization requires a non-zero maximum")
+        return arr / scale
 
     if mode == "channel":
         if not channel:
@@ -169,7 +183,12 @@ def make_displayed_spectrum(
     *,
     channel_lookup: Mapping[str, np.ndarray] | None = None,
 ) -> DisplayedSpectrum:
-    """Build a non-mutating displayed-spectrum view from raw trace data."""
+    """Build a non-mutating displayed view.
+
+    Operation order is:
+    raw x/y copy -> smoothing -> derivative -> normalization -> outlier mask
+    -> vertical offset -> displayed/exported trace.
+    """
     opts = options or SpectrumDisplayOptions()
     x = np.asarray(trace.x_raw, dtype=np.float64).copy()
     y = np.asarray(trace.y_raw, dtype=np.float64).copy()
@@ -197,11 +216,12 @@ def make_displayed_spectrum(
         y,
         mode=opts.normalize_mode,
         constant=opts.normalize_constant,
+        setpoint=_metadata_float(trace.metadata, "setpoint_a", "setpoint"),
         channel=opts.normalize_channel,
         channel_lookup=channel_lookup,
     )
     if (opts.normalize_mode or "none").lower() not in {"none", "off"}:
-        y_label = f"{y_label} / {opts.normalize_mode}"
+        y_label = f"{y_label} ({_normalization_description(opts)})"
         y_unit = "relative"
 
     x_display, y_display, keep = apply_outlier_mask(
@@ -218,6 +238,7 @@ def make_displayed_spectrum(
         "raw_points": raw_points,
         "displayed_points": int(y_display.size),
         "excluded_indices": np.flatnonzero(~keep).astype(int).tolist(),
+        "display_pipeline": _display_pipeline(opts),
     })
 
     return DisplayedSpectrum(
@@ -257,6 +278,44 @@ def _robust_scores(values: np.ndarray) -> np.ndarray:
     scores[:] = 0.0
     scores[(dev > 0) | ~finite] = np.inf
     return scores
+
+
+def _normalization_description(opts: SpectrumDisplayOptions) -> str:
+    mode = (opts.normalize_mode or "none").strip().lower()
+    if mode == "setpoint":
+        return "divided by setpoint"
+    if mode == "constant":
+        return f"divided by constant {opts.normalize_constant:g}"
+    if mode == "channel":
+        return f"divided by channel {opts.normalize_channel}"
+    if mode in {"max_abs", "maxabs", "max"}:
+        return "divided by max |y|"
+    return f"normalized by {mode}"
+
+
+def _display_pipeline(opts: SpectrumDisplayOptions) -> list[str]:
+    return [
+        "copy raw x/y arrays",
+        f"smoothing={opts.smoothing_mode}",
+        f"derivative={'on' if opts.derivative else 'off'}",
+        f"normalization={opts.normalize_mode}",
+        f"outlier_mask={opts.outlier_mode}",
+        f"vertical_offset={opts.vertical_offset:g}",
+    ]
+
+
+def _metadata_float(metadata: Mapping[str, object], *keys: str) -> float | None:
+    for key in keys:
+        value = metadata.get(key)
+        if value is None:
+            continue
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            continue
+        if np.isfinite(number):
+            return number
+    return None
 
 
 def _looks_like_current(channel: str, label: str) -> bool:
