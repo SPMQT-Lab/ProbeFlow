@@ -12,7 +12,8 @@ from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFileDialog,
     QGridLayout, QGroupBox, QHBoxLayout, QLabel, QPushButton, QScrollArea,
-    QSpinBox, QSplitter, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QSizePolicy, QSpinBox, QSplitter, QTableWidget, QTableWidgetItem,
+    QVBoxLayout, QWidget,
 )
 
 from probeflow.gui.models import VertFile
@@ -28,6 +29,25 @@ from probeflow.spectroscopy.models import (
     SpectrumTrace,
 )
 from probeflow.spectroscopy.transforms import make_displayed_spectrum
+
+
+def _plain_button(text: str) -> QPushButton:
+    button = QPushButton(text)
+    button.setDefault(False)
+    button.setAutoDefault(False)
+    return button
+
+
+def _focus_in_parameter_inputs(focus: QWidget | None, inputs: list[QWidget]) -> bool:
+    if focus is None:
+        return False
+    for widget in inputs:
+        if focus is widget:
+            return True
+        line_edit = widget.lineEdit() if hasattr(widget, "lineEdit") else None
+        if line_edit is not None and focus is line_edit:
+            return True
+    return False
 
 
 class SpecViewerDialog(QDialog):
@@ -57,6 +77,7 @@ class SpecViewerDialog(QDialog):
         self._canvas = None
         self._fig = None
         self._displayed_traces: list[DisplayedSpectrum] = []
+        self._parameter_inputs: list[QWidget] = []
         # Unit-override choice per base SI unit. "Auto" means use
         # choose_display_unit; otherwise lookup_unit_scale picks a fixed scale.
         self._unit_choice: dict[str, str] = {"m": "Auto", "A": "Auto", "V": "Auto"}
@@ -152,12 +173,14 @@ class SpecViewerDialog(QDialog):
         self._smooth_points_spin.setValue(7)
         self._smooth_points_spin.setFont(QFont("Helvetica", 9))
         self._smooth_points_spin.valueChanged.connect(self._on_processing_changed)
+        self._smooth_points_spin.editingFinished.connect(self._on_processing_changed)
 
         self._savgol_order_spin = QSpinBox()
         self._savgol_order_spin.setRange(0, 12)
         self._savgol_order_spin.setValue(2)
         self._savgol_order_spin.setFont(QFont("Helvetica", 9))
         self._savgol_order_spin.valueChanged.connect(self._on_processing_changed)
+        self._savgol_order_spin.editingFinished.connect(self._on_processing_changed)
 
         self._derivative_cb = QComboBox()
         self._derivative_cb.addItems(["Off", "dI/dV"])
@@ -176,6 +199,7 @@ class SpecViewerDialog(QDialog):
         self._norm_constant_spin.setValue(1.0)
         self._norm_constant_spin.setFont(QFont("Helvetica", 9))
         self._norm_constant_spin.valueChanged.connect(self._on_processing_changed)
+        self._norm_constant_spin.editingFinished.connect(self._on_processing_changed)
 
         self._norm_channel_cb = QComboBox()
         self._norm_channel_cb.setFont(QFont("Helvetica", 9))
@@ -193,6 +217,7 @@ class SpecViewerDialog(QDialog):
         self._outlier_threshold_spin.setValue(6.0)
         self._outlier_threshold_spin.setFont(QFont("Helvetica", 9))
         self._outlier_threshold_spin.valueChanged.connect(self._on_processing_changed)
+        self._outlier_threshold_spin.editingFinished.connect(self._on_processing_changed)
 
         self._plot_mode_cb = QComboBox()
         self._plot_mode_cb.addItems(["Separate", "Overlay", "Waterfall"])
@@ -207,6 +232,22 @@ class SpecViewerDialog(QDialog):
         self._offset_spin.setFont(QFont("Helvetica", 9))
         self._offset_spin.setToolTip("Vertical offset for Waterfall mode, in displayed Y units.")
         self._offset_spin.valueChanged.connect(self._redraw)
+        self._offset_spin.editingFinished.connect(self._redraw)
+
+        self._parameter_inputs.extend([
+            self._signal_cb,
+            self._smoothing_cb,
+            self._smooth_points_spin,
+            self._savgol_order_spin,
+            self._derivative_cb,
+            self._normalize_cb,
+            self._norm_constant_spin,
+            self._norm_channel_cb,
+            self._outlier_cb,
+            self._outlier_threshold_spin,
+            self._plot_mode_cb,
+            self._offset_spin,
+        ])
 
         analysis_lay.addWidget(QLabel("File:"), 0, 0)
         analysis_lay.addWidget(self._file_lbl, 0, 1)
@@ -242,17 +283,24 @@ class SpecViewerDialog(QDialog):
         left_scroll = QScrollArea()
         left_scroll.setWidgetResizable(True)
         left_scroll.setWidget(self._channels_panel)
-        left_scroll.setMinimumWidth(200)
-        left_scroll.setMaximumWidth(300)
+        left_scroll.setMinimumWidth(320)
+        left_scroll.setMaximumWidth(420)
+        left_scroll.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+        self._left_scroll = left_scroll
         splitter.addWidget(left_scroll)
 
         # Right panel: plot canvas.
         self._canvas_widget = QWidget()
+        self._canvas_widget.setMinimumWidth(520)
         self._canvas_lay = QVBoxLayout(self._canvas_widget)
         self._canvas_lay.setContentsMargins(0, 0, 0, 0)
         splitter.addWidget(self._canvas_widget)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
+        splitter.setCollapsible(0, False)
+        splitter.setCollapsible(1, False)
+        splitter.setSizes([340, 760])
+        self._splitter = splitter
         lay.addWidget(splitter, 1)
 
         self._status = QLabel("Loading…")
@@ -264,36 +312,36 @@ class SpecViewerDialog(QDialog):
         lay.addWidget(self._cursor_lbl)
 
         btn_row = QHBoxLayout()
-        self._raw_btn = QPushButton("Show raw data")
+        self._raw_btn = _plain_button("Show raw data")
         self._raw_btn.setFixedWidth(140)
         self._raw_btn.clicked.connect(self._show_raw_data)
         btn_row.addWidget(self._raw_btn)
 
-        self._export_csv_btn = QPushButton("Export CSV…")
+        self._export_csv_btn = _plain_button("Export CSV…")
         self._export_csv_btn.setFixedWidth(120)
         self._export_csv_btn.setToolTip(
             "Save the spectrum as a CSV file with one column per selected channel.")
         self._export_csv_btn.clicked.connect(self._export_csv)
         btn_row.addWidget(self._export_csv_btn)
 
-        self._copy_csv_btn = QPushButton("Copy data")
+        self._copy_csv_btn = _plain_button("Copy data")
         self._copy_csv_btn.setFixedWidth(100)
         self._copy_csv_btn.setToolTip(
             "Copy the currently displayed spectrum data as CSV text.")
         self._copy_csv_btn.clicked.connect(self._copy_csv)
         btn_row.addWidget(self._copy_csv_btn)
 
-        self._export_json_btn = QPushButton("Export JSON…")
+        self._export_json_btn = _plain_button("Export JSON…")
         self._export_json_btn.setFixedWidth(120)
         self._export_json_btn.clicked.connect(self._export_json)
         btn_row.addWidget(self._export_json_btn)
 
-        self._export_txt_btn = QPushButton("Export TXT…")
+        self._export_txt_btn = _plain_button("Export TXT…")
         self._export_txt_btn.setFixedWidth(110)
         self._export_txt_btn.clicked.connect(self._export_txt)
         btn_row.addWidget(self._export_txt_btn)
 
-        self._export_grace_btn = QPushButton("Export xmgrace…")
+        self._export_grace_btn = _plain_button("Export xmgrace…")
         self._export_grace_btn.setFixedWidth(160)
         self._export_grace_btn.setToolTip(
             "Render via xmgrace (Helvetica default). "
@@ -303,11 +351,20 @@ class SpecViewerDialog(QDialog):
         btn_row.addWidget(self._export_grace_btn)
 
         btn_row.addStretch()
-        close_btn = QPushButton("Close")
+        close_btn = _plain_button("Close")
         close_btn.setFixedWidth(80)
         close_btn.clicked.connect(self.accept)
         btn_row.addWidget(close_btn)
         lay.addLayout(btn_row)
+
+    def keyPressEvent(self, event) -> None:
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter) and _focus_in_parameter_inputs(
+            self.focusWidget(), self._parameter_inputs
+        ):
+            self._on_processing_changed()
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     # ── Data load + channel list population ─────────────────────────────
 
@@ -812,7 +869,7 @@ class SpecViewerDialog(QDialog):
         table = self._raw_data_table()
         v.addWidget(table)
 
-        close_btn = QPushButton("Close")
+        close_btn = _plain_button("Close")
         close_btn.clicked.connect(dlg.accept)
         btn_row = QHBoxLayout()
         btn_row.addStretch()
@@ -861,14 +918,15 @@ class SpecOverlayDialog(QDialog):
     def __init__(self, entries: list[VertFile], t: dict, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Spectra overlay")
-        self.setMinimumSize(900, 560)
-        self.resize(1050, 640)
+        self.setMinimumSize(1050, 620)
+        self.resize(1160, 700)
         self._entries = list(entries)
         self._t = t
         self._specs = []
         self._canvas = None
         self._fig = None
         self._displayed_traces: list[DisplayedSpectrum] = []
+        self._parameter_inputs: list[QWidget] = []
         self._build()
         self._load()
 
@@ -885,6 +943,10 @@ class SpecOverlayDialog(QDialog):
         body = QSplitter(Qt.Horizontal)
 
         controls = QWidget()
+        controls.setMinimumWidth(300)
+        controls.setMaximumWidth(400)
+        controls.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+        self._controls_panel = controls
         ctrl_lay = QVBoxLayout(controls)
         ctrl_lay.setContentsMargins(6, 6, 6, 6)
         ctrl_lay.setSpacing(5)
@@ -910,6 +972,7 @@ class SpecOverlayDialog(QDialog):
         self._smooth_points_spin.setRange(1, 9999)
         self._smooth_points_spin.setValue(7)
         self._smooth_points_spin.valueChanged.connect(self._redraw)
+        self._smooth_points_spin.editingFinished.connect(self._redraw)
         ctrl_lay.addWidget(QLabel("Window/points"))
         ctrl_lay.addWidget(self._smooth_points_spin)
 
@@ -917,6 +980,7 @@ class SpecOverlayDialog(QDialog):
         self._savgol_order_spin.setRange(0, 12)
         self._savgol_order_spin.setValue(2)
         self._savgol_order_spin.valueChanged.connect(self._redraw)
+        self._savgol_order_spin.editingFinished.connect(self._redraw)
         ctrl_lay.addWidget(QLabel("Poly order"))
         ctrl_lay.addWidget(self._savgol_order_spin)
 
@@ -938,6 +1002,7 @@ class SpecOverlayDialog(QDialog):
         self._norm_constant_spin.setSingleStep(1.0)
         self._norm_constant_spin.setValue(1.0)
         self._norm_constant_spin.valueChanged.connect(self._redraw)
+        self._norm_constant_spin.editingFinished.connect(self._redraw)
         ctrl_lay.addWidget(QLabel("Constant"))
         ctrl_lay.addWidget(self._norm_constant_spin)
 
@@ -958,6 +1023,7 @@ class SpecOverlayDialog(QDialog):
         self._outlier_threshold_spin.setSingleStep(0.5)
         self._outlier_threshold_spin.setValue(6.0)
         self._outlier_threshold_spin.valueChanged.connect(self._redraw)
+        self._outlier_threshold_spin.editingFinished.connect(self._redraw)
         ctrl_lay.addWidget(QLabel("Threshold"))
         ctrl_lay.addWidget(self._outlier_threshold_spin)
 
@@ -968,22 +1034,37 @@ class SpecOverlayDialog(QDialog):
         self._offset_spin.setValue(0.0)
         self._offset_spin.setToolTip("Vertical offset between spectra, in displayed Y units.")
         self._offset_spin.valueChanged.connect(self._redraw)
+        self._offset_spin.editingFinished.connect(self._redraw)
         ctrl_lay.addWidget(QLabel("Waterfall offset"))
         ctrl_lay.addWidget(self._offset_spin)
 
-        copy_btn = QPushButton("Copy data")
+        self._parameter_inputs.extend([
+            self._channel_cb,
+            self._smoothing_cb,
+            self._smooth_points_spin,
+            self._savgol_order_spin,
+            self._derivative_cb,
+            self._normalize_cb,
+            self._norm_constant_spin,
+            self._norm_channel_cb,
+            self._outlier_cb,
+            self._outlier_threshold_spin,
+            self._offset_spin,
+        ])
+
+        copy_btn = _plain_button("Copy data")
         copy_btn.clicked.connect(self._copy_csv)
         ctrl_lay.addWidget(copy_btn)
 
-        export_btn = QPushButton("Export CSV…")
+        export_btn = _plain_button("Export CSV…")
         export_btn.clicked.connect(self._export_csv)
         ctrl_lay.addWidget(export_btn)
 
-        export_json_btn = QPushButton("Export JSON…")
+        export_json_btn = _plain_button("Export JSON…")
         export_json_btn.clicked.connect(self._export_json)
         ctrl_lay.addWidget(export_json_btn)
 
-        export_txt_btn = QPushButton("Export TXT…")
+        export_txt_btn = _plain_button("Export TXT…")
         export_txt_btn.clicked.connect(self._export_txt)
         ctrl_lay.addWidget(export_txt_btn)
 
@@ -991,11 +1072,16 @@ class SpecOverlayDialog(QDialog):
         body.addWidget(controls)
 
         self._canvas_widget = QWidget()
+        self._canvas_widget.setMinimumWidth(560)
         self._canvas_lay = QVBoxLayout(self._canvas_widget)
         self._canvas_lay.setContentsMargins(0, 0, 0, 0)
         body.addWidget(self._canvas_widget)
         body.setStretchFactor(0, 0)
         body.setStretchFactor(1, 1)
+        body.setCollapsible(0, False)
+        body.setCollapsible(1, False)
+        body.setSizes([320, 840])
+        self._splitter = body
         lay.addWidget(body, 1)
 
         self._status = QLabel("")
@@ -1006,10 +1092,19 @@ class SpecOverlayDialog(QDialog):
 
         row = QHBoxLayout()
         row.addStretch(1)
-        close_btn = QPushButton("Close")
+        close_btn = _plain_button("Close")
         close_btn.clicked.connect(self.accept)
         row.addWidget(close_btn)
         lay.addLayout(row)
+
+    def keyPressEvent(self, event) -> None:
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter) and _focus_in_parameter_inputs(
+            self.focusWidget(), self._parameter_inputs
+        ):
+            self._redraw()
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     def _load(self) -> None:
         from probeflow.io.spectroscopy import read_spec_file
@@ -1146,6 +1241,10 @@ class SpecOverlayDialog(QDialog):
             return "x/y length mismatch"
         if len(spec.x_array) == 0:
             return "empty x-axis"
+        if len(spec.x_array) != len(ref_spec.x_array):
+            return "x-axis length differs from reference"
+        if not np.allclose(spec.x_array, ref_spec.x_array, rtol=1e-7, atol=1e-12, equal_nan=True):
+            return "x-axis values differ from reference"
         return None
 
     def _redraw(self) -> None:

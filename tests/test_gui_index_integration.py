@@ -1186,7 +1186,40 @@ class TestSpecViewerRawData:
         dlg.close()
         dlg.deleteLater()
 
+    def test_viewer_parameter_enter_does_not_target_export_buttons(self, qapp, monkeypatch):
+        from PySide6.QtCore import QEvent, Qt
+        from PySide6.QtGui import QKeyEvent
+        from PySide6.QtWidgets import QPushButton
+        from probeflow.gui import SpecViewerDialog, THEMES
+
+        monkeypatch.setattr(SpecViewerDialog, "_load", lambda self: None)
+        entry = VertFile(path=TESTDATA / "spectrum_time_trace_5k.VERT", stem="spec")
+        dlg = SpecViewerDialog(entry, THEMES["dark"])
+        dlg.show()
+        dlg._smooth_points_spin.setFocus(Qt.OtherFocusReason)
+        qapp.processEvents()
+
+        calls = []
+
+        def refresh():
+            calls.append("refresh")
+
+        dlg._on_processing_changed = refresh
+        event = QKeyEvent(QEvent.KeyPress, Qt.Key_Return, Qt.NoModifier)
+
+        dlg.keyPressEvent(event)
+
+        assert calls == ["refresh"]
+        assert all(not button.autoDefault() for button in dlg.findChildren(QPushButton))
+        assert all(not button.isDefault() for button in dlg.findChildren(QPushButton))
+        assert dlg._left_scroll.minimumWidth() >= 320
+        assert dlg._canvas_widget.minimumWidth() >= 520
+
+        dlg.close()
+        dlg.deleteLater()
+
     def test_overlay_dialog_exports_long_csv(self, qapp):
+        from PySide6.QtWidgets import QPushButton
         from probeflow.gui import SpecOverlayDialog, THEMES
 
         entries = [
@@ -1201,6 +1234,9 @@ class TestSpecViewerRawData:
         assert "source_file,spectrum_id,trace_label" in text
         assert ",a,a I," in text
         assert ",b,b I," in text
+        assert all(not button.autoDefault() for button in dlg.findChildren(QPushButton))
+        assert dlg._controls_panel.minimumWidth() >= 300
+        assert dlg._canvas_widget.minimumWidth() >= 560
 
         dlg.close()
         dlg.deleteLater()
@@ -1221,6 +1257,48 @@ class TestSpecViewerRawData:
         assert displayed[0].spectrum_id == "time"
         assert "bias" not in text
         assert "Skipped 1 spectra" in dlg._status.text()
+
+        dlg.close()
+        dlg.deleteLater()
+
+    def test_overlay_dialog_skips_matching_labels_with_different_x_values(
+        self, qapp, monkeypatch
+    ):
+        from probeflow.gui import SpecOverlayDialog, THEMES
+        from probeflow.io.spectroscopy import SpecData
+        import probeflow.io.spectroscopy as spec_io
+
+        def fake_read_spec_file(path):
+            x = np.array([0.0, 0.5, 1.0])
+            if Path(path).stem == "shifted":
+                x = np.array([0.0, 0.6, 1.0])
+            return SpecData(
+                header={},
+                channels={"I": np.array([1.0, 2.0, 3.0])},
+                x_array=x,
+                x_label="Bias (V)",
+                x_unit="V",
+                y_units={"I": "A"},
+                position=(0.0, 0.0),
+                metadata={"n_points": 3, "sweep_type": "bias_sweep"},
+                channel_order=["I"],
+                default_channels=["I"],
+            )
+
+        monkeypatch.setattr(spec_io, "read_spec_file", fake_read_spec_file)
+        entries = [
+            VertFile(path=Path("reference.VERT"), stem="reference"),
+            VertFile(path=Path("shifted.VERT"), stem="shifted"),
+        ]
+        dlg = SpecOverlayDialog(entries, THEMES["dark"])
+
+        displayed = dlg._current_displayed_spectra()
+        text = dlg._current_csv_text()
+
+        assert len(displayed) == 1
+        assert displayed[0].spectrum_id == "reference"
+        assert "shifted" not in text
+        assert "x-axis values differ from reference" in dlg._status.text()
 
         dlg.close()
         dlg.deleteLater()
