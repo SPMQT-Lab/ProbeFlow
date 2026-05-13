@@ -4,72 +4,53 @@
 
 # ProbeFlow
 
-ProbeFlow is a focused STM/SPM browser, converter, and analysis tool for
-Createc and Nanonis image and point-spectroscopy data.
+ProbeFlow is a Python program for browsing scanning probe microscopy (SPM)
+data, applying standard image-processing and analysis operations, and exporting
+images or data with processing details alongside them.
 
-The current goal is practical lab use: open a folder, browse scans and spectra,
-apply standard STM image corrections, draw ROIs, make profiles/histograms/FFT
-checks, and export files with enough metadata to understand what happened.
+It currently focuses on Createc and Nanonis files used in STM/SPM workflows.
+The aim is practical: open a folder of data, inspect scans and spectra, apply
+routine corrections, make simple measurements, and save outputs that record how
+they were produced.
 
-ProbeFlow is not trying to replace Gwyddion, Fiji/ImageJ, WSXM, or AISurf. It is
-intended to be the workflow layer around them: reliable loading, routine cleanup,
-simple measurements, conversion, and traceable handoff.
+ProbeFlow is not a replacement for Gwyddion, Fiji/ImageJ, WSXM, or other
+specialist tools. It is a lab workflow tool for common browsing, processing,
+conversion, measurement, and export tasks.
 
 ## Status
 
-ProbeFlow is beta software. The GUI, CLI, Python API, and sidecar formats may
-change between commits. Raw microscope input files are not modified.
+ProbeFlow is beta software. The GUI, CLI, Python API, and JSON sidecar formats
+may change between versions.
 
-Working today:
+Raw microscope input files are treated as read-only. Processing and export
+operations write to separate output paths and sidecar files.
 
-- Createc `.dat` scan loading and `.VERT` spectroscopy loading.
-- Nanonis `.sxm` scan loading and Nanonis spectroscopy `.dat` loading.
-- Folder browsing with image and spectroscopy thumbnails.
-- Createc `.dat` to Nanonis-compatible `.sxm` conversion.
-- PNG, PDF, CSV, JSON, `.sxm`, and `.gwy` export paths.
-- Processing operations such as row alignment, bad-line removal, plane/polynomial
-  background subtraction, STM line background, smoothing, FFT filters, periodic
-  notch filtering, TV denoising, zero-point/zero-plane tools, and geometric
-  flips/rotations.
-- Analysis paths for line profiles, histograms, FFT spectra, particles, feature
-  counts, lattice extraction, unit-cell averaging, grain detection, and
-  spectroscopy plotting.
-- ROI drawing and ROI-aware analysis/processing for the main image viewer.
-- Export provenance for PNG/JSON-style outputs.
+## What It Does
 
-Still evolving:
-
-- The main window (`ProbeFlowWindow`) and most CLI command runners still live
-  in `probeflow/gui/_legacy.py` and `probeflow/cli/_legacy.py`. Many widgets
-  and dialogs have already been extracted to dedicated submodules (`gui/browse/`,
-  `gui/workers/`, `gui/models/`, `gui/terminal/`, `gui/dialogs/`, `gui/viewer/`,
-  `gui/rendering/`, `gui/image_canvas/`, `gui/roi_items/`, `gui/features/`);
-  extraction is ongoing and opportunistic.
-- CLI command runners are being moved to `probeflow/cli/commands/` submodules.
-  The submodules exist as extraction targets and re-export the runners from
-  `_legacy` while the migration is in progress; the active parser entry point
-  is still `cli/_legacy.py`.
-- `ProcessingState` is the canonical processing model, but
-  `Scan.processing_history` remains as a compatibility representation for some
-  writers and CLI paths.
-- `ScanGraph` dataclasses exist in `probeflow/provenance/graph.py` and are tested,
-  but the GUI/CLI do not yet use the graph as the runtime source of truth.
-- The plugin registry and `PluginSpec` API exist as a foundation
-  (`probeflow/plugins/`), but in-tree operations are not yet discovered from
-  the registry at runtime. `plugins/manifest.py` is scaffolding for the wiring
-  step.
-- Full session persistence, a provenance panel, a measurement table, and
-  DisplayLayer-style per-region display settings are planned, not implemented.
+- Browse folders containing supported scan and spectroscopy files.
+- Load Createc `.dat` scans and `.VERT` spectroscopy files.
+- Load Nanonis `.sxm` scans and Nanonis spectroscopy `.dat` files.
+- Convert Createc `.dat` scans to Nanonis-compatible `.sxm` files.
+- Apply standard image-processing operations such as row alignment, bad-line
+  correction, background subtraction, smoothing, FFT filtering, notch filtering,
+  denoising, zeroing, and simple geometric transforms.
+- Draw ROIs and use them for selected processing and analysis operations.
+- Make line profiles, histograms, FFT views, particle/feature summaries,
+  lattice estimates, unit-cell averages, and spectroscopy plots.
+- Export `.png`, `.pdf`, `.csv`, `.json`, `.sxm`, and optionally `.gwy` files.
+- Write provenance sidecars for exported files where supported, including
+  source information, channel information, display settings, processing state,
+  warnings, and ROI data when available.
 
 ## Installation
+
+Python 3.11 or newer is required.
 
 ```bash
 git clone https://github.com/SPMQT-Lab/ProbeFlow.git
 cd ProbeFlow
 python -m pip install -e .
 ```
-
-Python 3.11+ is required.
 
 For development:
 
@@ -93,14 +74,14 @@ Launch the GUI:
 probeflow gui
 ```
 
-Inspect a scan:
+Inspect a scan from the command line:
 
 ```bash
 probeflow info scan.dat
 probeflow info scan.sxm --json
 ```
 
-Convert Createc `.dat` to Nanonis `.sxm`:
+Convert a Createc `.dat` file to `.sxm`:
 
 ```bash
 probeflow convert scan.dat scan.sxm
@@ -115,13 +96,7 @@ probeflow pipeline scan.dat \
     -o scan_processed.png
 ```
 
-Prepare a PNG handoff with provenance:
-
-```bash
-probeflow prepare-png scan.dat aisurf_input.png \
-    --steps align-rows:median plane-bg:1 \
-    --colormap gray
-```
+More CLI examples are in [docs/cli.md](docs/cli.md).
 
 ## Supported Files
 
@@ -143,140 +118,62 @@ Output:
 | `.pdf` | Figure-style export |
 | `.csv` | Numerical data export |
 | `.json` | Metadata, provenance, or analysis output |
-| `.gwy` | Gwyddion handoff/export |
+| `.gwy` | Optional Gwyddion export, when `gwyfile` is installed |
 
-## CLI Overview
+## GUI
 
-The top-level command is `probeflow`. Run `probeflow <command> --help` for the
-full options.
-
-Common commands:
-
-| Command | Purpose |
-|---|---|
-| `gui` | Launch the PySide6 GUI |
-| `convert` | Suffix-driven scan conversion/export |
-| `pipeline` | Apply ordered processing steps |
-| `prepare-png` | PNG handoff with provenance sidecar |
-| `plane-bg` | Polynomial background subtraction, including ROI-aware modes |
-| `align-rows` | Per-row median/mean/linear offset correction |
-| `remove-bad-lines` | Detect and interpolate bad scan lines |
-| `smooth` | Gaussian smoothing |
-| `fft` | Fourier-domain low/high-pass filtering |
-| `histogram` | Pixel-value histogram, optionally ROI-aware |
-| `fft-spectrum` | FFT magnitude spectrum, optionally ROI-aware |
-| `profile` | Line profile from endpoints or a named line ROI |
-| `autoclip` | Suggest display clip percentiles |
-| `particles`, `count`, `classify` | Feature detection workflows |
-| `lattice`, `unit-cell` | Lattice extraction and unit-cell averaging |
-| `spec-info`, `spec-plot`, `spec-overlay`, `spec-positions` | Spectroscopy tools |
-
-Pipeline step syntax is `name[:param1,param2,...]`, for example:
+The GUI is started with:
 
 ```bash
-probeflow pipeline scan.sxm \
-    --steps remove-bad-lines align-rows:median plane-bg:1 smooth:1.2 \
-    -o scan_processed.sxm
+probeflow gui
 ```
 
-Processing commands that derive an output path use command-specific suffixes,
-for example `smooth` writes `<input-stem>_smooth.sxm` by default and `pipeline`
-writes `<input-stem>_pipeline.sxm`. CLI exports refuse to overwrite an existing
-output artifact or provenance sidecar unless `--force` is provided.
+It includes tools for folder browsing, viewing images, basic spectroscopy
+inspection, ROI drawing, image processing, feature/lattice workflows, TV
+denoising, conversion, and export.
 
-## GUI Overview
-
-The GUI currently has six tabs:
-
-- **Browse**: folder scan, thumbnails, full image viewer, histogram controls,
-  ROI tools, line profiles, FFT viewer, spectroscopy markers, and PNG export.
-- **Convert**: folder-in/folder-out Createc conversion to `.sxm` and/or PNG.
-- **FeatureCounting**: particles, template matching, lattice workflows, result
-  table, and JSON export.
-- **TV-denoise**: Chambolle-Pock TV denoising with axis-selective options.
-- **Dev**: embedded developer terminal.
-- **Defs**: short reference notes for processing operations.
-
-Preferences such as theme, last folders, clip values, and font size are stored
+Preferences such as theme, recent folders, clip values, and font size are saved
 in `~/.probeflow_config.json`.
 
-## ROI Manager Status
+## ROIs
 
-ROI support is now a first-class part of the processing and GUI model, but it is
-still being hardened.
+ProbeFlow supports rectangle, ellipse, polygon, freehand, line, and point ROIs.
+ROIs are stored in pixel coordinates with `(x, y) = (column, row)` and origin at
+the top-left of the displayed image.
 
-Supported drawing tools:
-
-- rectangle
-- ellipse
-- polygon
-- freehand
-- line
-- point
-
-Implemented ROI-aware paths include:
-
-- line profile from a line ROI;
-- ROI histogram;
-- ROI FFT spectrum/crop;
-- ROI background subtraction fit and exclusion regions;
-- ROI sidecars loaded by both GUI and CLI named ROI lookup;
-- ROI transform updates for lossless flip/90-degree rotation;
-- ROI invalidation for arbitrary-angle rotation.
-
-Current limitations:
-
-- ROIs are stored in pixel coordinates, not physical coordinates.
-- The GUI stores one `.rois.json` sidecar per scan file. Channels/planes that
-  share the same displayed pixel frame currently share that ROISet.
-- Geometric display operations transform the ROISet in the displayed frame.
-  Arbitrary-angle rotation removes existing ROIs because exact transformed
-  masks would be misleading.
-- Session-level ROI persistence does not exist yet; the `.rois.json` sidecar is
-  the durable store for now.
-- Composite/inverted ROIs are supported through polygon/multipolygon geometry,
-  but the UI for complex ROI algebra is intentionally light.
-
-### ROI Coordinate Rules
-
-ROI coordinates use image pixels with `(x, y) = (column, row)` and origin at the
-top-left of the displayed image. Masks are generated with array shape
-`(Ny, Nx)` and applied as `array[row, col]`.
-
-The sidecar path for a scan is:
+The default ROI sidecar for a scan is:
 
 ```text
 <scan-stem>.rois.json
 ```
 
-CLI named ROI lookup checks that GUI sidecar first, then falls back to a
-matching `.provenance.json` sidecar if needed.
+ROI sidecars are used by the GUI and by CLI commands that accept named ROIs.
+Current limitations are simple: ROIs are stored in pixel coordinates, not
+physical coordinates, and session-level ROI project files are not implemented.
 
-## Provenance
+## Provenance And Export Safety
 
-PNG/JSON-style exports can include a provenance sidecar recording:
+ProbeFlow writes JSON sidecars for many exports. These sidecars are intended to
+answer practical questions such as:
 
-- source file and format;
-- selected channel;
-- array shape and scan range;
-- display state;
-- processing state;
-- ProbeFlow version;
-- warnings;
-- ROISet data when available.
+- what source file was used;
+- which channel was exported;
+- what display settings were used;
+- what processing state was recorded;
+- whether the output is processed rather than raw data;
+- which ROIs were included, when relevant.
 
-This is not yet a complete lab notebook or graph-backed session model. It is a
-linear export record intended to make routine image preparation auditable.
+These sidecars are not a full electronic lab notebook. They are export records
+for helping users understand and audit saved files.
 
-ProbeFlow preserves existing provenance sidecars by default. Reusing an output
-path that already has a `.provenance.json` or `.probeflow.json` sidecar raises an
-error before the artifact is written; pass `--force` in CLI export paths, or
-`overwrite=True` / `overwrite_sidecars=True` in writer APIs, only when replacing
-the artifact and its sidecars is intentional.
+Export paths are conservative by default. Existing output artifacts and
+provenance sidecars are not overwritten unless overwrite options are used
+explicitly, such as CLI `--force` or writer API `overwrite=True` /
+`overwrite_sidecars=True`.
 
 ## Python Use
 
-ProbeFlow can be used without launching the GUI:
+ProbeFlow can also be used from Python:
 
 ```python
 from probeflow import load_scan, processing
@@ -305,51 +202,23 @@ dzdv = numeric_derivative(spec.x_array, z_smooth)
 probeflow/
 |-- core/        # Scan model, loading dispatch, metadata, ROI, validation
 |-- assets/      # Packaged logo artwork
-|-- data/        # Packaged runtime resources such as SXM cushion bytes
+|-- data/        # Packaged runtime resources
 |-- io/          # File sniffing, readers, writers, converters, sidecar helpers
-|-- processing/  # GUI-free numerical processing and ProcessingState
+|-- processing/  # Numerical processing and ProcessingState
 |-- analysis/    # Particles, lattice, spectroscopy plotting, feature tools
-|-- provenance/  # Export provenance and tested ScanGraph dataclasses
+|-- provenance/  # Export provenance and graph data structures
 |-- gui/         # PySide6 GUI package
 |-- cli/         # Command-line interface
-`-- plugins/     # Plugin API/registry foundation
+`-- plugins/     # Plugin API and registry groundwork
 
 tests/           # pytest suite
 test_data/       # sample/manual input data
+docs/            # additional documentation
 ```
 
-### Current Architecture Reality
+Architecture notes for contributors are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
-The package tree shows the intended decomposition.  The bulk of the main window
-and CLI parser remain in the two `_legacy` files, but significant extraction has
-already happened:
-
-| Area | Extracted to |
-|---|---|
-| Browse cards, thumbnail grid | `gui/browse/` |
-| Background workers | `gui/workers/` |
-| File-list models | `gui/models/` |
-| Developer terminal | `gui/terminal/` |
-| Dialogs (FFT, ROI, spec, about…) | `gui/dialogs/` |
-| Viewer controllers and panels | `gui/viewer/` |
-| Colormap rendering helpers | `gui/rendering/` |
-| Image canvas and ROI graphics items | `gui/image_canvas/`, `gui/roi_items/` |
-| Feature-counting and TV-denoise panels | `gui/features/` |
-| Processing control panel | `gui/processing/` |
-
-What remains in `gui/_legacy.py`: `ProbeFlowWindow`, `Navbar`,
-`BrowseInfoPanel`, `BrowseToolPanel`, `ConvertPanel`, `ConvertSidebar`, and
-config helpers (`load_config`, `save_config`).
-
-The `_legacy` suffix is historical. These files are not deprecated. Cleanup is
-happening opportunistically: extract one class or helper when a real feature or
-bug fix already touches it.
-
-CLI command runners are moving to `probeflow/cli/commands/` submodules as they
-are touched.  Until a runner is fully moved the submodule re-exports it from
-`_legacy`; see `cli/commands/__init__.py` for the migration protocol.
-
-## Testing And Development
+## Testing
 
 ```bash
 python -m pip install -e ".[dev,features]"
@@ -357,34 +226,19 @@ pytest
 ruff check probeflow tests
 ```
 
-The repository includes GitHub Actions for pytest on Python 3.11/3.12 and a
-permissive ruff check. Pre-commit hooks are available:
-
-```bash
-pip install pre-commit
-pre-commit install
-```
-
-Dead-code checks (install `vulture` via `pip install -e ".[dev]"`):
+Dead-code checks:
 
 ```bash
 vulture probeflow/ tests/ whitelist.py --min-confidence 80
 python scripts/find_orphan_modules.py
 ```
 
-`whitelist.py` at the repo root suppresses known false positives (Qt override
-methods, plugin API entry points). `scripts/find_orphan_modules.py` reports
-`.py` files that no other file imports. `docs/dead_code_audit.md` documents
-the current findings and per-symbol verdicts.
-
 ## Notes
 
 - Failed batch conversions are logged to `errors.json`.
-- The `.sxm` writer uses a packaged reference Nanonis byte layout under
-  `probeflow/data/file_cushions/`; converted files should still be checked in target
-  software when scientific output depends on interoperability.
-- Sidecar formats are intentionally JSON and version-light while the project is
-  beta. Avoid treating them as a permanent project file format.
+- Converted `.sxm` files should be checked in the target software when exact
+  interoperability matters.
+- Sidecar formats are JSON and may change while the project is beta.
 
 ## Acknowledgements
 

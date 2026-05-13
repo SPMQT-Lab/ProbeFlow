@@ -92,4 +92,5 @@ condition and break tests for too long.
 - Describe the *why*, not the *what* — the diff already says what.
 - If the change touches a GUI dialog, include a screenshot or a
   short note on what visually changed.
-- If the change adds a public API or CLI command, update the README.
+- If the change adds a public API or CLI command, update the relevant docs
+  (`README.md` for broad user-facing changes, `docs/cli.md` for CLI details).
