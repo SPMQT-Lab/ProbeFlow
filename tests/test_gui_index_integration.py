@@ -1141,6 +1141,90 @@ class TestSpecViewerRawData:
         dlg.close()
         dlg.deleteLater()
 
+    def test_displayed_csv_uses_processing_controls(self, qapp, monkeypatch):
+        from PySide6.QtWidgets import QCheckBox
+        from probeflow.gui import SpecViewerDialog, THEMES
+        from probeflow.io.spectroscopy import SpecChannel, SpecData
+
+        monkeypatch.setattr(SpecViewerDialog, "_load", lambda self: None)
+        entry = VertFile(path=TESTDATA / "spectrum_time_trace_5k.VERT", stem="spec")
+        dlg = SpecViewerDialog(entry, THEMES["dark"])
+        x = np.linspace(-1.0, 1.0, 11)
+        dlg._spec = SpecData(
+            header={},
+            channels={"I": 2e-9 * x + 1e-9},
+            x_array=x,
+            x_label="Bias (V)",
+            x_unit="V",
+            y_units={"I": "A"},
+            position=(0.0, 0.0),
+            metadata={"n_points": 11, "sweep_type": "bias_sweep"},
+            channel_order=["I"],
+            default_channels=["I"],
+            channel_info={
+                "I": SpecChannel(
+                    key="I",
+                    source_name="I",
+                    source_label="I",
+                    unit="A",
+                    roles=("current",),
+                    display_label="Current channel",
+                ),
+            },
+        )
+        cb = QCheckBox("I")
+        cb.setChecked(True)
+        dlg._checkboxes = {"I": cb}
+        dlg._derivative_cb.setCurrentText("dI/dV")
+
+        text = dlg._current_csv_text()
+
+        assert "dI/dV" in text or "Current channel" in text
+        assert "nA/V" in text
+        assert ",2" in text
+
+        dlg.close()
+        dlg.deleteLater()
+
+    def test_overlay_dialog_exports_long_csv(self, qapp):
+        from probeflow.gui import SpecOverlayDialog, THEMES
+
+        entries = [
+            VertFile(path=TESTDATA / "createc_ivt_telegraph_300mv_a.VERT", stem="a"),
+            VertFile(path=TESTDATA / "createc_ivt_telegraph_300mv_b.VERT", stem="b"),
+        ]
+        dlg = SpecOverlayDialog(entries, THEMES["dark"])
+
+        text = dlg._current_csv_text()
+
+        assert "probeflow_displayed_spectra" in text
+        assert "source_file,spectrum_id,trace_label" in text
+        assert ",a,a I," in text
+        assert ",b,b I," in text
+
+        dlg.close()
+        dlg.deleteLater()
+
+    def test_overlay_dialog_skips_incompatible_x_axes(self, qapp):
+        from probeflow.gui import SpecOverlayDialog, THEMES
+
+        entries = [
+            VertFile(path=TESTDATA / "createc_ivt_telegraph_300mv_a.VERT", stem="time"),
+            VertFile(path=TESTDATA / "createc_vert_didz_image_state.VERT", stem="bias"),
+        ]
+        dlg = SpecOverlayDialog(entries, THEMES["dark"])
+
+        displayed = dlg._current_displayed_spectra()
+        text = dlg._current_csv_text()
+
+        assert len(displayed) == 1
+        assert displayed[0].spectrum_id == "time"
+        assert "bias" not in text
+        assert "Skipped 1 spectra" in dlg._status.text()
+
+        dlg.close()
+        dlg.deleteLater()
+
 
 # ── Test B: split_indexed_items separates scans, spectra, errors ──────────────
 

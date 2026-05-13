@@ -155,6 +155,10 @@ class TestNormalize:
         with pytest.raises(ValueError, match="Unknown"):
             normalize(np.ones(10), method="rms")
 
+    def test_setpoint_normalization_uses_first_nonzero(self):
+        y = np.array([0.0, -2.0, -4.0])
+        out = normalize(y, method="setpoint")
+        np.testing.assert_allclose(out, [-0.0, 1.0, 2.0])
 
 # ─── crop ────────────────────────────────────────────────────────────────────
 

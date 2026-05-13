@@ -46,6 +46,7 @@ class BrowseToolPanel(QWidget):
     colormap_changed           = Signal(str)
     thumbnail_align_changed    = Signal(str)
     map_spectra_requested      = Signal()
+    overlay_spectra_requested  = Signal()
     filter_changed             = Signal(str)   # "all" | "images" | "spectra"
     thumbnail_channel_changed  = Signal(str)
 
@@ -172,6 +173,16 @@ class BrowseToolPanel(QWidget):
             "You can also map per-image inside the viewer.")
         self._map_spectra_btn.clicked.connect(self.map_spectra_requested.emit)
         lay.addWidget(self._map_spectra_btn)
+
+        self._overlay_spectra_btn = QPushButton("Overlay selected spectra…")
+        self._overlay_spectra_btn.setFont(QFont("Helvetica", 9))
+        self._overlay_spectra_btn.setFixedHeight(28)
+        self._overlay_spectra_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self._overlay_spectra_btn.setToolTip(
+            "Ctrl-click two or more spectroscopy cards, then overlay or "
+            "waterfall one common signal channel.")
+        self._overlay_spectra_btn.clicked.connect(self.overlay_spectra_requested.emit)
+        lay.addWidget(self._overlay_spectra_btn)
 
         lay.addStretch()
         scroll.setWidget(inner)

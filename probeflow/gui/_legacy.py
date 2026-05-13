@@ -109,6 +109,7 @@ from probeflow.gui.dialogs import (
     FFTViewerDialog,
     PeriodicFilterDialog,
     SpecMappingDialog,
+    SpecOverlayDialog,
     SpecViewerDialog,
     STMBackgroundDialog,
 )
@@ -2868,6 +2869,7 @@ class ProbeFlowWindow(QMainWindow):
         self._browse_tools.colormap_changed.connect(self._on_thumbnail_colormap_changed)
         self._browse_tools.thumbnail_align_changed.connect(self._on_thumbnail_align_changed)
         self._browse_tools.map_spectra_requested.connect(self._on_map_spectra)
+        self._browse_tools.overlay_spectra_requested.connect(self._on_overlay_selected_spectra)
         self._browse_tools.filter_changed.connect(self._on_filter_changed)
         self._browse_tools.thumbnail_channel_changed.connect(self._on_thumbnail_channel_changed)
         # Sync initial filter state from the toolbar into the grid so the
@@ -3337,6 +3339,20 @@ class ProbeFlowWindow(QMainWindow):
             self._status_bar.showMessage(
                 f"Spec mapping updated: {len(new_map)} of "
                 f"{len(vert_entries)} spectra assigned.")
+
+    def _on_overlay_selected_spectra(self):
+        selected = self._grid.get_selected()
+        entries = [
+            e for e in self._grid.get_entries()
+            if isinstance(e, VertFile) and e.stem in selected
+        ]
+        if len(entries) < 2:
+            self._status_bar.showMessage(
+                "Select two or more spectra with Ctrl-click before overlaying.")
+            return
+        t = THEMES["dark" if self._dark else "light"]
+        dlg = SpecOverlayDialog(entries, t, self)
+        dlg.exec()
 
     def _on_card_context_action(self, entry, action: str):
         """Dispatch ScanCard right-click actions (Send to Features, export, show metadata)."""

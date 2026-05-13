@@ -110,6 +110,7 @@ def normalize(data: np.ndarray, method: str = "max") -> np.ndarray:
         'max'    — divide by max absolute value.
         'minmax' — rescale to [0, 1].
         'zscore' — subtract mean, divide by std.
+        'setpoint' — divide by the first finite non-zero value.
 
     Returns
     -------
@@ -130,9 +131,19 @@ def normalize(data: np.ndarray, method: str = "max") -> np.ndarray:
         mu = float(np.nanmean(data))
         sigma = float(np.nanstd(data))
         return (data - mu) / sigma if sigma != 0.0 else np.zeros_like(data)
+    elif method == "setpoint":
+        finite = data[np.isfinite(data) & (data != 0)]
+        if finite.size == 0:
+            warnings.warn(
+                "normalize: no finite non-zero setpoint; returning input unchanged",
+                stacklevel=2,
+            )
+            return data.copy()
+        return data / float(finite[0])
     else:
         raise ValueError(
-            f"Unknown normalization method: {method!r}. Choose max, minmax, or zscore."
+            f"Unknown normalization method: {method!r}. "
+            "Choose max, minmax, zscore, or setpoint."
         )
 
 

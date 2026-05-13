@@ -37,6 +37,10 @@ operations write to separate output paths and sidecar files.
 - Draw ROIs and use them for selected processing and analysis operations.
 - Make line profiles, histograms, FFT views, particle/feature summaries,
   lattice estimates, unit-cell averages, and spectroscopy plots.
+- Inspect spectroscopy traces individually or as overlays/waterfalls, with basic
+  smoothing, approximate numerical `dI/dV`, outlier masking, simple
+  normalization, cursor readout, and CSV/JSON/TXT copy/export of displayed
+  values.
 - Export `.png`, `.pdf`, `.csv`, `.json`, `.sxm`, and optionally `.gwy` files.
 - Write provenance sidecars for exported files where supported, including
   source information, channel information, display settings, processing state,
@@ -129,8 +133,12 @@ probeflow gui
 ```
 
 It includes tools for folder browsing, viewing images, basic spectroscopy
-inspection, ROI drawing, image processing, feature/lattice workflows, TV
-denoising, conversion, and export.
+inspection, selected-spectrum overlays, ROI drawing, image processing,
+feature/lattice workflows, TV denoising, conversion, and export.
+
+Spectroscopy display transforms are non-destructive. Smoothing, derivative,
+normalization, outlier masking, and offsets are applied to derived display data,
+not to the raw arrays loaded from the source file.
 
 Preferences such as theme, recent folders, clip values, and font size are saved
 in `~/.probeflow_config.json`.
