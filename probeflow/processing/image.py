@@ -867,6 +867,8 @@ def subtract_background(
     step_threshold_deg: float = 3.0,
     fit_rect: Optional[tuple[int, int, int, int]] = None,
     fit_mask: Optional[np.ndarray] = None,
+    pixel_size_x_m: float = 1.0,
+    pixel_size_y_m: float = 1.0,
 ) -> np.ndarray:
     """Fit and subtract a 2-D polynomial background from an image.
 
@@ -931,6 +933,13 @@ def subtract_background(
         ``n_terms`` pixels remain after masking.
     step_threshold_deg:
         Slope angle (degrees) above which a pixel is treated as a step edge.
+    pixel_size_x_m:
+        Physical pixel width in metres. Used only when ``step_tolerance=True``
+        to convert the finite-difference gradient from data-units/pixel to the
+        dimensionless slope ratio ``dz/dx`` before comparing against
+        ``tan(step_threshold_deg)``.  Default 1.0 (pixel-unit gradient).
+    pixel_size_y_m:
+        Physical pixel height in metres, same purpose as ``pixel_size_x_m``.
     fit_rect:
         Optional inclusive pixel rectangle ``(x0, y0, x1, y1)`` restricting
         the fit region.  Combined with ``fit_roi`` (intersection).
@@ -1020,7 +1029,9 @@ def subtract_background(
     # ── Step-tolerance masking ────────────────────────────────────────────────
     if step_tolerance and Ny >= 3 and Nx >= 3:
         gy, gx = np.gradient(np.where(np.isfinite(arr), arr, _finite_median(arr)))
-        slope_mag = np.sqrt(gx ** 2 + gy ** 2).ravel()
+        psx = max(float(pixel_size_x_m), 1e-30)
+        psy = max(float(pixel_size_y_m), 1e-30)
+        slope_mag = np.sqrt((gx / psx) ** 2 + (gy / psy) ** 2).ravel()
         tan_thresh = math.tan(math.radians(step_threshold_deg))
         candidate = finite & (slope_mag < tan_thresh) & fit_mask_acc
         if candidate.sum() >= n_terms:
