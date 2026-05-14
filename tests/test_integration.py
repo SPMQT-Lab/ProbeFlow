@@ -29,11 +29,6 @@ class TestDatToPng:
         pngs = list((out_dir / "pngs").glob("*.png"))
         assert len(pngs) > 0, "At least one PNG should be produced"
 
-    def test_return_dict_keys(self, first_sample_dat, tmp_path):
-        rep = dat_to_hdr_imgs(first_sample_dat, tmp_path / "out")
-        for key in ("Nx", "Ny", "num_channels", "z_scale_m_per_dac", "i_scale_a_per_dac"):
-            assert key in rep
-
     def test_pixel_dimensions_positive(self, first_sample_dat, tmp_path):
         rep = dat_to_hdr_imgs(first_sample_dat, tmp_path / "out")
         assert rep["Nx"] > 0

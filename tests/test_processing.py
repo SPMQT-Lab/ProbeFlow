@@ -528,6 +528,16 @@ class TestAlignRows:
         # After fitting+subtracting per-row linear trend, residuals ≈ 0
         assert np.allclose(out, 0.0, atol=1e-10)
 
+    def test_all_nan_row_is_preserved_and_others_still_correct(self):
+        arr = np.ones((8, 8), dtype=float)
+        arr += np.arange(8, dtype=float)[:, None] * 3.0  # per-row offsets
+        arr[3, :] = np.nan
+        out = align_rows(arr, method="median")
+        assert np.all(np.isnan(out[3, :]))
+        for r in range(8):
+            if r != 3:
+                assert abs(float(np.median(out[r]))) < 1e-10
+
     def test_invalid_method_raises(self):
         with pytest.raises(ValueError, match="method must be"):
             align_rows(np.ones((4, 4)), method="mode")
