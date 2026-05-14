@@ -43,10 +43,17 @@ _AREA_KINDS = {"rectangle", "ellipse", "polygon", "freehand", "multipolygon"}
 class ImageMeasurementController:
     """Coordinate image measurements between viewer state and result widgets."""
 
-    def __init__(self, viewer: Any, table: Any, feature_panel: Any | None = None):
+    def __init__(
+        self,
+        viewer: Any,
+        table: Any,
+        feature_panel: Any | None = None,
+        point_mask_panel: Any | None = None,
+    ):
         self._viewer = viewer
         self._table = table
         self._feature_panel = feature_panel
+        self._point_mask_panel = point_mask_panel
         self._feature_points: list[Any] = []
         self._feature_metadata: dict[str, object] = {}
         if feature_panel is not None:
@@ -54,10 +61,11 @@ class ImageMeasurementController:
             feature_panel.copyPointsRequested.connect(self.copy_feature_points)
             feature_panel.exportCsvRequested.connect(self.export_feature_points_csv)
             feature_panel.exportJsonRequested.connect(self.export_feature_points_json)
-            feature_panel.exportMaskCsvRequested.connect(self.export_point_mask_csv)
-            feature_panel.computeFftRequested.connect(self.compute_point_mask_fft)
-            feature_panel.exportFftCsvRequested.connect(self.export_point_fft_csv)
             feature_panel.clearRequested.connect(self.clear_feature_points)
+        if point_mask_panel is not None:
+            point_mask_panel.exportMaskCsvRequested.connect(self.export_point_mask_csv)
+            point_mask_panel.computeFftRequested.connect(self.compute_point_mask_fft)
+            point_mask_panel.exportFftCsvRequested.connect(self.export_point_fft_csv)
 
     @property
     def feature_points(self) -> list[Any]:
@@ -299,6 +307,11 @@ class ImageMeasurementController:
             self._sync_actions()
             if self._feature_panel is not None:
                 self._feature_panel.set_points_count(len(points), roi_name=roi.name)
+            if (
+                self._point_mask_panel is not None
+                and hasattr(self._point_mask_panel, "set_points_available")
+            ):
+                self._point_mask_panel.set_points_available(bool(points))
             result = feature_maxima_result(
                 points,
                 measurement_id=self._table.next_measurement_id(),
@@ -441,6 +454,8 @@ class ImageMeasurementController:
         self._push_feature_overlay()
         if self._feature_panel is not None:
             self._feature_panel.set_points_count(0)
+        if self._point_mask_panel is not None and hasattr(self._point_mask_panel, "set_points_available"):
+            self._point_mask_panel.set_points_available(False)
         self._sync_actions()
         if not silent:
             self._set_status("Cleared feature maxima overlay.")
@@ -463,8 +478,8 @@ class ImageMeasurementController:
         if arr is None:
             raise ValueError("No image is loaded for point-mask generation.")
         settings = (
-            self._feature_panel.mask_settings()
-            if self._feature_panel is not None and hasattr(self._feature_panel, "mask_settings")
+            self._point_mask_panel.mask_settings()
+            if self._point_mask_panel is not None and hasattr(self._point_mask_panel, "mask_settings")
             else {}
         )
         radius_px = int(settings.get("radius_px", 0))
@@ -561,6 +576,8 @@ class ImageMeasurementController:
             status.setText(str(message))
         if self._feature_panel is not None:
             self._feature_panel.show_message(str(message))
+        if self._point_mask_panel is not None and hasattr(self._point_mask_panel, "show_message"):
+            self._point_mask_panel.show_message(str(message))
 
     def _sync_actions(self) -> None:
         if hasattr(self._viewer, "_sync_viewer_menu_actions"):

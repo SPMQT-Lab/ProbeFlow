@@ -152,7 +152,7 @@ def test_measurement_results_table_records_and_copies_rows(qapp):
 
 
 def test_feature_detection_panel_settings_and_export_state(qapp):
-    from probeflow.gui.widgets import FeatureDetectionPanel
+    from probeflow.gui.widgets import FeatureDetectionPanel, PointMaskFFTPanel
 
     panel = FeatureDetectionPanel()
 
@@ -174,6 +174,38 @@ def test_feature_detection_panel_settings_and_export_state(qapp):
     assert not panel._copy_btn.isEnabled()
     assert not panel._csv_btn.isEnabled()
     assert not panel._json_btn.isEnabled()
+
+    panel.close()
+
+    mask_panel = PointMaskFFTPanel()
+    assert mask_panel.mask_settings() == {"radius_px": 0, "shape_mode": "disk"}
+    assert not mask_panel._fft_btn.isEnabled()
+    mask_panel.set_points_available(True)
+    assert mask_panel._mask_csv_btn.isEnabled()
+    assert mask_panel._fft_btn.isEnabled()
+    assert mask_panel._fft_csv_btn.isEnabled()
+    mask_panel.close()
+
+
+def test_image_measurements_panel_uses_one_setup_mode_at_a_time(qapp):
+    from probeflow.gui.widgets import ImageMeasurementsPanel
+
+    panel = ImageMeasurementsPanel()
+
+    assert panel.measurement_type() == "feature_maxima"
+    assert panel._setup_stack.currentWidget() is panel.feature_panel
+
+    panel.set_measurement_type("point_fft")
+    assert panel._setup_stack.currentWidget() is panel.point_mask_panel
+
+    panel.set_measurement_type("line_profile")
+    assert panel.measurement_type() == "line_profile"
+    assert panel._setup_stack.currentWidget() is not panel.feature_panel
+    assert panel._setup_stack.currentWidget() is not panel.point_mask_panel
+
+    panel.set_points_count(2, roi_name="terrace")
+    assert panel.feature_panel._copy_btn.isEnabled()
+    assert panel.point_mask_panel._fft_btn.isEnabled()
 
     panel.close()
 

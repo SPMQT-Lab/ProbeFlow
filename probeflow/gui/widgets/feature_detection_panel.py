@@ -23,9 +23,6 @@ class FeatureDetectionPanel(QWidget):
     copyPointsRequested = Signal()
     exportCsvRequested = Signal()
     exportJsonRequested = Signal()
-    exportMaskCsvRequested = Signal()
-    computeFftRequested = Signal()
-    exportFftCsvRequested = Signal()
     clearRequested = Signal()
 
     _MODE_LABELS = [
@@ -55,13 +52,6 @@ class FeatureDetectionPanel(QWidget):
             "exclude_border": int(self._border_spin.value()),
         }
 
-    def mask_settings(self) -> dict[str, object]:
-        """Return point-mask settings as plain values."""
-        return {
-            "radius_px": int(self._mask_radius_spin.value()),
-            "shape_mode": self._mask_shape_cb.currentData() or "disk",
-        }
-
     def set_points_count(self, count: int, *, roi_name: str | None = None) -> None:
         """Update status text and export-button state."""
         n = int(max(0, count))
@@ -73,9 +63,6 @@ class FeatureDetectionPanel(QWidget):
         self._copy_btn.setEnabled(has_points)
         self._csv_btn.setEnabled(has_points)
         self._json_btn.setEnabled(has_points)
-        self._mask_csv_btn.setEnabled(has_points)
-        self._fft_btn.setEnabled(has_points)
-        self._fft_csv_btn.setEnabled(has_points)
         self._clear_btn.setEnabled(has_points)
 
     def show_message(self, message: str) -> None:
@@ -168,9 +155,55 @@ class FeatureDetectionPanel(QWidget):
             export_row.addWidget(button)
         lay.addLayout(export_row)
 
-        mask_title = QLabel("Point mask / FFT")
-        mask_title.setStyleSheet("font-weight: 600; margin-top: 4px;")
-        lay.addWidget(mask_title)
+        self._status_lbl = QLabel("")
+        self._status_lbl.setWordWrap(True)
+        lay.addWidget(self._status_lbl)
+
+
+class PointMaskFFTPanel(QWidget):
+    """Controls for derived point masks and FFTs from detected maxima."""
+
+    exportMaskCsvRequested = Signal()
+    computeFftRequested = Signal()
+    exportFftCsvRequested = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._build()
+        self.set_points_available(False)
+
+    def mask_settings(self) -> dict[str, object]:
+        """Return point-mask settings as plain values."""
+        return {
+            "radius_px": int(self._mask_radius_spin.value()),
+            "shape_mode": self._mask_shape_cb.currentData() or "disk",
+        }
+
+    def set_points_available(self, available: bool) -> None:
+        has_points = bool(available)
+        self._mask_csv_btn.setEnabled(has_points)
+        self._fft_btn.setEnabled(has_points)
+        self._fft_csv_btn.setEnabled(has_points)
+        self._status_lbl.setText(
+            "Uses the latest detected maxima." if has_points
+            else "Detect feature maxima before creating a point mask or FFT."
+        )
+
+    def show_message(self, message: str) -> None:
+        self._status_lbl.setText(str(message))
+
+    def _build(self) -> None:
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(4)
+
+        title = QLabel("Point mask / FFT")
+        title.setStyleSheet("font-weight: 600;")
+        lay.addWidget(title)
+
+        intro = QLabel("Create a binary mask from detected maxima and inspect its FFT.")
+        intro.setWordWrap(True)
+        lay.addWidget(intro)
 
         mask_grid = QGridLayout()
         mask_grid.setContentsMargins(0, 0, 0, 0)

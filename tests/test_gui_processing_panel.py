@@ -122,7 +122,12 @@ def _make_feature_maxima_controller(image, feature_panel=None):
     dlg._status_lbl = _FakeStatus()
     dlg._zoom_lbl = _FakeCanvas()
     table = _FakeMeasurementTable()
-    controller = ImageMeasurementController(dlg, table, feature_panel=feature_panel)
+    controller = ImageMeasurementController(
+        dlg,
+        table,
+        feature_panel=feature_panel,
+        point_mask_panel=feature_panel,
+    )
     return controller, dlg, table, roi
 
 
@@ -214,12 +219,16 @@ def test_viewer_dialog_keeps_standard_processing_visible(qapp, monkeypatch):
     assert dlg._spec_overlay_widget.isHidden() is True
     assert dlg._spec_show_cb.isChecked() is False
     assert dlg._export_widget.isHidden() is True
+    assert dlg._sidebar_tabs.tabText(dlg._sidebar_tabs.currentIndex()) == "View"
+    assert dlg._roi_dock.isVisible() is False
+    assert dlg._measurement_dock.isVisible() is False
 
     dlg.close()
     dlg.deleteLater()
 
 
 def test_viewer_dialog_layout_prioritises_image_and_bounds_side_panels(qapp, monkeypatch):
+    from PySide6.QtCore import Qt
     from probeflow.gui import ImageViewerDialog, SxmFile, THEMES
 
     monkeypatch.setattr(ImageViewerDialog, "_load_current", lambda self: None)
@@ -229,13 +238,22 @@ def test_viewer_dialog_layout_prioritises_image_and_bounds_side_panels(qapp, mon
     splitter = dlg._viewer_main.centralWidget()
 
     assert splitter.widget(0).minimumWidth() == 500
-    assert splitter.widget(1).minimumWidth() == 300
-    assert splitter.widget(1).maximumWidth() == 380
+    assert splitter.widget(1).minimumWidth() == 380
+    assert splitter.widget(1).maximumWidth() == 420
     assert dlg._roi_dock.minimumWidth() == 160
     assert dlg._roi_dock.maximumWidth() == 280
     assert dlg._hist_panel._canvas.minimumHeight() == 140
     assert dlg._hist_panel._canvas.maximumHeight() == 140
     assert dlg._hist_panel._canvas.sizePolicy().verticalPolicy().name == "Fixed"
+    assert [dlg._sidebar_tabs.tabText(i) for i in range(dlg._sidebar_tabs.count())] == [
+        "View",
+        "Process",
+        "ROI",
+        "Measure",
+        "Export",
+    ]
+    assert dlg._sidebar_tabs.elideMode() == Qt.ElideNone
+    assert dlg._sidebar_tabs.tabBar().usesScrollButtons() is False
 
     dlg.close()
     dlg.deleteLater()
@@ -291,10 +309,18 @@ def test_viewer_dialog_menus_mirror_existing_controls(qapp, monkeypatch):
         action("Processing", "FFT soft border")
     assert action("Processing", "STM Background...").isEnabled() is True
     assert action("View", "Histogram / Contrast").isEnabled() is True
+    assert action("View", "Processing panel").isEnabled() is True
+    assert action("View", "ROI panel").isEnabled() is True
+    assert action("View", "Measurements panel").isEnabled() is True
+    assert action("View", "Export panel").isEnabled() is True
     assert action("View", "ROI Manager").isEnabled() is True
     assert action("View", "Measurements").isEnabled() is True
     assert action("Measurements", "Show measurements").isEnabled() is True
     assert action("Measurements", "Compute point-mask FFT").isEnabled() is False
+    action("View", "Processing panel").trigger()
+    assert dlg._sidebar_tabs.tabText(dlg._sidebar_tabs.currentIndex()) == "Process"
+    action("View", "Histogram / Contrast").trigger()
+    assert dlg._sidebar_tabs.tabText(dlg._sidebar_tabs.currentIndex()) == "View"
     dlg._display_arr = np.ones((8, 8), dtype=float)
     action("Processing", "STM Background...").trigger()
     qapp.processEvents()
@@ -311,8 +337,14 @@ def test_viewer_dialog_menus_mirror_existing_controls(qapp, monkeypatch):
     action("ROI", "Rectangle").trigger()
     assert dlg._zoom_lbl.tool() == "rectangle"
     assert action("ROI", "Rectangle").isChecked()
+    assert dlg._sidebar_tabs.tabText(dlg._sidebar_tabs.currentIndex()) == "ROI"
     action("ROI", "Pan").trigger()
     assert dlg._zoom_lbl.tool() == "pan"
+    action("ROI", "Line").trigger()
+    assert dlg._zoom_lbl.tool() == "line"
+    assert dlg._sidebar_tabs.tabText(dlg._sidebar_tabs.currentIndex()) == "Measure"
+    assert dlg._measurement_panel.measurement_type() == "line_profile"
+    action("ROI", "Pan").trigger()
 
     dlg.show()
     qapp.processEvents()
@@ -322,12 +354,15 @@ def test_viewer_dialog_menus_mirror_existing_controls(qapp, monkeypatch):
     action("ROI", "Show ROI Manager").trigger()
     qapp.processEvents()
     assert dlg._roi_dock.isVisible() is True
+    assert dlg._sidebar_tabs.tabText(dlg._sidebar_tabs.currentIndex()) == "ROI"
     dlg._measurement_dock.close()
     qapp.processEvents()
     assert dlg._measurement_dock.isVisible() is False
     action("View", "Measurements").trigger()
     qapp.processEvents()
     assert dlg._measurement_dock.isVisible() is True
+    action("View", "Export panel").trigger()
+    assert dlg._sidebar_tabs.tabText(dlg._sidebar_tabs.currentIndex()) == "Export"
 
     assert action("ROI", "Rename ROI").isEnabled() is False
     assert action("ROI", "Delete ROI").isEnabled() is False

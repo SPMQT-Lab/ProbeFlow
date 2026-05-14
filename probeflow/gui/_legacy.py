@@ -43,7 +43,7 @@ from PySide6.QtWidgets import (
     QDialog, QDoubleSpinBox, QFileDialog, QFrame, QGridLayout,
     QHBoxLayout, QLabel, QMainWindow, QMenu, QPushButton,
     QDockWidget, QScrollArea, QSizePolicy, QSplitter, QStackedWidget,
-    QStatusBar, QTableWidget, QTableWidgetItem, QHeaderView,
+    QStatusBar, QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView,
     QVBoxLayout, QWidget,
 )
 import shutil
@@ -527,37 +527,61 @@ class ImageViewerDialog(QDialog):
 
         splitter.addWidget(left)
 
-        # ── Right: control panel ───────────────────────────────────────────────
-        right_scroll = QScrollArea()
-        right_scroll.setWidgetResizable(True)
-        right_scroll.setFrameShape(QFrame.NoFrame)
-        right_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        right_scroll.setMinimumWidth(300)
-        right_scroll.setMaximumWidth(380)
-        right_scroll.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
-
+        # ── Right: task-focused sidebar ───────────────────────────────────────
         right = QWidget()
-        right.setMinimumWidth(300)
-        right.setMaximumWidth(380)
+        right.setMinimumWidth(380)
+        right.setMaximumWidth(420)
         right_lay = QVBoxLayout(right)
         right_lay.setContentsMargins(8, 4, 8, 4)
         right_lay.setSpacing(6)
 
-        def _collapsible_section(title: str, expanded: bool = False):
+        self._sidebar_tabs = QTabWidget()
+        self._sidebar_tabs.setDocumentMode(True)
+        self._sidebar_tabs.setMinimumWidth(360)
+        self._sidebar_tabs.setElideMode(Qt.ElideNone)
+        self._sidebar_tabs.tabBar().setUsesScrollButtons(False)
+        right_lay.addWidget(self._sidebar_tabs, 1)
+        self._sidebar_tab_indices: dict[str, int] = {}
+
+        def _sidebar_tab(key: str, label: str) -> tuple[QWidget, QVBoxLayout]:
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setFrameShape(QFrame.NoFrame)
+            scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+            body = QWidget()
+            lay = QVBoxLayout(body)
+            lay.setContentsMargins(6, 6, 6, 6)
+            lay.setSpacing(6)
+            scroll.setWidget(body)
+            idx = self._sidebar_tabs.addTab(scroll, label)
+            self._sidebar_tab_indices[key] = idx
+            return body, lay
+
+        _display_tab, display_lay = _sidebar_tab("display", "View")
+        _processing_tab, processing_lay = _sidebar_tab("processing", "Process")
+        _roi_tab, roi_lay = _sidebar_tab("roi", "ROI")
+        _measurements_tab, measurements_lay = _sidebar_tab("measurements", "Measure")
+        _export_tab, export_lay = _sidebar_tab("export", "Export")
+
+        def _collapsible_section(
+            target_lay: QVBoxLayout,
+            title: str,
+            expanded: bool = False,
+        ):
             btn = QPushButton(("[−] " if expanded else "[+] ") + title)
             btn.setCheckable(True)
             btn.setChecked(expanded)
             btn.setFlat(True)
             btn.setFont(QFont("Helvetica", 9, QFont.Bold))
             btn.setCursor(QCursor(Qt.PointingHandCursor))
-            right_lay.addWidget(btn)
+            target_lay.addWidget(btn)
 
             body = QWidget()
             body_lay = QVBoxLayout(body)
             body_lay.setContentsMargins(2, 2, 0, 2)
             body_lay.setSpacing(4)
             body.setVisible(expanded)
-            right_lay.addWidget(body)
+            target_lay.addWidget(body)
 
             def _sync(checked: bool):
                 body.setVisible(bool(checked))
@@ -593,6 +617,7 @@ class ImageViewerDialog(QDialog):
         self._hist_panel.maxReleased.connect(self._on_max_slider_changed)
         self._hist_panel.brightnessReleased.connect(self._on_brightness_slider_changed)
         self._hist_panel.contrastReleased.connect(self._on_contrast_slider_changed)
+        display_lay.addWidget(self._hist_panel)
         self._processing_panel = ProcessingControlPanel("viewer_full")
         self._processing_panel.bad_line_preview_requested.connect(
             self._on_preview_bad_lines)
@@ -604,21 +629,20 @@ class ImageViewerDialog(QDialog):
             self._on_simple_background)
         self._processing_panel._align_combo.currentIndexChanged.connect(
             self._on_align_rows_changed)
-        right_lay.addWidget(self._processing_panel)
+        processing_lay.addWidget(self._processing_panel)
 
-        right_lay.addWidget(_sep())
+        processing_lay.addWidget(_sep())
 
-        history_hdr = QLabel("History")
-        history_hdr.setFont(QFont("Helvetica", 7, QFont.Bold))
-        history_hdr.setAlignment(Qt.AlignCenter)
-        right_lay.addWidget(history_hdr)
+        _, self._history_widget, history_lay = _collapsible_section(
+            processing_lay, "Processing history", expanded=False
+        )
         self._history_text = QLabel("")
         self._history_text.setFont(QFont("Helvetica", 8))
         self._history_text.setWordWrap(True)
         self._history_text.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        right_lay.addWidget(self._history_text)
+        history_lay.addWidget(self._history_text)
 
-        right_lay.addWidget(_sep())
+        processing_lay.addWidget(_sep())
 
         # ── Zero reference | ROI filter scope (compact 2-column row) ──────────
         zs_row = QHBoxLayout()
@@ -665,14 +689,14 @@ class ImageViewerDialog(QDialog):
 
         zs_row.addLayout(zero_col, 1)
         zs_row.addLayout(sel_col, 1)
-        right_lay.addLayout(zs_row)
+        processing_lay.addLayout(zs_row)
 
         self._roi_status_lbl = QLabel("ROI filter scope: whole image")
         self._roi_status_lbl.setFont(QFont("Helvetica", 8))
         self._roi_status_lbl.setWordWrap(True)
-        right_lay.addWidget(self._roi_status_lbl)
+        processing_lay.addWidget(self._roi_status_lbl)
 
-        right_lay.addWidget(_sep())
+        processing_lay.addWidget(_sep())
 
         # ── Apply / Reset — always visible ────────────────────────────────────
         ar_row = QHBoxLayout()
@@ -695,7 +719,7 @@ class ImageViewerDialog(QDialog):
         proc_reset_btn.clicked.connect(self._on_reset_processing)
         ar_row.addWidget(proc_apply_btn, 2)
         ar_row.addWidget(proc_reset_btn, 1)
-        right_lay.addLayout(ar_row)
+        processing_lay.addLayout(ar_row)
 
         # ── Undo / Redo — restore previous processing snapshots ───────────────
         ur_row = QHBoxLayout()
@@ -715,7 +739,7 @@ class ImageViewerDialog(QDialog):
         self._proc_redo_btn.clicked.connect(self._on_redo_processing)
         ur_row.addWidget(self._proc_undo_btn, 1)
         ur_row.addWidget(self._proc_redo_btn, 1)
-        right_lay.addLayout(ur_row)
+        processing_lay.addLayout(ur_row)
         self._proc_undo_ctrl = ProcessingUndoController(
             self._proc_undo_btn, self._proc_redo_btn, self._sync_viewer_menu_actions,
         )
@@ -728,7 +752,7 @@ class ImageViewerDialog(QDialog):
         QShortcut(QKeySequence("Ctrl+Shift+Z"), self,
                   activated=self._on_redo_processing)
 
-        right_lay.addWidget(_sep())
+        processing_lay.addWidget(_sep())
 
         # ── Save PNG — always visible ─────────────────────────────────────────
         save_btn = QPushButton("⬇  Save PNG copy…")
@@ -736,10 +760,12 @@ class ImageViewerDialog(QDialog):
         save_btn.setFixedHeight(26)
         save_btn.setObjectName("accentBtn")
         save_btn.clicked.connect(self._on_save_png)
-        right_lay.addWidget(save_btn)
+        export_lay.addWidget(save_btn)
 
         # ── Send to tool (collapsible) ────────────────────────────────────────
-        _, self._export_widget, send_lay = _collapsible_section("→ Send to tool", expanded=False)
+        _, self._export_widget, send_lay = _collapsible_section(
+            export_lay, "→ Send to tool", expanded=False
+        )
 
         send_feat_btn = QPushButton("→ Feature Counting")
         send_feat_btn.setFont(QFont("Helvetica", 8))
@@ -758,7 +784,9 @@ class ImageViewerDialog(QDialog):
         send_lay.addWidget(send_tv_btn)
 
         # ── Advanced tools (collapsible) ──────────────────────────────────────
-        _, self._advanced_widget, advanced_lay = _collapsible_section("Advanced tools", expanded=False)
+        _, self._advanced_widget, advanced_lay = _collapsible_section(
+            processing_lay, "Advanced tools", expanded=False
+        )
 
         periodic_btn = QPushButton("Periodic FFT filter…")
         periodic_btn.setFont(QFont("Helvetica", 8))
@@ -818,7 +846,9 @@ class ImageViewerDialog(QDialog):
         advanced_lay.addWidget(self._undistort_scale_w)
 
         # ── Spectroscopy overlay (collapsible) ────────────────────────────────
-        _, self._spec_overlay_widget, spec_lay = _collapsible_section("Spectroscopy overlay", expanded=False)
+        _, self._spec_overlay_widget, spec_lay = _collapsible_section(
+            display_lay, "Spectroscopy overlay", expanded=False
+        )
 
         self._spec_show_cb = QCheckBox("Show spec positions")
         self._spec_show_cb.setFont(QFont("Helvetica", 8))
@@ -854,16 +884,45 @@ class ImageViewerDialog(QDialog):
         self._line_profile_panel.export_csv_clicked.connect(self._on_export_line_profile_csv)
         self._line_profile_panel.width_changed.connect(self._on_line_profile_width_changed)
 
+        roi_empty_lbl = QLabel(
+            "ROI tools live in the ROI Manager dock. Choose a drawing tool above "
+            "to create an ROI, or reopen the manager here."
+        )
+        roi_empty_lbl.setFont(QFont("Helvetica", 8))
+        roi_empty_lbl.setWordWrap(True)
+        roi_lay.addWidget(roi_empty_lbl)
+        show_roi_btn = QPushButton("Show ROI Manager")
+        show_roi_btn.setDefault(False)
+        show_roi_btn.setAutoDefault(False)
+        show_roi_btn.clicked.connect(self._show_roi_manager)
+        roi_lay.addWidget(show_roi_btn)
+        roi_lay.addStretch(1)
+
+        measurements_empty_lbl = QLabel(
+            "Measurement setup and results live in the Measurements dock. "
+            "Use the top Measurements menu or reopen the dock here."
+        )
+        measurements_empty_lbl.setFont(QFont("Helvetica", 8))
+        measurements_empty_lbl.setWordWrap(True)
+        measurements_lay.addWidget(measurements_empty_lbl)
+        show_measurements_btn = QPushButton("Show Measurements")
+        show_measurements_btn.setDefault(False)
+        show_measurements_btn.setAutoDefault(False)
+        show_measurements_btn.clicked.connect(self._show_measurements)
+        measurements_lay.addWidget(show_measurements_btn)
+        measurements_lay.addStretch(1)
+
         self._status_lbl = QLabel("")
         self._status_lbl.setFont(QFont("Helvetica", 8))
         self._status_lbl.setWordWrap(True)
         right_lay.addWidget(self._status_lbl)
 
-        right_lay.addStretch()
+        display_lay.addStretch(1)
+        processing_lay.addStretch(1)
+        export_lay.addStretch(1)
 
-        right_scroll.setWidget(right)
-        splitter.addWidget(right_scroll)
-        splitter.setSizes([740, 320])
+        splitter.addWidget(right)
+        splitter.setSizes([720, 380])
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 0)
         splitter.setCollapsible(1, False)
@@ -892,6 +951,16 @@ class ImageViewerDialog(QDialog):
             self,
             self._measurement_table,
             self._feature_detection_panel,
+            self._measurement_panel.point_mask_panel,
+        )
+        self._measurement_panel.roiStatsRequested.connect(
+            self._image_measurements.add_active_roi_stats_measurement
+        )
+        self._measurement_panel.stepHeightRequested.connect(
+            self._image_measurements.add_selected_step_height_measurement
+        )
+        self._measurement_panel.lineProfileRequested.connect(
+            self._image_measurements.add_current_line_profile_measurement
         )
 
         self._roi_dock = ROIManagerDock(
@@ -912,25 +981,16 @@ class ImageViewerDialog(QDialog):
             parent=self._viewer_main,
         )
 
-        # Histogram / contrast dock — always visible above the ROI Manager
-        self._hist_dock = QDockWidget("Histogram / Contrast", self._viewer_main)
-        self._hist_dock.setWidget(self._hist_panel)
-        self._hist_dock.setFeatures(
-            QDockWidget.DockWidgetClosable
-            | QDockWidget.DockWidgetMovable
-            | QDockWidget.DockWidgetFloatable
-        )
-        self._hist_dock.setMinimumWidth(180)
-
-        # Add histogram, ROI, and measurements as explicit right-side docks.
-        self._viewer_main.addDockWidget(Qt.RightDockWidgetArea, self._hist_dock)
+        # ROI and measurements are powerful but task-specific, so they start
+        # hidden and remain reachable from the sidebar and top menus.
         self._viewer_main.addDockWidget(Qt.RightDockWidgetArea, self._roi_dock)
-        self._viewer_main.splitDockWidget(self._hist_dock, self._roi_dock, Qt.Vertical)
         self._viewer_main.addDockWidget(Qt.RightDockWidgetArea, self._measurement_dock)
         self._viewer_main.splitDockWidget(self._roi_dock, self._measurement_dock, Qt.Vertical)
         self._viewer_main.resizeDocks(
-            [self._hist_dock, self._roi_dock], [220, 220], Qt.Horizontal
+            [self._roi_dock, self._measurement_dock], [220, 220], Qt.Horizontal
         )
+        self._roi_dock.hide()
+        self._measurement_dock.hide()
         self._build_viewer_menu_bar()
         root.addWidget(self._viewer_main, 1)
 
@@ -999,8 +1059,25 @@ class ImageViewerDialog(QDialog):
         native_action.triggered.connect(self._zoom_lbl.reset_zoom)
         view_menu.addAction(native_action)
         view_menu.addSeparator()
+        display_panel_action = QAction("Histogram / Contrast", self)
+        display_panel_action.triggered.connect(lambda: self._show_sidebar_tab("display"))
+        view_menu.addAction(display_panel_action)
+        processing_panel_action = QAction("Processing panel", self)
+        processing_panel_action.triggered.connect(lambda: self._show_sidebar_tab("processing"))
+        view_menu.addAction(processing_panel_action)
+        roi_panel_action = QAction("ROI panel", self)
+        roi_panel_action.triggered.connect(lambda: self._show_sidebar_tab("roi"))
+        view_menu.addAction(roi_panel_action)
+        measurements_panel_action = QAction("Measurements panel", self)
+        measurements_panel_action.triggered.connect(
+            lambda: self._show_sidebar_tab("measurements")
+        )
+        view_menu.addAction(measurements_panel_action)
+        export_panel_action = QAction("Export panel", self)
+        export_panel_action.triggered.connect(lambda: self._show_sidebar_tab("export"))
+        view_menu.addAction(export_panel_action)
+        view_menu.addSeparator()
         for label, dock in (
-            ("Histogram / Contrast", self._hist_dock),
             ("ROI Manager", self._roi_dock),
             ("Measurements", self._measurement_dock),
         ):
@@ -1191,13 +1268,22 @@ class ImageViewerDialog(QDialog):
         self._viewer_processing_actions[f"combo:{title}"] = action_map
         combo.currentTextChanged.connect(self._sync_viewer_menu_actions)
 
+    def _show_sidebar_tab(self, key: str) -> None:
+        if not hasattr(self, "_sidebar_tabs"):
+            return
+        idx = self._sidebar_tab_indices.get(key)
+        if idx is not None:
+            self._sidebar_tabs.setCurrentIndex(idx)
+
     def _show_roi_manager(self) -> None:
+        self._show_sidebar_tab("roi")
         if not hasattr(self, "_roi_dock"):
             return
         self._roi_dock.show()
         self._roi_dock.raise_()
 
     def _show_measurements(self) -> None:
+        self._show_sidebar_tab("measurements")
         if not hasattr(self, "_measurement_dock"):
             return
         self._measurement_dock.show()
@@ -1887,6 +1973,12 @@ class ImageViewerDialog(QDialog):
                 action.blockSignals(True)
                 action.setChecked(key == tool)
                 action.blockSignals(False)
+            if tool in {"rectangle", "ellipse", "polygon", "freehand", "point"}:
+                self._show_sidebar_tab("roi")
+            elif tool == "line":
+                self._show_sidebar_tab("measurements")
+                if hasattr(self, "_measurement_panel"):
+                    self._measurement_panel.set_measurement_type("line_profile")
 
         if hasattr(self, "_viewer_roi_actions"):
             roi_id = self._selected_or_active_image_roi_id()
