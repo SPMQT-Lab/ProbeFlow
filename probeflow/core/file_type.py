@@ -77,19 +77,18 @@ def sniff_file_type(path) -> FileType:
 
 
 def _has_binary_data_block(head: bytes) -> bool:
-    """Return True if ``head`` contains a ``DATA`` marker followed by
-    non-ASCII bytes within the sniffed window."""
+    """Return True if ``head`` contains a ``DATA`` marker followed by a zlib
+    compressed stream.
+
+    Createc image payloads are always zlib-deflate compressed, so the first
+    byte after the DATA marker (and any trailing EOL) is always ``0x78`` — the
+    zlib CMF byte for deflate with a 32 KB window.  Checking for this specific
+    byte prevents false positives on text or markdown files that happen to
+    contain the word "DATA" followed by a stray non-ASCII character.
+    """
     idx = head.find(b"DATA")
     if idx < 0:
         return False
-    # Look at the bytes after the DATA marker (skip over CRLF/newline) and
-    # see if any byte is non-ASCII (>= 0x80) — this is the binary payload.
-    tail = head[idx + 4:]
-    # Skip immediate EOL bytes
-    tail = tail.lstrip(b"\r\n")
-    if not tail:
-        return False
-    for b in tail:
-        if b >= 0x80:
-            return True
-    return False
+    tail = head[idx + 4:].lstrip(b"\r\n")
+    # zlib stream always begins with 0x78 (deflate, window size 32 KB)
+    return len(tail) >= 2 and tail[0] == 0x78
