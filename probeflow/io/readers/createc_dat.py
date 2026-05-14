@@ -3,6 +3,19 @@
 This module intentionally stops short of promising that every Createc channel
 is STM topography/current.  It decodes the raw container, records the decisions
 made along the way, and exposes small adapters for the legacy STM paths.
+
+Reader invariants:
+
+* The binary image payload starts after the real ``DATA`` marker.  Createc image
+  files commonly look like ``DATAx...`` because the zlib stream starts with byte
+  ``0x78`` immediately after the four marker bytes; header text containing the
+  word ``DATA`` must not be mistaken for that marker.
+* ``decoded_channels_dac`` is display-safe decoded data, not a byte-for-byte
+  acquisition dump: trailing incomplete rows may be trimmed and the known
+  Createc first-column scan-line artifact is removed by default.
+* ``original_header`` and ``original_Nx``/``original_Ny`` preserve the raw
+  acquisition header/dimensions so provenance and diagnostics can still tell
+  what changed during decoding.
 """
 
 from __future__ import annotations
@@ -19,7 +32,6 @@ from probeflow.io.common import (
     find_hdr,
     get_dac_bits,
     i_scale_a_per_dac,
-    parse_header,
     trim_stack,
     v_per_dac,
     z_scale_m_per_dac,
@@ -50,8 +62,10 @@ class CreatecDatDecodeReport:
     payload_float_count: int
     detected_channel_count: int
     ignored_tail_float_count: int
-    raw_channels_dac: np.ndarray | None
+    decoded_channels_dac: np.ndarray | None
     trimmed_Ny: int
+    image_y_pos_max: int | None
+    is_partial_scan: bool
     first_column_removed: bool
     first_column_diagnostics: list[dict[str, float | int | None]]
     scale_factors: dict[str, float | int]
@@ -65,6 +79,18 @@ class CreatecDatDecodeReport:
     @property
     def decoded_Ny(self) -> int:
         return int(self.header.get("Num.Y", self.trimmed_Ny))
+
+    @property
+    def raw_channels_dac(self) -> np.ndarray | None:
+        """Backward-compatible alias for ``decoded_channels_dac``.
+
+        The name is historical.  These arrays are decoded DAC values after
+        ProbeFlow's display-safety cleanup, including the default removal of
+        Createc's first stored column.  Use ``original_header`` and
+        ``original_Nx``/``original_Ny`` when the acquisition dimensions matter.
+        """
+
+        return self.decoded_channels_dac
 
 
 def read_createc_dat_report(
@@ -85,13 +111,8 @@ def read_createc_dat_report(
     raw = path.read_bytes()
     warnings: list[str] = []
 
-    if b"DATA" not in raw:
-        raise ValueError(
-            f"{path.name}: missing DATA marker — not a valid Createc .dat file"
-        )
-
-    hb, comp = raw.split(b"DATA", 1)
-    original_header = parse_header(hb)
+    hb, payload = _split_createc_dat_payload(path, raw)
+    original_header = _parse_createc_dat_header(hb)
     header = dict(original_header)
 
     Nx = _i(find_hdr(header, "Num.X", 0), 0)
@@ -101,11 +122,6 @@ def read_createc_dat_report(
 
     if _i(find_hdr(header, "ScanmodeSine", 0), 0) != 0:
         raise NotImplementedError(f"{path.name}: sine scan mode is not supported")
-
-    try:
-        payload = zlib.decompress(comp)
-    except zlib.error as exc:
-        raise ValueError(f"{path.name}: zlib decompression failed — {exc}") from exc
 
     if len(payload) % 4:
         warnings.append(
@@ -124,7 +140,8 @@ def read_createc_dat_report(
         )
 
     arr = np.frombuffer(payload, dtype="<f4", count=needed).reshape((num_chan, Ny, Nx))
-    trimmed, trimmed_Ny = trim_stack(arr)
+    image_y_pos_max = _image_y_pos_max(header)
+    trimmed, trimmed_Ny = _trim_createc_stack(arr, image_y_pos_max)
     if trimmed_Ny != Ny:
         warnings.append(f"trimmed image height from {Ny} to {trimmed_Ny} row(s)")
     header["Num.Y"] = str(trimmed_Ny)
@@ -140,9 +157,9 @@ def read_createc_dat_report(
         header["Num.X"] = str(Nx)
 
     if include_raw:
-        raw_channels_dac = np.array(decoded, dtype=np.float32, copy=True)
+        decoded_channels_dac = np.array(decoded, dtype=np.float32, copy=True)
     else:
-        raw_channels_dac = None
+        decoded_channels_dac = None
 
     bits = get_dac_bits(header)
     vpd = v_per_dac(bits)
@@ -166,8 +183,10 @@ def read_createc_dat_report(
         payload_float_count=payload_float_count,
         detected_channel_count=num_chan,
         ignored_tail_float_count=ignored_tail,
-        raw_channels_dac=raw_channels_dac,
+        decoded_channels_dac=decoded_channels_dac,
         trimmed_Ny=trimmed_Ny,
+        image_y_pos_max=image_y_pos_max,
+        is_partial_scan=trimmed_Ny < Ny,
         first_column_removed=remove_first_column,
         first_column_diagnostics=first_column_diagnostics,
         scale_factors=scale_factors,
@@ -179,12 +198,12 @@ def read_createc_dat_report(
 def scale_channels_for_scan(report: CreatecDatDecodeReport) -> list[np.ndarray]:
     """Return decoded channels scaled according to ``report.channel_info``."""
 
-    if report.raw_channels_dac is None:
-        raise ValueError("report does not include raw channel arrays")
+    if report.decoded_channels_dac is None:
+        raise ValueError("report does not include decoded channel arrays")
 
     planes: list[np.ndarray] = []
     for info in report.channel_info:
-        arr = report.raw_channels_dac[info.native_index] * info.scale_factor
+        arr = report.decoded_channels_dac[info.native_index] * info.scale_factor
         planes.append(np.asarray(arr, dtype=np.float64))
     return planes
 
@@ -195,6 +214,112 @@ def scan_range_m_from_header(hdr: dict[str, str]) -> tuple[float, float]:
     lx_a = _f(hdr.get("Length x[A]", "0"), 0.0)
     ly_a = _f(hdr.get("Length y[A]", "0"), 0.0)
     return (lx_a * 1e-10, ly_a * 1e-10)
+
+
+def _split_createc_dat_payload(path: Path, raw: bytes) -> tuple[bytes, bytes]:
+    """Return ``(header_bytes, decompressed_payload)`` for a Createc image.
+
+    The payload begins immediately after the real four-byte ``DATA`` marker.
+    In valid image files the next byte is usually the zlib CMF byte ``0x78``,
+    which is why the on-disk sequence can be read as ``DATAx`` in a hex/text
+    viewer.  Header comments may also contain the word ``DATA``; candidates are
+    therefore accepted only when zlib decompression succeeds from ``marker + 4``.
+    """
+
+    marker = b"DATA"
+    pos = raw.find(marker)
+    while pos >= 0:
+        start = pos + len(marker)
+        if start < len(raw) and raw[start] == 0x78:
+            try:
+                return raw[:pos], zlib.decompress(raw[start:])
+            except zlib.error:
+                pass
+        pos = raw.find(marker, start)
+
+    if marker not in raw:
+        raise ValueError(
+            f"{path.name}: missing DATA marker — not a valid Createc .dat file"
+        )
+    raise ValueError(f"{path.name}: zlib decompression failed after DATA marker")
+
+
+def _parse_createc_dat_header(hb: bytes) -> dict[str, str]:
+    """Parse Createc ``key=value`` header lines with conservative aliases.
+
+    Createc headers are mostly ASCII, but some files spell Angstrom as the
+    Latin-1 byte for ``Å``.  Internal/display header lines such as
+    ``InternalName / DisplayName=value`` are stored under both the full display
+    key and the internal key so exact lookups keep distinguishing ``Channels``
+    from ``ScanChannels``.
+    """
+
+    try:
+        text = hb.decode("ascii")
+    except UnicodeDecodeError:
+        text = hb.decode("latin-1")
+
+    hdr: dict[str, str] = {}
+    for line in text.splitlines():
+        if "=" not in line:
+            continue
+        raw_key, raw_value = line.split("=", 1)
+        value = raw_value.strip()
+        key_parts = [part.strip() for part in raw_key.split("/") if part.strip()]
+        if not key_parts:
+            continue
+
+        display_key = key_parts[-1]
+        hdr[display_key] = value
+        for key in key_parts[:-1]:
+            hdr.setdefault(key, value)
+        hdr.setdefault(raw_key.strip(), value)
+
+        for key in key_parts + [raw_key.strip()]:
+            alias = _canonical_createc_header_key(key)
+            if alias != key:
+                hdr.setdefault(alias, value)
+
+    return hdr
+
+
+def _canonical_createc_header_key(key: str) -> str:
+    """Return a normalized Createc header spelling for known unit aliases."""
+
+    return (
+        key.replace("[Å]", "[A]")
+        .replace("[å]", "[A]")
+        .replace("[Ang]", "[A]")
+        .replace("[Angstrom]", "[A]")
+    )
+
+
+def _image_y_pos_max(hdr: dict[str, str]) -> int | None:
+    """Return Createc ``ImageYPosMax`` as an integer, if present."""
+
+    value = _i(_header_value(hdr, "ImageYPosMax"), None)
+    return value if value is not None and value > 0 else None
+
+
+def _trim_createc_stack(
+    stack: np.ndarray,
+    image_y_pos_max: int | None,
+) -> tuple[np.ndarray, int]:
+    """Trim incomplete rows using explicit Createc metadata when available.
+
+    Real complete Createc fixtures record ``ImageYPosMax`` as ``Num.Y + 1``.
+    Interpreting the field as one-based "next Y position" gives the completed
+    row count as ``ImageYPosMax - 1``.  When the field is absent or outside the
+    declared image height, the legacy non-zero channel-0 heuristic is retained.
+    """
+
+    Ny = int(stack.shape[1])
+    if image_y_pos_max is not None:
+        rows_from_header = image_y_pos_max - 1
+        if 1 <= rows_from_header < Ny:
+            return stack[:, :rows_from_header, :], rows_from_header
+
+    return trim_stack(stack)
 
 
 def _detect_channel_count(

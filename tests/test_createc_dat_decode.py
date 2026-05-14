@@ -30,6 +30,7 @@ def test_report_records_trim_first_column_and_tail(first_sample_dat):
     assert report.first_column_removed is True
     assert report.ignored_tail_float_count >= 0
     assert report.raw_channels_dac is not None
+    assert report.raw_channels_dac is report.decoded_channels_dac
     assert report.raw_channels_dac.shape == (
         report.detected_channel_count,
         report.decoded_Ny,
@@ -294,6 +295,74 @@ def test_missing_data_marker_raises_createc_error(tmp_path):
 
     with pytest.raises(ValueError, match="missing DATA marker"):
         read_createc_dat_report(bad)
+
+
+def test_data_marker_inside_header_is_not_used_as_payload_start(tmp_path):
+    dat = tmp_path / "comment_mentions_data.dat"
+    header = (
+        b"[Paramco32]\n"
+        b"Comment=operator checked DATA integrity before scan\n"
+        b"Num.X=3\n"
+        b"Num.Y=2\n"
+        b"Channels=1\n"
+    )
+    payload = np.arange(1, 7, dtype="<f4").tobytes()
+    dat.write_bytes(header + b"DATA" + zlib.compress(payload))
+
+    report = read_createc_dat_report(dat)
+
+    assert report.detected_channel_count == 1
+    assert report.decoded_channels_dac is not None
+    np.testing.assert_array_equal(
+        report.decoded_channels_dac[0],
+        np.array([[2, 3], [5, 6]], dtype=np.float32),
+    )
+
+
+def test_createc_header_aliases_preserve_channels_and_latin1_dacto(tmp_path):
+    dat = tmp_path / "alias_header.dat"
+    header = (
+        "[Paramco32]\n"
+        "Num.X=3\n"
+        "Num.Y=2\n"
+        "ScanChannels=99\n"
+        "InternalChannels / Channels=1\n"
+        "InternalZ / Dacto[Å]z=2.0\n"
+        "GainZ=10\n"
+    ).encode("latin-1")
+    payload = np.arange(1, 7, dtype="<f4").tobytes()
+    dat.write_bytes(header + b"DATA" + zlib.compress(payload))
+
+    report = read_createc_dat_report(dat)
+
+    assert report.detected_channel_count == 1
+    assert report.original_header["Channels"] == "1"
+    assert report.original_header["InternalChannels"] == "1"
+    assert report.original_header["ScanChannels"] == "99"
+    assert report.scale_factors["z_m_per_dac"] == pytest.approx(2.0e-9)
+
+
+def test_image_y_pos_max_records_partial_scan_without_guessing_full_height(tmp_path):
+    dat = tmp_path / "partial.dat"
+    header = (
+        b"[Paramco32]\n"
+        b"Num.X=3\n"
+        b"Num.Y=5\n"
+        b"Channels=1\n"
+        b"ImageYPosMax=4\n"
+    )
+    payload = np.arange(1, 16, dtype="<f4").tobytes()
+    dat.write_bytes(header + b"DATA" + zlib.compress(payload))
+
+    report = read_createc_dat_report(dat)
+
+    assert report.image_y_pos_max == 4
+    assert report.is_partial_scan is True
+    assert report.original_Ny == 5
+    assert report.trimmed_Ny == 3
+    assert report.decoded_Ny == 3
+    assert report.decoded_channels_dac is not None
+    assert report.decoded_channels_dac.shape == (1, 3, 2)
 
 
 def test_createc_qplus_header_infers_afm_topography():

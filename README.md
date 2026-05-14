@@ -113,6 +113,11 @@ Input:
 | Nanonis `.sxm` | STM/SPM image scan |
 | Nanonis `.dat` | Point spectroscopy |
 
+Createc `.dat` scans are decoded directly from the compressed image payload.
+The reader records original dimensions, trims interrupted rows when detected,
+and removes the known first stored column artifact before display or export.
+More detail is in [docs/createc_dat_reader.md](docs/createc_dat_reader.md).
+
 Output:
 
 | File type | Use |
