@@ -16,6 +16,8 @@ dependencies = [
   "PySide6",
   "matplotlib",
   "shapely>=2.0",
+  "scanflow>=0.1.0",
+  "python-pptx>=0.6",
 ]
 
 [project.optional-dependencies]
