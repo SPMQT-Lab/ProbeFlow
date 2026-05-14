@@ -1908,9 +1908,6 @@ class ImageViewerDialog(QDialog):
         arr = self._display_arr if self._display_arr is not None else self._raw_arr
         return None if arr is None else arr.shape
 
-    def _active_image_roi_id(self) -> "str | None":
-        return active_roi_id(self._image_roi_set)
-
     def _active_image_roi(self):
         return active_roi(self._image_roi_set)
 
@@ -3773,9 +3770,6 @@ class ProbeFlowWindow(QMainWindow):
                 f"|a|={result.a_length_m * 1e9:.3f} nm  "
                 f"|b|={result.b_length_m * 1e9:.3f} nm  "
                 f"γ={result.gamma_deg:.1f}°")
-
-    def _features_segmentation_signature(self, params: dict) -> tuple:
-        return tuple(sorted(params.items()))
 
     def _on_classify_params_changed(self) -> None:
         self._features_panel.clear_sample_labels()
