@@ -546,7 +546,6 @@ class TestSyntheticDACConversion:
         # 20-bit DAC: vpd = (10/2^20)*2 = 20/2^20 V/DAC; gain=10^9 V/A
         # is_ = vpd/gain = 20/(2^20 * 1e9) ≈ 1.9073e-14 A/DAC
         # i_dac=-5000 → current ≈ -9.537e-11 A (negative)
-        import math
         f = _make_synthetic_vert(tmp_path, z_dac=0.0, i_dac=-5000.0)
         spec = read_spec_file(f)
         vpd = (10.0 / 2**20) * 2

@@ -2,9 +2,10 @@
 ProbeFlow — lattice extraction for atomically-resolved STM images.
 
 Ported from AiSurf's lattice_extraction notebook (SIFT keypoints → silhouette
-clustering → kNN vector clustering → primitive lattice vectors). The physics
-is identical; the API is a single ``extract_lattice()`` call that takes a
-Scan plane plus a ``pixel_size_m`` and returns a :class:`LatticeResult`.
+clustering → kNN vector clustering → primitive lattice vectors). The API keeps
+the historical scalar ``pixel_size_m`` for square-pixel callers and also accepts
+``pixel_size_x_m`` / ``pixel_size_y_m`` so physical vectors are correct on
+rectangular scans.
 
 Optional dependency: this module needs OpenCV (for SIFT) and scikit-learn
 (for silhouette-scored clustering). Install via ``pip install probeflow[features]``.
@@ -81,6 +82,8 @@ class LatticeResult:
     cluster_labels: List[int] = field(default_factory=list)
     primary_cluster: int = -1
     pixel_size_m: float = 0.0
+    pixel_size_x_m: float = 0.0
+    pixel_size_y_m: float = 0.0
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -161,6 +164,9 @@ def extract_lattice(
     arr: np.ndarray,
     pixel_size_m: float,
     params: Optional[LatticeParams] = None,
+    *,
+    pixel_size_x_m: float | None = None,
+    pixel_size_y_m: float | None = None,
 ) -> LatticeResult:
     """Extract primitive lattice vectors from an STM image.
 
@@ -169,7 +175,11 @@ def extract_lattice(
     arr
         2-D scan plane (one channel).
     pixel_size_m
-        Physical pixel size (metres). Must be > 0.
+        Backward-compatible scalar physical pixel size (metres). Must be > 0.
+    pixel_size_x_m, pixel_size_y_m
+        Optional physical pixel width and height. Pass these for rectangular
+        scans; vector components, lengths, angles, and reports use the
+        corresponding physical axis scales.
     params
         Tunable parameters. Defaults are AiSurf's recommended settings.
 
@@ -195,8 +205,11 @@ def extract_lattice(
     """
     if arr.ndim != 2:
         raise ValueError("extract_lattice expects a 2-D array")
-    if pixel_size_m <= 0:
-        raise ValueError("pixel_size_m must be > 0")
+    dx_m = float(pixel_size_x_m if pixel_size_x_m is not None else pixel_size_m)
+    dy_m = float(pixel_size_y_m if pixel_size_y_m is not None else pixel_size_m)
+    if dx_m <= 0 or dy_m <= 0:
+        raise ValueError("pixel sizes must be > 0")
+    pixel_size_m = float(np.sqrt(dx_m * dy_m))
     params = params or LatticeParams()
 
     cv2 = _cv()
@@ -288,11 +301,13 @@ def extract_lattice(
     if a_vec is None or b_vec is None:
         raise RuntimeError("Could not find two non-colinear lattice vectors.")
 
-    a_m = (float(a_vec[0]) * pixel_size_m, float(a_vec[1]) * pixel_size_m)
-    b_m = (float(b_vec[0]) * pixel_size_m, float(b_vec[1]) * pixel_size_m)
-    a_len = float(np.linalg.norm(a_vec)) * pixel_size_m
-    b_len = float(np.linalg.norm(b_vec)) * pixel_size_m
-    gamma = _angle_between_deg(a_vec, b_vec)
+    a_phys = np.array([float(a_vec[0]) * dx_m, float(a_vec[1]) * dy_m])
+    b_phys = np.array([float(b_vec[0]) * dx_m, float(b_vec[1]) * dy_m])
+    a_m = (float(a_phys[0]), float(a_phys[1]))
+    b_m = (float(b_phys[0]), float(b_phys[1]))
+    a_len = float(np.linalg.norm(a_phys))
+    b_len = float(np.linalg.norm(b_phys))
+    gamma = _angle_between_deg(a_phys, b_phys)
 
     return LatticeResult(
         a_vector_m=a_m,
@@ -308,6 +323,8 @@ def extract_lattice(
         cluster_labels=[int(lbl) for lbl in kp_labels.tolist()],
         primary_cluster=primary,
         pixel_size_m=float(pixel_size_m),
+        pixel_size_x_m=dx_m,
+        pixel_size_y_m=dy_m,
     )
 
 
@@ -392,7 +409,13 @@ def write_lattice_pdf(
             dists = np.sqrt((diffs ** 2).sum(axis=-1)).ravel()
             dists = dists[dists > 0]
             if dists.size > 0:
-                ax_hist.hist(dists * lattice.pixel_size_m * 1e9, bins=40,
+                dx = lattice.pixel_size_x_m or lattice.pixel_size_m
+                dy = lattice.pixel_size_y_m or lattice.pixel_size_m
+                dists_m = np.sqrt(
+                    (diffs[..., 0] * dx) ** 2 + (diffs[..., 1] * dy) ** 2
+                ).ravel()
+                dists_m = dists_m[dists_m > 0]
+                ax_hist.hist(dists_m * 1e9, bins=40,
                              color="steelblue", edgecolor="black")
                 ax_hist.axvline(lattice.a_length_m * 1e9, color="red",
                                 linestyle="--", label="|a|")
@@ -571,8 +594,10 @@ def average_unit_cell(
     avg = (accum / n_cells).reshape(Hc, Wc).astype(arr.dtype, copy=False)
 
     # Physical extent of the averaged cell.
-    cell_w_m = float(np.hypot(a_px[0], a_px[1])) * lattice.pixel_size_m
-    cell_h_m = float(np.hypot(b_px[0], b_px[1])) * lattice.pixel_size_m
+    dx = lattice.pixel_size_x_m or lattice.pixel_size_m
+    dy = lattice.pixel_size_y_m or lattice.pixel_size_m
+    cell_w_m = float(np.hypot(a_px[0] * dx, a_px[1] * dy))
+    cell_h_m = float(np.hypot(b_px[0] * dx, b_px[1] * dy))
 
     return UnitCellResult(
         avg_cell=avg,

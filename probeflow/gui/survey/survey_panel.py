@@ -374,7 +374,7 @@ class SurveyPanel(QWidget):
 
         try:
             from probeflow.gui import (
-                SxmFile, scan_image_folder, render_with_processing
+                scan_image_folder, render_with_processing
             )
             entries = scan_image_folder(dat_path.parent)
             target = next((e for e in entries if Path(e.path) == dat_path), None)

@@ -11,7 +11,6 @@ Or headless: QT_QPA_PLATFORM=offscreen pytest tests/test_gui_smoke.py
 from __future__ import annotations
 
 import os
-import numpy as np
 import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")

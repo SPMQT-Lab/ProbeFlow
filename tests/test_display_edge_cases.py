@@ -11,7 +11,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from probeflow.processing.display import array_to_uint8, normalise_array
+from probeflow.processing.display import array_to_uint8
 from probeflow.processing.display_state import DisplayRangeState
 
 

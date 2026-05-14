@@ -9,9 +9,6 @@ pytest.importorskip("cv2")
 pytest.importorskip("sklearn")
 
 from probeflow.analysis.features import (
-    Classification,
-    Detection,
-    Particle,
     classify_particles,
     count_features,
     segment_particles,
@@ -61,6 +58,23 @@ class TestSegmentParticles:
         p = parts[0]
         # Disk radius=5 px, pixel=0.2 nm → area ≈ π·(5·0.2)² ≈ π nm² ≈ 3.14
         assert 2.0 < p.area_nm2 < 5.0
+
+    def test_particle_coordinates_use_anisotropic_pixel_sizes(self):
+        arr = _disk((64, 64), 20, 30, r=3, height=1.0)
+        parts = segment_particles(
+            arr,
+            pixel_size_m=1e-9,
+            pixel_size_x_m=2e-9,
+            pixel_size_y_m=0.5e-9,
+            min_area_nm2=0.1,
+            size_sigma_clip=None,
+        )
+        assert len(parts) == 1
+        p = parts[0]
+        assert p.centroid_x_m == pytest.approx(40e-9)
+        assert p.centroid_y_m == pytest.approx(15e-9)
+        assert p.bbox_m[0] == pytest.approx(p.bbox_px[0] * 2e-9)
+        assert p.bbox_m[1] == pytest.approx(p.bbox_px[1] * 0.5e-9)
 
     def test_min_area_filter(self):
         # Two disks of very different sizes → filter should drop the small one.
@@ -186,6 +200,25 @@ class TestCountFeatures:
         if dets:
             d = dets[0].to_dict()
             assert "x_m" in d and "correlation" in d
+
+    def test_detection_coordinates_use_anisotropic_pixel_sizes(self):
+        arr = _disk((64, 64), 32, 20, r=3, height=5.0)
+        tmpl = _disk((12, 12), 6, 6, r=3, height=5.0)
+        dets = count_features(
+            arr,
+            tmpl,
+            pixel_size_m=1e-9,
+            pixel_size_x_m=2e-9,
+            pixel_size_y_m=0.5e-9,
+            min_correlation=0.4,
+            min_distance_m=5e-9,
+        )
+        assert dets
+        d = max(dets, key=lambda item: item.correlation)
+        assert d.x_px == 32
+        assert d.y_px == 20
+        assert d.x_m == pytest.approx(64e-9)
+        assert d.y_m == pytest.approx(10e-9)
 
 
 # ─── classify_particles ─────────────────────────────────────────────────────

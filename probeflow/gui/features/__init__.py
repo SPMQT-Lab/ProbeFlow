@@ -74,11 +74,14 @@ class _FeaturesWorker(QRunnable):
     """
 
     def __init__(self, mode: str, arr: np.ndarray, pixel_size_m: float,
+                 pixel_size_x_m: float, pixel_size_y_m: float,
                  params: dict, signals: _FeaturesWorkerSignals):
         super().__init__()
         self._mode    = mode
         self._arr     = arr
         self._px      = float(pixel_size_m)
+        self._px_x    = float(pixel_size_x_m)
+        self._px_y    = float(pixel_size_y_m)
         self._params  = params
         self._signals = signals
 
@@ -89,6 +92,8 @@ class _FeaturesWorker(QRunnable):
                 from probeflow.analysis.features import segment_particles
                 res = segment_particles(
                     self._arr, self._px,
+                    pixel_size_x_m=self._px_x,
+                    pixel_size_y_m=self._px_y,
                     threshold=self._params["threshold"],
                     manual_value=self._params.get("manual_value"),
                     invert=self._params.get("invert", False),
@@ -100,13 +105,20 @@ class _FeaturesWorker(QRunnable):
                 from probeflow.analysis.features import count_features
                 res = count_features(
                     self._arr, self._params["template"], self._px,
+                    pixel_size_x_m=self._px_x,
+                    pixel_size_y_m=self._px_y,
                     min_correlation=self._params.get("min_correlation", 0.5),
                     min_distance_m=self._params.get("min_distance_m"),
                 )
             elif self._mode == "lattice":
                 from probeflow.analysis.lattice import extract_lattice, LatticeParams
-                res = extract_lattice(self._arr, self._px,
-                                      params=LatticeParams())
+                res = extract_lattice(
+                    self._arr,
+                    self._px,
+                    pixel_size_x_m=self._px_x,
+                    pixel_size_y_m=self._px_y,
+                    params=LatticeParams(),
+                )
             else:
                 raise ValueError(f"Unknown mode {self._mode!r}")
             self._signals.finished.emit(self._mode, res, "")
@@ -132,6 +144,8 @@ class FeaturesPanel(QWidget):
         self._plane_idx  = 0
         self._arr        = None            # np.ndarray
         self._pixel_size_m = 1e-10
+        self._pixel_size_x_m = 1e-10
+        self._pixel_size_y_m = 1e-10
         self._overlay_mode = "none"        # "particles" | "template" | "lattice"
         self._particles  = []
         self._detections = []
@@ -187,11 +201,18 @@ class FeaturesPanel(QWidget):
         lay.addWidget(powered)
 
     def load_entry(self, entry, plane_idx: int, arr: np.ndarray,
-                    pixel_size_m: float):
+                    pixel_size_m: float, pixel_size_x_m: float | None = None,
+                    pixel_size_y_m: float | None = None):
         self._entry        = entry
         self._plane_idx    = plane_idx
         self._arr          = arr
         self._pixel_size_m = pixel_size_m
+        self._pixel_size_x_m = (
+            float(pixel_size_x_m) if pixel_size_x_m is not None else float(pixel_size_m)
+        )
+        self._pixel_size_y_m = (
+            float(pixel_size_y_m) if pixel_size_y_m is not None else float(pixel_size_m)
+        )
         self._particles    = []
         self._detections   = []
         self._lattice      = None
@@ -203,7 +224,8 @@ class FeaturesPanel(QWidget):
         self._title.setText(
             f"{entry.stem}  -  {plane_lbl}  -  "
             f"{arr.shape[1]}x{arr.shape[0]} px  "
-            f"(px = {pixel_size_m * 1e12:.1f} pm)")
+            f"(px = {self._pixel_size_x_m * 1e12:.1f} x "
+            f"{self._pixel_size_y_m * 1e12:.1f} pm)")
 
     def current_entry(self):
         return self._entry
@@ -213,6 +235,9 @@ class FeaturesPanel(QWidget):
 
     def current_pixel_size(self):
         return self._pixel_size_m
+
+    def current_pixel_sizes(self):
+        return self._pixel_size_x_m, self._pixel_size_y_m
 
     def set_mode(self, mode: str) -> None:
         self._current_mode = mode
@@ -398,13 +423,13 @@ class FeaturesPanel(QWidget):
 
         if self._overlay_mode == "particles":
             for p in self._particles:
-                xs = [c[0] / self._pixel_size_m for c in p.contour_xy_m]
-                ys = [c[1] / self._pixel_size_m for c in p.contour_xy_m]
+                xs = [c[0] / self._pixel_size_x_m for c in p.contour_xy_m]
+                ys = [c[1] / self._pixel_size_y_m for c in p.contour_xy_m]
                 if xs and ys:
                     xs.append(xs[0]); ys.append(ys[0])
                     self._ax.plot(xs, ys, color="#f38ba8", lw=0.8)
-                cx = p.centroid_x_m / self._pixel_size_m
-                cy = p.centroid_y_m / self._pixel_size_m
+                cx = p.centroid_x_m / self._pixel_size_x_m
+                cy = p.centroid_y_m / self._pixel_size_y_m
                 self._ax.plot(cx, cy, marker="+", color="#a6e3a1", ms=5)
         elif self._overlay_mode == "template":
             for d in self._detections:

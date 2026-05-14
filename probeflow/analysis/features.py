@@ -8,7 +8,10 @@ cleanly to JSON via :mod:`probeflow.io.writers.json`.
 
 Design notes
 ------------
-* Everything operates on a single 2-D float array plus ``pixel_size_m``.
+* Everything operates on a single 2-D float array plus physical pixel sizes.
+  The historical ``pixel_size_m`` scalar is still accepted for square-pixel
+  callers; newer callers should pass ``pixel_size_x_m`` and ``pixel_size_y_m``
+  so coordinates remain correct on rectangular scans.
 * OpenCV and scikit-learn are optional at import time — they are imported
   lazily inside the functions that need them. A ``features`` extra in
   pyproject.toml pulls them in on demand.
@@ -34,6 +37,19 @@ from dataclasses import dataclass, field, asdict
 from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
+
+
+def _pixel_scales(
+    pixel_size_m: float,
+    pixel_size_x_m: Optional[float] = None,
+    pixel_size_y_m: Optional[float] = None,
+) -> tuple[float, float, float]:
+    """Return ``(dx, dy, sqrt(dx*dy))`` in metres."""
+    dx = float(pixel_size_x_m if pixel_size_x_m is not None else pixel_size_m)
+    dy = float(pixel_size_y_m if pixel_size_y_m is not None else pixel_size_m)
+    if dx <= 0 or dy <= 0:
+        raise ValueError("pixel sizes must be > 0")
+    return dx, dy, float(np.sqrt(dx * dy))
 
 from probeflow.analysis.helpers import (
     cv2_module,
@@ -92,6 +108,8 @@ def segment_particles(
     arr: np.ndarray,
     pixel_size_m: float,
     *,
+    pixel_size_x_m: Optional[float] = None,
+    pixel_size_y_m: Optional[float] = None,
     threshold: str = "otsu",
     manual_value: Optional[float] = None,
     invert: bool = False,
@@ -108,8 +126,11 @@ def segment_particles(
     arr
         2-D float array (one scan plane).
     pixel_size_m
-        Physical pixel size, metres. When pixels are non-square this should be
-        the geometric mean (``sqrt(dx * dy)``).
+        Backward-compatible scalar physical pixel size, metres.
+    pixel_size_x_m, pixel_size_y_m
+        Optional physical pixel width and height. Use these for rectangular
+        scans; areas use ``dx * dy`` and coordinates use the corresponding
+        axis scale.
     threshold
         ``"otsu"`` (default) uses Otsu's automatic threshold on the percentile-
         normalised uint8 view. ``"manual"`` uses ``manual_value`` in 0-255
@@ -135,8 +156,7 @@ def segment_particles(
     """
     if arr.ndim != 2:
         raise ValueError("segment_particles expects a 2-D array")
-    if pixel_size_m <= 0:
-        raise ValueError("pixel_size_m must be > 0")
+    dx_m, dy_m, _ = _pixel_scales(pixel_size_m, pixel_size_x_m, pixel_size_y_m)
 
     # Constant or empty planes carry no features. OpenCV's Otsu threshold on
     # a flat image is undefined (newer versions return a full-image foreground
@@ -172,7 +192,7 @@ def segment_particles(
         mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE,
     )
 
-    px_area = pixel_size_m * pixel_size_m
+    px_area = dx_m * dy_m
     particles: List[Particle] = []
     for i, cnt in enumerate(contours):
         # Rasterised particle mask (robust for holes and thin shapes).
@@ -205,19 +225,19 @@ def segment_particles(
             min_h = float(finite.min())
 
         contour_xy_m = [
-            (float(pt[0][0]) * pixel_size_m,
-             float(pt[0][1]) * pixel_size_m)
+            (float(pt[0][0]) * dx_m,
+             float(pt[0][1]) * dy_m)
             for pt in cnt
         ]
 
         particles.append(Particle(
             index=len(particles),
-            centroid_x_m=cx_px * pixel_size_m,
-            centroid_y_m=cy_px * pixel_size_m,
+            centroid_x_m=cx_px * dx_m,
+            centroid_y_m=cy_px * dy_m,
             area_m2=area_m2,
             area_nm2=area_nm2,
-            bbox_m=(x0 * pixel_size_m, y0 * pixel_size_m,
-                    (x1 + 1) * pixel_size_m, (y1 + 1) * pixel_size_m),
+            bbox_m=(x0 * dx_m, y0 * dy_m,
+                    (x1 + 1) * dx_m, (y1 + 1) * dy_m),
             bbox_px=(x0, y0, x1 + 1, y1 + 1),
             mean_height=mean_h,
             max_height=max_h,
@@ -298,6 +318,8 @@ def count_features(
     template: np.ndarray,
     pixel_size_m: float,
     *,
+    pixel_size_x_m: Optional[float] = None,
+    pixel_size_y_m: Optional[float] = None,
     min_correlation: float = 0.5,
     min_distance_m: Optional[float] = None,
     clip_low: float = 1.0,
@@ -313,7 +335,11 @@ def count_features(
         2-D float array — a crop of the repeating motif. Must be smaller than
         ``arr`` in both dimensions.
     pixel_size_m
-        Physical pixel size.
+        Backward-compatible scalar physical pixel size, metres.
+    pixel_size_x_m, pixel_size_y_m
+        Optional physical pixel width and height. Detected coordinates use the
+        corresponding axis scale; the scalar geometric mean is used only for
+        the square-pixel suppression window.
     min_correlation
         Reject peaks whose normalised cross-correlation is below this value.
         AiSurf's recommended range is 0.4 – 0.6.
@@ -330,8 +356,9 @@ def count_features(
         raise ValueError("arr and template must be 2-D arrays")
     if template.shape[0] >= arr.shape[0] or template.shape[1] >= arr.shape[1]:
         raise ValueError("template must be smaller than arr in both dims")
-    if pixel_size_m <= 0:
-        raise ValueError("pixel_size_m must be > 0")
+    dx_m, dy_m, geom_px_m = _pixel_scales(
+        pixel_size_m, pixel_size_x_m, pixel_size_y_m
+    )
 
     cv2 = _cv()
 
@@ -343,8 +370,8 @@ def count_features(
     oy, ox = th // 2, tw // 2  # offset to recover whole-image coordinates
 
     if min_distance_m is None:
-        min_distance_m = 0.5 * float(np.sqrt(th * tw)) * pixel_size_m
-    min_distance_px = max(1, int(round(min_distance_m / pixel_size_m)))
+        min_distance_m = 0.5 * float(np.sqrt(th * tw)) * geom_px_m
+    min_distance_px = max(1, int(round(min_distance_m / geom_px_m)))
 
     peaks = _peak_local_max(response,
                             min_distance_px=min_distance_px,
@@ -359,8 +386,8 @@ def count_features(
         h = float(arr[y_px, x_px]) if np.isfinite(arr[y_px, x_px]) else float("nan")
         detections.append(Detection(
             index=i,
-            x_m=x_px * pixel_size_m,
-            y_m=y_px * pixel_size_m,
+            x_m=x_px * dx_m,
+            y_m=y_px * dy_m,
             x_px=x_px,
             y_px=y_px,
             correlation=float(response[r, c]),

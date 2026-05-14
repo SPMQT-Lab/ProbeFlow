@@ -1391,6 +1391,41 @@ def test_viewer_refresh_display_array_blocks_stale_roi_reference(qapp, monkeypat
     assert "missing-id" in dlg._status_lbl.text
 
 
+def test_viewer_refresh_display_array_blocks_export_after_processing_error(qapp, monkeypatch):
+    from probeflow.core.roi import ROISet
+    from probeflow.gui import ImageViewerDialog
+    import probeflow.gui._legacy as gui_mod
+
+    class FakeStatus:
+        def __init__(self):
+            self.text = ""
+
+        def setText(self, text):
+            self.text = text
+
+    def fail_apply(arr, processing, roi_set=None):
+        raise RuntimeError("bad processing setting")
+
+    monkeypatch.setattr(gui_mod, "_apply_processing", fail_apply)
+
+    dlg = ImageViewerDialog.__new__(ImageViewerDialog)
+    dlg._display_arr = None
+    dlg._raw_arr = np.zeros((2, 2))
+    dlg._processing = {"smooth_sigma": 1.0}
+    dlg._image_roi_set = ROISet(image_id="img1")
+    dlg._reset_zoom_on_next_pixmap = False
+    dlg._status_lbl = FakeStatus()
+    dlg._processing_roi_error = ""
+    dlg._processing_error = ""
+
+    dlg._refresh_display_array()
+
+    np.testing.assert_allclose(dlg._display_arr, np.zeros((2, 2)))
+    assert "bad processing setting" in dlg._processing_error
+    assert dlg._assert_exportable_processing() is False
+    assert "Export blocked" in dlg._status_lbl.text
+
+
 def test_viewer_dialog_initializes_panel_from_thumbnail_processing(qapp, monkeypatch):
     from probeflow.gui import ImageViewerDialog, ProcessingControlPanel, SxmFile
 

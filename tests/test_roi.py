@@ -1,7 +1,6 @@
 """Tests for probeflow.core.roi — ROI data model, masks, and transforms."""
 from __future__ import annotations
 
-import math
 import warnings
 
 import numpy as np
@@ -14,7 +13,6 @@ from probeflow.core.roi import (
     invert_mask,
     translate,
 )
-from probeflow.processing.state import apply_processing_state, ProcessingState, ProcessingStep
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────

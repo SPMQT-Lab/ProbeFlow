@@ -1858,19 +1858,14 @@ def export_png(
         img.save(str(out_path), format="PNG")
 
     if provenance is not None:
-        try:
-            from probeflow.provenance.export import write_provenance_sidecars
+        from probeflow.provenance.export import write_provenance_sidecars
 
-            write_provenance_sidecars(
-                out_path,
-                provenance,
-                export_format="png",
-                overwrite=overwrite_sidecars,
-            )
-        except FileExistsError:
-            raise
-        except Exception:
-            pass  # unexpected sidecar failure must never break the PNG export
+        write_provenance_sidecars(
+            out_path,
+            provenance,
+            export_format="png",
+            overwrite=overwrite_sidecars,
+        )
 
 
 # ═════════════════════════════════════════════════════════════════════════════

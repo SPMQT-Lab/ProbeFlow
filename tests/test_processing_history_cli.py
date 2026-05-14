@@ -254,7 +254,7 @@ class TestPipelineHistory:
 # ─── CLI output safety ───────────────────────────────────────────────────────
 
 class TestCliOutputSafety:
-    def test_single_op_default_uses_command_suffix(self, first_sample_dat, tmp_path):
+    def test_single_op_default_blocks_selected_plane_sxm(self, first_sample_dat, tmp_path):
         src = tmp_path / first_sample_dat.name
         src.write_bytes(first_sample_dat.read_bytes())
         existing = tmp_path / f"{src.stem}.sxm"
@@ -262,28 +262,28 @@ class TestCliOutputSafety:
 
         rc = main(["smooth", str(src)])
 
-        assert rc == 0
+        assert rc == 1
         assert existing.read_bytes() == b"sentinel"
-        assert (tmp_path / f"{src.stem}_smooth.sxm").exists()
+        assert not (tmp_path / f"{src.stem}_smooth.sxm").exists()
 
     def test_existing_explicit_output_requires_force(self, first_sample_dat, tmp_path):
         src = tmp_path / first_sample_dat.name
         src.write_bytes(first_sample_dat.read_bytes())
-        out = tmp_path / "processed.sxm"
+        out = tmp_path / "processed.png"
         out.write_bytes(b"sentinel")
 
-        with pytest.raises(ValueError, match="already exists"):
-            main(["smooth", str(src), "-o", str(out)])
+        rc = main(["smooth", str(src), "--png", "-o", str(out)])
 
+        assert rc == 1
         assert out.read_bytes() == b"sentinel"
 
     def test_force_allows_explicit_output_replacement(self, first_sample_dat, tmp_path):
         src = tmp_path / first_sample_dat.name
         src.write_bytes(first_sample_dat.read_bytes())
-        out = tmp_path / "processed.sxm"
+        out = tmp_path / "processed.png"
         out.write_bytes(b"sentinel")
 
-        rc = main(["smooth", str(src), "-o", str(out), "--force"])
+        rc = main(["smooth", str(src), "--png", "-o", str(out), "--force"])
 
         assert rc == 0
         assert out.read_bytes() != b"sentinel"

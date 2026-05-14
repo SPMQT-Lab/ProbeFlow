@@ -876,16 +876,16 @@ class TestSetZeroPlane:
 
 class TestPlaneBgCli:
     def test_order3_via_cli(self, first_sample_dat, tmp_path):
-        out = tmp_path / "out.sxm"
+        out = tmp_path / "out.png"
         rc = cli_main(["plane-bg", str(first_sample_dat),
-                       "--order", "3", "-o", str(out)])
+                       "--order", "3", "--png", "-o", str(out)])
         assert rc == 0
         assert out.exists()
 
     def test_order4_via_cli(self, first_sample_dat, tmp_path):
-        out = tmp_path / "out.sxm"
+        out = tmp_path / "out.png"
         rc = cli_main(["plane-bg", str(first_sample_dat),
-                       "--order", "4", "-o", str(out)])
+                       "--order", "4", "--png", "-o", str(out)])
         assert rc == 0
         assert out.exists()
 
@@ -1052,14 +1052,13 @@ class TestPiezoCreepBackground:
         assert np.isfinite(out).any()
 
     def test_order5_via_cli_rejected(self, first_sample_dat, tmp_path):
-        import sys
         with pytest.raises(SystemExit):
             cli_main(["plane-bg", str(first_sample_dat), "--order", "5"])
 
     def test_pipeline_order4_accepted(self, first_sample_dat, tmp_path):
-        out = tmp_path / "out.sxm"
+        out = tmp_path / "out.png"
         rc = cli_main(["pipeline", str(first_sample_dat),
-                       "-o", str(out), "--steps", "plane-bg:4"])
+                       "--png", "-o", str(out), "--steps", "plane-bg:4"])
         assert rc == 0
         assert out.exists()
 

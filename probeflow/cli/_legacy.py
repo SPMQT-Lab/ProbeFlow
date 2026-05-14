@@ -223,6 +223,13 @@ def _write_output(
         )
     else:
         out_path = _derive_output(args, default_suffix)
+        state = getattr(scan, "processing_state", None)
+        if getattr(state, "steps", None) and scan.n_planes > 1:
+            raise ValueError(
+                "Refusing to write selected-plane processing as an all-plane SXM. "
+                "Use --png for selected-plane export until per-plane SXM "
+                "processing provenance is supported."
+            )
         _ensure_output_available(out_path, force=force)
         scan.save_sxm(out_path, overwrite=force, overwrite_sidecars=force)
     log.info("[OK] %s → %s", args.input.name, out_path)
@@ -390,7 +397,11 @@ def _processing_state_from_ops(ops: list[_Op]) -> ProcessingState:
 def _cmd_single_op(args, op: Callable[[np.ndarray], np.ndarray]) -> int:
     setup_logging(args.verbose)
     scan = _apply_to_plane(args.input, args.plane, op)
-    _write_output(args, scan, default_suffix=".sxm")
+    try:
+        _write_output(args, scan, default_suffix=".sxm")
+    except Exception as exc:
+        log.error("%s", exc)
+        return 1
     return 0
 
 
@@ -579,7 +590,11 @@ def _cmd_pipeline(args) -> int:
     for op in ops:
         scan.planes[args.plane] = op(scan.planes[args.plane])
         _record_op(scan, op.name, op.params)
-    _write_output(args, scan, default_suffix=".sxm")
+    try:
+        _write_output(args, scan, default_suffix=".sxm")
+    except Exception as exc:
+        log.error("%s", exc)
+        return 1
     return 0
 
 
@@ -669,11 +684,19 @@ def _cmd_convert(args) -> int:
 
 def _pixel_size_m_from_scan(scan) -> float:
     """Geometric mean pixel size — used as a single-number proxy."""
+    dx_m, dy_m = _pixel_sizes_m_from_scan(scan)
+    if dx_m <= 0 or dy_m <= 0:
+        return 0.0
+    return float(np.sqrt(dx_m * dy_m))
+
+
+def _pixel_sizes_m_from_scan(scan) -> tuple[float, float]:
+    """Return physical ``(dx, dy)`` pixel sizes in metres."""
     w_m, h_m = scan.scan_range_m
     Nx, Ny = scan.dims
     if Nx <= 0 or Ny <= 0 or w_m <= 0 or h_m <= 0:
-        return 0.0
-    return float(np.sqrt((w_m / Nx) * (h_m / Ny)))
+        return 0.0, 0.0
+    return float(w_m / Nx), float(h_m / Ny)
 
 
 def _cmd_particles(args) -> int:
@@ -688,7 +711,8 @@ def _cmd_particles(args) -> int:
         log.error("Plane %d not present (file has %d)",
                   args.plane, scan.n_planes)
         return 1
-    px_m = _pixel_size_m_from_scan(scan)
+    dx_m, dy_m = _pixel_sizes_m_from_scan(scan)
+    px_m = float(np.sqrt(dx_m * dy_m)) if dx_m > 0 and dy_m > 0 else 0.0
     if px_m <= 0:
         log.error("Scan has no physical pixel size — cannot segment.")
         return 1
@@ -697,6 +721,8 @@ def _cmd_particles(args) -> int:
     particles = segment_particles(
         scan.planes[args.plane],
         pixel_size_m=px_m,
+        pixel_size_x_m=dx_m,
+        pixel_size_y_m=dy_m,
         threshold=args.threshold,
         manual_value=args.manual_value,
         invert=args.invert,
@@ -739,7 +765,8 @@ def _cmd_count(args) -> int:
         log.error("Plane %d not present (file has %d)",
                   args.plane, scan.n_planes)
         return 1
-    px_m = _pixel_size_m_from_scan(scan)
+    dx_m, dy_m = _pixel_sizes_m_from_scan(scan)
+    px_m = float(np.sqrt(dx_m * dy_m)) if dx_m > 0 and dy_m > 0 else 0.0
     if px_m <= 0:
         log.error("Scan has no physical pixel size.")
         return 1
@@ -756,6 +783,8 @@ def _cmd_count(args) -> int:
     dets = count_features(
         scan.planes[args.plane], tmpl,
         pixel_size_m=px_m,
+        pixel_size_x_m=dx_m,
+        pixel_size_y_m=dy_m,
         min_correlation=args.min_corr,
         min_distance_m=args.min_distance * 1e-9 if args.min_distance else None,
         clip_low=args.clip_low,
@@ -803,7 +832,11 @@ def _cmd_tv_denoise(args) -> int:
         "method": args.method, "lam": args.lam, "alpha": args.alpha,
         "tau": args.tau, "max_iter": args.max_iter, "nabla_comp": args.nabla_comp,
     })
-    _write_output(args, scan, default_suffix="_tv.sxm")
+    try:
+        _write_output(args, scan, default_suffix="_tv.sxm")
+    except Exception as exc:
+        log.error("%s", exc)
+        return 1
     return 0
 
 
@@ -819,7 +852,8 @@ def _cmd_lattice(args) -> int:
         log.error("Plane %d not present (file has %d)",
                   args.plane, scan.n_planes)
         return 1
-    px_m = _pixel_size_m_from_scan(scan)
+    dx_m, dy_m = _pixel_sizes_m_from_scan(scan)
+    px_m = float(np.sqrt(dx_m * dy_m)) if dx_m > 0 and dy_m > 0 else 0.0
     if px_m <= 0:
         log.error("Scan has no physical pixel size.")
         return 1
@@ -836,8 +870,13 @@ def _cmd_lattice(args) -> int:
         cluster_kNN_high=args.cluster_knn_high,
     )
     try:
-        res = extract_lattice(scan.planes[args.plane], pixel_size_m=px_m,
-                              params=params)
+        res = extract_lattice(
+            scan.planes[args.plane],
+            pixel_size_m=px_m,
+            pixel_size_x_m=dx_m,
+            pixel_size_y_m=dy_m,
+            params=params,
+        )
     except Exception as exc:
         log.error("Lattice extraction failed: %s", exc)
         return 1
@@ -878,7 +917,8 @@ def _cmd_classify(args) -> int:
         log.error("Plane %d not present (file has %d)",
                   args.plane, scan.n_planes)
         return 1
-    px_m = _pixel_size_m_from_scan(scan)
+    dx_m, dy_m = _pixel_sizes_m_from_scan(scan)
+    px_m = float(np.sqrt(dx_m * dy_m)) if dx_m > 0 and dy_m > 0 else 0.0
     if px_m <= 0:
         log.error("Scan has no physical pixel size.")
         return 1
@@ -890,6 +930,8 @@ def _cmd_classify(args) -> int:
 
     particles = segment_particles(
         arr, pixel_size_m=px_m,
+        pixel_size_x_m=dx_m,
+        pixel_size_y_m=dy_m,
         min_area_nm2=args.min_area,
         size_sigma_clip=None if args.no_sigma_clip else args.sigma_clip,
     )
@@ -1347,7 +1389,8 @@ def _cmd_unit_cell(args) -> int:
     if args.plane >= scan.n_planes:
         log.error("Plane %d not present (file has %d)", args.plane, scan.n_planes)
         return 1
-    px_m = _pixel_size_m_from_scan(scan)
+    dx_m, dy_m = _pixel_sizes_m_from_scan(scan)
+    px_m = float(np.sqrt(dx_m * dy_m)) if dx_m > 0 and dy_m > 0 else 0.0
     if px_m <= 0:
         log.error("Scan has no physical pixel size.")
         return 1
@@ -1357,7 +1400,13 @@ def _cmd_unit_cell(args) -> int:
     )
     arr = scan.planes[args.plane]
     try:
-        lat = extract_lattice(arr, pixel_size_m=px_m, params=LatticeParams())
+        lat = extract_lattice(
+            arr,
+            pixel_size_m=px_m,
+            pixel_size_x_m=dx_m,
+            pixel_size_y_m=dy_m,
+            params=LatticeParams(),
+        )
     except Exception as exc:
         log.error("Lattice extraction failed: %s", exc)
         return 1

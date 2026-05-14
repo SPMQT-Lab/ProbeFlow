@@ -89,7 +89,6 @@ def test_extracted_dialogs_smoke_construct(qapp):
         FFTViewerDialog,
         PeriodicFilterDialog,
         SpecMappingDialog,
-        SpecViewerDialog,
         STMBackgroundDialog,
         ViewerSpecMappingDialog,
         _DefinitionsDialog,

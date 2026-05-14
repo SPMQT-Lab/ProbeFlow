@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 from probeflow.analysis.spec_plot import choose_display_unit, spec_position_to_pixel
 

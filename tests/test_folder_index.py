@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from probeflow.core.indexing import ProbeFlowItem, index_folder
+from probeflow.core.indexing import index_folder
 
 
 TESTDATA = Path(__file__).resolve().parents[1] / "test_data"

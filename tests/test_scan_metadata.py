@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from probeflow import read_scan_metadata
-from probeflow.core.metadata import _extract_createc_fields, metadata_from_scan, ScanMetadata
+from probeflow.core.metadata import _extract_createc_fields, ScanMetadata
 from probeflow.core.scan_loader import load_scan
 
 

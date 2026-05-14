@@ -331,6 +331,7 @@ class ImageViewerDialog(QDialog):
         self._drs        = DisplayRangeController(clip_low=clip_low, clip_high=clip_high, parent=self)
         self._processing = dict(processing) if processing else {}
         self._processing_roi_error: str = ""
+        self._processing_error: str = ""
         # Undo / redo stacks for processing state. Each entry is a deep copy
         # of the full processing dict at a prior point. Apply / Reset push
         # the previous state onto _undo_stack and clear _redo_stack; the
@@ -1443,6 +1444,7 @@ class ImageViewerDialog(QDialog):
         if self._raw_arr is not None and self._processing:
             try:
                 self._processing_roi_error = ""
+                self._processing_error = ""
                 state = processing_state_from_gui(self._processing or {})
                 missing = missing_roi_references(state, self._image_roi_set)
                 if missing:
@@ -1468,10 +1470,14 @@ class ImageViewerDialog(QDialog):
                     if "roi_set" not in str(exc):
                         raise
                     self._display_arr = _apply_processing(self._raw_arr, self._processing)
-            except Exception:
+            except Exception as exc:
+                self._processing_error = f"Processing failed: {exc}"
+                if hasattr(self, "_status_lbl"):
+                    self._status_lbl.setText(self._processing_error)
                 self._display_arr = self._raw_arr
         else:
             self._processing_roi_error = ""
+            self._processing_error = ""
             self._display_arr = self._raw_arr
         new_shape = self._display_arr.shape if self._display_arr is not None else None
         if reset_zoom_if_shape_changed and old_shape is not None and new_shape != old_shape:
@@ -2454,6 +2460,9 @@ class ImageViewerDialog(QDialog):
                 f"Cannot export while processing has stale ROI references. {self._processing_roi_error}"
             )
             return
+        if getattr(self, "_processing_error", ""):
+            self._status_lbl.setText(f"Export blocked: {self._processing_error}")
+            return
         try:
             ps = processing_state_from_gui(self._processing or {})
             assert_roi_references_resolved(ps, self._image_roi_set)
@@ -2488,6 +2497,9 @@ class ImageViewerDialog(QDialog):
             self._status_lbl.setText(
                 f"Cannot export while processing has stale ROI references. {self._processing_roi_error}"
             )
+            return False
+        if getattr(self, "_processing_error", ""):
+            self._status_lbl.setText(f"Export blocked: {self._processing_error}")
             return False
         try:
             ps = processing_state_from_gui(self._processing or {})
@@ -2635,6 +2647,13 @@ class ImageViewerDialog(QDialog):
                     provenance=provenance,
                 )
             elif suffix == ".sxm":
+                if scan.processing_state.steps and scan.n_planes > 1:
+                    self._status_lbl.setText(
+                        "Processed SXM export is blocked because SXM writes all planes. "
+                        "Use PNG/CSV/PDF/GWY for the selected plane until per-plane "
+                        "SXM processing provenance is supported."
+                    )
+                    return
                 scan.save_sxm(out)
             else:
                 self._status_lbl.setText(
@@ -3599,10 +3618,12 @@ class ProbeFlowWindow(QMainWindow):
             w_m, h_m = _scan.scan_range_m
             Ny, Nx = arr.shape
             if Nx <= 0 or Ny <= 0 or w_m <= 0 or h_m <= 0:
-                px_m = 1e-10
+                px_x_m = px_y_m = px_m = 1e-10
             else:
-                px_m = float(np.sqrt((w_m / Nx) * (h_m / Ny)))
-            self._features_panel.load_entry(entry, plane_idx, arr, px_m)
+                px_x_m = float(w_m / Nx)
+                px_y_m = float(h_m / Ny)
+                px_m = float(np.sqrt(px_x_m * px_y_m))
+            self._features_panel.load_entry(entry, plane_idx, arr, px_m, px_x_m, px_y_m)
             self._features_sidebar.set_status(
                 f"Loaded {entry.stem} (plane {plane_idx})")
             self._status_bar.showMessage(f"{entry.stem} sent to FeatureCounting")
@@ -3686,10 +3707,12 @@ class ProbeFlowWindow(QMainWindow):
             return
         Ny, Nx = arr.shape
         if Nx <= 0 or Ny <= 0 or w_m <= 0 or h_m <= 0:
-            px_m = 1e-10
+            px_x_m = px_y_m = px_m = 1e-10
         else:
-            px_m = float(np.sqrt((w_m / Nx) * (h_m / Ny)))
-        self._features_panel.load_entry(entry, plane_idx, arr, px_m)
+            px_x_m = float(w_m / Nx)
+            px_y_m = float(h_m / Ny)
+            px_m = float(np.sqrt(px_x_m * px_y_m))
+        self._features_panel.load_entry(entry, plane_idx, arr, px_m, px_x_m, px_y_m)
         self._features_sidebar.set_status(
             f"Loaded {entry.stem} (plane {plane_idx}, px = {px_m * 1e12:.1f} pm)")
 
@@ -3699,6 +3722,7 @@ class ProbeFlowWindow(QMainWindow):
             self._features_sidebar.set_status("Load a scan first.")
             return
         px_m = self._features_panel.current_pixel_size()
+        px_x_m, px_y_m = self._features_panel.current_pixel_sizes()
         if px_m <= 0:
             self._features_sidebar.set_status("Scan has no physical pixel size.")
             return
@@ -3726,7 +3750,9 @@ class ProbeFlowWindow(QMainWindow):
             return
 
         self._features_sidebar.set_status(f"Running {mode}…")
-        worker = _FeaturesWorker(mode, arr, px_m, params, self._features_signals)
+        worker = _FeaturesWorker(
+            mode, arr, px_m, px_x_m, px_y_m, params, self._features_signals
+        )
         self._features_pool.start(worker)
 
     def _on_features_finished(self, mode: str, result, error: str):
@@ -3919,12 +3945,14 @@ class ProbeFlowWindow(QMainWindow):
         shape = arr.shape
         if scan_range and shape and shape[0] > 0 and shape[1] > 0:
             w_m, h_m = float(scan_range[0]), float(scan_range[1])
-            px_m = float(np.sqrt((w_m / shape[1]) * (h_m / shape[0])))
+            px_x_m = float(w_m / shape[1])
+            px_y_m = float(h_m / shape[0])
+            px_m = float(np.sqrt(px_x_m * px_y_m))
         else:
-            px_m = 1e-10
+            px_x_m = px_y_m = px_m = 1e-10
         if action == "features":
             self._switch_mode("features")
-            self._features_panel.load_entry(entry, plane_idx, arr, px_m)
+            self._features_panel.load_entry(entry, plane_idx, arr, px_m, px_x_m, px_y_m)
             self._features_sidebar.set_status(
                 f"Loaded {entry.stem} (processed, plane {plane_idx}, px = {px_m * 1e12:.1f} pm)")
             self._status_bar.showMessage(f"{entry.stem} → Feature Counting")

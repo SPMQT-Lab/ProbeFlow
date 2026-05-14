@@ -1,7 +1,6 @@
 """Tests for Phase 0 geometric transform operations."""
 from __future__ import annotations
 
-import math
 import warnings
 
 import numpy as np

@@ -12,7 +12,6 @@ builder functions.  This file focuses on the gaps:
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import numpy as np
 import pytest
@@ -132,6 +131,45 @@ class TestExportPng:
         )
         sidecar = out.with_suffix("").with_suffix(".provenance.json")
         assert sidecar.exists()
+
+    def test_sidecar_write_failure_is_reported(self, tmp_path, monkeypatch):
+        from probeflow.processing.image import export_png
+        from probeflow.provenance.export import ExportProvenance
+        import probeflow.provenance.export as export_mod
+
+        out = tmp_path / "out.png"
+        prov = ExportProvenance(
+            source_file=str(tmp_path / "scan.dat"),
+            source_format="dat",
+            item_type="scan",
+            channel_name="Z fwd",
+            channel_index=0,
+            array_shape=(32, 32),
+            scan_range_m=(1e-7, 1e-7),
+            units="m",
+            processing_state={"steps": []},
+            display_state={"mode": "percentile", "low_pct": 1.0, "high_pct": 99.0,
+                           "vmin": None, "vmax": None},
+            probeflow_version="0.0.0",
+            export_timestamp="2026-01-01T00:00:00Z",
+        )
+
+        def fail_sidecar(*args, **kwargs):
+            raise RuntimeError("sidecar sink failed")
+
+        monkeypatch.setattr(export_mod, "write_provenance_sidecars", fail_sidecar)
+
+        with pytest.raises(RuntimeError, match="sidecar sink failed"):
+            export_png(
+                _make_arr(),
+                out,
+                colormap_key="gray",
+                clip_low=1.0,
+                clip_high=99.0,
+                lut_fn=_lut_fn,
+                scan_range_m=(1e-7, 1e-7),
+                provenance=prov,
+            )
 
     def test_sidecar_is_valid_json(self, tmp_path):
         from probeflow.processing.image import export_png
