@@ -163,8 +163,10 @@ class SurveyPanel(QWidget):
             self.log_message.emit(f"ScanFlow not importable: {e}")
             QMessageBox.critical(
                 self, "ScanFlow missing",
-                "ProbeFlow needs the scanflow package to open surveys.\n\n"
-                f"pip install scanflow\n\nError: {e}"
+                "Opening ScanFlow surveys requires a compatible optional "
+                "scanflow installation. It is not installed with ProbeFlow "
+                "by default.\n\n"
+                f"Error: {e}"
             )
             return False
 

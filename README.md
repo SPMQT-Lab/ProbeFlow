@@ -70,6 +70,9 @@ python -m pip install -e ".[features]"  # OpenCV / scikit-learn feature tools
 python -m pip install -e ".[gwyddion]"  # optional Gwyddion writer dependency
 ```
 
+The experimental ScanFlow survey/PPTX integration is optional and is not
+installed with ProbeFlow by default.
+
 ## Quick Start
 
 Launch the GUI:
