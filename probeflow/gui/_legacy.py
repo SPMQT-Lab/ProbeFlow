@@ -3771,6 +3771,9 @@ class ProbeFlowWindow(QMainWindow):
                 f"|b|={result.b_length_m * 1e9:.3f} nm  "
                 f"γ={result.gamma_deg:.1f}°")
 
+    def _features_segmentation_signature(self, params: dict) -> tuple:
+        return tuple(sorted(params.items()))
+
     def _on_classify_params_changed(self) -> None:
         self._features_panel.clear_sample_labels()
         self._features_sidebar.set_status(
