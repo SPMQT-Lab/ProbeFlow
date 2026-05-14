@@ -2851,7 +2851,7 @@ class ProbeFlowWindow(QMainWindow):
     RIGHT_INSPECTOR_MIN_W = 300
     CENTRAL_BROWSER_MIN_W = 500
 
-    def __init__(self):
+    def __init__(self, *, open_survey: Optional[Path] = None):
         super().__init__()
         self.setWindowTitle("ProbeFlow")
         self.setMinimumSize(1100, 720)
@@ -2863,6 +2863,7 @@ class ProbeFlowWindow(QMainWindow):
         self._mode     = "browse"
         self._running  = False
         self._n_loaded = 0
+        self._pending_survey = Path(open_survey) if open_survey else None
         # Spec → image mapping (populated by user via "Map spectra…" dialogs;
         # kept empty by default so we never auto-attach spectra to the wrong
         # image based on coordinate guesses alone). Keys are spec stems,
@@ -2871,6 +2872,16 @@ class ProbeFlowWindow(QMainWindow):
 
         self._build_ui()
         self._apply_theme()
+
+        # If launched with --open-survey, jump straight into Survey mode with
+        # the manifest pre-loaded. Wire the panel's log_message into status bar.
+        if self._pending_survey is not None:
+            try:
+                self._survey_panel.log_message.connect(self._status_bar.showMessage)
+                if self._survey_panel.load_manifest(self._pending_survey):
+                    self._switch_mode("survey")
+            except Exception as e:
+                self._status_bar.showMessage(f"Could not open survey: {e}")
 
     # ── Build ──────────────────────────────────────────────────────────────────
     def _build_ui(self):
@@ -2916,11 +2927,14 @@ class ProbeFlowWindow(QMainWindow):
         self._features_panel = FeaturesPanel(t)
         self._tv_panel       = TVPanel(t)
         self._dev_terminal   = DeveloperTerminalWidget(t)
-        self._content_stack.addWidget(self._browse_splitter)
-        self._content_stack.addWidget(self._conv_panel)
-        self._content_stack.addWidget(self._features_panel)
-        self._content_stack.addWidget(self._tv_panel)
-        self._content_stack.addWidget(self._dev_terminal)
+        from probeflow.gui.survey import SurveyPanel
+        self._survey_panel   = SurveyPanel()
+        self._content_stack.addWidget(self._browse_splitter)        # idx 0 browse
+        self._content_stack.addWidget(self._conv_panel)             # idx 1 convert
+        self._content_stack.addWidget(self._features_panel)         # idx 2 features
+        self._content_stack.addWidget(self._tv_panel)               # idx 3 tv
+        self._content_stack.addWidget(self._dev_terminal)           # idx 4 dev
+        self._content_stack.addWidget(self._survey_panel)           # idx 5 survey
         self._splitter.addWidget(self._content_stack)
 
         # ── Right: sidebar stack ───────────────────────────────────────────────
@@ -2932,11 +2946,25 @@ class ProbeFlowWindow(QMainWindow):
         self._features_sidebar = FeaturesSidebar(t)
         self._tv_sidebar       = TVSidebar(t)
         self._dev_sidebar      = _DevSidebar(t)
-        self._sidebar_stack.addWidget(self._browse_info)
-        self._sidebar_stack.addWidget(self._convert_sidebar)
-        self._sidebar_stack.addWidget(self._features_sidebar)
-        self._sidebar_stack.addWidget(self._tv_sidebar)
-        self._sidebar_stack.addWidget(self._dev_sidebar)
+        self._sidebar_stack.addWidget(self._browse_info)        # idx 0
+        self._sidebar_stack.addWidget(self._convert_sidebar)    # idx 1
+        self._sidebar_stack.addWidget(self._features_sidebar)   # idx 2
+        self._sidebar_stack.addWidget(self._tv_sidebar)         # idx 3
+        self._sidebar_stack.addWidget(self._dev_sidebar)        # idx 4
+        # Placeholder sidebar for Survey mode — metadata is shown in the main
+        # panel itself, so the right column is just a small hint label.
+        _survey_sidebar_placeholder = QWidget()
+        _ssp_lay = QVBoxLayout(_survey_sidebar_placeholder)
+        _ssp_lay.setContentsMargins(8, 8, 8, 8)
+        _ssp_lay.addWidget(QLabel(
+            "<b>Survey mode</b><br><br>"
+            "Click a feature in the list to view its details. "
+            "Use the Process button to open the .dat in the image viewer, "
+            "then Save polished PNG to upgrade its slide image."
+        ))
+        _ssp_lay.itemAt(0).widget().setWordWrap(True)
+        _ssp_lay.addStretch(1)
+        self._sidebar_stack.addWidget(_survey_sidebar_placeholder)  # idx 5
         self._splitter.addWidget(self._sidebar_stack)
         self._splitter.setChildrenCollapsible(False)
         self._splitter.setStretchFactor(0, 1)
@@ -3121,6 +3149,8 @@ class ProbeFlowWindow(QMainWindow):
         _mode_action(tools_menu, "Feature counting", "features", "Ctrl+3")
         _mode_action(tools_menu, "TV denoise", "tv", "Ctrl+4")
         tools_menu.addSeparator()
+        _mode_action(tools_menu, "Survey (ScanFlow campaign)", "survey", "Ctrl+Shift+S")
+        tools_menu.addSeparator()
         _mode_action(tools_menu, "Developer tools", "dev", "Ctrl+5")
         prefs_action = QAction("Preferences...", self)
         prefs_action.setEnabled(False)
@@ -3241,6 +3271,11 @@ class ProbeFlowWindow(QMainWindow):
             self._sidebar_stack.setCurrentIndex(4)
             self._status_bar.showMessage(
                 "Developer terminal — run shell commands and Python scripts")
+        elif mode == "survey":
+            self._content_stack.setCurrentIndex(5)
+            self._sidebar_stack.setCurrentIndex(5)
+            self._status_bar.showMessage(
+                "Survey mode — open a ScanFlow survey.json, polish each feature, then Export PPTX")
         else:
             self._content_stack.setCurrentIndex(1)
             self._sidebar_stack.setCurrentIndex(1)
@@ -4112,10 +4147,10 @@ QFrame[frameShape="4"], QFrame[frameShape="5"] {{
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────
-def main() -> None:
+def main(*, open_survey: "Optional[Path]" = None) -> None:
     app    = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("ProbeFlow")
-    window = ProbeFlowWindow()
+    window = ProbeFlowWindow(open_survey=open_survey)
     window.show()
     sys.exit(app.exec())
 

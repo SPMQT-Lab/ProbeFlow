@@ -124,10 +124,14 @@ def __getattr__(name: str) -> Any:
     raise AttributeError(f"module 'probeflow.gui' has no attribute {name!r}")
 
 
-def main() -> None:
-    """Start the Qt GUI, importing PySide6 only when the GUI is launched."""
+def main(*, open_survey: Any = None) -> None:
+    """Start the Qt GUI, importing PySide6 only when the GUI is launched.
 
-    _load_legacy().main()
+    When ``open_survey`` is set to a path, ProbeFlow boots straight into
+    Survey mode with that ScanFlow manifest loaded.
+    """
+
+    _load_legacy().main(open_survey=open_survey)
 
 
 class _GuiCompatModule(ModuleType):
