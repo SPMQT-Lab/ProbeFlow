@@ -160,6 +160,8 @@ class ImageCanvas(QGraphicsView):
         self._marker_items: list[ImageCanvas._SpecMarkerItem] = []
         self._zero_marker_items: list[ImageCanvas._ZeroMarkerItem] = []
         self._bad_segment_items: list[QGraphicsRectItem] = []
+        self._feature_points: list[object] = []
+        self._feature_point_items: list[QGraphicsEllipseItem] = []
 
         self._text_overlay_item = QGraphicsTextItem()
         self._text_overlay_item.setDefaultTextColor(QColor("#cdd6f4"))
@@ -224,6 +226,7 @@ class ImageCanvas(QGraphicsView):
 
         self._rebuild_marker_items()
         self._rebuild_zero_marker_items()
+        self._rebuild_feature_point_items()
         self._rebuild_roi_items()
         self._apply_zoom()
 
@@ -376,6 +379,42 @@ class ImageCanvas(QGraphicsView):
         for item in self._bad_segment_items:
             self.scene().removeItem(item)
         self._bad_segment_items.clear()
+
+    # ── detected feature points ──────────────────────────────────────────────
+
+    def set_feature_points(self, points) -> None:
+        """Show a non-persistent overlay for detected feature maxima."""
+        self._feature_points = list(points or [])
+        self._rebuild_feature_point_items()
+
+    def clear_feature_points(self) -> None:
+        self.set_feature_points([])
+
+    def _rebuild_feature_point_items(self) -> None:
+        for item in self._feature_point_items:
+            self.scene().removeItem(item)
+        self._feature_point_items.clear()
+        if not self._feature_points or self._image_size is None:
+            return
+        pen = QPen(QColor("#00e5ff"), 1.4)
+        brush = QBrush(QColor(0, 229, 255, 55))
+        for point in self._feature_points:
+            try:
+                x_px = float(point.x_px)
+                y_px = float(point.y_px)
+                label = str(getattr(point, "point_id", ""))
+            except (AttributeError, TypeError, ValueError):
+                continue
+            item = QGraphicsEllipseItem(QRectF(-4.0, -4.0, 8.0, 8.0))
+            item.setFlag(QGraphicsItem.ItemIgnoresTransformations, True)
+            item.setPen(pen)
+            item.setBrush(brush)
+            item.setPos(x_px, y_px)
+            item.setZValue(23)
+            if label:
+                item.setToolTip(label)
+            self.scene().addItem(item)
+            self._feature_point_items.append(item)
 
     # ── ROI set display ───────────────────────────────────────────────────────
 

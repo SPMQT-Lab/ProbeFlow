@@ -29,6 +29,103 @@ def qapp():
         pytest.skip(f"QApplication unavailable: {exc}")
 
 
+class _FakeMeasurementTable:
+    def __init__(self):
+        self.rows = []
+
+    def next_measurement_id(self):
+        return f"M{len(self.rows) + 1:04d}"
+
+    def add_result(self, result):
+        self.rows.append(result)
+
+
+class _FakeStatus:
+    def __init__(self):
+        self.text = ""
+
+    def setText(self, text):
+        self.text = text
+
+
+class _FakeCanvas:
+    def __init__(self):
+        self.feature_points = None
+
+    def set_feature_points(self, points):
+        self.feature_points = list(points)
+
+
+class _FakeSignal:
+    def connect(self, _callback):
+        return None
+
+
+class _FakeFeaturePanel:
+    def __init__(self, settings):
+        self._settings = dict(settings)
+        self.detectRequested = _FakeSignal()
+        self.copyPointsRequested = _FakeSignal()
+        self.exportCsvRequested = _FakeSignal()
+        self.exportJsonRequested = _FakeSignal()
+        self.exportMaskCsvRequested = _FakeSignal()
+        self.computeFftRequested = _FakeSignal()
+        self.exportFftCsvRequested = _FakeSignal()
+        self.clearRequested = _FakeSignal()
+        self.count = None
+        self.message = ""
+
+    def settings(self):
+        return dict(self._settings)
+
+    def mask_settings(self):
+        return {
+            "radius_px": int(self._settings.get("radius_px", 0)),
+            "shape_mode": self._settings.get("shape_mode", "disk"),
+        }
+
+    def set_points_count(self, count, roi_name=None):
+        self.count = count
+        self.roi_name = roi_name
+
+    def show_message(self, message):
+        self.message = str(message)
+
+
+def _make_feature_maxima_controller(image, feature_panel=None):
+    from probeflow.core.roi import ROI, ROISet
+    from probeflow.gui import ImageViewerDialog, SxmFile
+    from probeflow.gui.viewer import ImageMeasurementController
+
+    roi_set = ROISet(image_id="img1")
+    roi = ROI.new(
+        "rectangle",
+        {"x": 0, "y": 0, "width": image.shape[1], "height": image.shape[0]},
+        name="all",
+    )
+    roi_set.add(roi)
+
+    dlg = ImageViewerDialog.__new__(ImageViewerDialog)
+    dlg._image_roi_set = roi_set
+    dlg._display_arr = image
+    dlg._entries = [
+        SxmFile(
+            path=Path("/tmp/example.sxm"),
+            stem="example",
+            Nx=image.shape[1],
+            Ny=image.shape[0],
+        )
+    ]
+    dlg._idx = 0
+    dlg._channel_unit = lambda: (1.0, "nm", "Height")
+    dlg._pixel_size_xy_m = lambda: (1e-9, 1e-9)
+    dlg._status_lbl = _FakeStatus()
+    dlg._zoom_lbl = _FakeCanvas()
+    table = _FakeMeasurementTable()
+    controller = ImageMeasurementController(dlg, table, feature_panel=feature_panel)
+    return controller, dlg, table, roi
+
+
 def test_browse_quick_panel_emits_only_thumbnail_corrections(qapp):
     from probeflow.gui import ProcessingControlPanel
 
@@ -153,7 +250,15 @@ def test_viewer_dialog_menus_mirror_existing_controls(qapp, monkeypatch):
     dlg = ImageViewerDialog(entry, [entry], "gray", THEMES["dark"])
     top_menu_names = [action.text() for action in dlg._viewer_main.menuBar().actions()]
 
-    assert top_menu_names == ["File", "View", "Processing", "ROI", "Export", "Help"]
+    assert top_menu_names == [
+        "File",
+        "View",
+        "Processing",
+        "ROI",
+        "Measurements",
+        "Export",
+        "Help",
+    ]
 
     def action(menu_name: str, text: str):
         top_action = next(
@@ -185,6 +290,11 @@ def test_viewer_dialog_menus_mirror_existing_controls(qapp, monkeypatch):
     with pytest.raises(AssertionError):
         action("Processing", "FFT soft border")
     assert action("Processing", "STM Background...").isEnabled() is True
+    assert action("View", "Histogram / Contrast").isEnabled() is True
+    assert action("View", "ROI Manager").isEnabled() is True
+    assert action("View", "Measurements").isEnabled() is True
+    assert action("Measurements", "Show measurements").isEnabled() is True
+    assert action("Measurements", "Compute point-mask FFT").isEnabled() is False
     dlg._display_arr = np.ones((8, 8), dtype=float)
     action("Processing", "STM Background...").trigger()
     qapp.processEvents()
@@ -212,6 +322,12 @@ def test_viewer_dialog_menus_mirror_existing_controls(qapp, monkeypatch):
     action("ROI", "Show ROI Manager").trigger()
     qapp.processEvents()
     assert dlg._roi_dock.isVisible() is True
+    dlg._measurement_dock.close()
+    qapp.processEvents()
+    assert dlg._measurement_dock.isVisible() is False
+    action("View", "Measurements").trigger()
+    qapp.processEvents()
+    assert dlg._measurement_dock.isVisible() is True
 
     assert action("ROI", "Rename ROI").isEnabled() is False
     assert action("ROI", "Delete ROI").isEnabled() is False
@@ -671,6 +787,327 @@ def test_viewer_line_profile_uses_display_array_and_physical_units(qapp):
     assert dlg._line_profile_panel.source.startswith("Line ROI:")
 
 
+def test_viewer_adds_roi_statistics_to_measurement_table(qapp):
+    from probeflow.core.roi import ROI, ROISet
+    from probeflow.gui import ImageViewerDialog, SxmFile
+    from probeflow.gui.viewer import ImageMeasurementController
+
+    class FakeTable:
+        def __init__(self):
+            self.rows = []
+
+        def next_measurement_id(self):
+            return f"M{len(self.rows) + 1:04d}"
+
+        def add_result(self, result):
+            self.rows.append(result)
+
+    class FakeStatus:
+        def __init__(self):
+            self.text = ""
+
+        def setText(self, text):
+            self.text = text
+
+    roi_set = ROISet(image_id="img1")
+    roi = ROI.new("rectangle", {"x": 1, "y": 1, "width": 2, "height": 2}, name="terrace")
+    roi_set.add(roi)
+    dlg = ImageViewerDialog.__new__(ImageViewerDialog)
+    dlg._image_roi_set = roi_set
+    dlg._display_arr = np.arange(16, dtype=float).reshape(4, 4) * 1e-9
+    dlg._entries = [SxmFile(path=Path("/tmp/example.sxm"), stem="example", Nx=4, Ny=4)]
+    dlg._idx = 0
+    dlg._channel_unit = lambda: (1e9, "nm", "Height")
+    dlg._pixel_size_xy_m = lambda: (2e-9, 3e-9)
+    table = FakeTable()
+    dlg._measurement_table = table
+    dlg._status_lbl = FakeStatus()
+    controller = ImageMeasurementController(dlg, table)
+
+    controller.add_roi_stats_measurement(roi.id)
+
+    result = table.rows[0]
+    assert result.kind == "roi_stats"
+    assert result.values["mean_height"] == pytest.approx(7.5)
+    assert result.values["area"] == pytest.approx(24.0)
+    assert result.context["roi_name"] == "terrace"
+    assert result.context["height_unit"] == "nm"
+    assert "M0001" in dlg._status_lbl.text
+
+
+def test_viewer_adds_step_height_from_two_rois(qapp):
+    from probeflow.core.roi import ROI, ROISet
+    from probeflow.gui import ImageViewerDialog, SxmFile
+    from probeflow.gui.viewer import ImageMeasurementController
+
+    class FakeTable:
+        def __init__(self):
+            self.rows = []
+
+        def next_measurement_id(self):
+            return f"M{len(self.rows) + 1:04d}"
+
+        def add_result(self, result):
+            self.rows.append(result)
+
+    class FakeStatus:
+        def __init__(self):
+            self.text = ""
+
+        def setText(self, text):
+            self.text = text
+
+    image = np.zeros((4, 4), dtype=float)
+    image[:, 2:] = 2.5e-9
+    roi_set = ROISet(image_id="img1")
+    lower = ROI.new("rectangle", {"x": 0, "y": 0, "width": 2, "height": 4}, name="lower")
+    upper = ROI.new("rectangle", {"x": 2, "y": 0, "width": 2, "height": 4}, name="upper")
+    roi_set.add(lower)
+    roi_set.add(upper)
+    dlg = ImageViewerDialog.__new__(ImageViewerDialog)
+    dlg._image_roi_set = roi_set
+    dlg._display_arr = image
+    dlg._entries = [SxmFile(path=Path("/tmp/example.sxm"), stem="example", Nx=4, Ny=4)]
+    dlg._idx = 0
+    dlg._channel_unit = lambda: (1e9, "nm", "Height")
+    table = FakeTable()
+    dlg._measurement_table = table
+    dlg._status_lbl = FakeStatus()
+    controller = ImageMeasurementController(dlg, table)
+
+    controller.add_step_height_measurement_for_rois([lower.id, upper.id])
+
+    result = table.rows[0]
+    assert result.kind == "step_height"
+    assert result.values["height_difference"] == pytest.approx(2.5)
+    assert result.context["roi_a_name"] == "lower"
+    assert result.context["roi_b_name"] == "upper"
+    assert result.context["height_unit"] == "nm"
+
+
+def test_viewer_adds_line_profile_summary_to_measurement_table(qapp):
+    from probeflow.core.roi import ROI, ROISet
+    from probeflow.gui import ImageViewerDialog, SxmFile
+    from probeflow.gui.viewer import ImageMeasurementController
+
+    class FakeTable:
+        def __init__(self):
+            self.rows = []
+
+        def next_measurement_id(self):
+            return f"M{len(self.rows) + 1:04d}"
+
+        def add_result(self, result):
+            self.rows.append(result)
+
+    class FakeStatus:
+        def __init__(self):
+            self.text = ""
+
+        def setText(self, text):
+            self.text = text
+
+    roi_set = ROISet(image_id="img1")
+    line = ROI.new("line", {"x1": 0.0, "y1": 2.0, "x2": 4.0, "y2": 2.0}, name="step")
+    roi_set.add(line)
+    dlg = ImageViewerDialog.__new__(ImageViewerDialog)
+    dlg._image_roi_set = roi_set
+    dlg._display_arr = np.tile(np.arange(5, dtype=np.float64), (5, 1)) * 1e-9
+    dlg._entries = [SxmFile(path=Path("/tmp/example.sxm"), stem="example", Nx=5, Ny=5)]
+    dlg._idx = 0
+    dlg._channel_unit = lambda: (1e9, "nm", "Height")
+    dlg._pixel_size_xy_m = lambda: (1e-9, 1e-9)
+    table = FakeTable()
+    dlg._measurement_table = table
+    dlg._status_lbl = FakeStatus()
+    dlg._on_roi_line_profile = lambda _roi_id: None
+    controller = ImageMeasurementController(dlg, table)
+
+    controller.add_line_profile_measurement_for_roi(line.id)
+
+    result = table.rows[0]
+    assert result.kind == "line_profile"
+    assert result.values["height_peak_to_peak"] == pytest.approx(4.0)
+    assert result.values["x2"] == pytest.approx(4.0)
+    assert result.values["y2"] == pytest.approx(2.0)
+    assert result.context["roi_id"] == line.id
+    assert result.context["roi_name"] == "step"
+    assert result.y_unit == "nm"
+
+
+def test_viewer_feature_maxima_action_adds_summary_measurement(
+    qapp, monkeypatch, tmp_path,
+):
+    from PySide6.QtWidgets import QFileDialog
+    from probeflow.core.roi import ROI, ROISet
+    from probeflow.gui import ImageViewerDialog, SxmFile
+    from probeflow.gui.viewer import ImageMeasurementController
+
+    class FakeTable:
+        def __init__(self):
+            self.rows = []
+
+        def next_measurement_id(self):
+            return f"M{len(self.rows) + 1:04d}"
+
+        def add_result(self, result):
+            self.rows.append(result)
+
+    class FakeStatus:
+        def __init__(self):
+            self.text = ""
+
+        def setText(self, text):
+            self.text = text
+
+    image = np.zeros((7, 7), dtype=float)
+    image[2, 2] = 10.0
+    image[5, 5] = 8.0
+    roi_set = ROISet(image_id="img1")
+    roi = ROI.new("rectangle", {"x": 0, "y": 0, "width": 7, "height": 7}, name="all")
+    roi_set.add(roi)
+
+    dlg = ImageViewerDialog.__new__(ImageViewerDialog)
+    dlg._image_roi_set = roi_set
+    dlg._display_arr = image
+    dlg._entries = [SxmFile(path=Path("/tmp/example.sxm"), stem="example", Nx=7, Ny=7)]
+    dlg._idx = 0
+    dlg._channel_unit = lambda: (1.0, "nm", "Height")
+    dlg._pixel_size_xy_m = lambda: (1e-9, 1e-9)
+    table = FakeTable()
+    dlg._measurement_table = table
+    dlg._status_lbl = FakeStatus()
+    controller = ImageMeasurementController(dlg, table)
+
+    controller.detect_feature_maxima_for_roi(
+        roi.id,
+        settings={
+            "threshold_mode": "percentile",
+            "threshold_value": 99.0,
+            "min_distance_px": 1,
+        },
+    )
+
+    result = table.rows[0]
+    assert result.kind == "feature_maxima"
+    assert result.values["n_points"] >= 1
+    assert result.context["roi_id"] == roi.id
+    assert "Detected" in dlg._status_lbl.text
+
+    controller.copy_feature_points()
+    assert "point_id,x_px,y_px" in qapp.clipboard().text()
+
+    csv_path = tmp_path / "points.csv"
+    json_path = tmp_path / "points.json"
+    paths = iter([str(csv_path), str(json_path)])
+    monkeypatch.setattr(
+        QFileDialog,
+        "getSaveFileName",
+        lambda *args, **kwargs: (next(paths), ""),
+    )
+
+    controller.export_feature_points_csv()
+    controller.export_feature_points_json()
+
+    assert "P0001" in csv_path.read_text(encoding="utf-8")
+    assert "x_unit,y_unit,z_unit" in csv_path.read_text(encoding="utf-8")
+    assert "probeflow_feature_points" in json_path.read_text(encoding="utf-8")
+
+
+def test_viewer_feature_maxima_roi_action_uses_panel_settings(qapp):
+    from PySide6.QtWidgets import QApplication
+
+    image = np.zeros((7, 7), dtype=float)
+    image[2, 2] = 10.0
+    image[5, 5] = 8.0
+    panel = _FakeFeaturePanel({
+        "threshold_mode": "absolute",
+        "threshold_value": 9.0,
+        "min_distance_px": 1,
+    })
+    controller, dlg, table, roi = _make_feature_maxima_controller(image, panel)
+
+    controller.detect_feature_maxima_for_roi(roi.id)
+
+    assert len(controller.feature_points) == 1
+    assert table.rows[0].values["n_points"] == 1
+    assert panel.count == 1
+    assert "Detected 1 maxima" in dlg._status_lbl.text
+
+    controller.copy_feature_points()
+    assert ",nm,nm,nm," in QApplication.clipboard().text()
+
+
+def test_viewer_feature_maxima_failure_clears_stale_overlay(qapp):
+    image = np.zeros((7, 7), dtype=float)
+    image[2, 2] = 10.0
+    controller, dlg, table, roi = _make_feature_maxima_controller(image)
+
+    controller.detect_feature_maxima_for_roi(
+        roi.id,
+        settings={
+            "threshold_mode": "absolute",
+            "threshold_value": 1.0,
+            "min_distance_px": 1,
+        },
+    )
+    assert len(controller.feature_points) == 1
+    assert len(dlg._zoom_lbl.feature_points) == 1
+
+    controller.detect_feature_maxima_for_roi(
+        roi.id,
+        settings={
+            "threshold_mode": "not-a-mode",
+            "threshold_value": 1.0,
+            "min_distance_px": 1,
+        },
+    )
+
+    assert controller.feature_points == []
+    assert dlg._zoom_lbl.feature_points == []
+    assert len(table.rows) == 1
+    assert "Could not detect maxima" in dlg._status_lbl.text
+
+
+def test_viewer_feature_maxima_exports_point_mask_and_fft(qapp, monkeypatch, tmp_path):
+    from PySide6.QtWidgets import QFileDialog
+
+    image = np.zeros((8, 8), dtype=float)
+    image[2, 2] = 10.0
+    image[6, 6] = 8.0
+    panel = _FakeFeaturePanel({
+        "threshold_mode": "absolute",
+        "threshold_value": 1.0,
+        "min_distance_px": 1,
+        "radius_px": 1,
+        "shape_mode": "square",
+    })
+    controller, dlg, table, roi = _make_feature_maxima_controller(image, panel)
+    controller.detect_feature_maxima_for_roi(roi.id)
+
+    controller.compute_point_mask_fft(show_dialog=False)
+    assert table.rows[-1].kind == "point_fft"
+    assert table.rows[-1].context["shape_mode"] == "square"
+    assert table.rows[-1].context["radius_px"] == 1
+
+    mask_path = tmp_path / "mask.csv"
+    fft_path = tmp_path / "fft.csv"
+    paths = iter([str(mask_path), str(fft_path)])
+    monkeypatch.setattr(
+        QFileDialog,
+        "getSaveFileName",
+        lambda *args, **kwargs: (next(paths), ""),
+    )
+
+    controller.export_point_mask_csv()
+    controller.export_point_fft_csv()
+
+    assert "1" in mask_path.read_text(encoding="utf-8")
+    fft_text = fft_path.read_text(encoding="utf-8")
+    assert "qx,qy,magnitude,unit" in fft_text
+    assert "cycles/nm" in fft_text
+
+
 def test_viewer_active_line_roi_detection(qapp):
     from probeflow.core.roi import ROI, ROISet
     from probeflow.gui import ImageViewerDialog
@@ -773,10 +1210,12 @@ def test_line_profile_panel_empty_clears_source_title(qapp):
     panel.set_source_label("Line ROI: line_1 (abc12345)", theme={})
 
     assert panel._ax.get_title() == "Line ROI: line_1 (abc12345)"
+    assert panel._add_measurement_btn.isEnabled()
 
     panel.show_empty(theme={})
 
     assert panel._ax.get_title() == ""
+    assert not panel._add_measurement_btn.isEnabled()
 
 
 def test_viewer_transform_updates_roi_set_coordinates(qapp):

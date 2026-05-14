@@ -153,6 +153,10 @@ class ROIManagerDock(QDockWidget):
             if item.data(Qt.UserRole) is not None
         ]
 
+    def selected_roi_ids(self) -> list[str]:
+        """Return selected ROI IDs for viewer-level actions."""
+        return self._selected_roi_ids()
+
     def _selected_roi_id(self) -> "str | None":
         ids = self._selected_roi_ids()
         return ids[0] if ids else None
@@ -241,10 +245,15 @@ class ROIManagerDock(QDockWidget):
 
     def _show_context_menu(self, pos) -> None:
         roi_id = self._selected_roi_id()
+        roi_ids = self._selected_roi_ids()
         roi_set = self._roi_set_getter()
         roi = roi_set.get(roi_id) if (roi_set and roi_id) else None
         is_area = roi is not None and roi.kind in _AREA_KINDS
         is_line = roi is not None and roi.kind == "line"
+        selected_area_pair = False
+        if roi_set is not None and len(roi_ids) == 2:
+            selected = [roi_set.get(rid) for rid in roi_ids]
+            selected_area_pair = all(r is not None and r.kind in _AREA_KINDS for r in selected)
 
         menu = QMenu(self)
 
@@ -284,10 +293,34 @@ class ROIManagerDock(QDockWidget):
             lambda: self._cb.get("on_histogram_roi", lambda _: None)(roi_id)
         )
 
+        stats_act = menu.addAction("Add ROI statistics to measurements")
+        stats_act.setEnabled(is_area)
+        stats_act.triggered.connect(
+            lambda: self._cb.get("on_roi_stats_measurement", lambda _: None)(roi_id)
+        )
+
+        maxima_act = menu.addAction("Detect maxima in this region")
+        maxima_act.setEnabled(is_area)
+        maxima_act.triggered.connect(
+            lambda: self._cb.get("on_feature_maxima_roi", lambda _: None)(roi_id)
+        )
+
+        step_act = menu.addAction("Add step height from selected ROIs")
+        step_act.setEnabled(selected_area_pair)
+        step_act.triggered.connect(
+            lambda: self._cb.get("on_step_height_measurement", lambda _: None)(roi_ids)
+        )
+
         profile_act = menu.addAction("Line profile")
         profile_act.setEnabled(is_line)
         profile_act.triggered.connect(
             lambda: self._cb.get("on_line_profile_roi", lambda _: None)(roi_id)
+        )
+
+        profile_measure_act = menu.addAction("Add line profile measurement")
+        profile_measure_act.setEnabled(is_line)
+        profile_measure_act.triggered.connect(
+            lambda: self._cb.get("on_line_profile_measurement", lambda _: None)(roi_id)
         )
 
         menu.exec(self._list.mapToGlobal(pos))

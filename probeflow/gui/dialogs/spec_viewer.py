@@ -17,6 +17,8 @@ from PySide6.QtWidgets import (
 )
 
 from probeflow.gui.models import VertFile
+from probeflow.gui.widgets import MeasurementResultsTable
+from probeflow.measurements.spectrum import spectrum_delta_to_result
 from probeflow.spectroscopy.export import (
     displayed_spectra_to_clipboard_text,
     displayed_spectra_to_csv_text,
@@ -81,6 +83,19 @@ def _shorten_filename(name: str, max_chars: int = 36) -> str:
 
 def _trace_key(trace: DisplayedSpectrum) -> tuple[str, str, str]:
     return (trace.source_file, trace.spectrum_id, trace.y_channel)
+
+
+def _displayed_trace_for_measurement(
+    traces: list[DisplayedSpectrum],
+    measurement: SpectrumDeltaMeasurement | None,
+) -> DisplayedSpectrum | None:
+    if measurement is None:
+        return None
+    key = measurement.point1.trace_key
+    for trace in traces:
+        if _trace_key(trace) == key:
+            return trace
+    return None
 
 
 def _focus_in_parameter_inputs(focus: QWidget | None, inputs: list[QWidget]) -> bool:
@@ -422,12 +437,21 @@ class SpecViewerDialog(QDialog):
         self._copy_measure_btn.clicked.connect(self._copy_measurement)
         measure_row.addWidget(self._copy_measure_btn)
 
+        self._add_measure_btn = _plain_button("Add to measurements")
+        self._add_measure_btn.setFixedWidth(170)
+        self._add_measure_btn.clicked.connect(self._add_measurement_result)
+        measure_row.addWidget(self._add_measure_btn)
+
         self._clear_measure_btn = _plain_button("Clear measurement")
         self._clear_measure_btn.setFixedWidth(150)
         self._clear_measure_btn.clicked.connect(self._clear_measurement)
         measure_row.addWidget(self._clear_measure_btn)
         measure_row.addStretch(1)
         lay.addLayout(measure_row)
+
+        self._measurement_table = MeasurementResultsTable()
+        self._measurement_table.setMaximumHeight(170)
+        lay.addWidget(self._measurement_table)
 
         btn_row = QHBoxLayout()
         self._raw_btn = _plain_button("Show raw data")
@@ -941,6 +965,19 @@ class SpecViewerDialog(QDialog):
         QApplication.clipboard().setText(measurement_to_tsv(self._measurement))
         self._status.setText("Copied displayed-trace measurement.")
 
+    def _add_measurement_result(self) -> None:
+        if self._measurement is None:
+            self._status.setText("No completed crosshair measurement to add.")
+            return
+        trace = _displayed_trace_for_measurement(self._displayed_traces, self._measurement)
+        result = spectrum_delta_to_result(
+            self._measurement,
+            measurement_id=self._measurement_table.next_measurement_id(),
+            trace=trace,
+        )
+        self._measurement_table.add_result(result)
+        self._status.setText(f"Added measurement {result.measurement_id}.")
+
     def _clear_measurement(self) -> None:
         self._measure_points.clear()
         self._measurement = None
@@ -1421,9 +1458,17 @@ class SpecOverlayDialog(QDialog):
         self._copy_measure_btn.clicked.connect(self._copy_measurement)
         ctrl_lay.addWidget(self._copy_measure_btn)
 
+        self._add_measure_btn = _plain_button("Add to measurements")
+        self._add_measure_btn.clicked.connect(self._add_measurement_result)
+        ctrl_lay.addWidget(self._add_measure_btn)
+
         self._clear_measure_btn = _plain_button("Clear measurement")
         self._clear_measure_btn.clicked.connect(self._clear_measurement)
         ctrl_lay.addWidget(self._clear_measure_btn)
+
+        self._measurement_table = MeasurementResultsTable()
+        self._measurement_table.setMaximumHeight(170)
+        ctrl_lay.addWidget(self._measurement_table)
 
         self._parameter_inputs.extend([
             self._channel_cb,
@@ -1774,6 +1819,9 @@ class SpecOverlayDialog(QDialog):
 
     def _copy_measurement(self) -> None:
         SpecViewerDialog._copy_measurement(self)
+
+    def _add_measurement_result(self) -> None:
+        SpecViewerDialog._add_measurement_result(self)
 
     def _clear_measurement(self) -> None:
         SpecViewerDialog._clear_measurement(self)

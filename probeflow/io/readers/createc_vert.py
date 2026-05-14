@@ -244,7 +244,7 @@ def detect_createc_vert_time_trace(
 
 def _parse_createc_vert_header_and_version(hb: bytes) -> tuple[dict[str, str], str]:
     if any(b > 0x7F for b in hb):
-        log.warning(
+        log.debug(
             "_parse_createc_vert_header: non-ASCII bytes found; decoded as latin-1"
         )
 

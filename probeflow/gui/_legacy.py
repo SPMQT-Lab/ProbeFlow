@@ -255,8 +255,10 @@ from probeflow.gui.viewer.widgets import (
     RulerWidget,
     ScaleBarWidget,
 )
+from probeflow.gui.widgets import ImageMeasurementsPanel
 from probeflow.gui.image_canvas import ImageCanvas
 from probeflow.gui.roi_manager_dock import ROIManagerDock
+from probeflow.gui.viewer import ImageMeasurementController
 
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -874,13 +876,35 @@ class ImageViewerDialog(QDialog):
 
         self._image_roi_set = None
         self._copy_roi_buffer = None  # ROI object held for Ctrl+V paste
+
+        self._measurement_panel = ImageMeasurementsPanel(parent=self._viewer_main)
+        self._measurement_table = self._measurement_panel.table
+        self._feature_detection_panel = self._measurement_panel.feature_panel
+        self._measurement_dock = QDockWidget("Measurements", self._viewer_main)
+        self._measurement_dock.setWidget(self._measurement_panel)
+        self._measurement_dock.setFeatures(
+            QDockWidget.DockWidgetClosable
+            | QDockWidget.DockWidgetMovable
+            | QDockWidget.DockWidgetFloatable
+        )
+        self._measurement_dock.setMinimumWidth(240)
+        self._image_measurements = ImageMeasurementController(
+            self,
+            self._measurement_table,
+            self._feature_detection_panel,
+        )
+
         self._roi_dock = ROIManagerDock(
             roi_set_getter=lambda: self._image_roi_set,
             callbacks={
                 "on_roi_set_changed":    self._on_image_roi_set_changed,
                 "on_fft_roi":            self._on_roi_fft,
                 "on_histogram_roi":      self._on_roi_histogram,
+                "on_roi_stats_measurement": self._image_measurements.add_roi_stats_measurement,
+                "on_step_height_measurement": self._image_measurements.add_step_height_measurement_for_rois,
                 "on_line_profile_roi":   self._on_roi_line_profile,
+                "on_line_profile_measurement": self._image_measurements.add_line_profile_measurement_for_roi,
+                "on_feature_maxima_roi": self._image_measurements.detect_feature_maxima_for_roi,
                 "on_stm_background_roi": self._open_stm_background_for_roi,
                 "on_roi_selection_changed": self._sync_viewer_menu_actions,
                 "get_image_shape":       self._current_array_shape,
@@ -898,11 +922,12 @@ class ImageViewerDialog(QDialog):
         )
         self._hist_dock.setMinimumWidth(180)
 
-        # Add histogram dock first, then ROI dock, then split them vertically
-        # so histogram is above ROI Manager in the far-right column.
+        # Add histogram, ROI, and measurements as explicit right-side docks.
         self._viewer_main.addDockWidget(Qt.RightDockWidgetArea, self._hist_dock)
         self._viewer_main.addDockWidget(Qt.RightDockWidgetArea, self._roi_dock)
         self._viewer_main.splitDockWidget(self._hist_dock, self._roi_dock, Qt.Vertical)
+        self._viewer_main.addDockWidget(Qt.RightDockWidgetArea, self._measurement_dock)
+        self._viewer_main.splitDockWidget(self._roi_dock, self._measurement_dock, Qt.Vertical)
         self._viewer_main.resizeDocks(
             [self._hist_dock, self._roi_dock], [220, 220], Qt.Horizontal
         )
@@ -958,6 +983,7 @@ class ImageViewerDialog(QDialog):
         self._viewer_processing_actions: dict[str, QAction | dict[str, QAction]] = {}
         self._viewer_roi_tool_actions: dict[str, QAction] = {}
         self._viewer_roi_actions: dict[str, QAction] = {}
+        self._viewer_measurement_actions: dict[str, QAction] = {}
 
         file_menu = menu_bar.addMenu("File")
         close_action = QAction("Close", self)
@@ -972,6 +998,15 @@ class ImageViewerDialog(QDialog):
         native_action = QAction("Native size", self)
         native_action.triggered.connect(self._zoom_lbl.reset_zoom)
         view_menu.addAction(native_action)
+        view_menu.addSeparator()
+        for label, dock in (
+            ("Histogram / Contrast", self._hist_dock),
+            ("ROI Manager", self._roi_dock),
+            ("Measurements", self._measurement_dock),
+        ):
+            action = dock.toggleViewAction()
+            action.setText(label)
+            view_menu.addAction(action)
 
         processing_menu = menu_bar.addMenu("Processing")
         self._add_combo_menu(
@@ -1072,6 +1107,42 @@ class ImageViewerDialog(QDialog):
         self._viewer_roi_actions["invert"] = invert_action
         roi_menu.addAction(invert_action)
 
+        measurements_menu = menu_bar.addMenu("Measurements")
+        add_roi_stats_action = QAction("Add active ROI statistics", self)
+        add_roi_stats_action.triggered.connect(
+            self._image_measurements.add_active_roi_stats_measurement
+        )
+        self._viewer_measurement_actions["roi_stats"] = add_roi_stats_action
+        measurements_menu.addAction(add_roi_stats_action)
+        add_step_height_action = QAction("Add step height from selected ROIs", self)
+        add_step_height_action.triggered.connect(
+            self._image_measurements.add_selected_step_height_measurement
+        )
+        self._viewer_measurement_actions["step_height"] = add_step_height_action
+        measurements_menu.addAction(add_step_height_action)
+        add_line_profile_action = QAction("Add current line profile", self)
+        add_line_profile_action.triggered.connect(
+            self._image_measurements.add_current_line_profile_measurement
+        )
+        self._viewer_measurement_actions["line_profile"] = add_line_profile_action
+        measurements_menu.addAction(add_line_profile_action)
+        detect_maxima_action = QAction("Detect maxima in active ROI", self)
+        detect_maxima_action.triggered.connect(
+            self._image_measurements.detect_feature_maxima_for_active_roi
+        )
+        self._viewer_measurement_actions["feature_maxima"] = detect_maxima_action
+        measurements_menu.addAction(detect_maxima_action)
+        measurements_menu.addSeparator()
+        self._image_measurements.add_detected_point_menu_actions(
+            measurements_menu,
+            self,
+            self._viewer_measurement_actions,
+        )
+        measurements_menu.addSeparator()
+        show_measurements_action = QAction("Show measurements", self)
+        show_measurements_action.triggered.connect(self._show_measurements)
+        measurements_menu.addAction(show_measurements_action)
+
         export_menu = menu_bar.addMenu("Export")
         save_png_action = QAction("Save PNG copy", self)
         save_png_action.triggered.connect(self._on_save_png)
@@ -1125,6 +1196,12 @@ class ImageViewerDialog(QDialog):
             return
         self._roi_dock.show()
         self._roi_dock.raise_()
+
+    def _show_measurements(self) -> None:
+        if not hasattr(self, "_measurement_dock"):
+            return
+        self._measurement_dock.show()
+        self._measurement_dock.raise_()
 
     # ── Navigation ─────────────────────────────────────────────────────────────
     def keyPressEvent(self, event):
@@ -1204,6 +1281,8 @@ class ImageViewerDialog(QDialog):
         self._sync_line_profile_visibility()
 
     def _load_current_source(self, entry: SxmFile, reset_zoom: bool = True):
+        if hasattr(self, "_image_measurements"):
+            self._image_measurements.clear_feature_points(silent=True)
         self._title_lbl.setText(entry.stem)
         self.setWindowTitle(entry.stem)
         self._pos_lbl.setText(f"{self._idx + 1} / {len(self._entries)}")
@@ -1573,9 +1652,24 @@ class ImageViewerDialog(QDialog):
         act_hist = menu.addAction("Histogram of this region")
         act_hist.setEnabled(is_area)
         act_hist.triggered.connect(lambda: self._on_roi_histogram(roi_id))
+        act_stats = menu.addAction("Add ROI statistics to measurements")
+        act_stats.setEnabled(is_area)
+        act_stats.triggered.connect(
+            lambda: self._image_measurements.add_roi_stats_measurement(roi_id)
+        )
+        act_maxima = menu.addAction("Detect maxima in this region")
+        act_maxima.setEnabled(is_area)
+        act_maxima.triggered.connect(
+            lambda: self._image_measurements.detect_feature_maxima_for_roi(roi_id)
+        )
         act_profile = menu.addAction("Line profile")
         act_profile.setEnabled(is_line)
         act_profile.triggered.connect(lambda: self._on_roi_line_profile(roi_id))
+        act_profile_measure = menu.addAction("Add line profile measurement")
+        act_profile_measure.setEnabled(is_line)
+        act_profile_measure.triggered.connect(
+            lambda: self._image_measurements.add_line_profile_measurement_for_roi(roi_id)
+        )
         menu.exec(global_pos)
 
     # ── ROI helper actions ────────────────────────────────────────────────────
@@ -1804,6 +1898,11 @@ class ImageViewerDialog(QDialog):
                 action.setEnabled(roi is not None)
                 if key == "invert":
                     action.setEnabled(is_area)
+
+        if hasattr(self, "_viewer_measurement_actions"):
+            states = self._image_measurements.action_enabled_state()
+            for key, action in self._viewer_measurement_actions.items():
+                action.setEnabled(states.get(key, True))
 
     def _set_selection_tool(self, kind: str) -> None:
         """Compat shim: delegates to _set_drawing_tool, mapping 'none' → 'pan'."""

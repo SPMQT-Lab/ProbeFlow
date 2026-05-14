@@ -886,6 +886,55 @@ class TestThumbnailGridChannelSelection:
         grid.deleteLater()
 
 
+class TestThumbnailGridLifetime:
+    def test_folder_card_theme_survives_deleted_placeholder_label(self, qapp):
+        from probeflow.gui.browse import FolderCard
+        from probeflow.gui.models import FolderEntry
+
+        card = FolderCard(
+            FolderEntry(path=Path("/tmp/subfolder"), n_scans=1),
+            THEMES["dark"],
+        )
+
+        qapp.processEvents()
+        card.apply_theme(THEMES["light"])
+
+        assert card.img_lbl is None
+
+        card.deleteLater()
+        qapp.processEvents()
+
+    def test_grid_theme_skips_deleted_stale_cards(self, qapp):
+        class StaleCard:
+            def apply_theme(self, _theme):
+                raise RuntimeError("wrapped C/C++ object has been deleted")
+
+        grid = ThumbnailGrid(THEMES["dark"])
+        grid._cards["folder:/tmp/subfolder"] = StaleCard()
+
+        grid.apply_theme(THEMES["light"])
+
+        assert grid._cards == {}
+
+        grid.deleteLater()
+        qapp.processEvents()
+
+    def test_grid_theme_reraises_unrelated_runtime_errors(self, qapp):
+        class BrokenCard:
+            def apply_theme(self, _theme):
+                raise RuntimeError("theme calculation failed")
+
+        grid = ThumbnailGrid(THEMES["dark"])
+        grid._cards["scan:/tmp/example"] = BrokenCard()
+
+        with pytest.raises(RuntimeError, match="theme calculation failed"):
+            grid.apply_theme(THEMES["light"])
+        assert "scan:/tmp/example" in grid._cards
+
+        grid.deleteLater()
+        qapp.processEvents()
+
+
 class TestBrowseLayoutCleanup:
     def test_font_size_helper_and_config_round_trip(self, tmp_path, monkeypatch):
         import probeflow.gui as gui_mod
@@ -1353,6 +1402,12 @@ class TestSpecViewerRawData:
         assert "Displayed trace measurement" in dlg._measure_lbl.text()
         dlg._copy_measurement()
         assert "trace\tx1\ty1" in qapp.clipboard().text()
+        dlg._add_measurement_result()
+        measurements = dlg._measurement_table.results()
+        assert len(measurements) == 1
+        assert measurements[0].kind == "spectrum_delta"
+        assert measurements[0].context["data_basis"] == "displayed_trace"
+        assert measurements[0].context["normalization"] == "constant"
 
         dlg.close()
         dlg.deleteLater()

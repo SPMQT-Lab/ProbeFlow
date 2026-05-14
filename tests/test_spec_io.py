@@ -575,12 +575,14 @@ class TestParseSpecHeaderEdgeCases:
         with pytest.raises(ValueError, match="DATA"):
             parse_spec_header(f)
 
-    def test_latin1_non_ascii_round_trip(self, tmp_path):
+    def test_latin1_non_ascii_round_trip(self, tmp_path, caplog):
         # Å (0xC5) appears in Createc headers as the unit for angstrom.
         f = tmp_path / "latin1.VERT"
         f.write_bytes("Dacto[\xc5]xy=0.00083\r\nDATA\r\n".encode("latin-1"))
-        hdr = parse_spec_header(f)
+        with caplog.at_level("WARNING"):
+            hdr = parse_spec_header(f)
         assert "Dacto[\xc5]xy" in hdr or "Dacto[Å]xy" in hdr
+        assert "non-ASCII bytes found" not in caplog.text
 
 
 # ─── z_scale_m_per_dac fallback path ─────────────────────────────────────────

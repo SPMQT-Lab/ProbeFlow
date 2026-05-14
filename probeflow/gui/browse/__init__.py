@@ -40,6 +40,15 @@ def _sep() -> QFrame:
     return line
 
 
+def _is_deleted_qt_runtime_error(exc: RuntimeError) -> bool:
+    message = str(exc).lower()
+    return (
+        "already deleted" in message
+        or "object has been deleted" in message
+        or "internal c++ object" in message
+    )
+
+
 class BrowseToolPanel(QWidget):
     """Left-side control panel for browsing and live thumbnail appearance."""
     open_folder_requested      = Signal()
@@ -576,6 +585,8 @@ class _BrowseCard(QFrame):
         self._refresh_style()
 
     def set_pixmap(self, pixmap: QPixmap):
+        if getattr(self, "img_lbl", None) is None:
+            return
         self.img_lbl.setPixmap(
             pixmap.scaled(self.IMG_W, self.IMG_H,
                           Qt.KeepAspectRatio, Qt.SmoothTransformation))
@@ -608,7 +619,8 @@ class _BrowseCard(QFrame):
         """)
         self.name_lbl.setStyleSheet(f"color: {fg}; background: transparent;")
         self.meta_lbl.setStyleSheet(f"color: {t['sub_fg']}; background: transparent;")
-        self.img_lbl.setStyleSheet(f"color: {t['sub_fg']}; background: transparent;")
+        if getattr(self, "img_lbl", None) is not None:
+            self.img_lbl.setStyleSheet(f"color: {t['sub_fg']}; background: transparent;")
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -692,6 +704,7 @@ class FolderCard(_BrowseCard):
         idx = outer_lay.indexOf(self.img_lbl)
         outer_lay.removeWidget(self.img_lbl)
         self.img_lbl.deleteLater()
+        self.img_lbl = None
 
         strip = QWidget()
         strip.setFixedSize(self.IMG_W, self.IMG_H)
@@ -1246,8 +1259,17 @@ class ThumbnailGrid(QWidget):
         self._toolbar.setStyleSheet(f"background-color: {t['main_bg']};")
         self._path_lbl.setStyleSheet(f"color: {t['sub_fg']}; background: transparent;")
         self._breadcrumb.apply_theme(t)
-        for card in self._cards.values():
-            card.apply_theme(t)
+        stale_keys = []
+        for key, card in list(self._cards.items()):
+            try:
+                card.apply_theme(t)
+            except RuntimeError as exc:
+                if _is_deleted_qt_runtime_error(exc):
+                    stale_keys.append(key)
+                else:
+                    raise
+        for key in stale_keys:
+            self._cards.pop(key, None)
 
     # ── Slots ──────────────────────────────────────────────────────────────────
     @Slot(str, QPixmap, object)

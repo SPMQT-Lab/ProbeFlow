@@ -6,6 +6,7 @@ from probeflow.gui.viewer.deferred_action import DeferredPlaneAction
 from probeflow.gui.viewer.display_sliders import DisplaySliderController
 from probeflow.gui.viewer.geometric_ops import transform_roi_set_for_display_op
 from probeflow.gui.viewer.histogram_export import export_histogram
+from probeflow.gui.viewer.image_measurements import ImageMeasurementController
 from probeflow.gui.viewer.line_profile_export import export_line_profile
 from probeflow.gui.viewer.png_export import save_viewer_png
 from probeflow.gui.viewer.processing_undo import ProcessingUndoController
@@ -39,6 +40,7 @@ __all__ = [
     "BadLinePreviewController",
     "DeferredPlaneAction",
     "DisplaySliderController",
+    "ImageMeasurementController",
     "ProcessingUndoController",
     "SetZeroPlaneController",
     "SpecOverlayController",

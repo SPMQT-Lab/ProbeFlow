@@ -124,6 +124,102 @@ def test_browse_panels_import_from_new_module_and_gui_package(qapp):
     info.close()
 
 
+def test_measurement_results_table_records_and_copies_rows(qapp):
+    from probeflow.gui.widgets import MeasurementResultsTable
+    from probeflow.measurements.models import MeasurementResult
+
+    table = MeasurementResultsTable()
+    result = MeasurementResult(
+        measurement_id=table.next_measurement_id(),
+        kind="spectrum_delta",
+        source_label="spec.VERT:I",
+        source_path="/tmp/spec.VERT",
+        channel="I",
+        x_unit="V",
+        y_unit="pA",
+        values={"dx": 0.25, "dy": 6.4},
+        context={"data_basis": "displayed_trace"},
+    )
+
+    table.add_result(result)
+    table.copy_all()
+
+    assert table.results() == [result]
+    assert table._table.rowCount() == 1
+    assert "value.dx" in qapp.clipboard().text()
+
+    table.close()
+
+
+def test_feature_detection_panel_settings_and_export_state(qapp):
+    from probeflow.gui.widgets import FeatureDetectionPanel
+
+    panel = FeatureDetectionPanel()
+
+    settings = panel.settings()
+    assert settings["threshold_mode"] == "percentile"
+    assert settings["threshold_value"] == pytest.approx(95.0)
+    assert settings["min_distance_px"] == 2
+    assert settings["smoothing_sigma"] is None
+
+    panel.set_points_count(3, roi_name="terrace")
+
+    assert "3" in panel._status_lbl.text()
+    assert panel._copy_btn.isEnabled()
+    assert panel._csv_btn.isEnabled()
+    assert panel._json_btn.isEnabled()
+
+    panel.set_points_count(0)
+
+    assert not panel._copy_btn.isEnabled()
+    assert not panel._csv_btn.isEnabled()
+    assert not panel._json_btn.isEnabled()
+
+    panel.close()
+
+
+def test_image_canvas_feature_point_overlay(qapp):
+    from PySide6.QtGui import QPixmap
+    from probeflow.gui.image_canvas import ImageCanvas
+    from probeflow.measurements.models import FeaturePoint
+
+    canvas = ImageCanvas()
+    canvas.set_source(QPixmap(20, 20))
+    points = [
+        FeaturePoint(
+            point_id="P0001",
+            x_px=4.0,
+            y_px=5.0,
+            x_phys=1.0,
+            y_phys=1.25,
+            z_value=0.2,
+            channel="Z",
+            source_label="scan:Z",
+        ),
+        FeaturePoint(
+            point_id="P0002",
+            x_px=10.0,
+            y_px=12.0,
+            x_phys=2.5,
+            y_phys=3.0,
+            z_value=0.3,
+            channel="Z",
+            source_label="scan:Z",
+        ),
+    ]
+
+    canvas.set_feature_points(points)
+
+    assert len(canvas._feature_point_items) == 2
+    assert canvas._feature_point_items[0].toolTip() == "P0001"
+
+    canvas.clear_feature_points()
+
+    assert canvas._feature_point_items == []
+
+    canvas.close()
+
+
 def test_main_window_browse_layout_uses_resizable_splitters(qapp):
     from probeflow.gui import ProbeFlowWindow
 

@@ -226,6 +226,7 @@ class LineProfilePanel(QWidget):
     """
 
     export_csv_clicked = Signal()
+    add_measurement_clicked = Signal()
     width_changed      = Signal(int)
 
     # Catppuccin Mocha colours used for measurement markers
@@ -280,6 +281,15 @@ class LineProfilePanel(QWidget):
         self._export_btn.setToolTip("Export line profile data as CSV")
         self._export_btn.clicked.connect(self.export_csv_clicked)
         btn_row.addWidget(self._export_btn)
+        self._add_measurement_btn = QPushButton("Add measurement")
+        self._add_measurement_btn.setFont(QFont("Helvetica", 8))
+        self._add_measurement_btn.setFixedHeight(20)
+        self._add_measurement_btn.setEnabled(False)
+        self._add_measurement_btn.setToolTip(
+            "Add a summary of the current displayed line profile to the measurements table."
+        )
+        self._add_measurement_btn.clicked.connect(self.add_measurement_clicked)
+        btn_row.addWidget(self._add_measurement_btn)
         lay.addLayout(btn_row)
 
         self._x_vals = None
@@ -347,6 +357,7 @@ class LineProfilePanel(QWidget):
         self._y_vals = None
         self._source_label = ""
         self._export_btn.setEnabled(False)
+        self._add_measurement_btn.setEnabled(False)
 
     def plot_profile(self, x_vals, values, *, x_label: str = "Distance [nm]",
                      y_label: str, theme: Optional[dict] = None) -> None:
@@ -377,6 +388,7 @@ class LineProfilePanel(QWidget):
         self._y_label = y_label
         self._source_label = ""
         self._export_btn.setEnabled(True)
+        self._add_measurement_btn.setEnabled(True)
 
     def set_source_label(self, source_label: str | None,
                          theme: Optional[dict] = None) -> None:

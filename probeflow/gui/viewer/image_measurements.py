@@ -1,0 +1,567 @@
+"""Image-viewer measurement controller.
+
+This module keeps image measurement orchestration out of the legacy viewer
+class.  Numerical work stays in :mod:`probeflow.measurements`; this controller
+only gathers viewer state, records results, updates point overlays, and handles
+small GUI export actions.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+
+from PySide6.QtGui import QAction
+from PySide6.QtWidgets import QApplication, QFileDialog
+
+from probeflow.measurements.export import (
+    feature_points_to_csv_text,
+    feature_points_to_json_text,
+)
+from probeflow.measurements.features import (
+    detect_local_maxima,
+    feature_maxima_result,
+)
+from probeflow.measurements.fft_points import (
+    fft_from_point_mask,
+    point_fft_summary_result,
+    point_fft_to_csv_text,
+    point_mask_to_csv_text,
+    points_to_mask,
+)
+from probeflow.measurements.image import (
+    line_profile_measurement,
+    roi_statistics,
+    step_height_from_rois,
+)
+
+_AREA_KINDS = {"rectangle", "ellipse", "polygon", "freehand", "multipolygon"}
+
+
+class ImageMeasurementController:
+    """Coordinate image measurements between viewer state and result widgets."""
+
+    def __init__(self, viewer: Any, table: Any, feature_panel: Any | None = None):
+        self._viewer = viewer
+        self._table = table
+        self._feature_panel = feature_panel
+        self._feature_points: list[Any] = []
+        self._feature_metadata: dict[str, object] = {}
+        if feature_panel is not None:
+            feature_panel.detectRequested.connect(self.detect_feature_maxima_for_active_roi)
+            feature_panel.copyPointsRequested.connect(self.copy_feature_points)
+            feature_panel.exportCsvRequested.connect(self.export_feature_points_csv)
+            feature_panel.exportJsonRequested.connect(self.export_feature_points_json)
+            feature_panel.exportMaskCsvRequested.connect(self.export_point_mask_csv)
+            feature_panel.computeFftRequested.connect(self.compute_point_mask_fft)
+            feature_panel.exportFftCsvRequested.connect(self.export_point_fft_csv)
+            feature_panel.clearRequested.connect(self.clear_feature_points)
+
+    @property
+    def feature_points(self) -> list[Any]:
+        """Return the currently detected feature points."""
+        return list(self._feature_points)
+
+    def action_enabled_state(self) -> dict[str, bool]:
+        """Return enabled states for viewer measurement menu actions."""
+        roi_id = self._selected_or_active_roi_id()
+        roi = self._roi(roi_id)
+        is_area = roi is not None and roi.kind in _AREA_KINDS
+        is_line = roi is not None and roi.kind == "line"
+        selected_rois = [self._roi(rid) for rid in self.selected_roi_ids()]
+        selected_area_pair = (
+            len(selected_rois) == 2
+            and all(r is not None and r.kind in _AREA_KINDS for r in selected_rois)
+        )
+        return {
+            "roi_stats": is_area,
+            "step_height": selected_area_pair,
+            "line_profile": is_line or self._active_line_roi_id() is not None,
+            "feature_maxima": is_area,
+            "copy_points": bool(self._feature_points),
+            "export_points_csv": bool(self._feature_points),
+            "export_points_json": bool(self._feature_points),
+            "export_point_mask": bool(self._feature_points),
+            "compute_point_fft": bool(self._feature_points),
+            "export_point_fft": bool(self._feature_points),
+            "clear_points": bool(self._feature_points),
+        }
+
+    def add_detected_point_menu_actions(
+        self,
+        menu: Any,
+        action_owner: Any,
+        action_map: dict[str, QAction],
+    ) -> None:
+        """Install menu actions for point-list, mask, and FFT operations."""
+        for label, key, callback in [
+            ("Copy detected points", "copy_points", self.copy_feature_points),
+            ("Export detected points CSV", "export_points_csv", self.export_feature_points_csv),
+            ("Export detected points JSON", "export_points_json", self.export_feature_points_json),
+            ("Export point mask CSV", "export_point_mask", self.export_point_mask_csv),
+            ("Compute point-mask FFT", "compute_point_fft", self.compute_point_mask_fft),
+            ("Export point-mask FFT CSV", "export_point_fft", self.export_point_fft_csv),
+            ("Clear detected points", "clear_points", self.clear_feature_points),
+        ]:
+            action = QAction(label, action_owner)
+            action.triggered.connect(lambda _checked=False, cb=callback: cb())
+            action_map[key] = action
+            menu.addAction(action)
+
+    def selected_roi_ids(self) -> list[str]:
+        """Return selected ROI IDs from the dock, falling back to active ROI."""
+        dock = getattr(self._viewer, "_roi_dock", None)
+        if dock is not None and hasattr(dock, "selected_roi_ids"):
+            return list(dock.selected_roi_ids())
+        roi_id = self._selected_or_active_roi_id()
+        return [roi_id] if roi_id else []
+
+    def add_active_roi_stats_measurement(self) -> None:
+        roi_id = self._selected_or_active_roi_id()
+        if roi_id:
+            self.add_roi_stats_measurement(roi_id)
+
+    def add_roi_stats_measurement(self, roi_id: str) -> None:
+        roi = self._roi(roi_id)
+        arr = self._display_arr()
+        if roi is None or arr is None:
+            return
+        try:
+            entry, scale, unit, channel, source_label = self._source_info()
+            px_x_nm, px_y_nm = self._pixel_size_nm()
+            result = roi_statistics(
+                arr * scale,
+                measurement_id=self._table.next_measurement_id(),
+                source_label=source_label,
+                source_path=str(entry.path),
+                channel=channel,
+                roi=roi,
+                pixel_size_x=px_x_nm,
+                pixel_size_y=px_y_nm,
+                x_unit="nm",
+                y_unit="nm",
+                height_unit=unit or None,
+                notes=f"ROI statistics for {roi.name}",
+            )
+            self._record(result)
+        except Exception as exc:
+            self._set_status(f"Could not add ROI statistics: {exc}")
+
+    def add_selected_step_height_measurement(self) -> None:
+        self.add_step_height_measurement_for_rois(self.selected_roi_ids())
+
+    def add_step_height_measurement_for_rois(self, roi_ids: list[str]) -> None:
+        arr = self._display_arr()
+        if arr is None or len(roi_ids) != 2:
+            self._set_status("Select exactly two area ROIs for step height.")
+            return
+        roi_a = self._roi(roi_ids[0])
+        roi_b = self._roi(roi_ids[1])
+        if (
+            roi_a is None or roi_b is None
+            or roi_a.kind not in _AREA_KINDS
+            or roi_b.kind not in _AREA_KINDS
+        ):
+            self._set_status("Step height requires two area ROIs.")
+            return
+        try:
+            entry, scale, unit, channel, source_label = self._source_info()
+            result = step_height_from_rois(
+                arr * scale,
+                roi_a,
+                roi_b,
+                measurement_id=self._table.next_measurement_id(),
+                source_label=source_label,
+                source_path=str(entry.path),
+                channel=channel,
+                x_unit="nm",
+                y_unit="nm",
+                height_unit=unit or None,
+                notes=f"Step height: {roi_a.name} to {roi_b.name}",
+            )
+            self._record(result)
+        except Exception as exc:
+            self._set_status(f"Could not add step-height measurement: {exc}")
+
+    def add_current_line_profile_measurement(self) -> None:
+        roi_id = self._active_line_roi_id()
+        if roi_id is None:
+            self._set_status(
+                "Set a saved line ROI active before adding a line-profile measurement."
+            )
+            return
+        self.add_line_profile_measurement_for_roi(roi_id)
+
+    def add_line_profile_measurement_for_roi(self, roi_id: str) -> None:
+        roi = self._roi(roi_id)
+        arr = self._display_arr()
+        if roi is None or roi.kind != "line" or arr is None:
+            return
+        try:
+            self._viewer._on_roi_line_profile(roi_id)
+            entry, _scale, _unit, channel, source_label = self._source_info()
+            distance, profile, x_unit, y_unit, width_px = self._line_profile_data(roi)
+            result = line_profile_measurement(
+                distance,
+                profile,
+                measurement_id=self._table.next_measurement_id(),
+                source_label=source_label,
+                source_path=str(entry.path),
+                channel=channel,
+                x_unit=x_unit,
+                y_unit=y_unit or None,
+                p0=(
+                    float(roi.geometry.get("x1", 0.0)),
+                    float(roi.geometry.get("y1", 0.0)),
+                ),
+                p1=(
+                    float(roi.geometry.get("x2", 0.0)),
+                    float(roi.geometry.get("y2", 0.0)),
+                ),
+                roi_id=roi.id,
+                roi_name=roi.name,
+                swath_width=width_px,
+                averaging_method="perpendicular mean",
+                notes=f"Line profile for {roi.name}",
+            )
+            self._record(result)
+        except Exception as exc:
+            self._set_status(f"Could not add line profile measurement: {exc}")
+
+    def detect_feature_maxima_for_active_roi(self) -> None:
+        roi_id = self._selected_or_active_roi_id()
+        if roi_id is None:
+            self._set_status("Select an area ROI before detecting maxima.")
+            return
+        settings = self._feature_panel.settings() if self._feature_panel else {}
+        self.detect_feature_maxima_for_roi(roi_id, settings=settings)
+
+    def detect_feature_maxima_for_roi(
+        self,
+        roi_id: str,
+        *,
+        settings: dict[str, object] | None = None,
+    ) -> None:
+        roi = self._roi(roi_id)
+        arr = self._display_arr()
+        if roi is None or arr is None:
+            return
+        if roi.kind not in _AREA_KINDS:
+            self._set_status("Feature maxima detection requires an area ROI.")
+            return
+        if settings is None and self._feature_panel is not None:
+            settings = self._feature_panel.settings()
+        settings = dict(settings or {})
+        try:
+            entry, scale, unit, channel, source_label = self._source_info()
+            px_x_nm, px_y_nm = self._pixel_size_nm()
+            threshold_mode = str(settings.get("threshold_mode", "percentile"))
+            threshold_value = float(settings.get("threshold_value", 95.0))
+            min_distance_px = int(settings.get("min_distance_px", 2))
+            smoothing_sigma = settings.get("smoothing_sigma")
+            max_peaks = settings.get("max_peaks")
+            exclude_border = int(settings.get("exclude_border", 0))
+            points = detect_local_maxima(
+                arr * scale,
+                threshold_mode=threshold_mode,
+                threshold_value=threshold_value,
+                min_distance_px=min_distance_px,
+                smoothing_sigma=(
+                    float(smoothing_sigma) if smoothing_sigma is not None else None
+                ),
+                max_peaks=(int(max_peaks) if max_peaks is not None else None),
+                exclude_border=exclude_border,
+                roi=roi,
+                pixel_size_x=px_x_nm,
+                pixel_size_y=px_y_nm,
+                channel=channel,
+                source_label=source_label,
+            )
+            self._feature_points = list(points)
+            self._feature_metadata = {
+                "source_label": source_label,
+                "source_path": str(entry.path),
+                "channel": channel,
+                "x_unit": "nm",
+                "y_unit": "nm",
+                "z_unit": unit or None,
+                "roi_id": roi.id,
+                "roi_name": roi.name,
+                "threshold_mode": threshold_mode,
+                "threshold_value": threshold_value,
+                "min_distance_px": min_distance_px,
+                "smoothing_sigma": smoothing_sigma,
+                "exclude_border": exclude_border,
+            }
+            self._push_feature_overlay()
+            self._sync_actions()
+            if self._feature_panel is not None:
+                self._feature_panel.set_points_count(len(points), roi_name=roi.name)
+            result = feature_maxima_result(
+                points,
+                measurement_id=self._table.next_measurement_id(),
+                source_label=source_label,
+                source_path=str(entry.path),
+                channel=channel,
+                x_unit="nm",
+                y_unit="nm",
+                threshold_mode=threshold_mode,
+                threshold_value=threshold_value,
+                min_distance_px=min_distance_px,
+                smoothing_sigma=(
+                    float(smoothing_sigma) if smoothing_sigma is not None else None
+                ),
+                roi_id=roi.id,
+                notes=f"Local maxima in {roi.name}; z unit: {unit or 'data units'}",
+            )
+            self._record(result)
+            self._set_status(
+                f"Detected {len(points)} maxima and added measurement {result.measurement_id}."
+            )
+        except Exception as exc:
+            self.clear_feature_points(silent=True)
+            self._set_status(f"Could not detect maxima: {exc}")
+            if self._feature_panel is not None:
+                self._feature_panel.show_message(str(exc))
+
+    def copy_feature_points(self) -> None:
+        if not self._feature_points:
+            return
+        QApplication.clipboard().setText(
+            feature_points_to_csv_text(
+                self._feature_points,
+                metadata=self._feature_metadata,
+            )
+        )
+        self._set_status(f"Copied {len(self._feature_points)} feature points.")
+
+    def export_feature_points_csv(self) -> None:
+        if not self._feature_points:
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self._viewer,
+            "Export feature points CSV",
+            str(Path.home() / "probeflow_feature_points.csv"),
+            "CSV files (*.csv)",
+        )
+        if path:
+            Path(path).write_text(
+                feature_points_to_csv_text(
+                    self._feature_points,
+                    metadata=self._feature_metadata,
+                ),
+                encoding="utf-8",
+            )
+            self._set_status(f"Feature points -> {path}")
+
+    def export_feature_points_json(self) -> None:
+        if not self._feature_points:
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self._viewer,
+            "Export feature points JSON",
+            str(Path.home() / "probeflow_feature_points.json"),
+            "JSON files (*.json)",
+        )
+        if path:
+            Path(path).write_text(
+                feature_points_to_json_text(
+                    self._feature_points,
+                    metadata=self._feature_metadata,
+                ),
+                encoding="utf-8",
+            )
+            self._set_status(f"Feature points -> {path}")
+
+    def export_point_mask_csv(self) -> None:
+        """Export a derived binary mask from the current feature points."""
+        try:
+            mask, _radius_px, _shape_mode = self._point_mask()
+        except ValueError as exc:
+            self._set_status(str(exc))
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self._viewer,
+            "Export point mask CSV",
+            str(Path.home() / "probeflow_feature_point_mask.csv"),
+            "CSV files (*.csv)",
+        )
+        if path:
+            Path(path).write_text(point_mask_to_csv_text(mask), encoding="utf-8")
+            self._set_status(f"Point mask -> {path}")
+
+    def compute_point_mask_fft(self, *, show_dialog: bool = True) -> None:
+        """Compute an FFT from the derived feature-point mask."""
+        try:
+            mask, radius_px, shape_mode = self._point_mask()
+            fft_result = self._point_fft(mask, radius_px=radius_px)
+            entry, _scale, _unit, channel, source_label = self._source_info()
+            result = point_fft_summary_result(
+                fft_result,
+                measurement_id=self._table.next_measurement_id(),
+                source_label=source_label,
+                source_path=str(entry.path),
+                channel=channel,
+                mask_pixels=int(np.count_nonzero(mask)),
+                shape_mode=shape_mode,
+                notes="FFT of derived binary mask from detected feature maxima.",
+            )
+            self._record(result)
+            self._set_status(
+                f"Computed point-mask FFT from {len(self._feature_points)} points."
+            )
+            if show_dialog:
+                self._show_point_fft_dialog(mask, fft_result)
+        except Exception as exc:
+            self._set_status(f"Could not compute point-mask FFT: {exc}")
+
+    def export_point_fft_csv(self) -> None:
+        """Export the current derived point-mask FFT as long-form CSV."""
+        try:
+            mask, radius_px, _shape_mode = self._point_mask()
+            fft_result = self._point_fft(mask, radius_px=radius_px)
+        except ValueError as exc:
+            self._set_status(str(exc))
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self._viewer,
+            "Export point-mask FFT CSV",
+            str(Path.home() / "probeflow_point_mask_fft.csv"),
+            "CSV files (*.csv)",
+        )
+        if path:
+            Path(path).write_text(point_fft_to_csv_text(fft_result), encoding="utf-8")
+            self._set_status(f"Point-mask FFT -> {path}")
+
+    def clear_feature_points(self, *, silent: bool = False) -> None:
+        self._feature_points = []
+        self._feature_metadata = {}
+        self._push_feature_overlay()
+        if self._feature_panel is not None:
+            self._feature_panel.set_points_count(0)
+        self._sync_actions()
+        if not silent:
+            self._set_status("Cleared feature maxima overlay.")
+
+    def _record(self, result) -> None:
+        self._table.add_result(result)
+        if hasattr(self._viewer, "_show_measurements"):
+            self._viewer._show_measurements()
+        self._set_status(f"Added {result.kind} measurement {result.measurement_id}.")
+
+    def _push_feature_overlay(self) -> None:
+        canvas = getattr(self._viewer, "_zoom_lbl", None)
+        if canvas is not None and hasattr(canvas, "set_feature_points"):
+            canvas.set_feature_points(self._feature_points)
+
+    def _point_mask(self) -> tuple[np.ndarray, int, str]:
+        if not self._feature_points:
+            raise ValueError("Detect feature maxima before generating a point mask.")
+        arr = self._display_arr()
+        if arr is None:
+            raise ValueError("No image is loaded for point-mask generation.")
+        settings = (
+            self._feature_panel.mask_settings()
+            if self._feature_panel is not None and hasattr(self._feature_panel, "mask_settings")
+            else {}
+        )
+        radius_px = int(settings.get("radius_px", 0))
+        shape_mode = str(settings.get("shape_mode", "disk"))
+        mask = points_to_mask(
+            self._feature_points,
+            np.asarray(arr).shape,
+            radius_px=radius_px,
+            shape_mode=shape_mode,
+        )
+        return mask, radius_px, shape_mode
+
+    def _point_fft(self, mask: np.ndarray, *, radius_px: int):
+        px_x_nm, px_y_nm = self._pixel_size_nm()
+        return fft_from_point_mask(
+            mask,
+            pixel_size_x=px_x_nm,
+            pixel_size_y=px_y_nm,
+            spatial_unit="nm",
+            n_points=len(self._feature_points),
+            radius_px=radius_px,
+        )
+
+    def _show_point_fft_dialog(self, mask: np.ndarray, fft_result) -> None:
+        from probeflow.gui.dialogs.point_fft import PointMaskFFTDialog
+
+        dialog = PointMaskFFTDialog(
+            mask,
+            fft_result,
+            theme=getattr(self._viewer, "_t", None),
+            parent=self._viewer,
+        )
+        self._point_fft_dialog = dialog
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def _line_profile_data(self, roi) -> tuple[np.ndarray, np.ndarray, str, str, float]:
+        from probeflow.analysis.spec_plot import choose_display_unit
+        from probeflow.processing.image import line_profile
+
+        arr = self._display_arr()
+        px_x, px_y = self._viewer._pixel_size_xy_m()
+        width_px = float(roi.geometry.get("width", 1)) if roi.geometry else 1.0
+        distance_m, values = line_profile(
+            arr,
+            roi=roi,
+            pixel_size_x_m=px_x,
+            pixel_size_y_m=px_y,
+            width_px=max(1.0, width_px),
+        )
+        scale, unit, _channel = self._viewer._channel_unit()
+        x_scale, x_unit = choose_display_unit("m", distance_m)
+        return (
+            np.asarray(distance_m, dtype=np.float64) * x_scale,
+            np.asarray(values, dtype=np.float64) * scale,
+            x_unit,
+            unit,
+            width_px,
+        )
+
+    def _source_info(self):
+        entry = self._viewer._entries[self._viewer._idx]
+        scale, unit, axis_label = self._viewer._channel_unit()
+        channel = axis_label or self._viewer._ch_cb.currentText()
+        source_label = f"{entry.stem}:{channel}" if channel else entry.stem
+        return entry, scale, unit, channel, source_label
+
+    def _pixel_size_nm(self) -> tuple[float, float]:
+        px_x_m, px_y_m = self._viewer._pixel_size_xy_m()
+        return float(px_x_m) * 1e9, float(px_y_m) * 1e9
+
+    def _display_arr(self):
+        return getattr(self._viewer, "_display_arr", None)
+
+    def _roi(self, roi_id: str | None):
+        roi_set = getattr(self._viewer, "_image_roi_set", None)
+        return roi_set.get(roi_id) if roi_set is not None and roi_id else None
+
+    def _selected_or_active_roi_id(self) -> str | None:
+        if hasattr(self._viewer, "_selected_or_active_image_roi_id"):
+            return self._viewer._selected_or_active_image_roi_id()
+        roi_set = getattr(self._viewer, "_image_roi_set", None)
+        return getattr(roi_set, "active_roi_id", None)
+
+    def _active_line_roi_id(self) -> str | None:
+        if hasattr(self._viewer, "_active_line_roi_id"):
+            return self._viewer._active_line_roi_id()
+        return None
+
+    def _set_status(self, message: str) -> None:
+        status = getattr(self._viewer, "_status_lbl", None)
+        if status is not None and hasattr(status, "setText"):
+            status.setText(str(message))
+        if self._feature_panel is not None:
+            self._feature_panel.show_message(str(message))
+
+    def _sync_actions(self) -> None:
+        if hasattr(self._viewer, "_sync_viewer_menu_actions"):
+            self._viewer._sync_viewer_menu_actions()

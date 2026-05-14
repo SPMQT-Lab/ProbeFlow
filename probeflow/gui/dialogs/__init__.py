@@ -10,6 +10,7 @@ from probeflow.gui.dialogs.definitions import (
 )
 from probeflow.gui.dialogs.fft_viewer import FFTViewerDialog
 from probeflow.gui.dialogs.periodic_filter import PeriodicFilterDialog
+from probeflow.gui.dialogs.point_fft import PointMaskFFTDialog
 from probeflow.gui.dialogs.spec_mapping import SpecMappingDialog, ViewerSpecMappingDialog
 from probeflow.gui.dialogs.spec_viewer import SpecOverlayDialog, SpecViewerDialog
 from probeflow.gui.dialogs.stm_background import STMBackgroundDialog
@@ -21,6 +22,7 @@ __all__ = [
     "_DefinitionsPanel",
     "FFTViewerDialog",
     "PeriodicFilterDialog",
+    "PointMaskFFTDialog",
     "SpecMappingDialog",
     "SpecOverlayDialog",
     "SpecViewerDialog",
