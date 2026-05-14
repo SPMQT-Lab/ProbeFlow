@@ -109,15 +109,21 @@ def feature_maxima_result(
     min_distance_px: int,
     smoothing_sigma: float | None = None,
     roi_id: str | None = None,
+    roi_name: str | None = None,
+    selection_scope: str = "roi",
+    exclude_border: int = 0,
     data_basis: str = "processed_image",
     notes: str = "",
 ) -> MeasurementResult:
     """Return a summary MeasurementResult for a detected point list."""
     context: dict[str, Scalar] = {
         "data_basis": data_basis,
+        "selection_scope": selection_scope,
         "roi_id": roi_id,
+        "roi_name": roi_name,
         "threshold_mode": threshold_mode,
         "detection_smoothing_sigma": smoothing_sigma,
+        "exclude_border": exclude_border,
     }
     return MeasurementResult(
         measurement_id=measurement_id,

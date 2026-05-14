@@ -87,7 +87,7 @@ class ImageMeasurementController:
             "roi_stats": is_area,
             "step_height": selected_area_pair,
             "line_profile": is_line or self._active_line_roi_id() is not None,
-            "feature_maxima": is_area,
+            "feature_maxima": True,  # works on full image when no area ROI is active
             "copy_points": bool(self._feature_points),
             "export_points_csv": bool(self._feature_points),
             "export_points_json": bool(self._feature_points),
@@ -239,12 +239,14 @@ class ImageMeasurementController:
             self._set_status(f"Could not add line profile measurement: {exc}")
 
     def detect_feature_maxima_for_active_roi(self) -> None:
+        """Detect maxima inside the active area ROI, or over the full image if none."""
         roi_id = self._selected_or_active_roi_id()
-        if roi_id is None:
-            self._set_status("Select an area ROI before detecting maxima.")
-            return
+        roi = self._roi(roi_id) if roi_id else None
+        # Non-area ROIs (line, point) are not valid for maxima detection — use full image
+        if roi is not None and roi.kind not in _AREA_KINDS:
+            roi, roi_id = None, None
         settings = self._feature_panel.settings() if self._feature_panel else {}
-        self.detect_feature_maxima_for_roi(roi_id, settings=settings)
+        self._run_feature_maxima(roi_id=roi_id, settings=settings)
 
     def detect_feature_maxima_for_roi(
         self,
@@ -261,6 +263,20 @@ class ImageMeasurementController:
             return
         if settings is None and self._feature_panel is not None:
             settings = self._feature_panel.settings()
+        self._run_feature_maxima(roi_id=roi_id, settings=settings)
+
+    def _run_feature_maxima(
+        self,
+        *,
+        roi_id: str | None,
+        settings: dict[str, object] | None = None,
+    ) -> None:
+        """Run feature maxima detection with optional ROI, falling back to full image."""
+        arr = self._display_arr()
+        if arr is None:
+            self._set_status("No image is loaded.")
+            return
+        roi = self._roi(roi_id)
         settings = dict(settings or {})
         try:
             entry, scale, unit, channel, source_label = self._source_info()
@@ -271,6 +287,8 @@ class ImageMeasurementController:
             smoothing_sigma = settings.get("smoothing_sigma")
             max_peaks = settings.get("max_peaks")
             exclude_border = int(settings.get("exclude_border", 0))
+            scope = "roi" if roi is not None else "full_image"
+            scope_label = roi.name if roi is not None else "full image"
             points = detect_local_maxima(
                 arr * scale,
                 threshold_mode=threshold_mode,
@@ -286,6 +304,7 @@ class ImageMeasurementController:
                 pixel_size_y=px_y_nm,
                 channel=channel,
                 source_label=source_label,
+                roi_id=roi_id,
             )
             self._feature_points = list(points)
             self._feature_metadata = {
@@ -295,8 +314,9 @@ class ImageMeasurementController:
                 "x_unit": "nm",
                 "y_unit": "nm",
                 "z_unit": unit or None,
-                "roi_id": roi.id,
-                "roi_name": roi.name,
+                "roi_id": roi_id,
+                "roi_name": roi.name if roi is not None else None,
+                "selection_scope": scope,
                 "threshold_mode": threshold_mode,
                 "threshold_value": threshold_value,
                 "min_distance_px": min_distance_px,
@@ -306,7 +326,7 @@ class ImageMeasurementController:
             self._push_feature_overlay()
             self._sync_actions()
             if self._feature_panel is not None:
-                self._feature_panel.set_points_count(len(points), roi_name=roi.name)
+                self._feature_panel.set_points_count(len(points), roi_name=scope_label)
             if (
                 self._point_mask_panel is not None
                 and hasattr(self._point_mask_panel, "set_points_available")
@@ -326,12 +346,15 @@ class ImageMeasurementController:
                 smoothing_sigma=(
                     float(smoothing_sigma) if smoothing_sigma is not None else None
                 ),
-                roi_id=roi.id,
-                notes=f"Local maxima in {roi.name}; z unit: {unit or 'data units'}",
+                roi_id=roi_id,
+                roi_name=roi.name if roi is not None else None,
+                selection_scope=scope,
+                exclude_border=exclude_border,
+                notes=f"Local maxima in {scope_label}; z unit: {unit or 'data units'}",
             )
             self._record(result)
             self._set_status(
-                f"Detected {len(points)} maxima and added measurement {result.measurement_id}."
+                f"Detected {len(points)} maxima ({scope_label}) → {result.measurement_id}."
             )
         except Exception as exc:
             self.clear_feature_points(silent=True)

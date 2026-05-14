@@ -18,6 +18,7 @@ from probeflow.measurements.export import (
     measurements_to_json_text,
     measurements_to_tsv,
 )
+from probeflow.measurements.export import feature_points_to_json_text
 from probeflow.measurements.features import detect_local_maxima, feature_maxima_result
 from probeflow.measurements.fft_points import (
     fft_from_point_mask,
@@ -388,3 +389,189 @@ def test_error_handling_seam_step_height_one_empty_roi_raises():
             source_label="scan:Z",
             channel="Z",
         )
+
+
+# ── seam 11: feature maxima — full-image fallback when no ROI ────────────────
+
+def test_feature_maxima_full_image_without_roi_finds_peaks():
+    """detect_local_maxima with roi=None must detect peaks across the whole image."""
+    image = _gaussian_image([(16, 16, 5.0), (48, 48, 4.0)])
+
+    points = detect_local_maxima(
+        image,
+        threshold_mode="percentile",
+        threshold_value=90.0,
+        min_distance_px=5,
+        # no roi / roi_mask arguments — defaults to full image
+        channel="Z",
+        source_label="scan:Z",
+    )
+
+    assert len(points) >= 2
+    for p in points:
+        assert p.roi_id is None
+
+
+def test_feature_maxima_result_records_full_image_scope():
+    """feature_maxima_result with selection_scope='full_image' must store it in context."""
+    image = _gaussian_image([(8, 8, 3.0)])
+    points = detect_local_maxima(
+        image,
+        threshold_mode="percentile",
+        threshold_value=90.0,
+        min_distance_px=3,
+        channel="Z",
+        source_label="scan:Z",
+    )
+
+    result = feature_maxima_result(
+        points,
+        measurement_id="M0001",
+        source_label="scan:Z",
+        channel="Z",
+        threshold_mode="percentile",
+        threshold_value=90.0,
+        min_distance_px=3,
+        roi_id=None,
+        roi_name=None,
+        selection_scope="full_image",
+        exclude_border=0,
+    )
+
+    assert result.context["selection_scope"] == "full_image"
+    assert result.context["roi_id"] is None
+    assert result.context["roi_name"] is None
+    assert result.context["exclude_border"] == 0
+
+
+def test_feature_maxima_result_records_roi_scope():
+    """feature_maxima_result with selection_scope='roi' records ROI name and id."""
+    roi = _rect_roi(0, 0, 32, 32, name="scan_area")
+    image = _gaussian_image([(8, 8, 3.0)])
+    roi_mask = roi.to_mask((64, 64))
+    points = detect_local_maxima(
+        image,
+        threshold_mode="percentile",
+        threshold_value=90.0,
+        min_distance_px=3,
+        roi_mask=roi_mask,
+        roi_id=roi.id,
+        channel="Z",
+        source_label="scan:Z",
+    )
+
+    result = feature_maxima_result(
+        points,
+        measurement_id="M0002",
+        source_label="scan:Z",
+        channel="Z",
+        threshold_mode="percentile",
+        threshold_value=90.0,
+        min_distance_px=3,
+        roi_id=roi.id,
+        roi_name=roi.name,
+        selection_scope="roi",
+    )
+
+    assert result.context["selection_scope"] == "roi"
+    assert result.context["roi_id"] == roi.id
+    assert result.context["roi_name"] == "scan_area"
+
+
+def test_feature_maxima_area_roi_restricts_points_to_roi_bounds():
+    """Points detected inside an area ROI must all lie within the ROI mask."""
+    image = _gaussian_image([(10, 10, 5.0), (50, 50, 4.0)])
+    roi = _rect_roi(0, 0, 30, 30, name="top_left")
+    roi_mask = roi.to_mask((64, 64))
+
+    points = detect_local_maxima(
+        image,
+        threshold_mode="percentile",
+        threshold_value=80.0,
+        min_distance_px=3,
+        roi_mask=roi_mask,
+        roi_id=roi.id,
+        channel="Z",
+        source_label="scan:Z",
+    )
+
+    for p in points:
+        # All detected points must lie within the ROI bounds (x < 30, y < 30)
+        assert p.x_px < 30 and p.y_px < 30, (
+            f"Point {p.point_id} at ({p.x_px}, {p.y_px}) is outside the ROI"
+        )
+
+
+def test_feature_maxima_scope_survives_json_export():
+    """selection_scope and roi metadata must survive round-trip through JSON export."""
+    image = _gaussian_image([(8, 8, 3.0)])
+    points = detect_local_maxima(
+        image,
+        threshold_mode="absolute",
+        threshold_value=1.0,
+        min_distance_px=3,
+        channel="Z",
+        source_label="scan:Z",
+    )
+    result = feature_maxima_result(
+        points,
+        measurement_id="M0001",
+        source_label="scan:Z",
+        channel="Z",
+        threshold_mode="absolute",
+        threshold_value=1.0,
+        min_distance_px=3,
+        selection_scope="full_image",
+        exclude_border=2,
+    )
+
+    payload = json.loads(measurements_to_json_text([result]))
+    m = payload["measurements"][0]
+
+    assert m["context"]["selection_scope"] == "full_image"
+    assert m["context"]["exclude_border"] == 2
+    assert m["context"]["roi_id"] is None
+
+
+def test_point_mask_fft_seam_after_full_image_detection():
+    """point mask and FFT must work correctly after full-image (no ROI) detection."""
+    image = _gaussian_image([(8, 8, 5.0), (24, 24, 4.0), (40, 40, 3.5)])
+
+    points = detect_local_maxima(
+        image,
+        threshold_mode="percentile",
+        threshold_value=85.0,
+        min_distance_px=4,
+        pixel_size_x=0.5,
+        pixel_size_y=0.5,
+        channel="Z",
+        source_label="scan:Z",
+    )
+    assert len(points) >= 2
+
+    mask = points_to_mask(points, (64, 64), radius_px=1)
+    fft_result = fft_from_point_mask(
+        mask,
+        pixel_size_x=0.5,
+        pixel_size_y=0.5,
+        spatial_unit="nm",
+        n_points=len(points),
+        radius_px=1,
+    )
+    fft_summary = point_fft_summary_result(
+        fft_result,
+        measurement_id="M0001",
+        source_label="scan:Z",
+        channel="Z",
+    )
+
+    assert fft_summary.values["n_points"] == len(points)
+    assert fft_result.units == "cycles/nm"
+    assert fft_summary.kind == "point_fft"
+
+    # Full-image detected points export as JSON without roi_id
+    points_json = json.loads(
+        feature_points_to_json_text(points, metadata={"x_unit": "nm", "z_unit": "pm"})
+    )
+    for p in points_json["points"]:
+        assert p["roi_id"] is None

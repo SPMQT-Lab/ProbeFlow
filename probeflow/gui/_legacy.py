@@ -900,10 +900,9 @@ class ImageViewerDialog(QDialog):
         roi_lay.addStretch(1)
 
         measurements_empty_lbl = QLabel(
-            "Measurement setup and results live in the Measurements dock. "
-            "Use the top Measurements menu or reopen the dock here."
+            "Measurements are shown in the Measurements dock.\n"
+            "Use Show Measurements to reopen it."
         )
-        measurements_empty_lbl.setFont(QFont("Helvetica", 8))
         measurements_empty_lbl.setWordWrap(True)
         measurements_lay.addWidget(measurements_empty_lbl)
         show_measurements_btn = QPushButton("Show Measurements")
@@ -4252,6 +4251,30 @@ QDoubleSpinBox {{
     padding: 3px 5px;
 }}
 QSplitter::handle {{ background-color: {t['splitter']}; }}
+QTabWidget::pane {{
+    border: none;
+    border-top: 1px solid {t['sep']};
+}}
+QTabBar {{
+    border: none;
+}}
+QTabBar::tab {{
+    background-color: {t['tab_inact']};
+    color: {t['sub_fg']};
+    padding: 4px 12px;
+    border: none;
+    min-width: 40px;
+}}
+QTabBar::tab:selected {{
+    background-color: {t['tab_act']};
+    color: {t['fg']};
+    font-weight: 600;
+    border-bottom: 2px solid {t['accent_bg']};
+}}
+QTabBar::tab:hover:!selected {{
+    background-color: {t['entry_bg']};
+    color: {t['fg']};
+}}
 QStatusBar {{
     background-color: {t['status_bg']};
     color: {t['status_fg']};
