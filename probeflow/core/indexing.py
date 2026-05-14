@@ -1,4 +1,4 @@
-"""Lightweight folder indexing for Createc/Nanonis scan and spectroscopy files.
+"""Lightweight folder indexing for supported scan and spectroscopy files.
 
 Public API
 ----------
@@ -28,6 +28,7 @@ _SKIP_DIRS: frozenset[str] = frozenset({
 _FORMAT_MAP: dict[FileType, tuple[str, str]] = {
     FileType.CREATEC_IMAGE: ("createc_dat",          "scan"),
     FileType.NANONIS_IMAGE:  ("nanonis_sxm",           "scan"),
+    FileType.RHK_SM4_IMAGE:  ("rhk_sm4",               "scan"),
     FileType.CREATEC_SPEC:   ("createc_vert",          "spectrum"),
     FileType.NANONIS_SPEC:   ("nanonis_dat_spectrum",  "spectrum"),
 }

@@ -29,12 +29,12 @@ from probeflow.io.createc_interpretation import createc_dat_experiment_metadata
 class ScanMetadata:
     """Lightweight, immutable summary of a single STM image scan.
 
-    source_format is "createc_dat" or "nanonis_sxm" (independent of the
-    internal Scan.source_format strings "dat" / "sxm").
+    source_format is "createc_dat", "nanonis_sxm", or "rhk_sm4"
+    (independent of the internal Scan.source_format strings).
     """
 
     path: Path
-    source_format: str                          # "createc_dat" | "nanonis_sxm"
+    source_format: str                          # "createc_dat" | "nanonis_sxm" | "rhk_sm4"
     item_type: str = "scan"
     display_name: str = ""
     shape: Optional[tuple[int, int]] = None     # (Ny, Nx)
@@ -51,7 +51,7 @@ class ScanMetadata:
 
 # ── Format string mapping ────────────────────────────────────────────────────
 
-_FORMAT_MAP = {"dat": "createc_dat", "sxm": "nanonis_sxm"}
+_FORMAT_MAP = {"dat": "createc_dat", "sxm": "nanonis_sxm", "sm4": "rhk_sm4"}
 
 
 # ── metadata_from_scan ───────────────────────────────────────────────────────
@@ -73,6 +73,9 @@ def metadata_from_scan(scan) -> ScanMetadata:
         experiment_metadata = dict(getattr(scan, "experiment_metadata", {}) or {})
     elif scan.source_format == "sxm":
         bias, setpoint, comment, acq_dt = _extract_nanonis_fields(hdr)
+        experiment_metadata = {}
+    elif scan.source_format == "sm4":
+        bias, setpoint, comment, acq_dt = _extract_rhk_fields(hdr)
         experiment_metadata = {}
     else:
         bias, setpoint, comment, acq_dt = None, None, None, None
@@ -231,6 +234,21 @@ def _extract_nanonis_fields(hdr: dict) -> tuple:
     return bias, setpoint, comment, acq_dt
 
 
+def _extract_rhk_fields(hdr: dict) -> tuple:
+    """Extract display metadata from an RHK SM4 scan header."""
+    pages = hdr.get("pages") or []
+    first = pages[0] if pages else {}
+    bias = _f(first.get("bias"))
+    setpoint = _f(first.get("current"))
+    label = first.get("label") or first.get("page_type_label")
+    comment = str(label).strip() if label else None
+    strings = first.get("strings") or {}
+    date = str(strings.get("date") or "").strip()
+    time = str(strings.get("time") or "").strip()
+    acq_dt = f"{date} {time}".strip() or None
+    return bias, setpoint, comment, acq_dt
+
+
 # ── read_scan_metadata ───────────────────────────────────────────────────────
 
 def read_scan_metadata(path) -> ScanMetadata:
@@ -251,5 +269,9 @@ def read_scan_metadata(path) -> ScanMetadata:
         from probeflow.io.readers.nanonis_sxm import read_sxm_metadata
 
         return read_sxm_metadata(sig.path)
+    if sig.source_format == "sm4":
+        from probeflow.io.readers.rhk_sm4 import read_sm4_metadata
+
+        return read_sm4_metadata(sig.path)
 
     raise ValueError(f"Unsupported scan source format: {sig.source_format!r}")

@@ -51,7 +51,8 @@ class Scan:
     source_path
         Absolute path to the file we loaded from.
     source_format
-        ``"sxm"`` | ``"dat"`` identifies the reader that produced this Scan.
+        ``"sxm"`` | ``"dat"`` | ``"sm4"`` identifies the reader that produced
+        this Scan.
     """
 
     planes: List[np.ndarray]

@@ -10,7 +10,7 @@ import numpy as np
 
 from probeflow.core.scan_model import Scan
 
-_SUPPORTED_FORMATS = {"dat", "sxm"}
+_SUPPORTED_FORMATS = {"dat", "sxm", "sm4"}
 
 _CREATEC_PLANE_NAMES = [
     "Z forward",

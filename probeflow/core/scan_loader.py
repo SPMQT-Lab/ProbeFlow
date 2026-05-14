@@ -11,7 +11,7 @@ from __future__ import annotations
 from probeflow.core.scan_model import PLANE_CANON_NAMES, PLANE_CANON_UNITS, Scan
 
 
-SUPPORTED_SUFFIXES: tuple[str, ...] = (".sxm", ".dat")
+SUPPORTED_SUFFIXES: tuple[str, ...] = (".sxm", ".dat", ".sm4")
 
 
 def _validate(scan: Scan) -> None:
@@ -25,6 +25,7 @@ def load_scan(path) -> Scan:
     Supported formats:
       * ``.sxm`` - Nanonis topography
       * ``.dat`` - Createc topography
+      * ``.sm4`` - RHK SM4 image pages
 
     Point-spectroscopy files (Createc ``.VERT`` and Nanonis ``.dat`` spec)
     are not scans - use :func:`probeflow.io.spectroscopy.read_spec_file` instead.
@@ -41,6 +42,11 @@ def load_scan(path) -> Scan:
     if sig.source_format == "dat":
         from probeflow.io.readers.createc_scan import read_dat
         scan = read_dat(sig.path)
+        _validate(scan)
+        return scan
+    if sig.source_format == "sm4":
+        from probeflow.io.readers.rhk_sm4 import read_sm4
+        scan = read_sm4(sig.path)
         _validate(scan)
         return scan
 

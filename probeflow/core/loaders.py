@@ -42,6 +42,8 @@ def identify_scan_file(path) -> LoadSignature:
         return LoadSignature(p, ft, "scan", "sxm")
     if ft == FileType.CREATEC_IMAGE:
         return LoadSignature(p, ft, "scan", "dat")
+    if ft == FileType.RHK_SM4_IMAGE:
+        return LoadSignature(p, ft, "scan", "sm4")
     # ``.sxm`` is unambiguous, so let malformed headers fail in the reader's
     # metadata/full-load stages rather than at the sniff stage.
     if ft == FileType.UNKNOWN and suffix == ".sxm":
@@ -89,6 +91,11 @@ def identify_spectrum_file(path) -> LoadSignature:
     if ft == FileType.CREATEC_IMAGE:
         raise ValueError(
             f"{p.name}: identified as Createc scan image during spectroscopy "
+            "sniff stage; use probeflow.core.scan_loader.load_scan or read_scan_metadata."
+        )
+    if ft == FileType.RHK_SM4_IMAGE:
+        raise ValueError(
+            f"{p.name}: identified as RHK SM4 image during spectroscopy "
             "sniff stage; use probeflow.core.scan_loader.load_scan or read_scan_metadata."
         )
     raise ValueError(

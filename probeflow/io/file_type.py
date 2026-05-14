@@ -20,6 +20,7 @@ class FileType(Enum):
     CREATEC_SPEC = "createc_spec"
     NANONIS_IMAGE = "nanonis_image"
     NANONIS_SPEC = "nanonis_spec"
+    RHK_SM4_IMAGE = "rhk_sm4_image"
     UNKNOWN = "unknown"
 
 
@@ -39,6 +40,12 @@ def sniff_file_type(path) -> FileType:
 
     if not head:
         return FileType.UNKNOWN
+
+    # RHK SM4: UTF-16-ish "STiMage 005." magic starts at byte offset 2.
+    from probeflow.io.readers.rhk_sm4 import is_rhk_sm4
+
+    if is_rhk_sm4(head):
+        return FileType.RHK_SM4_IMAGE
 
     # Nanonis spec (.dat): pure ASCII, starts with "Experiment\t".
     # Check this BEFORE Createc image because both may share a .dat suffix.

@@ -28,7 +28,7 @@ class SxmFile:
     @classmethod
     def from_index_item(cls, item) -> "SxmFile":
         """Build the legacy GUI scan entry from a package-level ProbeFlowItem."""
-        fmt = {"createc_dat": "dat", "nanonis_sxm": "sxm"}.get(
+        fmt = {"createc_dat": "dat", "nanonis_sxm": "sxm", "rhk_sm4": "sm4"}.get(
             item.source_format, item.source_format)
         experiment = dict(item.metadata.get("experiment_metadata") or {})
         label = scan_mode_label(experiment)
