@@ -18,6 +18,7 @@ class MeasurementResult:
     channel: str | None
     x_unit: str | None
     y_unit: str | None
+    z_unit: str | None = None
     values: dict[str, Scalar] = field(default_factory=dict)
     context: dict[str, Scalar] = field(default_factory=dict)
     notes: str = ""
@@ -40,10 +41,11 @@ class FeaturePoint:
 
 def measurement_main_value(result: MeasurementResult) -> tuple[str, Scalar, str | None]:
     """Return a compact display value for a measurement table row."""
+    height_unit = result.z_unit or result.context.get("height_unit")
     preferences = {
         "spectrum_delta": ("dx", result.x_unit),
-        "roi_stats": ("mean_height", result.context.get("height_unit")),
-        "step_height": ("height_difference", result.context.get("height_unit")),
+        "roi_stats": ("mean_height", height_unit),
+        "step_height": ("height_difference", height_unit),
         "line_profile": ("length", result.x_unit),
         "feature_maxima": ("n_points", None),
         "point_fft": ("dominant_frequency", result.x_unit),

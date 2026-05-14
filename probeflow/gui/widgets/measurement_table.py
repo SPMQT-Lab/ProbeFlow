@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -22,6 +23,28 @@ from probeflow.measurements.export import (
     measurements_to_json,
 )
 from probeflow.measurements.models import MeasurementResult, measurement_main_value
+
+KIND_LABELS: dict[str, str] = {
+    "feature_maxima": "Feature maxima",
+    "point_fft": "Point mask FFT",
+    "roi_stats": "ROI statistics",
+    "step_height": "Step height",
+    "line_profile": "Line profile",
+    "spectrum_delta": "Spectrum Δ",
+}
+
+VALUE_LABELS: dict[str, str] = {
+    "mean_height": "Mean height",
+    "median_height": "Median height",
+    "std_height": "Std height",
+    "rms_roughness": "RMS roughness",
+    "height_difference": "Height difference",
+    "length": "Length",
+    "n_points": "Number of points",
+    "dominant_frequency": "Dominant frequency",
+    "dx": "Δx",
+    "dy": "Δy",
+}
 
 
 class MeasurementResultsTable(QWidget):
@@ -59,6 +82,7 @@ class MeasurementResultsTable(QWidget):
         """Clear all rows."""
         self._results.clear()
         self._table.setRowCount(0)
+        self._details.clear()
 
     def _build(self) -> None:
         lay = QVBoxLayout(self)
@@ -72,7 +96,15 @@ class MeasurementResultsTable(QWidget):
         self._table.setEditTriggers(QTableWidget.NoEditTriggers)
         self._table.setAlternatingRowColors(True)
         self._table.setMinimumHeight(110)
+        self._table.itemSelectionChanged.connect(self._on_selection_changed)
         lay.addWidget(self._table)
+
+        self._details = QTextEdit()
+        self._details.setReadOnly(True)
+        self._details.setMinimumHeight(80)
+        self._details.setMaximumHeight(160)
+        self._details.setPlaceholderText("Select a row to see full details.")
+        lay.addWidget(self._details)
 
         grid = QGridLayout()
         grid.setContentsMargins(0, 0, 0, 0)
@@ -91,18 +123,25 @@ class MeasurementResultsTable(QWidget):
             grid.addWidget(button, idx // 3, idx % 3)
         lay.addLayout(grid)
 
+    def _on_selection_changed(self) -> None:
+        rows = sorted({index.row() for index in self._table.selectedIndexes()})
+        if len(rows) == 1 and 0 <= rows[0] < len(self._results):
+            self._details.setPlainText(_format_details(self._results[rows[0]]))
+        else:
+            self._details.clear()
+
     def _append_row(self, result: MeasurementResult) -> None:
         row = self._table.rowCount()
         self._table.insertRow(row)
         key, value, unit = measurement_main_value(result)
-        main_value = "" if value is None else f"{key}={_fmt_value(value)}"
+        main_value = "" if value is None else f"{VALUE_LABELS.get(key, key)}={_fmt_value(value)}"
         values = [
             result.measurement_id,
-            result.kind,
+            KIND_LABELS.get(result.kind, result.kind),
             result.source_label,
             result.channel or "",
             main_value,
-            unit or result.y_unit or result.x_unit or "",
+            unit or result.z_unit or result.y_unit or result.x_unit or "",
             result.notes,
         ]
         for col, text in enumerate(values):
@@ -159,6 +198,38 @@ class MeasurementResultsTable(QWidget):
         if not results:
             return
         QApplication.clipboard().setText(measurements_to_tsv(results))
+
+
+def _format_details(result: MeasurementResult) -> str:
+    lines: list[str] = []
+    lines.append(f"{result.measurement_id}  —  {KIND_LABELS.get(result.kind, result.kind)}")
+    if result.source_label:
+        lines.append(f"Source: {result.source_label}")
+    if result.source_path and result.source_path != result.source_label:
+        lines.append(f"File:   {result.source_path}")
+    if result.channel:
+        lines.append(f"Channel: {result.channel}")
+    unit_parts = []
+    if result.x_unit:
+        unit_parts.append(f"x={result.x_unit}")
+    if result.y_unit and result.y_unit != result.x_unit:
+        unit_parts.append(f"y={result.y_unit}")
+    if result.z_unit:
+        unit_parts.append(f"z={result.z_unit}")
+    if unit_parts:
+        lines.append("Units:  " + "  ".join(unit_parts))
+    if result.values:
+        lines.append("Values:")
+        for k, v in result.values.items():
+            label = VALUE_LABELS.get(k, k)
+            lines.append(f"  {label}: {_fmt_value(v)}")
+    if result.context:
+        ctx_items = [f"{k}={v}" for k, v in result.context.items() if v is not None]
+        if ctx_items:
+            lines.append("Context: " + "  ".join(ctx_items))
+    if result.notes:
+        lines.append(f"Notes: {result.notes}")
+    return "\n".join(lines)
 
 
 def _fmt_value(value: object) -> str:

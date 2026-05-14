@@ -52,6 +52,7 @@ def roi_statistics(
         channel=channel,
         x_unit=x_unit,
         y_unit=y_unit,
+        z_unit=height_unit,
         values={
             "mean_height": float(np.mean(finite)),
             "median_height": float(np.median(finite)),
@@ -104,6 +105,7 @@ def step_height_from_rois(
         channel=channel,
         x_unit=x_unit,
         y_unit=y_unit,
+        z_unit=height_unit,
         values={
             "roi_a_mean": mean_a,
             "roi_b_mean": mean_b,

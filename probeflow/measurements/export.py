@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import datetime as _dt
 import io
 import json
 from dataclasses import asdict
@@ -12,6 +13,18 @@ from typing import Iterable
 import numpy as np
 
 from probeflow.measurements.models import FeaturePoint, MeasurementResult, Scalar
+
+
+def _utc_now() -> str:
+    return _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _get_version() -> str | None:
+    try:
+        from importlib.metadata import version
+        return version("probeflow")
+    except Exception:
+        return None
 
 
 def measurement_to_flat_dict(result: MeasurementResult) -> dict[str, Scalar]:
@@ -24,6 +37,7 @@ def measurement_to_flat_dict(result: MeasurementResult) -> dict[str, Scalar]:
         "channel": result.channel,
         "x_unit": result.x_unit,
         "y_unit": result.y_unit,
+        "z_unit": result.z_unit,
         "notes": result.notes,
     }
     for key in sorted(result.values):
@@ -52,6 +66,9 @@ def measurements_to_json_text(results: Iterable[MeasurementResult]) -> str:
     """Return nested JSON text for measurement results."""
     payload = {
         "export_type": "probeflow_measurements",
+        "schema_version": "1",
+        "created_at": _utc_now(),
+        "probeflow_version": _get_version(),
         "measurements": [_measurement_to_json_dict(result) for result in results],
     }
     return json.dumps(payload, indent=2, sort_keys=True)

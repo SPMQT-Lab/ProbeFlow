@@ -42,6 +42,8 @@ class ImageMeasurementsPanel(QWidget):
         self.point_mask_panel = PointMaskFFTPanel(self)
         self.table = MeasurementResultsTable(self)
         self._mode_pages: dict[str, int] = {}
+        self._action_buttons: dict[str, QPushButton] = {}
+        self._action_status: dict[str, QLabel] = {}
         self._build()
 
     def measurement_type(self) -> str:
@@ -65,6 +67,13 @@ class ImageMeasurementsPanel(QWidget):
         self.feature_panel.show_message(message)
         self.point_mask_panel.show_message(message)
 
+    def set_action_available(self, mode: str, available: bool, *, message: str = "") -> None:
+        """Enable or disable the action button for a mode and show a status message."""
+        if mode in self._action_buttons:
+            self._action_buttons[mode].setEnabled(available)
+        if mode in self._action_status:
+            self._action_status[mode].setText(message)
+
     def _build(self) -> None:
         lay = QVBoxLayout(self)
         lay.setContentsMargins(4, 4, 4, 4)
@@ -85,6 +94,7 @@ class ImageMeasurementsPanel(QWidget):
         self._setup_stack.addWidget(self.point_mask_panel)
         self._mode_pages["point_fft"] = 1
         self._setup_stack.addWidget(self._action_page(
+            "roi_stats",
             "ROI statistics",
             "Calculate mean, median, roughness, area, extrema, and finite-pixel counts for the active area ROI.",
             "Add active ROI statistics",
@@ -92,6 +102,7 @@ class ImageMeasurementsPanel(QWidget):
         ))
         self._mode_pages["roi_stats"] = 2
         self._setup_stack.addWidget(self._action_page(
+            "step_height",
             "Step height",
             "Select two area ROIs, then calculate the mean-height difference between them.",
             "Add step height from selected ROIs",
@@ -99,6 +110,7 @@ class ImageMeasurementsPanel(QWidget):
         ))
         self._mode_pages["step_height"] = 3
         self._setup_stack.addWidget(self._action_page(
+            "line_profile",
             "Line profile",
             "Use the active line ROI to add a profile summary to the measurement table.",
             "Add current line profile",
@@ -119,6 +131,7 @@ class ImageMeasurementsPanel(QWidget):
 
     def _action_page(
         self,
+        mode_key: str,
         title: str,
         description: str,
         button_text: str,
@@ -139,5 +152,11 @@ class ImageMeasurementsPanel(QWidget):
         button.setAutoDefault(False)
         button.clicked.connect(signal.emit)
         lay.addWidget(button)
+        status_lbl = QLabel("")
+        status_lbl.setWordWrap(True)
+        status_lbl.setStyleSheet("color: palette(mid);")
+        lay.addWidget(status_lbl)
         lay.addStretch(1)
+        self._action_buttons[mode_key] = button
+        self._action_status[mode_key] = status_lbl
         return page
