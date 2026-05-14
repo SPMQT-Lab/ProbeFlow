@@ -17,8 +17,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
-from probeflow.io.common import _f
-from probeflow.io.file_type import FileType, sniff_file_type
+from probeflow.core.common import _f
+from probeflow.core.file_type import FileType, sniff_file_type
 
 # Folder names to always skip when walking.
 _SKIP_DIRS: frozenset[str] = frozenset({

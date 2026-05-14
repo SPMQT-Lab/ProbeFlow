@@ -15,7 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from probeflow.io.file_type import FileType, sniff_file_type
+from probeflow.core.file_type import FileType, sniff_file_type
 
 
 @dataclass(frozen=True)

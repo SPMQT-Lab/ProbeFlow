@@ -176,20 +176,9 @@ def setup_logging(verbose: bool = False) -> None:
     )
 
 
-def _f(x, default=None):
-    """Safe float conversion; replaces commas with dots."""
-    try:
-        return float(str(x).replace(",", "."))
-    except (TypeError, ValueError):
-        return default
-
-
-def _i(x, default=None):
-    """Safe int conversion."""
-    try:
-        return int(float(str(x).replace(",", ".")))
-    except (TypeError, ValueError):
-        return default
+# Canonical definitions live in core.common; re-exported here for callers
+# that still import from probeflow.io.common.
+from probeflow.core.common import _f, _i  # noqa: F401
 
 
 def check_overwrite(input_path: Path, output_path: Path) -> None:

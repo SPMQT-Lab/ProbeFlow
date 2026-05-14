@@ -19,8 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
-from probeflow.io.common import _f
-from probeflow.io.createc_interpretation import createc_dat_experiment_metadata
+from probeflow.core.common import _f
 
 
 # ── ScanMetadata dataclass ────────────────────────────────────────────────────
@@ -105,6 +104,7 @@ def metadata_from_createc_dat_report(report) -> ScanMetadata:
     hdr = dict(report.header)
     bias, setpoint, comment, acq_dt = _extract_createc_fields(hdr)
     plane_names, units = _createc_report_plane_metadata(report)
+    from probeflow.io.createc_interpretation import createc_dat_experiment_metadata
     experiment_metadata = createc_dat_experiment_metadata(hdr)
 
     lx_a = _f(hdr.get("Length x[A]", "0"), 0.0)
