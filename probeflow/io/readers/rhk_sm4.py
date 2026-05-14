@@ -36,7 +36,9 @@ OBJECT_SIZE = 12
 GUID_SIZE = 16
 PAGE_INDEX_ARRAY_SIZE = GUID_SIZE + 4 * 4
 PAGE_INDEX_SIZE = GUID_SIZE + 4 * 4
-PAGE_HEADER_SIZE = 170
+# Minimum bytes needed to read all useful fixed fields of a page header:
+#   u16+u16 + 3×u32 + 2×i32 + 6×u32 + 2×i32 + 11×f32 + 4×u32 = 116
+PAGE_HEADER_SIZE = 116
 
 RHK_OBJECT_PAGE_INDEX_HEADER = 1
 RHK_OBJECT_PAGE_INDEX_ARRAY = 2
@@ -157,18 +159,24 @@ def read_rhk_sm4(path) -> RHKSM4File:
     data = path.read_bytes()
     if not is_rhk_sm4(data):
         raise ValueError(f"{path}: not an RHK SM4 file")
-    if len(data) < MAGIC_TOTAL_SIZE + 12:
+
+    # File header starts at MAGIC_OFFSET + MAGIC_TOTAL_SIZE = 2 + 36 = 38.
+    # Reading from MAGIC_TOTAL_SIZE (36) is 2 bytes too early and produces
+    # a wrong page count for files that use the standard layout.
+    header_offset = MAGIC_OFFSET + MAGIC_TOTAL_SIZE
+    if len(data) < header_offset + 20:
         raise ValueError(f"{path}: truncated RHK SM4 file header")
 
     notes: list[str] = []
-    page_count = _u32(data, MAGIC_TOTAL_SIZE)
-    object_count = _u32(data, MAGIC_TOTAL_SIZE + 4)
-    object_field_size = _u32(data, MAGIC_TOTAL_SIZE + 8)
+    page_count = _u32(data, header_offset)
+    object_count = _u32(data, header_offset + 4)
+    object_field_size = _u32(data, header_offset + 8)
     if object_field_size not in (0, OBJECT_SIZE):
         notes.append(f"Unexpected file object field size {object_field_size}; using 12 bytes.")
+    file_object_table_offset = header_offset + 20
     objects = parse_object_table(
         data,
-        MAGIC_TOTAL_SIZE + 12,
+        file_object_table_offset,
         object_count,
         container_start=0,
         notes=notes,
@@ -273,41 +281,39 @@ def parse_object_table(
 def parse_page_header(data: bytes, offset: int = 0) -> dict[str, Any]:
     """Parse the useful fixed fields of an RHK page header.
 
-    The offsets follow the public RHK/Gwyddion structure notes used by the
-    SM4 importer. Unknown/reserved tail bytes are intentionally preserved only
-    indirectly via parser notes; image import relies on dimensions, scales,
-    units, and page labels rather than opaque reserved fields.
+    The page header starts with two uint16 fields (field_size, string_count),
+    followed by uint32/int32 integer fields, then eleven float32 scale/offset
+    fields. Reading field_size and string_count as uint32 or scale fields as
+    float64 produces wrong values for the standard SM4 layout.
     """
     if offset < 0 or offset + PAGE_HEADER_SIZE > len(data):
         raise ValueError("RHK page header extends outside buffer")
-    names_u32 = (
-        "field_size", "string_count", "page_type", "data_sub_source",
-        "line_type",
-    )
     values: dict[str, Any] = {}
     pos = offset
-    for name in names_u32:
-        values[name] = _u32(data, pos)
-        pos += 4
+
+    # field_size and string_count are uint16, not uint32
+    values["field_size"] = _u16(data, pos); pos += 2
+    values["string_count"] = _u16(data, pos); pos += 2
+
+    for name in ("page_type", "data_sub_source", "line_type"):
+        values[name] = _u32(data, pos); pos += 4
     values["x_coord"] = _i32(data, pos); pos += 4
     values["y_coord"] = _i32(data, pos); pos += 4
-    for name in (
-        "x_size", "y_size", "image_type", "scan_dir", "group_id", "data_size",
-    ):
-        values[name] = _u32(data, pos)
-        pos += 4
+    for name in ("x_size", "y_size", "image_type", "scan_dir", "group_id", "data_size"):
+        values[name] = _u32(data, pos); pos += 4
     values["min_z_value"] = _i32(data, pos); pos += 4
     values["max_z_value"] = _i32(data, pos); pos += 4
+
+    # Scale and offset fields are float32 in the SM4 specification, not float64
     for name in (
         "x_scale", "y_scale", "z_scale", "xy_scale",
         "x_offset", "y_offset", "z_offset", "period",
         "bias", "current", "angle",
     ):
-        values[name] = _f64(data, pos)
-        pos += 8
+        values[name] = _f32(data, pos); pos += 4
+
     for name in ("color_info_count", "grid_x_size", "grid_y_size", "object_count"):
-        values[name] = _u32(data, pos)
-        pos += 4
+        values[name] = _u32(data, pos); pos += 4
     return values
 
 
@@ -317,15 +323,29 @@ def _parse_pages(
     declared_page_count: int,
     notes: list[str],
 ) -> list[RHKSM4Page]:
-    pages: list[RHKSM4Page] = []
+    # Some SM4 files expose PAGE_INDEX_ARRAY directly in the file-level object
+    # table. Others wrap it inside a PAGE_INDEX_HEADER sub-container.
     page_index_array = _first_object(file_objects, RHK_OBJECT_PAGE_INDEX_ARRAY)
-    if page_index_array is not None:
-        pages.extend(_parse_page_index_array(data, page_index_array, declared_page_count, notes))
-    if not pages:
-        page = _parse_page_from_objects(data, file_objects, 0, RHK_DATA_IMAGE, 0, notes)
-        if page is not None:
-            pages.append(page)
-    return pages
+
+    if page_index_array is None:
+        pih = _first_object(file_objects, RHK_OBJECT_PAGE_INDEX_HEADER)
+        if pih is not None and pih.offset + 8 <= len(data):
+            sub_count = _u32(data, pih.offset + 4)
+            sub_table_start = pih.offset + pih.size
+            try:
+                sub_objects = parse_object_table(
+                    data, sub_table_start, sub_count,
+                    container_start=0, notes=notes,
+                )
+                page_index_array = _first_object(sub_objects, RHK_OBJECT_PAGE_INDEX_ARRAY)
+            except ValueError as exc:
+                notes.append(f"PAGE_INDEX_HEADER sub-object parse failed: {exc}")
+
+    if page_index_array is None:
+        notes.append("No PAGE_INDEX_ARRAY found in file-level or page-index-header objects.")
+        return []
+
+    return _parse_page_index_array(data, page_index_array, declared_page_count, notes)
 
 
 def _parse_page_index_array(
@@ -334,64 +354,48 @@ def _parse_page_index_array(
     declared_page_count: int,
     notes: list[str],
 ) -> list[RHKSM4Page]:
-    if obj.size < PAGE_INDEX_ARRAY_SIZE:
-        notes.append("RHK page index array is too small.")
+    count = declared_page_count
+    if count <= 0:
         return []
-    count = declared_page_count or obj.size // PAGE_INDEX_ARRAY_SIZE
-    count = min(count, obj.size // PAGE_INDEX_ARRAY_SIZE)
+
     pages: list[RHKSM4Page] = []
-    seen_offsets: set[int] = set()
+    offset = obj.offset
+
     for i in range(count):
-        entry_offset = obj.offset + i * PAGE_INDEX_ARRAY_SIZE
-        fields = struct.unpack_from("<IIII", data, entry_offset + GUID_SIZE)
-        candidates = [f for f in fields if 0 <= f < len(data) and f not in seen_offsets]
-        page = None
-        for candidate in candidates:
-            try:
-                page = _parse_page_index(data, candidate, i, notes)
-            except Exception as exc:
-                notes.append(f"Could not parse RHK page {i} at {candidate}: {exc}")
-                page = None
+        if offset + PAGE_INDEX_ARRAY_SIZE > len(data):
+            notes.append(f"RHK page index array truncated at page {i}.")
+            break
+
+        data_type = _u32(data, offset + GUID_SIZE)
+        source = _u32(data, offset + GUID_SIZE + 4)
+        object_count = _u32(data, offset + GUID_SIZE + 8)
+        minor_version = _u32(data, offset + GUID_SIZE + 12)
+
+        obj_table_start = offset + PAGE_INDEX_ARRAY_SIZE
+        try:
+            objects = parse_object_table(
+                data, obj_table_start, object_count,
+                container_start=0, notes=notes,
+            )
+        except ValueError as exc:
+            notes.append(f"Could not parse RHK page {i} object table: {exc}")
+            objects = []
+
+        if data_type == RHK_DATA_IMAGE:
+            page = _parse_page_from_objects(data, objects, i, data_type, source, notes)
             if page is not None:
-                seen_offsets.add(candidate)
-                break
-        if page is None:
-            data_type = fields[1] if len(fields) > 1 else -1
-            notes.append(f"Skipped RHK page {i}: no parseable page index entry (fields={fields}, data_type={data_type}).")
+                page.metadata["minor_version"] = minor_version
+                pages.append(page)
         else:
-            pages.append(page)
+            notes.append(
+                f"Skipped non-image RHK page: index={i}, data_type={data_type}, "
+                f"source={source}, minor_version={minor_version}."
+            )
+
+        stride = PAGE_INDEX_ARRAY_SIZE + max(object_count, 0) * OBJECT_SIZE
+        offset += stride
+
     return pages
-
-
-def _parse_page_index(
-    data: bytes,
-    offset: int,
-    page_index: int,
-    notes: list[str],
-) -> RHKSM4Page | None:
-    if offset < 0 or offset + PAGE_INDEX_SIZE > len(data):
-        raise ValueError("page index extends outside file")
-    data_type = _u32(data, offset + GUID_SIZE)
-    source = _u32(data, offset + GUID_SIZE + 4)
-    object_count = _u32(data, offset + GUID_SIZE + 8)
-    minor_version = _u32(data, offset + GUID_SIZE + 12)
-    objects = parse_object_table(
-        data,
-        offset + PAGE_INDEX_SIZE,
-        object_count,
-        container_start=offset,
-        notes=notes,
-    )
-    if data_type != RHK_DATA_IMAGE:
-        notes.append(
-            f"Skipped non-image RHK page: index={page_index}, data_type={data_type}, "
-            f"source={source}, minor_version={minor_version}."
-        )
-        return None
-    page = _parse_page_from_objects(data, objects, page_index, data_type, source, notes)
-    if page is not None:
-        page.metadata["minor_version"] = minor_version
-    return page
 
 
 def _parse_page_from_objects(
@@ -413,7 +417,30 @@ def _parse_page_from_objects(
     if x_size <= 0 or y_size <= 0 or x_size > 1_000_000 or y_size > 1_000_000:
         notes.append(f"Skipped RHK page {page_index}: implausible dimensions {x_size}x{y_size}.")
         return None
-    strings = _parse_string_data(_object_bytes(data, _first_object(objects, RHK_OBJECT_STRING_DATA)))
+
+    # The STRING_DATA object lives inside the page header's own internal object
+    # table (at header_obj.offset + field_size), not in the page index entry's
+    # object table. Fall back to the page index entry's objects for synthetic or
+    # older files that embed strings there directly.
+    field_size = max(int(header.get("field_size", PAGE_HEADER_SIZE)), PAGE_HEADER_SIZE)
+    internal_obj_count = int(header.get("object_count", 0))
+    internal_objects: list[RHKObject] = []
+    if internal_obj_count > 0:
+        try:
+            internal_objects = parse_object_table(
+                data,
+                header_obj.offset + field_size,
+                internal_obj_count,
+                container_start=0,
+                notes=notes,
+            )
+        except ValueError:
+            pass
+    string_obj = (
+        _first_object(internal_objects, RHK_OBJECT_STRING_DATA)
+        or _first_object(objects, RHK_OBJECT_STRING_DATA)
+    )
+    strings = _parse_string_data(_object_bytes(data, string_obj))
     raw = _decode_image_payload(
         _object_bytes(data, data_obj),
         x_size=x_size,
@@ -491,6 +518,8 @@ def _decode_image_payload(
     if len(buf) == n * 2:
         arr = np.frombuffer(buf, dtype="<i2", count=n).astype(np.float64)
     elif len(buf) == expected:
+        # Decode as int32: the RHK SM4 image payload is raw integer counts.
+        # Interpreting these as float32 produces nonsensical 1e-31-scale values.
         arr = np.frombuffer(buf, dtype="<i4", count=n).astype(np.float64)
     elif len(buf) == n * 8:
         arr = np.frombuffer(buf, dtype="<f8", count=n).astype(np.float64)
@@ -504,18 +533,29 @@ def _decode_image_payload(
 
 
 def _parse_string_data(payload: bytes | None) -> dict[str, str]:
+    """Parse SM4 string data: length-prefixed UTF-16LE strings.
+
+    Each string is stored as a uint16 character count followed by that many
+    UTF-16LE code units. Empty strings (length=0) are included as placeholders
+    so that the position-to-key mapping (_STRING_KEYS) is preserved.
+    """
     if not payload:
         return {}
-    text = ""
-    for encoding in ("utf-16-le", "utf-8", "latin-1"):
-        try:
-            text = payload.decode(encoding, errors="ignore")
-            break
-        except UnicodeError:
+    strings: list[str] = []
+    pos = 0
+    while pos + 2 <= len(payload):
+        length = int.from_bytes(payload[pos:pos + 2], "little")
+        pos += 2
+        if length == 0:
+            strings.append("")
             continue
-    parts = [part.strip("\x00 \r\n\t") for part in text.replace("\x00\x00", "\x00").split("\x00")]
-    parts = [part for part in parts if part]
-    return {key: value for key, value in zip(_STRING_KEYS, parts)}
+        char_bytes = length * 2
+        if pos + char_bytes > len(payload):
+            break
+        text = payload[pos:pos + char_bytes].decode("utf-16-le", errors="replace")
+        strings.append(text)
+        pos += char_bytes
+    return {key: value for key, value in zip(_STRING_KEYS, strings) if value}
 
 
 def _object_bytes(data: bytes, obj: RHKObject | None) -> bytes | None:
@@ -583,12 +623,20 @@ def _finite_or(value: float, fallback: float) -> float:
     return float(value) if np.isfinite(value) else fallback
 
 
+def _u16(data: bytes, offset: int) -> int:
+    return int(struct.unpack_from("<H", data, offset)[0])
+
+
 def _u32(data: bytes, offset: int) -> int:
     return int(struct.unpack_from("<I", data, offset)[0])
 
 
 def _i32(data: bytes, offset: int) -> int:
     return int(struct.unpack_from("<i", data, offset)[0])
+
+
+def _f32(data: bytes, offset: int) -> float:
+    return float(struct.unpack_from("<f", data, offset)[0])
 
 
 def _f64(data: bytes, offset: int) -> float:
