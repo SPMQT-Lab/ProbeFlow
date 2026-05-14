@@ -12,6 +12,7 @@ from dataclasses import dataclass
 import math
 from pathlib import Path
 from typing import Any, Optional
+import warnings
 
 import numpy as np
 from scipy.ndimage import (
@@ -1102,7 +1103,16 @@ def stm_line_background(arr: np.ndarray, mode: str = "step_tolerant") -> np.ndar
         if have_shift:
             residual = diff - prev_shift
             delta = _modal_shift(residual)
-            shift = prev_shift if delta is None else prev_shift + delta
+            if delta is None:
+                warnings.warn(
+                    f"stm_line_background: modal shift estimation failed for row {r};"
+                    " propagating previous shift",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+                shift = prev_shift
+            else:
+                shift = prev_shift + delta
         else:
             modal = _modal_shift(diff)
             if modal is None:
@@ -1172,7 +1182,13 @@ def align_rows(arr: np.ndarray, method: str = 'median') -> np.ndarray:
 # 4.  facet_level  (Gwyddion: "Facet Level")
 # ═════════════════════════════════════════════════════════════════════════════
 
-def facet_level(arr: np.ndarray, threshold_deg: float = 3.0) -> np.ndarray:
+def facet_level(
+    arr: np.ndarray,
+    threshold_deg: float = 3.0,
+    *,
+    pixel_size_x_m: float = 1.0,
+    pixel_size_y_m: float = 1.0,
+) -> np.ndarray:
     """
     Level the image using only the nearly-flat (horizontal) pixels as
     the reference plane.
@@ -1182,6 +1198,16 @@ def facet_level(arr: np.ndarray, threshold_deg: float = 3.0) -> np.ndarray:
     for the plane fit.  The fitted plane is then subtracted from the whole image.
     This avoids step edges biasing the background correction — essential for
     Au(111), Si(111) and other stepped surfaces.
+
+    Parameters
+    ----------
+    pixel_size_x_m, pixel_size_y_m
+        Physical size of one pixel in metres along x and y respectively.
+        Passing the true pixel sizes makes the threshold_deg comparison
+        physically meaningful: the gradient is divided by the pixel size so
+        the slope is dimensionless (height / lateral distance) before being
+        compared against tan(threshold_deg).  Defaults to 1.0, which preserves
+        backward-compatible behaviour for callers that work in pixel units.
     """
     arr = arr.astype(np.float64, copy=True)
     Ny, Nx = arr.shape
@@ -1198,9 +1224,14 @@ def facet_level(arr: np.ndarray, threshold_deg: float = 3.0) -> np.ndarray:
     grad_arr = np.where(finite, arr, _finite_median(arr))
     gy, gx = np.gradient(grad_arr)
 
-    # Convert threshold from degrees to tangent value
+    # Convert gradient from data-units/pixel to dimensionless rise/run by
+    # dividing by the physical pixel size in metres.  This makes the
+    # tan(threshold_deg) comparison physically meaningful.
+    psx = max(float(pixel_size_x_m), 1e-30)
+    psy = max(float(pixel_size_y_m), 1e-30)
+    slope_mag = np.sqrt((gx / psx) ** 2 + (gy / psy) ** 2)
+
     tan_thresh = math.tan(math.radians(threshold_deg))
-    slope_mag = np.sqrt(gx**2 + gy**2)
     flat_mask = (slope_mag < tan_thresh) & np.isfinite(arr)
 
     if flat_mask.sum() < 3:
@@ -1265,7 +1296,7 @@ def fourier_filter(
         out[nan_mask] = np.nan
         return out
     if mode == "high_pass" and float(cutoff) <= 0.0:
-        out = centered
+        out = filled.copy()
         out[nan_mask] = np.nan
         return out
 
@@ -1298,9 +1329,7 @@ def fourier_filter(
 
     F_filtered = F * mask
     F_filtered = np.fft.ifftshift(F_filtered)
-    result = np.fft.ifft2(F_filtered).real
-    if mode == "low_pass":
-        result = result + mean_val
+    result = np.fft.ifft2(F_filtered).real + mean_val
     result[nan_mask] = np.nan
     return result
 
@@ -1975,6 +2004,11 @@ def tv_denoise(
 
     Ny, Nx = arr.shape
     f = arr.astype(np.float64, copy=True).ravel()
+    nan_mask_1d = ~np.isfinite(f)
+    if nan_mask_1d.any():
+        finite_vals = f[~nan_mask_1d]
+        fill_val = float(finite_vals.mean()) if finite_vals.size > 0 else 0.0
+        f[nan_mask_1d] = fill_val
     u = f.copy()
     p = np.zeros(2 * Ny * Nx)
 
@@ -2010,7 +2044,10 @@ def tv_denoise(
             if rmse < tol:
                 break
 
-    return u.reshape(Ny, Nx).astype(arr.dtype, copy=False)
+    result = u.reshape(Ny, Nx)
+    if nan_mask_1d.any():
+        result[nan_mask_1d.reshape(Ny, Nx)] = np.nan
+    return result.astype(arr.dtype, copy=False)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -2111,8 +2148,18 @@ def line_profile(
         # ``map_coordinates`` takes (row, col) = (y, x).
         z = map_coordinates(arr, np.vstack([ys, xs]), order=order, mode="reflect")
     else:
-        # Perpendicular unit vector in pixel space.
-        nx, ny = -dy_px / px_len, dx_px / px_len
+        # Physical-space perpendicular mapped back to pixel coordinates.
+        # Line direction in physical space: (dx_px*psx, dy_px*psy).
+        # Physical perpendicular: (-dy_px*psy, dx_px*psx), then divide by
+        # pixel sizes to convert back to pixel-space offsets.
+        # For square pixels this reduces to (-dy_px, dx_px) / px_len.
+        nx_un = -dy_px * (pixel_size_y_m / pixel_size_x_m)
+        ny_un =  dx_px * (pixel_size_x_m / pixel_size_y_m)
+        perp_px_len = math.sqrt(nx_un ** 2 + ny_un ** 2)
+        if perp_px_len > 1e-12:
+            nx, ny = nx_un / perp_px_len, ny_un / perp_px_len
+        else:
+            nx, ny = -dy_px / px_len, dx_px / px_len
         n_perp = int(round(width_px))
         offsets = np.linspace(-(width_px - 1) / 2.0,
                               (width_px - 1) / 2.0, n_perp)
@@ -2216,7 +2263,10 @@ def set_zero_plane(
 
     A = np.array([[x, y, 1.0] for x, y, _z in samples], dtype=np.float64)
     if np.linalg.matrix_rank(A) < 3:
-        return a
+        raise ValueError(
+            "set_zero_plane: the three reference points are collinear or coincident; "
+            "choose points that form a non-degenerate triangle."
+        )
     z = np.array([z for _x, _y, z in samples], dtype=np.float64)
     coeffs = np.linalg.solve(A, z)
     yy, xx = np.mgrid[:Ny, :Nx]
@@ -2299,9 +2349,7 @@ def fft_soft_border(
 
     out = np.fft.ifft2(np.fft.ifftshift(F * mask)).real
     safe_win = np.where(win2d > 1e-6, win2d, 1.0)
-    out = out / safe_win
-    if mode == "low_pass":
-        out = out + mean_val
+    out = out / safe_win + mean_val
     out[nan_mask] = np.nan
     return out
 
@@ -2612,4 +2660,4 @@ def rotate_arbitrary(
     from scipy.ndimage import rotate as _ndimage_rotate
     a = arr.astype(np.float64, copy=True)
     return _ndimage_rotate(a, float(angle_degrees), reshape=True, order=order,
-                           mode='constant', cval=0.0)
+                           mode='constant', cval=np.nan)

@@ -164,15 +164,15 @@ class TestRotateArbitrary:
         arr = np.zeros((20, 20))
         arr[8:12, 8:12] = 1.0  # 4×4 non-zero region
         out = rotate_arbitrary(arr, 45.0)
-        assert float(out.sum()) > float(arr.sum()) * 0.8
+        assert float(np.nansum(out)) > float(arr.sum()) * 0.8
 
-    def test_corner_regions_are_zero(self):
+    def test_corner_regions_are_nan(self):
         arr = np.ones((30, 30))
         out = rotate_arbitrary(arr, 45.0)
-        assert float(out[0, 0]) == pytest.approx(0.0)
-        assert float(out[0, -1]) == pytest.approx(0.0)
-        assert float(out[-1, 0]) == pytest.approx(0.0)
-        assert float(out[-1, -1]) == pytest.approx(0.0)
+        assert np.isnan(out[0, 0])
+        assert np.isnan(out[0, -1])
+        assert np.isnan(out[-1, 0])
+        assert np.isnan(out[-1, -1])
 
     def test_multi_plane_consistent_shape(self):
         planes = [np.ones((12, 12)), np.ones((12, 12)) * 2.0]

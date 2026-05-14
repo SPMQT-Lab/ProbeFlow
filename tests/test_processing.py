@@ -585,10 +585,10 @@ class TestFourierFilter:
         out = fourier_filter(arr, mode="low_pass", cutoff=0.2)
         np.testing.assert_allclose(out, arr, atol=1e-12)
 
-    def test_high_pass_removes_constant_image(self):
+    def test_high_pass_preserves_mean_of_constant_image(self):
         arr = np.ones((32, 32), dtype=float) * 5.0
         out = fourier_filter(arr, mode="high_pass", cutoff=0.2)
-        np.testing.assert_allclose(out, np.zeros_like(arr), atol=1e-12)
+        np.testing.assert_allclose(out, arr, atol=1e-12)
 
     def test_radial_low_pass_reduces_high_frequency_ripple(self):
         Y, X = np.mgrid[:64, :64]
@@ -597,14 +597,14 @@ class TestFourierFilter:
         # Output amplitude should be much smaller
         assert float(np.std(out)) < float(np.std(arr)) * 0.5
 
-    def test_radial_high_pass_removes_broad_dc_background(self):
-        # Mostly DC + a small high-frequency ripple. After high-pass, the mean
-        # should drop close to zero while the ripple amplitude survives.
+    def test_radial_high_pass_preserves_mean_and_keeps_ripple(self):
+        # DC offset + high-frequency ripple (period=4 px, freq=0.25 Nyquist).
+        # HP removes AC variations below cutoff while the mean is preserved.
         Y, X = np.mgrid[:32, :32]
-        arr = 10.0 + 0.5 * np.sin(2 * np.pi * X / 2.0)
-        out = fourier_filter(arr, mode="high_pass", cutoff=0.2)
-        assert abs(float(np.mean(out))) < 1.0
-        assert float(np.mean(out)) < float(np.mean(arr))
+        arr = 10.0 + 0.5 * np.sin(2 * np.pi * X / 4.0)
+        out = fourier_filter(arr, mode="high_pass", cutoff=0.1)
+        assert abs(float(np.mean(out)) - float(np.mean(arr))) < 1.0
+        assert float(np.std(out)) > 0.1
 
     def test_shape_preserved_for_non_square_images(self):
         arr = np.random.default_rng(0).normal(size=(20, 16))
@@ -656,10 +656,10 @@ class TestGaussianHighPass:
 
 
 class TestFftSoftBorder:
-    def test_high_pass_removes_constant_image(self):
+    def test_high_pass_preserves_mean_of_constant_image(self):
         arr = np.ones((32, 32), dtype=float) * 5.0
         out = fft_soft_border(arr, mode="high_pass", cutoff=0.2)
-        np.testing.assert_allclose(out, np.zeros_like(arr), atol=1e-12)
+        np.testing.assert_allclose(out, arr, atol=1e-12)
 
     def test_invalid_cutoff_raises(self):
         with pytest.raises(ValueError, match="cutoff"):
@@ -860,14 +860,12 @@ class TestSetZeroPlane:
         np.testing.assert_allclose(out, np.zeros_like(arr), atol=1e-12)
         assert out.dtype == np.float64
 
-    def test_degenerate_points_leave_copy_unchanged(self):
+    def test_degenerate_points_raise(self):
         yy, xx = np.mgrid[:8, :8]
         arr = xx + yy
 
-        out = set_zero_plane(arr, [(0, 0), (1, 1), (2, 2)], patch=0)
-
-        np.testing.assert_allclose(out, arr)
-        assert out is not arr
+        with pytest.raises(ValueError, match="collinear"):
+            set_zero_plane(arr, [(0, 0), (1, 1), (2, 2)], patch=0)
 
     def test_nan_pixels_are_preserved(self):
         yy, xx = np.mgrid[:8, :8]
