@@ -11,6 +11,7 @@ import pytest
 
 from probeflow.analysis.lattice_grid import (
     LatticeGrid,
+    LatticeGridDisplay,
     RealSpaceCalibration,
     ReciprocalCalibration,
     format_real_space_measurements,
@@ -493,6 +494,32 @@ class TestEdgeCases:
     def test_show_handles_default(self):
         g = LatticeGrid.make_square(0, 0, 50)
         assert g.show_handles is True
+
+
+# ── LatticeGridDisplay tests ──────────────────────────────────────────────────
+
+class TestLatticeGridDisplay:
+    def test_defaults(self):
+        d = LatticeGridDisplay()
+        assert d.cells == 12
+        assert d.line_width_px == 1.5
+        assert d.basis_width_px == 2.0
+        assert d.handle_radius_px == 7.0
+        assert d.show_grid is True
+        assert d.show_handles is True
+        assert d.show_labels is True
+
+    def test_custom_values(self):
+        d = LatticeGridDisplay(cells=8, line_width_px=2.5, show_labels=False)
+        assert d.cells == 8
+        assert d.line_width_px == 2.5
+        assert d.show_labels is False
+
+    def test_independent_of_geometry(self):
+        g = LatticeGrid.make_square(0, 0, 50)
+        d = LatticeGridDisplay(line_width_px=3.0)
+        assert g.angle_deg() == pytest.approx(90.0)
+        assert d.line_width_px == 3.0
 
 
 # ── export tests ──────────────────────────────────────────────────────────────

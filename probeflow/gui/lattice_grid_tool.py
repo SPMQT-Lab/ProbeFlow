@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
 from probeflow.analysis.lattice_grid import (
     LatticeGrid, LatticeKind, RealSpaceCalibration, ReciprocalCalibration,
     format_real_space_measurements, format_reciprocal_measurements,
+    LatticeGridDisplay,
 )
 
 # ── colours ───────────────────────────────────────────────────────────────────
@@ -87,6 +88,7 @@ class LatticeGridItem(QGraphicsObject):
         self._image_w = image_w
         self._image_h = image_h
         self._cells = cells
+        self._line_width_px: float = 1.5
 
         self.setZValue(50)
         self.setFlag(QGraphicsObject.ItemIsMovable, False)
@@ -101,6 +103,10 @@ class LatticeGridItem(QGraphicsObject):
 
     def set_cells(self, n: int) -> None:
         self._cells = max(1, int(n))
+        self.update()
+
+    def set_line_width(self, px: float) -> None:
+        self._line_width_px = max(0.25, float(px))
         self.update()
 
     def grid(self) -> LatticeGrid:
@@ -129,10 +135,9 @@ class LatticeGridItem(QGraphicsObject):
 
         painter.setRenderHint(QPainter.Antialiasing)
 
-        # Cosmetic pen: 1 screen pixel regardless of zoom
         pen = QPen(_COL_GRID)
         pen.setCosmetic(True)
-        pen.setWidthF(1.0)
+        pen.setWidthF(self._line_width_px)
         painter.setPen(pen)
         self._paint_grid_lines(painter)
 
@@ -275,6 +280,7 @@ class LatticeGridController(QObject):
         self._canvas = canvas
         self._panel: Optional["LatticeGridPanel"] = None
         self._active: bool = False
+        self._locked: bool = True
         self._dragging: bool = False
         self._drag_handle: int = _HANDLE_NONE
         self._drag_start_scene: Optional[QPointF] = None
@@ -296,6 +302,9 @@ class LatticeGridController(QObject):
             self._dragging = False
             self._drag_handle = _HANDLE_NONE
             self._canvas.viewport().setCursor(Qt.ArrowCursor)
+
+    def set_locked(self, locked: bool) -> None:
+        self._locked = locked
 
     # ── screen-space hit testing ───────────────────────────────────────────────
 
@@ -374,10 +383,12 @@ class LatticeGridController(QObject):
             new_grid = g0.translate(dx, dy)
 
         elif hid == _HANDLE_A:
-            new_grid = g0.with_a_vector((g0.a_px[0] + dx, g0.a_px[1] + dy))
+            new_a = (g0.a_px[0] + dx, g0.a_px[1] + dy)
+            new_grid = g0.with_a_vector(new_a) if self._locked else replace(g0, a_px=new_a)
 
         elif hid == _HANDLE_B:
-            new_grid = g0.with_b_vector((g0.b_px[0] + dx, g0.b_px[1] + dy))
+            new_b = (g0.b_px[0] + dx, g0.b_px[1] + dy)
+            new_grid = g0.with_b_vector(new_b) if self._locked else replace(g0, b_px=new_b)
 
         elif hid == _HANDLE_ROT:
             ox, oy = g0.origin_px
@@ -478,6 +489,12 @@ class LatticeGridPanel(QWidget):
         type_row.addWidget(self._type_combo, 1)
         lay.addLayout(type_row)
 
+        self._lock_cb = QCheckBox("Lock lattice constraint")
+        self._lock_cb.setFont(QFont("Helvetica", 9))
+        self._lock_cb.setChecked(True)
+        self._lock_cb.toggled.connect(self._on_locked_changed)
+        lay.addWidget(self._lock_cb)
+
         # ── parameters group ──────────────────────────────────────────────────
         params_grp = QGroupBox("Parameters")
         params_grp.setFont(QFont("Helvetica", 9))
@@ -517,6 +534,9 @@ class LatticeGridPanel(QWidget):
 
         self._rot_spin = _spin_row("Rotation:", -180.0, 180.0, 0.1, 1, "°")
 
+        self._angle_ab_spin = _spin_row("Angle a-b:", 1.0, 179.0, 0.1, 2, "°")
+        self._angle_ab_spin.setEnabled(False)  # only enabled in tunable mode
+
         # Cells spinbox (integer)
         cells_row = QHBoxLayout()
         cells_lbl = QLabel("Cells ±:")
@@ -531,6 +551,9 @@ class LatticeGridPanel(QWidget):
         cells_row.addWidget(self._cells_spin, 1)
         params_lay.addLayout(cells_row)
 
+        self._line_width_spin = _spin_row("Line width:", 0.25, 10.0, 0.25, 2, "px")
+        self._line_width_spin.setValue(1.5)
+
         lay.addWidget(params_grp)
 
         # Connect spinboxes after building (to avoid early triggers)
@@ -539,7 +562,9 @@ class LatticeGridPanel(QWidget):
         self._a_spin.valueChanged.connect(self._on_a_length_changed)
         self._b_spin.valueChanged.connect(self._on_b_length_changed)
         self._rot_spin.valueChanged.connect(self._on_rotation_changed)
+        self._angle_ab_spin.valueChanged.connect(self._on_angle_ab_changed)
         self._cells_spin.valueChanged.connect(self._on_cells_changed)
+        self._line_width_spin.valueChanged.connect(self._on_line_width_changed)
 
         # ── display group ─────────────────────────────────────────────────────
         disp_grp = QGroupBox("Display")
@@ -615,16 +640,20 @@ class LatticeGridPanel(QWidget):
             self._a_spin.setValue(a_len_u)
             self._b_spin.setValue(b_len_u)
             self._rot_spin.setValue(grid.a_angle_deg())
+            self._angle_ab_spin.setValue(grid.angle_deg())
             self._cells_spin.setValue(self._item.cells)
+            self._line_width_spin.setValue(self._item._line_width_px)
 
             kind = grid.kind
             idx = {"square": 0, "rectangular": 1, "hexagonal": 2}.get(kind, 0)
             if self._type_combo.currentIndex() != idx:
                 self._type_combo.setCurrentIndex(idx)
 
-            # Disable b-length for symmetric lattices
-            b_editable = (kind == "rectangular")
-            self._b_spin.setEnabled(b_editable)
+            locked = self._lock_cb.isChecked()
+            # b-length editable if rectangular or tunable
+            self._b_spin.setEnabled(kind == "rectangular" or not locked)
+            # angle_ab editable only in tunable mode
+            self._angle_ab_spin.setEnabled(not locked)
 
         finally:
             self._updating_controls = False
@@ -706,6 +735,33 @@ class LatticeGridPanel(QWidget):
         if self._updating_controls:
             return
         self._item.set_cells(value)
+
+    def _on_locked_changed(self, checked: bool) -> None:
+        self._ctrl.set_locked(checked)
+        self._angle_ab_spin.setEnabled(not checked)
+        g = self._item.grid()
+        self._b_spin.setEnabled(g.kind == "rectangular" or not checked)
+        if checked:
+            new_g = g.with_a_vector(g.a_px)
+            self._item.set_grid(new_g)
+            self.sync_from_model()
+
+    def _on_angle_ab_changed(self, value: float) -> None:
+        if self._updating_controls:
+            return
+        grid = self._item.grid()
+        lb_px = grid.b_length_px()
+        if lb_px < 1e-9:
+            return
+        b_angle_rad = math.radians(grid.a_angle_deg() + value)
+        new_b = (lb_px * math.cos(b_angle_rad), lb_px * math.sin(b_angle_rad))
+        self._item.set_grid(replace(grid, b_px=new_b))
+        self._refresh_measurement_label()
+
+    def _on_line_width_changed(self, value: float) -> None:
+        if self._updating_controls:
+            return
+        self._item.set_line_width(value)
 
     def _on_type_changed(self, idx: int) -> None:
         if self._updating_controls:
@@ -799,6 +855,8 @@ class FFTLatticeOverlay:
         self._artists: list = []
         self._grid: Optional[LatticeGrid] = None
         self._cells: int = 12
+        self._line_width_px: float = 1.5
+        self._locked: bool = True
         self._dragging: bool = False
         self._drag_handle: int = _HANDLE_NONE
         self._drag_start_q: Optional[tuple[float, float]] = None
@@ -819,6 +877,13 @@ class FFTLatticeOverlay:
     def set_cells(self, n: int) -> None:
         self._cells = max(1, int(n))
         self.redraw()
+
+    def set_line_width(self, px: float) -> None:
+        self._line_width_px = max(0.25, float(px))
+        self.redraw()
+
+    def set_locked(self, locked: bool) -> None:
+        self._locked = locked
 
     def set_on_change(self, cb) -> None:
         self._on_change_cb = cb
@@ -912,9 +977,11 @@ class FFTLatticeOverlay:
         if hid == _HANDLE_ORIGIN:
             self._grid = g0.translate(dpx, dpy)
         elif hid == _HANDLE_A:
-            self._grid = g0.with_a_vector((g0.a_px[0] + dpx, g0.a_px[1] + dpy))
+            new_a = (g0.a_px[0] + dpx, g0.a_px[1] + dpy)
+            self._grid = g0.with_a_vector(new_a) if self._locked else replace(g0, a_px=new_a)
         elif hid == _HANDLE_B:
-            self._grid = g0.with_b_vector((g0.b_px[0] + dpx, g0.b_px[1] + dpy))
+            new_b = (g0.b_px[0] + dpx, g0.b_px[1] + dpy)
+            self._grid = g0.with_b_vector(new_b) if self._locked else replace(g0, b_px=new_b)
         elif hid == _HANDLE_ROT:
             ox_px, oy_px = g0.origin_px
             ox_q, oy_q = self._px_to_q(ox_px, oy_px)
@@ -966,7 +1033,7 @@ class FFTLatticeOverlay:
             sq, eq = p2q(*s_px), p2q(*e_px)
             art, = self._ax.plot(
                 [sq[0], eq[0]], [sq[1], eq[1]],
-                color="#89b4fa", lw=0.8, alpha=0.7, zorder=5,
+                color="#89b4fa", lw=self._line_width_px, alpha=0.7, zorder=5,
             )
             self._artists.append(art)
 
@@ -977,7 +1044,7 @@ class FFTLatticeOverlay:
             sq, eq = p2q(*s_px), p2q(*e_px)
             art, = self._ax.plot(
                 [sq[0], eq[0]], [sq[1], eq[1]],
-                color="#89b4fa", lw=0.8, alpha=0.7, zorder=5,
+                color="#89b4fa", lw=self._line_width_px, alpha=0.7, zorder=5,
             )
             self._artists.append(art)
 
@@ -1062,6 +1129,12 @@ class FFTLatticePanel(QWidget):
         type_row.addWidget(self._type_combo, 1)
         lay.addLayout(type_row)
 
+        self._lock_cb = QCheckBox("Lock lattice constraint")
+        self._lock_cb.setFont(QFont("Helvetica", 9))
+        self._lock_cb.setChecked(True)
+        self._lock_cb.toggled.connect(self._on_locked_changed)
+        lay.addWidget(self._lock_cb)
+
         params_grp = QGroupBox("Parameters")
         params_grp.setFont(QFont("Helvetica", 9))
         params_lay = QVBoxLayout(params_grp)
@@ -1092,6 +1165,9 @@ class FFTLatticePanel(QWidget):
         self._g2_spin  = _row("|g2|:", 0.001, 1000.0, 0.01, 3, "nm⁻¹")
         self._rot_spin = _row("Rotation:", -180, 180, 0.1, 1, "°")
 
+        self._angle_ab_spin = _row("Angle g1-g2:", 1.0, 179.0, 0.1, 2, "°")
+        self._angle_ab_spin.setEnabled(False)
+
         cells_r = QHBoxLayout()
         cells_lb = QLabel("Cells ±:")
         cells_lb.setFont(QFont("Helvetica", 9))
@@ -1104,6 +1180,10 @@ class FFTLatticePanel(QWidget):
         cells_r.addWidget(cells_lb)
         cells_r.addWidget(self._cells_spin, 1)
         params_lay.addLayout(cells_r)
+
+        self._line_width_spin = _row("Line width:", 0.25, 10.0, 0.25, 2, "px")
+        self._line_width_spin.setValue(1.5)
+
         lay.addWidget(params_grp)
 
         self._ox_spin.valueChanged.connect(self._on_origin_changed)
@@ -1111,7 +1191,9 @@ class FFTLatticePanel(QWidget):
         self._g1_spin.valueChanged.connect(self._on_g1_changed)
         self._g2_spin.valueChanged.connect(self._on_g2_changed)
         self._rot_spin.valueChanged.connect(self._on_rotation_changed)
+        self._angle_ab_spin.valueChanged.connect(self._on_angle_ab_changed)
         self._cells_spin.valueChanged.connect(self._on_cells_changed)
+        self._line_width_spin.valueChanged.connect(self._on_line_width_changed)
 
         disp_grp = QGroupBox("Display")
         disp_grp.setFont(QFont("Helvetica", 9))
@@ -1162,7 +1244,9 @@ class FFTLatticePanel(QWidget):
             self._ox_spin.setValue(ox)
             self._oy_spin.setValue(oy)
             self._rot_spin.setValue(grid.a_angle_deg())
+            self._angle_ab_spin.setValue(grid.angle_deg())
             self._cells_spin.setValue(self._overlay._cells)
+            self._line_width_spin.setValue(self._overlay._line_width_px)
 
             g1 = self._cal.vec_length_q(grid.a_px)
             g2 = self._cal.vec_length_q(grid.b_px)
@@ -1173,7 +1257,9 @@ class FFTLatticePanel(QWidget):
             idx = {"square": 0, "rectangular": 1, "hexagonal": 2}.get(kind, 0)
             if self._type_combo.currentIndex() != idx:
                 self._type_combo.setCurrentIndex(idx)
-            self._g2_spin.setEnabled(kind == "rectangular")
+            locked = self._lock_cb.isChecked()
+            self._g2_spin.setEnabled(kind == "rectangular" or not locked)
+            self._angle_ab_spin.setEnabled(not locked)
         finally:
             self._updating_controls = False
 
@@ -1241,6 +1327,36 @@ class FFTLatticePanel(QWidget):
         if self._updating_controls:
             return
         self._overlay.set_cells(value)
+
+    def _on_locked_changed(self, checked: bool) -> None:
+        self._overlay.set_locked(checked)
+        self._angle_ab_spin.setEnabled(not checked)
+        g = self._overlay.grid()
+        if g is not None:
+            self._g2_spin.setEnabled(g.kind == "rectangular" or not checked)
+            if checked:
+                new_g = g.with_a_vector(g.a_px)
+                self._overlay.set_grid(new_g)
+                self.sync_from_model()
+
+    def _on_angle_ab_changed(self, value: float) -> None:
+        if self._updating_controls:
+            return
+        grid = self._overlay.grid()
+        if grid is None:
+            return
+        lb_px = grid.b_length_px()
+        if lb_px < 1e-9:
+            return
+        b_angle_rad = math.radians(grid.a_angle_deg() + value)
+        new_b = (lb_px * math.cos(b_angle_rad), lb_px * math.sin(b_angle_rad))
+        self._overlay.set_grid(replace(grid, b_px=new_b))
+        self._refresh_measurement_label()
+
+    def _on_line_width_changed(self, value: float) -> None:
+        if self._updating_controls:
+            return
+        self._overlay.set_line_width(value)
 
     def _on_type_changed(self, idx: int) -> None:
         if self._updating_controls:

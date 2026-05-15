@@ -286,6 +286,22 @@ class LatticeGrid:
         return self.rotate(delta)
 
 
+# ── display state ─────────────────────────────────────────────────────────────
+
+
+@dataclass
+class LatticeGridDisplay:
+    """Visual/display parameters for a lattice overlay, separate from geometry."""
+
+    cells: int = 12
+    line_width_px: float = 1.5
+    basis_width_px: float = 2.0
+    handle_radius_px: float = 7.0
+    show_grid: bool = True
+    show_handles: bool = True
+    show_labels: bool = True
+
+
 # ── calibration adapters ──────────────────────────────────────────────────────
 
 
