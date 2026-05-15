@@ -931,6 +931,18 @@ class ImageViewerDialog(QDialog):
         show_measurements_btn.setAutoDefault(False)
         show_measurements_btn.clicked.connect(self._show_measurements)
         measurements_lay.addWidget(show_measurements_btn)
+
+        measurements_lay.addWidget(_sep())
+
+        lattice_btn = QPushButton("Add lattice grid…")
+        lattice_btn.setFont(QFont("Helvetica", 8))
+        lattice_btn.setFixedHeight(26)
+        lattice_btn.setToolTip(
+            "Create an interactive lattice/grid overlay on the current image "
+            "for atomic-lattice measurement."
+        )
+        lattice_btn.clicked.connect(self._on_open_lattice_grid)
+        measurements_lay.addWidget(lattice_btn)
         measurements_lay.addStretch(1)
 
         self._status_lbl = QLabel("")
@@ -1242,6 +1254,10 @@ class ImageViewerDialog(QDialog):
             self,
             self._viewer_measurement_actions,
         )
+        measurements_menu.addSeparator()
+        lattice_grid_action = QAction("Lattice/Grid tool…", self)
+        lattice_grid_action.triggered.connect(self._on_open_lattice_grid)
+        measurements_menu.addAction(lattice_grid_action)
         measurements_menu.addSeparator()
         show_measurements_action = QAction("Show measurements", self)
         show_measurements_action.triggered.connect(self._show_measurements)
@@ -2329,6 +2345,36 @@ class ImageViewerDialog(QDialog):
             self._advanced_fft_soft_cb.setChecked(bool(state.get("fft_soft_border", False)))
         self._undistort_shear_spin.setValue(float(state.get("undistort_shear_x", 0.0)))
         self._undistort_scale_spin.setValue(float(state.get("undistort_scale_y", 1.0)))
+
+    def _on_open_lattice_grid(self):
+        arr = self._display_arr if self._display_arr is not None else self._raw_arr
+        if arr is None:
+            self._status_lbl.setText("No image loaded.")
+            return
+        from probeflow.gui.lattice_grid_tool import open_real_space_tool
+        scan_range = self._scan_range_m or (float(arr.shape[1]) * 1e-9,
+                                            float(arr.shape[0]) * 1e-9)
+        item, panel = open_real_space_tool(
+            self._zoom_lbl, scan_range, arr.shape, parent=self,
+        )
+        self._lattice_grid_item = item
+        dock = QDockWidget("Lattice Grid", self._viewer_main)
+        dock.setWidget(panel)
+        dock.setFeatures(
+            QDockWidget.DockWidgetClosable
+            | QDockWidget.DockWidgetMovable
+            | QDockWidget.DockWidgetFloatable
+        )
+        dock.setMinimumWidth(220)
+        self._viewer_main.addDockWidget(Qt.RightDockWidgetArea, dock)
+        dock.show()
+        dock.raise_()
+
+        def _on_dock_closed():
+            if self._zoom_lbl.scene() and item.scene():
+                self._zoom_lbl.scene().removeItem(item)
+
+        dock.visibilityChanged.connect(lambda v: _on_dock_closed() if not v else None)
 
     def _on_open_fft_viewer(self):
         arr = self._display_arr if self._display_arr is not None else self._raw_arr

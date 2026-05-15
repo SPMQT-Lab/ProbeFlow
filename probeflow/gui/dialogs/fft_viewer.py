@@ -126,6 +126,15 @@ class FFTViewerDialog(QDialog):
         exp_btn.clicked.connect(self._on_export)
         tb.addWidget(exp_btn)
 
+        tb.addSpacing(8)
+        grid_btn = QPushButton("Grid/Lattice…")
+        grid_btn.setFont(QFont("Helvetica", 9))
+        grid_btn.setFixedHeight(24)
+        grid_btn.setMinimumWidth(100)
+        grid_btn.setToolTip("Add a reciprocal-space lattice grid overlay to the FFT")
+        grid_btn.clicked.connect(self._on_open_fft_lattice)
+        tb.addWidget(grid_btn)
+
         return tb
 
     def _build_fft_column(self) -> QVBoxLayout:
@@ -681,3 +690,21 @@ class FFTViewerDialog(QDialog):
         )
         if path:
             self._fig_fft.savefig(path, dpi=150, bbox_inches="tight")
+
+    def _on_open_fft_lattice(self):
+        from probeflow.gui.lattice_grid_tool import open_fft_tool
+        from PySide6.QtWidgets import QDockWidget
+        if self._qx is None or self._qy is None:
+            return
+        Ny, Nx = self._arr.shape[:2]
+        overlay, panel = open_fft_tool(
+            self._ax_fft, self._canvas_fft,
+            self._qx, self._qy,
+            (Ny, Nx), parent=self,
+        )
+        self._fft_lattice_overlay = overlay
+        dock = QDockWidget("Reciprocal Grid", self)
+        dock.setWidget(panel)
+        dock.setFloating(True)
+        dock.setMinimumWidth(240)
+        dock.show()
