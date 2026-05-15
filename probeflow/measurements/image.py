@@ -158,17 +158,17 @@ def line_profile_measurement(
         raise ValueError("line profile contains no finite values")
     values: dict[str, Scalar] = {
         "length": float(s[-1] - s[0]) if s.size else 0.0,
-        "height_min": float(np.min(finite)),
-        "height_max": float(np.max(finite)),
-        "height_mean": float(np.mean(finite)),
-        "height_std": float(np.std(finite)),
-        "height_peak_to_peak": float(np.max(finite) - np.min(finite)),
+        "height_difference": float(np.max(finite) - np.min(finite)),
         "n_points": int(z.size),
     }
     if p0 is not None:
         values.update({"x1": float(p0[0]), "y1": float(p0[1])})
     if p1 is not None:
         values.update({"x2": float(p1[0]), "y2": float(p1[1])})
+    if p0 is not None and p1 is not None:
+        values["length_px"] = float(
+            np.hypot(float(p1[0]) - float(p0[0]), float(p1[1]) - float(p0[1]))
+        )
     context: dict[str, Scalar] = {
         "data_basis": data_basis,
         "roi_id": roi_id,

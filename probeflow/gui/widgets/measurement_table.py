@@ -41,7 +41,8 @@ VALUE_LABELS: dict[str, str] = {
     "rms_roughness": "RMS roughness",
     "height_difference": "Height difference",
     "length": "Length",
-    "n_points": "Number of points",
+    "length_px": "Length (px)",
+    "n_points": "N points",
     "dominant_frequency": "Dominant frequency",
     "dx": "Δx",
     "dy": "Δy",
@@ -233,6 +234,31 @@ def _format_details(result: MeasurementResult) -> str:
             lines.append(
                 f"P2: {_fmt_value(p2d)} {x_unit}, {_fmt_value(p2h)} {y_unit}".rstrip()
             )
+    elif result.kind == "line_profile":
+        length = result.values.get("length")
+        hdiff = result.values.get("height_difference")
+        n_pts = result.values.get("n_points")
+        length_px = result.values.get("length_px")
+        x1 = result.values.get("x1")
+        y1 = result.values.get("y1")
+        x2 = result.values.get("x2")
+        y2 = result.values.get("y2")
+        if length is not None:
+            lines.append(f"Length: {_fmt_value(length)} {x_unit}".rstrip())
+        if hdiff is not None:
+            lines.append(f"Height difference: {_fmt_value(hdiff)} {y_unit}".rstrip())
+        if n_pts is not None:
+            lines.append(f"N sampled points: {int(n_pts)}")
+        if x1 is not None and y1 is not None:
+            lpx_str = f"  ({_fmt_value(length_px)} px)" if length_px is not None else ""
+            lines.append(f"Start pixel: x={int(x1)}, y={int(y1)}{lpx_str}")
+        if x2 is not None and y2 is not None:
+            lines.append(f"End pixel:   x={int(x2)}, y={int(y2)}")
+        if result.channel:
+            lines.append(f"Channel: {result.channel}")
+        roi_name = result.context.get("roi_name")
+        if roi_name:
+            lines.append(f"Line ROI: {roi_name}")
     elif result.kind == "spectrum_delta":
         dy = result.values.get("dy")
         dx = result.values.get("dx")
