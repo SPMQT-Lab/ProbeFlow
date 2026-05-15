@@ -17,6 +17,8 @@ import math
 from dataclasses import dataclass, replace
 from typing import Literal
 
+import numpy as np
+
 # ── type aliases ──────────────────────────────────────────────────────────────
 
 LatticeKind = Literal["square", "rectangular", "hexagonal"]
@@ -246,6 +248,43 @@ class LatticeGrid:
         """Move origin to (cx, cy) without changing basis vectors."""
         return replace(self, origin_px=(cx, cy))
 
+    def set_a_length_px(self, length_px: float) -> "LatticeGrid":
+        """
+        Set |a| in pixels, preserving a-vector direction and lattice constraints.
+
+        Square/hexagonal: scales both vectors (preserves b/a relationship).
+        Rectangular: scales only a-vector; b is unchanged.
+        """
+        la = self.a_length_px()
+        if la < 1e-9 or length_px < 1e-9:
+            return self
+        factor = length_px / la
+        if self.kind in ("square", "hexagonal"):
+            return self.scale(factor)
+        ax, ay = self.a_px
+        return replace(self, a_px=(ax * factor, ay * factor))
+
+    def set_b_length_px(self, length_px: float) -> "LatticeGrid":
+        """
+        Set |b| in pixels, preserving b-vector direction and lattice constraints.
+
+        Square/hexagonal: scales both vectors.
+        Rectangular: scales only b-vector; a is unchanged.
+        """
+        lb = self.b_length_px()
+        if lb < 1e-9 or length_px < 1e-9:
+            return self
+        factor = length_px / lb
+        if self.kind in ("square", "hexagonal"):
+            return self.scale(factor)
+        bx, by = self.b_px
+        return replace(self, b_px=(bx * factor, by * factor))
+
+    def set_rotation_deg(self, angle_deg: float) -> "LatticeGrid":
+        """Rotate the grid so the a-vector points at angle_deg from +x."""
+        delta = angle_deg - self.a_angle_deg()
+        return self.rotate(delta)
+
 
 # ── calibration adapters ──────────────────────────────────────────────────────
 
@@ -297,8 +336,8 @@ class ReciprocalCalibration:
     centre_px: (cx_px, cy_px) position of DC/zero in FFT array indices.
     """
 
-    qx_axis: "np.ndarray"   # nm⁻¹, length Nx
-    qy_axis: "np.ndarray"   # nm⁻¹, length Ny
+    qx_axis: np.ndarray   # nm⁻¹, length Nx
+    qy_axis: np.ndarray   # nm⁻¹, length Ny
     image_width:  int
     image_height: int
 
@@ -308,15 +347,10 @@ class ReciprocalCalibration:
 
     def px_to_q(self, ix: float, iy: float) -> Vec2:
         """Convert FFT pixel indices (float) to q-space (nm⁻¹)."""
-        import numpy as np
-        cx = self.image_width  / 2.0
-        cy = self.image_height / 2.0
-        dx = ix - cx
-        dy = iy - cy
         dqx = (self.qx_axis[-1] - self.qx_axis[0]) / max(1, self.image_width  - 1)
         dqy = (self.qy_axis[-1] - self.qy_axis[0]) / max(1, self.image_height - 1)
-        return (float(self.qx_axis[0]) + (ix) * dqx,
-                float(self.qy_axis[0]) + (iy) * dqy)
+        return (float(self.qx_axis[0]) + ix * dqx,
+                float(self.qy_axis[0]) + iy * dqy)
 
     def vec_px_to_q(self, vec_px: Vec2) -> Vec2:
         """
@@ -324,7 +358,6 @@ class ReciprocalCalibration:
 
         (Does not offset by centre; for differences only.)
         """
-        import numpy as np
         dqx = (self.qx_axis[-1] - self.qx_axis[0]) / max(1, self.image_width  - 1)
         dqy = (self.qy_axis[-1] - self.qy_axis[0]) / max(1, self.image_height - 1)
         vx, vy = vec_px

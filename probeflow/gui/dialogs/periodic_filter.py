@@ -52,7 +52,6 @@ class PeriodicFilterDialog(FFTViewerDialog):
         bg = self._theme.get("bg", "#1e1e1e")
         fg = self._theme.get("fg", "#dddddd")
 
-        from PySide6.QtWidgets import QVBoxLayout
         lay = QVBoxLayout(self)
         lay.setSpacing(4)
         lay.setContentsMargins(6, 6, 6, 4)

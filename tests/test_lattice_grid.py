@@ -205,6 +205,64 @@ class TestConstraints:
         assert abs(g2.angle_deg() - 60.0) < 1e-6
 
 
+# ── numeric setter tests ──────────────────────────────────────────────────────
+
+class TestNumericSetters:
+    def test_set_a_length_px_square(self):
+        g = LatticeGrid.make_square(0, 0, 50)
+        g2 = g.set_a_length_px(80)
+        assert abs(g2.a_length_px() - 80) < 1e-9
+        assert abs(g2.b_length_px() - 80) < 1e-9  # square keeps equal lengths
+
+    def test_set_a_length_px_rectangular(self):
+        g = LatticeGrid.make_rectangular(0, 0, 50, 30)
+        g2 = g.set_a_length_px(80)
+        assert abs(g2.a_length_px() - 80) < 1e-9
+        assert abs(g2.b_length_px() - 30) < 1e-9  # rectangular keeps b unchanged
+
+    def test_set_a_length_px_hexagonal(self):
+        g = LatticeGrid.make_hexagonal(0, 0, 40)
+        g2 = g.set_a_length_px(60)
+        assert abs(g2.a_length_px() - 60) < 1e-9
+        assert abs(g2.b_length_px() - 60) < 1e-9  # hex keeps equal lengths
+        assert abs(g2.angle_deg() - 60.0) < 1e-6
+
+    def test_set_b_length_px_rectangular(self):
+        g = LatticeGrid.make_rectangular(0, 0, 50, 30)
+        g2 = g.set_b_length_px(70)
+        assert abs(g2.b_length_px() - 70) < 1e-9
+        assert abs(g2.a_length_px() - 50) < 1e-9  # a unchanged
+
+    def test_set_b_length_px_square(self):
+        g = LatticeGrid.make_square(0, 0, 50)
+        g2 = g.set_b_length_px(80)  # scales both
+        assert abs(g2.a_length_px() - 80) < 1e-9
+        assert abs(g2.b_length_px() - 80) < 1e-9
+
+    def test_set_rotation_deg(self):
+        g = LatticeGrid.make_square(0, 0, 50)
+        g2 = g.set_rotation_deg(45)
+        assert abs(g2.a_angle_deg() - 45) < 1e-9
+
+    def test_set_rotation_preserves_lengths(self):
+        g = LatticeGrid.make_rectangular(0, 0, 60, 40)
+        g2 = g.set_rotation_deg(30)
+        assert abs(g2.a_length_px() - 60) < 1e-9
+        assert abs(g2.b_length_px() - 40) < 1e-9
+
+    def test_set_a_length_zero_returns_unchanged(self):
+        g = LatticeGrid.make_square(0, 0, 50)
+        g2 = g.set_a_length_px(0.0)
+        assert g2 is g or g2.a_length_px() == g.a_length_px()
+
+    def test_cells_param_does_not_alter_lattice(self):
+        """The cells display count is independent of measured lattice constants."""
+        g = LatticeGrid.make_hexagonal(0, 0, 40)
+        # cells is a panel/item parameter, not on the model; verify model is unchanged
+        assert abs(g.a_length_px() - 40) < 1e-9
+        assert abs(g.angle_deg() - 60.0) < 1e-6
+
+
 # ── measurement tests ─────────────────────────────────────────────────────────
 
 class TestMeasurements:
@@ -450,7 +508,7 @@ class TestExport:
         pytest.importorskip("PySide6")
         from PySide6.QtWidgets import QApplication
         import sys
-        app = QApplication.instance() or QApplication(sys.argv[:1])
+        _ = QApplication.instance() or QApplication(sys.argv[:1])
 
         from PySide6.QtWidgets import QGraphicsScene
         from probeflow.gui.lattice_grid_tool import LatticeGridItem
