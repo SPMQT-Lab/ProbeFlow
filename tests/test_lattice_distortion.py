@@ -246,3 +246,68 @@ class TestMatrixProperties:
         result = compute_correction(measured, ideal)
         assert isinstance(result, LatticeCorrection)
         assert result.matrix.shape == (2, 2)
+
+
+# ── polar decomposition ───────────────────────────────────────────────────────
+
+class TestPolarDecomposition:
+    def _generic_correction(self):
+        measured = MeasuredLattice(
+            a_nm=(0.20, 0.05),
+            b_nm=(-0.02, 0.28),
+        )
+        ideal = IdealLattice(a_nm=0.25, b_nm=0.28, angle_deg=85.0)
+        return compute_correction(measured, ideal)
+
+    def test_polar_fields_exist(self):
+        result = self._generic_correction()
+        assert isinstance(result, LatticeCorrection)
+        assert hasattr(result, "rotation_matrix")
+        assert hasattr(result, "stretch_matrix")
+        assert hasattr(result, "polar_rotation_deg")
+
+    def test_polar_rotation_is_orthogonal(self):
+        result = self._generic_correction()
+        R = result.rotation_matrix
+        assert np.allclose(R @ R.T, np.eye(2), atol=1e-10)
+        assert abs(np.linalg.det(R) - 1.0) < 1e-10
+
+    def test_stretch_is_symmetric(self):
+        result = self._generic_correction()
+        S = result.stretch_matrix
+        assert np.allclose(S, S.T, atol=1e-10)
+
+    def test_polar_decomp_reconstructs_full_matrix(self):
+        result = self._generic_correction()
+        reconstructed = result.rotation_matrix @ result.stretch_matrix
+        assert np.allclose(reconstructed, result.matrix, atol=1e-10)
+
+    def test_identity_has_zero_polar_rotation(self):
+        measured = MeasuredLattice(a_nm=(0.25, 0.0), b_nm=(0.0, 0.25))
+        ideal = IdealLattice(a_nm=0.25, b_nm=0.25, angle_deg=90.0)
+        result = compute_correction(measured, ideal)
+        assert isinstance(result, LatticeCorrection)
+        assert abs(result.polar_rotation_deg) < 1e-9
+
+    def test_pure_scale_has_zero_polar_rotation(self):
+        """Pure anisotropic scale has no rotation component."""
+        measured = MeasuredLattice(a_nm=(0.20, 0.0), b_nm=(0.0, 0.22))
+        ideal = IdealLattice(a_nm=0.25, b_nm=0.25, angle_deg=90.0)
+        result = compute_correction(measured, ideal)
+        assert isinstance(result, LatticeCorrection)
+        assert abs(result.polar_rotation_deg) < 1e-9
+
+    def test_stretch_matrix_has_same_shape(self):
+        result = self._generic_correction()
+        assert result.stretch_matrix.shape == (2, 2)
+
+    def test_stretch_preserves_scale_correction(self):
+        """Applying stretch_matrix to measured vectors should give ideal vectors
+        modulo the rigid rotation — i.e. the corrected lengths should match."""
+        measured = MeasuredLattice(a_nm=(0.20, 0.0), b_nm=(0.0, 0.22))
+        ideal = IdealLattice(a_nm=0.25, b_nm=0.25, angle_deg=90.0)
+        result = compute_correction(measured, ideal)
+        assert isinstance(result, LatticeCorrection)
+        # stretch_matrix @ measured_a should have the same length as ideal a
+        stretched_a = result.stretch_matrix @ np.array(measured.a_nm)
+        assert abs(math.hypot(*stretched_a) - ideal.a_nm) < 1e-10

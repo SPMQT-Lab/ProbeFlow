@@ -741,6 +741,17 @@ class LatticeGridPanel(QWidget):
         self._expand_cb.setChecked(True)
         opts_lay.addWidget(self._expand_cb)
 
+        self._preserve_orientation_cb = QCheckBox("Preserve image orientation")
+        self._preserve_orientation_cb.setFont(QFont("Helvetica", 9))
+        self._preserve_orientation_cb.setChecked(True)
+        self._preserve_orientation_cb.setToolTip(
+            "Remove the global rotation from the measured-to-ideal correction.\n"
+            "This corrects lattice shear and scale while keeping the scan\n"
+            "approximately aligned with the original image axes."
+        )
+        opts_lay.addWidget(self._preserve_orientation_cb)
+        self._preserve_orientation_cb.toggled.connect(self._on_preserve_orientation_changed)
+
         interp_row = QHBoxLayout()
         interp_lbl = QLabel("Interpolation:")
         interp_lbl.setFont(QFont("Helvetica", 9))
@@ -1060,14 +1071,21 @@ class LatticeGridPanel(QWidget):
             )
             self._apply_btn.setEnabled(self._apply_correction_fn is not None)
 
+            preserve = self._preserve_orientation_cb.isChecked()
+            applied = result.stretch_matrix if preserve else result.matrix
+            rot_label = (
+                f"  rigid rot = {result.polar_rotation_deg:.3f}°  (removed)"
+                if preserve
+                else f"  rigid rot = {result.polar_rotation_deg:.3f}°  (applied)"
+            )
             lines = [
                 f"  x scale = {result.x_scale:.5f}",
                 f"  y/x    = {result.y_over_x:.5f}",
                 f"  shear  = {result.shear:.5f}",
-                f"  rot    = {result.rotation_deg:.3f}°",
-                "  matrix =",
-                f"  [{result.matrix[0,0]:+.5f}  {result.matrix[0,1]:+.5f}]",
-                f"  [{result.matrix[1,0]:+.5f}  {result.matrix[1,1]:+.5f}]",
+                rot_label,
+                "  applied matrix =",
+                f"  [{applied[0,0]:+.5f}  {applied[0,1]:+.5f}]",
+                f"  [{applied[1,0]:+.5f}  {applied[1,1]:+.5f}]",
             ]
             self._correction_lbl.setText("\n".join(lines))
         except Exception as exc:
@@ -1079,10 +1097,17 @@ class LatticeGridPanel(QWidget):
     # ── correction action helpers ─────────────────────────────────────────────
 
     def _correction_matrix_px(self) -> Optional[np.ndarray]:
-        """Return the pixel-space correction matrix, or None if unavailable."""
+        """Return the pixel-space correction matrix to apply to the image.
+
+        Uses stretch_matrix (orientation-preserving) when the checkbox is on,
+        otherwise uses the full measured-to-ideal matrix.
+        """
         if self._correction is None:
             return None
-        T_nm = self._correction.matrix
+        if self._preserve_orientation_cb.isChecked():
+            T_nm = self._correction.stretch_matrix
+        else:
+            T_nm = self._correction.matrix
         px_nm_x = self._cal.px_size_x * 1e9
         px_nm_y = self._cal.px_size_y * 1e9
         if px_nm_x <= 0 or px_nm_y <= 0:
@@ -1098,7 +1123,12 @@ class LatticeGridPanel(QWidget):
             "interpolation": interp_map.get(self._interp_combo.currentText(), "bilinear"),
             "fill_mode": fill_map.get(self._fill_combo.currentText(), "nan"),
             "expand_canvas": self._expand_cb.isChecked(),
+            "preserve_orientation": self._preserve_orientation_cb.isChecked(),
         }
+
+    def _on_preserve_orientation_changed(self) -> None:
+        self._clear_preview_if_active()
+        self._refresh_correction_label()
 
     def _set_preview_state(self, active: bool) -> None:
         self._preview_active = active
@@ -1192,11 +1222,20 @@ class LatticeGridPanel(QWidget):
 
         opts = self._correction_options()
         corr = self._correction
+        # Full nm-space matrix for provenance; pixel-space applied matrix is T_px
+        px_nm_x = self._cal.px_size_x * 1e9
+        px_nm_y = self._cal.px_size_y * 1e9
+        S_scale = np.diag([1.0 / px_nm_x, 1.0 / px_nm_y])
+        S_scale_inv = np.diag([px_nm_x, px_nm_y])
+        full_T_px = (S_scale @ corr.matrix @ S_scale_inv).tolist()
         op_params = {
             "matrix": T_px.tolist(),
+            "full_matrix": full_T_px,
             "expand_canvas": opts["expand_canvas"],
             "interpolation": opts["interpolation"],
             "fill_mode": opts["fill_mode"],
+            "preserve_orientation": opts["preserve_orientation"],
+            "polar_rotation_deg": corr.polar_rotation_deg,
             "measured_a_nm": list(corr.measured.a_nm),
             "measured_b_nm": list(corr.measured.b_nm),
             "ideal_a_nm": corr.ideal.a_nm,
