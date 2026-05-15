@@ -466,6 +466,8 @@ class LatticeGridPanel(QWidget):
         parent=None,
         get_image_fn=None,
         apply_correction_fn=None,
+        preview_image_fn=None,
+        clear_preview_fn=None,
     ):
         super().__init__(parent)
         self._item = item
@@ -475,7 +477,10 @@ class LatticeGridPanel(QWidget):
         self._image_h = image_h
         self._get_image_fn = get_image_fn
         self._apply_correction_fn = apply_correction_fn
+        self._preview_image_fn = preview_image_fn
+        self._clear_preview_fn = clear_preview_fn
         self._correction: Optional[LatticeCorrection] = None
+        self._preview_active: bool = False
 
         self._unit_scale, self._unit_label = _choose_display_unit(calibration)
         self._updating_controls = False
@@ -697,8 +702,20 @@ class LatticeGridPanel(QWidget):
         self._ideal_ab_cb.toggled.connect(self._on_ideal_ab_changed)
         self._ideal_angle_spin.valueChanged.connect(self._on_ideal_angle_changed)
 
+        # ── measured lattice display ──────────────────────────────────────────
+        meas_dist_grp = QGroupBox("Measured lattice")
+        meas_dist_grp.setFont(QFont("Helvetica", 9))
+        meas_dist_lay = QVBoxLayout(meas_dist_grp)
+        meas_dist_lay.setContentsMargins(6, 6, 6, 4)
+        self._measured_lbl = QLabel("(tune grid above)")
+        self._measured_lbl.setFont(QFont("Courier", 8))
+        self._measured_lbl.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        self._measured_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        meas_dist_lay.addWidget(self._measured_lbl)
+        dist_lay.addWidget(meas_dist_grp)
+
         # ── correction display ────────────────────────────────────────────────
-        corr_grp = QGroupBox("Measured → ideal correction")
+        corr_grp = QGroupBox("Correction: measured → ideal")
         corr_grp.setFont(QFont("Helvetica", 9))
         corr_lay = QVBoxLayout(corr_grp)
         corr_lay.setContentsMargins(6, 6, 6, 4)
@@ -718,6 +735,11 @@ class LatticeGridPanel(QWidget):
         opts_lay = QVBoxLayout(opts_grp)
         opts_lay.setSpacing(3)
         opts_lay.setContentsMargins(6, 6, 6, 4)
+
+        self._expand_cb = QCheckBox("Expand canvas to fit corrected image")
+        self._expand_cb.setFont(QFont("Helvetica", 9))
+        self._expand_cb.setChecked(True)
+        opts_lay.addWidget(self._expand_cb)
 
         interp_row = QHBoxLayout()
         interp_lbl = QLabel("Interpolation:")
@@ -743,25 +765,33 @@ class LatticeGridPanel(QWidget):
         fill_row.addWidget(self._fill_combo, 1)
         opts_lay.addLayout(fill_row)
 
-        self._expand_cb = QCheckBox("Expand canvas to fit corrected image")
-        self._expand_cb.setFont(QFont("Helvetica", 9))
-        self._expand_cb.setChecked(True)
-        opts_lay.addWidget(self._expand_cb)
-
         dist_lay.addWidget(opts_grp)
 
-        # ── apply buttons ─────────────────────────────────────────────────────
-        self._preview_btn = QPushButton("Preview correction…")
+        # ── preview status ────────────────────────────────────────────────────
+        self._preview_status_lbl = QLabel("")
+        self._preview_status_lbl.setFont(QFont("Helvetica", 8))
+        self._preview_status_lbl.setWordWrap(True)
+        self._preview_status_lbl.setVisible(False)
+        dist_lay.addWidget(self._preview_status_lbl)
+
+        # ── action buttons ────────────────────────────────────────────────────
+        self._preview_btn = QPushButton("Preview correction")
         self._preview_btn.setFont(QFont("Helvetica", 9))
         self._preview_btn.setFixedHeight(24)
         self._preview_btn.setEnabled(False)
         self._preview_btn.clicked.connect(self._on_preview)
+        self._clear_preview_btn = QPushButton("Clear preview")
+        self._clear_preview_btn.setFont(QFont("Helvetica", 9))
+        self._clear_preview_btn.setFixedHeight(24)
+        self._clear_preview_btn.setEnabled(False)
+        self._clear_preview_btn.clicked.connect(self._on_clear_preview)
         self._apply_btn = QPushButton("Apply correction")
         self._apply_btn.setFont(QFont("Helvetica", 9))
         self._apply_btn.setFixedHeight(24)
         self._apply_btn.setEnabled(False)
         self._apply_btn.clicked.connect(self._on_apply)
         dist_lay.addWidget(self._preview_btn)
+        dist_lay.addWidget(self._clear_preview_btn)
         dist_lay.addWidget(self._apply_btn)
 
         self._tabs.addTab(dist_tab, "Distortion")
@@ -946,6 +976,7 @@ class LatticeGridPanel(QWidget):
                 self._ideal_b_spin.setValue(value)
             finally:
                 self._updating_controls = False
+        self._clear_preview_if_active()
         self._refresh_correction_label()
 
     def _on_ideal_b_changed(self, value: float) -> None:
@@ -957,6 +988,7 @@ class LatticeGridPanel(QWidget):
                 self._ideal_a_spin.setValue(value)
             finally:
                 self._updating_controls = False
+        self._clear_preview_if_active()
         self._refresh_correction_label()
 
     def _on_ideal_ab_changed(self, checked: bool) -> None:
@@ -966,9 +998,11 @@ class LatticeGridPanel(QWidget):
                 self._ideal_b_spin.setValue(self._ideal_a_spin.value())
             finally:
                 self._updating_controls = False
+        self._clear_preview_if_active()
         self._refresh_correction_label()
 
     def _on_ideal_angle_changed(self, _value: float) -> None:
+        self._clear_preview_if_active()
         self._refresh_correction_label()
 
     def _refresh_correction_label(self) -> None:
@@ -979,20 +1013,31 @@ class LatticeGridPanel(QWidget):
             ideal_b_m = self._ideal_b_spin.value() * self._unit_scale
             ideal_angle = self._ideal_angle_spin.value()
 
-            if ideal_a_m < 1e-25 or ideal_b_m < 1e-25:
-                self._correction = None
-                self._preview_btn.setEnabled(False)
-                self._apply_btn.setEnabled(False)
-                self._correction_lbl.setText("(enter ideal lattice above)")
-                return
-
-            # Physical measured vectors in nm
+            # Physical measured vectors in nm (always update measured label)
             px_nm_x = self._cal.px_size_x * 1e9
             px_nm_y = self._cal.px_size_y * 1e9
             ax_px, ay_px = grid.a_px
             bx_px, by_px = grid.b_px
             m_a_nm = (ax_px * px_nm_x, ay_px * px_nm_y)
             m_b_nm = (bx_px * px_nm_x, by_px * px_nm_y)
+            m_la = math.hypot(*m_a_nm)
+            m_lb = math.hypot(*m_b_nm)
+            m_angle = grid.angle_deg()
+            unit = self._unit_label
+            s = self._unit_scale * 1e9
+
+            self._measured_lbl.setText(
+                f"|a| = {m_la / s:.4g} {unit}\n"
+                f"|b| = {m_lb / s:.4g} {unit}\n"
+                f"angle = {m_angle:.2f}°"
+            )
+
+            if ideal_a_m < 1e-25 or ideal_b_m < 1e-25:
+                self._correction = None
+                self._preview_btn.setEnabled(False)
+                self._apply_btn.setEnabled(False)
+                self._correction_lbl.setText("(enter ideal lattice above)")
+                return
 
             measured = MeasuredLattice(a_nm=m_a_nm, b_nm=m_b_nm)
             ideal = IdealLattice(
@@ -1006,32 +1051,16 @@ class LatticeGridPanel(QWidget):
                 self._correction = None
                 self._preview_btn.setEnabled(False)
                 self._apply_btn.setEnabled(False)
-                self._correction_lbl.setText(f"Warning: {result}")
+                self._correction_lbl.setText(f"Cannot compute correction:\n{result}")
                 return
 
             self._correction = result
-            can_act = self._get_image_fn is not None
-            self._preview_btn.setEnabled(can_act)
+            self._preview_btn.setEnabled(
+                self._get_image_fn is not None or self._preview_image_fn is not None
+            )
             self._apply_btn.setEnabled(self._apply_correction_fn is not None)
 
-            m_la = math.hypot(*m_a_nm)
-            m_lb = math.hypot(*m_b_nm)
-            m_angle = grid.angle_deg()
-            unit = self._unit_label
-            s = self._unit_scale * 1e9   # m → display unit (a_m is in m, *1e9 → nm, /unit_scale → display)
-
             lines = [
-                "Measured",
-                f"  |a| = {m_la / s:.4g} {unit}",
-                f"  |b| = {m_lb / s:.4g} {unit}",
-                f"  angle = {m_angle:.2f}°",
-                "",
-                "Ideal",
-                f"  |a| = {ideal_a_m / self._unit_scale:.4g} {unit}",
-                f"  |b| = {ideal_b_m / self._unit_scale:.4g} {unit}",
-                f"  angle = {ideal_angle:.2f}°",
-                "",
-                "Linear correction",
                 f"  x scale = {result.x_scale:.5f}",
                 f"  y/x    = {result.y_over_x:.5f}",
                 f"  shear  = {result.shear:.5f}",
@@ -1071,13 +1100,33 @@ class LatticeGridPanel(QWidget):
             "expand_canvas": self._expand_cb.isChecked(),
         }
 
+    def _set_preview_state(self, active: bool) -> None:
+        self._preview_active = active
+        self._clear_preview_btn.setEnabled(active)
+        if active:
+            self._preview_status_lbl.setText(
+                "Previewing lattice correction. "
+                "Click Apply to commit or Clear preview to return."
+            )
+        else:
+            self._preview_status_lbl.setText("")
+        self._preview_status_lbl.setVisible(active)
+
+    def _clear_preview_if_active(self) -> None:
+        if self._preview_active and self._clear_preview_fn is not None:
+            self._clear_preview_fn()
+            self._set_preview_state(False)
+
     def _on_preview(self) -> None:
-        if self._get_image_fn is None or self._correction is None:
+        if self._correction is None:
+            return
+        get_arr = self._get_image_fn
+        if get_arr is None:
             return
         T_px = self._correction_matrix_px()
         if T_px is None:
             return
-        arr = self._get_image_fn()
+        arr = get_arr()
         if arr is None:
             return
         from probeflow.processing.image import affine_lattice_correction
@@ -1095,32 +1144,39 @@ class LatticeGridPanel(QWidget):
             QMessageBox.warning(self, "Preview failed", str(exc))
             return
 
-        import matplotlib
-        matplotlib.use("QtAgg")
-        import matplotlib.pyplot as plt
-        from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
-        from PySide6.QtWidgets import QDialog, QVBoxLayout as _VBox
+        if self._preview_image_fn is not None:
+            self._preview_image_fn(corrected)
+            self._set_preview_state(True)
+        else:
+            # Fallback: open comparison dialog when no in-viewer preview hook available
+            import matplotlib
+            matplotlib.use("QtAgg")
+            import matplotlib.pyplot as plt
+            from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+            from PySide6.QtWidgets import QDialog, QVBoxLayout as _VBox
+            dlg = QDialog(self)
+            dlg.setWindowTitle("Lattice correction preview")
+            dlg.resize(700, 380)
+            fig, axes = plt.subplots(1, 2, figsize=(11, 5))
+            vlo = float(np.nanpercentile(arr, 2))
+            vhi = float(np.nanpercentile(arr, 98))
+            axes[0].set_title("Before")
+            axes[0].imshow(arr, origin="upper", cmap="gray", vmin=vlo, vmax=vhi)
+            axes[0].axis("off")
+            axes[1].set_title("After (preview)")
+            axes[1].imshow(corrected, origin="upper", cmap="gray", vmin=vlo, vmax=vhi)
+            axes[1].axis("off")
+            fig.tight_layout()
+            canvas = FigureCanvasQTAgg(fig)
+            vbox = _VBox(dlg)
+            vbox.addWidget(canvas)
+            dlg.exec()
+            plt.close(fig)
 
-        dlg = QDialog(self)
-        dlg.setWindowTitle("Lattice correction preview")
-        dlg.resize(600, 600)
-        fig, axes = plt.subplots(1, 2, figsize=(10, 5))
-        axes[0].set_title("Before")
-        axes[0].imshow(arr, origin="upper", cmap="gray",
-                       vmin=float(np.nanpercentile(arr, 2)),
-                       vmax=float(np.nanpercentile(arr, 98)))
-        axes[0].axis("off")
-        axes[1].set_title("After (preview)")
-        axes[1].imshow(corrected, origin="upper", cmap="gray",
-                       vmin=float(np.nanpercentile(arr, 2)),
-                       vmax=float(np.nanpercentile(arr, 98)))
-        axes[1].axis("off")
-        fig.tight_layout()
-        canvas = FigureCanvasQTAgg(fig)
-        vbox = _VBox(dlg)
-        vbox.addWidget(canvas)
-        dlg.exec()
-        plt.close(fig)
+    def _on_clear_preview(self) -> None:
+        if self._clear_preview_fn is not None:
+            self._clear_preview_fn()
+        self._set_preview_state(False)
 
     def _on_apply(self) -> None:
         if self._apply_correction_fn is None or self._correction is None:
@@ -1128,6 +1184,12 @@ class LatticeGridPanel(QWidget):
         T_px = self._correction_matrix_px()
         if T_px is None:
             return
+
+        # Clear preview before applying so the viewer is in sync
+        if self._preview_active and self._clear_preview_fn is not None:
+            self._clear_preview_fn()
+        self._set_preview_state(False)
+
         opts = self._correction_options()
         corr = self._correction
         op_params = {
@@ -1142,6 +1204,13 @@ class LatticeGridPanel(QWidget):
             "ideal_angle_deg": corr.ideal.angle_deg,
         }
         self._apply_correction_fn("affine_lattice_correction", op_params)
+
+        # Hide the grid overlay — it was measured on the pre-correction image
+        self._item.setVisible(False)
+        self._correction_lbl.setText(
+            "Correction applied.\n"
+            "Grid hidden: it was measured on the pre-correction image."
+        )
 
     def _on_type_changed(self, idx: int) -> None:
         if self._updating_controls:
@@ -1607,6 +1676,14 @@ class FFTLatticePanel(QWidget):
         self._meas_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
         meas_lay.addWidget(self._meas_lbl)
         lay.addWidget(meas_grp)
+
+        fft_note = QLabel(
+            "Linear lattice correction is available\nonly from real-space grids."
+        )
+        fft_note.setFont(QFont("Helvetica", 8))
+        fft_note.setWordWrap(True)
+        fft_note.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        lay.addWidget(fft_note)
         lay.addStretch(1)
 
     def _on_grid_changed(self, grid: LatticeGrid) -> None:
@@ -1799,6 +1876,8 @@ def open_real_space_tool(
     parent=None,
     get_image_fn=None,
     apply_correction_fn=None,
+    preview_image_fn=None,
+    clear_preview_fn=None,
 ) -> tuple[LatticeGridItem, LatticeGridPanel]:
     """
     Create a lattice grid overlay on an ImageCanvas.
@@ -1808,6 +1887,8 @@ def open_real_space_tool(
 
     get_image_fn: callable() → np.ndarray | None — returns current image array
     apply_correction_fn: callable(op_name, op_params) — applies a geometric op
+    preview_image_fn: callable(np.ndarray) → None — shows temporary preview in viewer
+    clear_preview_fn: callable() → None — restores original display from processing
     """
     Ny, Nx = image_shape
     cx, cy = Nx / 2.0, Ny / 2.0
@@ -1826,6 +1907,8 @@ def open_real_space_tool(
         item, controller, cal, Nx, Ny, parent=parent,
         get_image_fn=get_image_fn,
         apply_correction_fn=apply_correction_fn,
+        preview_image_fn=preview_image_fn,
+        clear_preview_fn=clear_preview_fn,
     )
     controller.set_panel(panel)
     item.grid_changed.connect(panel.sync_from_model)

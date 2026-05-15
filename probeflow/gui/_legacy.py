@@ -2358,6 +2358,14 @@ class ImageViewerDialog(QDialog):
         def _get_image():
             return self._display_arr if self._display_arr is not None else self._raw_arr
 
+        def _preview_lattice_correction(corrected_arr) -> None:
+            self._display_arr = corrected_arr
+            self._refresh_viewer_pixmap(reset_zoom=False)
+
+        def _clear_lattice_correction_preview() -> None:
+            self._refresh_display_array(reset_zoom_if_shape_changed=False)
+            self._refresh_viewer_pixmap(reset_zoom=False)
+
         def _apply_lattice_correction(op_name: str, op_params: dict) -> None:
             ops = list(self._processing.get("geometric_ops") or [])
             ops.append({"op": op_name, "params": op_params})
@@ -2368,6 +2376,8 @@ class ImageViewerDialog(QDialog):
             self._zoom_lbl, scan_range, arr.shape, parent=self,
             get_image_fn=_get_image,
             apply_correction_fn=_apply_lattice_correction,
+            preview_image_fn=_preview_lattice_correction,
+            clear_preview_fn=_clear_lattice_correction_preview,
         )
         self._lattice_grid_item = item
         dock = QDockWidget("Lattice Grid", self._viewer_main)
