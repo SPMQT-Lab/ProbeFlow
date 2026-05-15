@@ -274,6 +274,11 @@ class ImageCanvas(QGraphicsView):
         else:
             avail_w = self.parentWidget().width() if self.parentWidget() else Nx
             avail_h = self.parentWidget().height() if self.parentWidget() else Ny
+        # ImageCanvas sits inside a ruler container; subtract its offset so the
+        # ruler bars don't cause scrollbars to appear after the fit is applied.
+        pos = self.pos()
+        avail_w = max(1, avail_w - pos.x())
+        avail_h = max(1, avail_h - pos.y())
         if Nx <= 0 or Ny <= 0 or avail_w <= 0 or avail_h <= 0:
             return
         zoom = min(avail_w / Nx, avail_h / Ny)
