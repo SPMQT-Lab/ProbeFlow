@@ -332,7 +332,12 @@ class FFTViewerDialog(QDialog):
             mag = mag.astype(np.float64)
             mag[y0:y1, x0:x1] = np.nan
         if self._scale_mode == "log":
-            mag = np.log1p(mag)
+            # log10 gives meaningful contrast regardless of the absolute scale of
+            # the input data (log1p degenerates to linear when magnitudes are << 1,
+            # which is always the case for SI-unit STM height data).
+            with np.errstate(divide="ignore", invalid="ignore"):
+                log_mag = np.log10(mag)
+            mag = np.where(np.isfinite(log_mag), log_mag, np.nan)
         finite = mag[np.isfinite(mag)]
         self._disp_range = (
             (float(finite.min()), float(finite.max())) if finite.size > 0 else (0.0, 1.0)
@@ -389,7 +394,7 @@ class FFTViewerDialog(QDialog):
         )
         ax.set_xlim(*self._fft_xlim)
         ax.set_ylim(*self._fft_ylim)
-        scale_lbl = "log|FFT|" if self._scale_mode == "log" else "|FFT|"
+        scale_lbl = "log₁₀|FFT|" if self._scale_mode == "log" else "|FFT|"
         ax.set_title(f"FFT  ({scale_lbl})", fontsize=10, color=fg)
         ax.set_xlabel("q_x  (nm⁻¹)", fontsize=9, color=fg)
         ax.set_ylabel("q_y  (nm⁻¹)", fontsize=9, color=fg)
@@ -489,7 +494,7 @@ class FFTViewerDialog(QDialog):
         elif event.inaxes is self._radial_ax and event.xdata is not None:
             q = event.xdata
             val = event.ydata
-            scale_lbl = "log|FFT|" if self._scale_mode == "log" else "|FFT|"
+            scale_lbl = "log₁₀|FFT|" if self._scale_mode == "log" else "|FFT|"
             if q > 0:
                 d_nm = 1.0 / q
                 d_str = f"{d_nm:.2f} nm" if d_nm >= 1.0 else f"{d_nm * 10:.2f} Å"
@@ -660,7 +665,7 @@ class FFTViewerDialog(QDialog):
         good = np.isfinite(profile)
         if good.any():
             ax.plot(q_centers[good], profile[good], color="#88bbee", lw=1.0)
-        scale_lbl = "log|FFT|" if self._scale_mode == "log" else "|FFT|"
+        scale_lbl = "log₁₀|FFT|" if self._scale_mode == "log" else "|FFT|"
         ax.set_xlabel("q  (nm⁻¹)", fontsize=8, color=fg)
         ax.set_ylabel(f"⟨{scale_lbl}⟩", fontsize=8, color=fg)
         ax.tick_params(colors=fg, labelsize=7, length=3)

@@ -264,7 +264,7 @@ class PeriodicFilterDialog(FFTViewerDialog):
         elif event.inaxes is self._radial_ax and event.xdata is not None:
             q = event.xdata
             val = event.ydata
-            scale_lbl = "log|FFT|" if self._scale_mode == "log" else "|FFT|"
+            scale_lbl = "log₁₀|FFT|" if self._scale_mode == "log" else "|FFT|"
             if q > 0:
                 d_nm = 1.0 / q
                 d_str = f"{d_nm:.2f} nm" if d_nm >= 1.0 else f"{d_nm * 10:.2f} Å"
