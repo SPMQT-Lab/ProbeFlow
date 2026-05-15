@@ -2355,6 +2355,7 @@ class ImageViewerDialog(QDialog):
             peaks=self._processing.get("periodic_notches", []),
             radius_px=float(self._processing.get("periodic_notch_radius", 3.0)),
             scan_range_m=self._scan_range_m,
+            colormap=self._colormap,
             theme=self._t,
             parent=self,
         )
