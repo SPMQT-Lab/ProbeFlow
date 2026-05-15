@@ -27,14 +27,17 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QGroupBox,
-    QHBoxLayout, QLabel, QPushButton, QSpinBox, QVBoxLayout, QWidget,
-    QGraphicsObject,
+    QHBoxLayout, QLabel, QPushButton, QSpinBox, QTabWidget, QVBoxLayout,
+    QWidget, QGraphicsObject,
 )
 
 from probeflow.analysis.lattice_grid import (
     LatticeGrid, LatticeKind, RealSpaceCalibration, ReciprocalCalibration,
     format_real_space_measurements, format_reciprocal_measurements,
     LatticeGridDisplay,
+)
+from probeflow.analysis.lattice_distortion import (
+    IdealLattice, MeasuredLattice, LatticeCorrection, compute_correction,
 )
 
 # ── colours ───────────────────────────────────────────────────────────────────
@@ -281,6 +284,7 @@ class LatticeGridController(QObject):
         self._panel: Optional["LatticeGridPanel"] = None
         self._active: bool = False
         self._locked: bool = True
+        self._ab_equal: bool = False
         self._dragging: bool = False
         self._drag_handle: int = _HANDLE_NONE
         self._drag_start_scene: Optional[QPointF] = None
@@ -305,6 +309,9 @@ class LatticeGridController(QObject):
 
     def set_locked(self, locked: bool) -> None:
         self._locked = locked
+
+    def set_ab_equal(self, equal: bool) -> None:
+        self._ab_equal = equal
 
     # ── screen-space hit testing ───────────────────────────────────────────────
 
@@ -413,6 +420,14 @@ class LatticeGridController(QObject):
         else:
             return
 
+        # Enforce |b| = |a| if a=b constraint is active
+        if self._ab_equal:
+            la = new_grid.a_length_px()
+            lb = new_grid.b_length_px()
+            if la > 1e-9 and lb > 1e-9 and abs(la - lb) > 1e-9:
+                bx, by = new_grid.b_px
+                new_grid = replace(new_grid, b_px=(bx * la / lb, by * la / lb))
+
         self._item.set_grid(new_grid)
         if self._panel is not None:
             self._panel.sync_from_model()
@@ -466,7 +481,44 @@ class LatticeGridPanel(QWidget):
     # ── layout ────────────────────────────────────────────────────────────────
 
     def _build(self) -> None:
-        lay = QVBoxLayout(self)
+        outer_lay = QVBoxLayout(self)
+        outer_lay.setContentsMargins(0, 0, 0, 0)
+        outer_lay.setSpacing(0)
+
+        self._tabs = QTabWidget()
+        self._tabs.setFont(QFont("Helvetica", 9))
+        outer_lay.addWidget(self._tabs)
+
+        # ── helpers ───────────────────────────────────────────────────────────
+
+        def _make_spin_row(target_lay: QVBoxLayout):
+            def _spin_row(
+                label: str, lo: float, hi: float,
+                step: float, decimals: int, suffix: str = "",
+            ) -> QDoubleSpinBox:
+                row = QHBoxLayout()
+                lbl = QLabel(label)
+                lbl.setFont(QFont("Helvetica", 9))
+                lbl.setMinimumWidth(68)
+                spin = QDoubleSpinBox()
+                spin.setRange(lo, hi)
+                spin.setSingleStep(step)
+                spin.setDecimals(decimals)
+                if suffix:
+                    spin.setSuffix(f" {suffix}")
+                spin.setFont(QFont("Helvetica", 9))
+                spin.setFixedHeight(22)
+                row.addWidget(lbl)
+                row.addWidget(spin, 1)
+                target_lay.addLayout(row)
+                return spin
+            return _spin_row
+
+        # ════════════════════════════════════════════════════════════════════
+        # Grid tab
+        # ════════════════════════════════════════════════════════════════════
+        grid_tab = QWidget()
+        lay = QVBoxLayout(grid_tab)
         lay.setContentsMargins(6, 6, 6, 6)
         lay.setSpacing(4)
 
@@ -476,10 +528,9 @@ class LatticeGridPanel(QWidget):
         self._edit_cb.setChecked(True)
         self._edit_cb.toggled.connect(self._on_active_toggled)
         lay.addWidget(self._edit_cb)
-        # Activate immediately
         self._ctrl.set_active(True)
 
-        # ── lattice type ──────────────────────────────────────────────────────
+        # ── lattice type + constraints ────────────────────────────────────────
         type_row = QHBoxLayout()
         type_row.addWidget(QLabel("Type:"))
         self._type_combo = QComboBox()
@@ -495,31 +546,19 @@ class LatticeGridPanel(QWidget):
         self._lock_cb.toggled.connect(self._on_locked_changed)
         lay.addWidget(self._lock_cb)
 
+        self._ab_equal_cb = QCheckBox("a = b  (equal vector lengths)")
+        self._ab_equal_cb.setFont(QFont("Helvetica", 9))
+        self._ab_equal_cb.setChecked(False)
+        self._ab_equal_cb.toggled.connect(self._on_ab_equal_changed)
+        lay.addWidget(self._ab_equal_cb)
+
         # ── parameters group ──────────────────────────────────────────────────
         params_grp = QGroupBox("Parameters")
         params_grp.setFont(QFont("Helvetica", 9))
         params_lay = QVBoxLayout(params_grp)
         params_lay.setSpacing(3)
         params_lay.setContentsMargins(6, 6, 6, 4)
-
-        def _spin_row(label: str, lo: float, hi: float,
-                      step: float, decimals: int, suffix: str = "") -> QDoubleSpinBox:
-            row = QHBoxLayout()
-            lbl = QLabel(label)
-            lbl.setFont(QFont("Helvetica", 9))
-            lbl.setMinimumWidth(68)
-            spin = QDoubleSpinBox()
-            spin.setRange(lo, hi)
-            spin.setSingleStep(step)
-            spin.setDecimals(decimals)
-            if suffix:
-                spin.setSuffix(f" {suffix}")
-            spin.setFont(QFont("Helvetica", 9))
-            spin.setFixedHeight(22)
-            row.addWidget(lbl)
-            row.addWidget(spin, 1)
-            params_lay.addLayout(row)
-            return spin
+        _spin_row = _make_spin_row(params_lay)
 
         self._ox_spin = _spin_row("Origin x:", 0.0, float(self._image_w), 0.5, 1, "px")
         self._oy_spin = _spin_row("Origin y:", 0.0, float(self._image_h), 0.5, 1, "px")
@@ -535,9 +574,8 @@ class LatticeGridPanel(QWidget):
         self._rot_spin = _spin_row("Rotation:", -180.0, 180.0, 0.1, 1, "°")
 
         self._angle_ab_spin = _spin_row("Angle a-b:", 1.0, 179.0, 0.1, 2, "°")
-        self._angle_ab_spin.setEnabled(False)  # only enabled in tunable mode
+        self._angle_ab_spin.setEnabled(False)
 
-        # Cells spinbox (integer)
         cells_row = QHBoxLayout()
         cells_lbl = QLabel("Cells ±:")
         cells_lbl.setFont(QFont("Helvetica", 9))
@@ -556,7 +594,6 @@ class LatticeGridPanel(QWidget):
 
         lay.addWidget(params_grp)
 
-        # Connect spinboxes after building (to avoid early triggers)
         self._ox_spin.valueChanged.connect(self._on_origin_changed)
         self._oy_spin.valueChanged.connect(self._on_origin_changed)
         self._a_spin.valueChanged.connect(self._on_a_length_changed)
@@ -584,14 +621,12 @@ class LatticeGridPanel(QWidget):
 
         lay.addWidget(disp_grp)
 
-        # ── actions ───────────────────────────────────────────────────────────
         reset_btn = QPushButton("Reset origin to centre")
         reset_btn.setFont(QFont("Helvetica", 9))
         reset_btn.setFixedHeight(24)
         reset_btn.clicked.connect(self._on_reset_origin)
         lay.addWidget(reset_btn)
 
-        # ── measured values ───────────────────────────────────────────────────
         meas_grp = QGroupBox("Measured")
         meas_grp.setFont(QFont("Helvetica", 9))
         meas_lay = QVBoxLayout(meas_grp)
@@ -604,7 +639,6 @@ class LatticeGridPanel(QWidget):
         meas_lay.addWidget(self._meas_lbl)
         lay.addWidget(meas_grp)
 
-        # ── export ────────────────────────────────────────────────────────────
         lay.addStretch(1)
         exp_row = QHBoxLayout()
         exp_with_btn = QPushButton("Export with grid…")
@@ -618,6 +652,74 @@ class LatticeGridPanel(QWidget):
         exp_row.addWidget(exp_with_btn)
         exp_row.addWidget(exp_grid_btn)
         lay.addLayout(exp_row)
+
+        self._tabs.addTab(grid_tab, "Grid")
+
+        # ════════════════════════════════════════════════════════════════════
+        # Distortion tab
+        # ════════════════════════════════════════════════════════════════════
+        dist_tab = QWidget()
+        dist_lay = QVBoxLayout(dist_tab)
+        dist_lay.setContentsMargins(6, 6, 6, 6)
+        dist_lay.setSpacing(4)
+
+        # ── ideal lattice group ───────────────────────────────────────────────
+        ideal_grp = QGroupBox("Ideal lattice")
+        ideal_grp.setFont(QFont("Helvetica", 9))
+        ideal_lay = QVBoxLayout(ideal_grp)
+        ideal_lay.setSpacing(3)
+        ideal_lay.setContentsMargins(6, 6, 6, 4)
+        _ideal_spin = _make_spin_row(ideal_lay)
+
+        self._ideal_a_spin = _ideal_spin(
+            f"|a| ({self._unit_label}):", 0.001, a_max * 2, 0.01, 3, self._unit_label,
+        )
+        self._ideal_b_spin = _ideal_spin(
+            f"|b| ({self._unit_label}):", 0.001, a_max * 2, 0.01, 3, self._unit_label,
+        )
+        self._ideal_ab_cb = QCheckBox("ideal a = b")
+        self._ideal_ab_cb.setFont(QFont("Helvetica", 9))
+        self._ideal_ab_cb.setChecked(False)
+        ideal_lay.addWidget(self._ideal_ab_cb)
+
+        self._ideal_angle_spin = _ideal_spin("Angle:", 1.0, 179.0, 0.1, 2, "°")
+        self._ideal_angle_spin.setValue(90.0)
+
+        dist_lay.addWidget(ideal_grp)
+
+        self._ideal_a_spin.valueChanged.connect(self._on_ideal_a_changed)
+        self._ideal_b_spin.valueChanged.connect(self._on_ideal_b_changed)
+        self._ideal_ab_cb.toggled.connect(self._on_ideal_ab_changed)
+        self._ideal_angle_spin.valueChanged.connect(self._on_ideal_angle_changed)
+
+        # ── correction display ────────────────────────────────────────────────
+        corr_grp = QGroupBox("Measured → ideal correction")
+        corr_grp.setFont(QFont("Helvetica", 9))
+        corr_lay = QVBoxLayout(corr_grp)
+        corr_lay.setContentsMargins(6, 6, 6, 4)
+        self._correction_lbl = QLabel("(enter ideal lattice above)")
+        self._correction_lbl.setFont(QFont("Courier", 8))
+        self._correction_lbl.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        self._correction_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self._correction_lbl.setWordWrap(True)
+        corr_lay.addWidget(self._correction_lbl)
+        dist_lay.addWidget(corr_grp)
+
+        dist_lay.addStretch(1)
+
+        # ── stage 2 placeholders ──────────────────────────────────────────────
+        preview_btn = QPushButton("Preview correction…")
+        preview_btn.setFont(QFont("Helvetica", 9))
+        preview_btn.setFixedHeight(24)
+        preview_btn.setEnabled(False)
+        apply_btn = QPushButton("Apply correction…")
+        apply_btn.setFont(QFont("Helvetica", 9))
+        apply_btn.setFixedHeight(24)
+        apply_btn.setEnabled(False)
+        dist_lay.addWidget(preview_btn)
+        dist_lay.addWidget(apply_btn)
+
+        self._tabs.addTab(dist_tab, "Distortion")
 
     # ── model↔UI sync ─────────────────────────────────────────────────────────
 
@@ -659,6 +761,7 @@ class LatticeGridPanel(QWidget):
             self._updating_controls = False
 
         self._refresh_measurement_label()
+        self._refresh_correction_label()
 
     def _refresh_measurement_label(self) -> None:
         grid = self._item.grid()
@@ -690,28 +793,33 @@ class LatticeGridPanel(QWidget):
             return
         grid = self._item.grid()
         new_a_m = value * self._unit_scale
-        # Direction-aware px conversion
         old_a_m = self._cal.vector_length_m(grid.a_px)
         old_a_px = grid.a_length_px()
         if old_a_m < 1e-25 or old_a_px < 1e-9:
             return
         new_a_px = new_a_m * old_a_px / old_a_m
         new_grid = grid.set_a_length_px(new_a_px)
+        # If a=b is active, also force b to same pixel length (preserve b direction)
+        if self._ab_equal_cb.isChecked():
+            lb = new_grid.b_length_px()
+            if lb > 1e-9:
+                bx, by = new_grid.b_px
+                new_grid = replace(new_grid, b_px=(bx * new_a_px / lb, by * new_a_px / lb))
         self._item.set_grid(new_grid)
         self._updating_controls = True
         try:
-            if grid.kind != "rectangular":
-                b_m = self._cal.vector_length_m(new_grid.b_px)
-                self._b_spin.setValue(b_m / self._unit_scale)
+            b_m = self._cal.vector_length_m(new_grid.b_px)
+            self._b_spin.setValue(b_m / self._unit_scale)
         finally:
             self._updating_controls = False
         self._refresh_measurement_label()
+        self._refresh_correction_label()
 
     def _on_b_length_changed(self, value: float) -> None:
         if self._updating_controls:
             return
         grid = self._item.grid()
-        if grid.kind != "rectangular":
+        if grid.kind != "rectangular" and not self._ab_equal_cb.isChecked():
             return
         new_b_m = value * self._unit_scale
         old_b_m = self._cal.vector_length_m(grid.b_px)
@@ -719,9 +827,18 @@ class LatticeGridPanel(QWidget):
         if old_b_m < 1e-25 or old_b_px < 1e-9:
             return
         new_b_px = new_b_m * old_b_px / old_b_m
-        new_grid = grid.set_b_length_px(new_b_px)
+        # Raw rescale: preserve b direction
+        bx, by = grid.b_px
+        new_grid = replace(grid, b_px=(bx * new_b_px / old_b_px, by * new_b_px / old_b_px))
+        # If a=b, also force a to same length
+        if self._ab_equal_cb.isChecked():
+            la = new_grid.a_length_px()
+            if la > 1e-9:
+                ax, ay = new_grid.a_px
+                new_grid = replace(new_grid, a_px=(ax * new_b_px / la, ay * new_b_px / la))
         self._item.set_grid(new_grid)
         self._refresh_measurement_label()
+        self._refresh_correction_label()
 
     def _on_rotation_changed(self, value: float) -> None:
         if self._updating_controls:
@@ -762,6 +879,114 @@ class LatticeGridPanel(QWidget):
         if self._updating_controls:
             return
         self._item.set_line_width(value)
+
+    def _on_ab_equal_changed(self, checked: bool) -> None:
+        self._ctrl.set_ab_equal(checked)
+        if checked:
+            # Immediately force |b| = |a|
+            g = self._item.grid()
+            la = g.a_length_px()
+            lb = g.b_length_px()
+            if la > 1e-9 and lb > 1e-9 and abs(la - lb) > 1e-9:
+                bx, by = g.b_px
+                self._item.set_grid(replace(g, b_px=(bx * la / lb, by * la / lb)))
+        self.sync_from_model()
+
+    def _on_ideal_a_changed(self, value: float) -> None:
+        if self._updating_controls:
+            return
+        if self._ideal_ab_cb.isChecked():
+            self._updating_controls = True
+            try:
+                self._ideal_b_spin.setValue(value)
+            finally:
+                self._updating_controls = False
+        self._refresh_correction_label()
+
+    def _on_ideal_b_changed(self, value: float) -> None:
+        if self._updating_controls:
+            return
+        if self._ideal_ab_cb.isChecked():
+            self._updating_controls = True
+            try:
+                self._ideal_a_spin.setValue(value)
+            finally:
+                self._updating_controls = False
+        self._refresh_correction_label()
+
+    def _on_ideal_ab_changed(self, checked: bool) -> None:
+        if checked:
+            self._updating_controls = True
+            try:
+                self._ideal_b_spin.setValue(self._ideal_a_spin.value())
+            finally:
+                self._updating_controls = False
+        self._refresh_correction_label()
+
+    def _on_ideal_angle_changed(self, _value: float) -> None:
+        self._refresh_correction_label()
+
+    def _refresh_correction_label(self) -> None:
+        """Compute and display the measured-vs-ideal affine correction."""
+        grid = self._item.grid()
+        try:
+            ideal_a_m = self._ideal_a_spin.value() * self._unit_scale
+            ideal_b_m = self._ideal_b_spin.value() * self._unit_scale
+            ideal_angle = self._ideal_angle_spin.value()
+
+            if ideal_a_m < 1e-25 or ideal_b_m < 1e-25:
+                self._correction_lbl.setText("(enter ideal lattice above)")
+                return
+
+            # Physical measured vectors in nm
+            px_nm_x = self._cal.px_size_x * 1e9
+            px_nm_y = self._cal.px_size_y * 1e9
+            ax_px, ay_px = grid.a_px
+            bx_px, by_px = grid.b_px
+            m_a_nm = (ax_px * px_nm_x, ay_px * px_nm_y)
+            m_b_nm = (bx_px * px_nm_x, by_px * px_nm_y)
+
+            measured = MeasuredLattice(a_nm=m_a_nm, b_nm=m_b_nm)
+            ideal = IdealLattice(
+                a_nm=ideal_a_m * 1e9,
+                b_nm=ideal_b_m * 1e9,
+                angle_deg=ideal_angle,
+            )
+            result = compute_correction(measured, ideal)
+
+            if isinstance(result, str):
+                self._correction_lbl.setText(f"Warning: {result}")
+                return
+
+            m_la = math.hypot(*m_a_nm)
+            m_lb = math.hypot(*m_b_nm)
+            m_angle = grid.angle_deg()
+            unit = self._unit_label
+            s = self._unit_scale * 1e9   # m → display unit (a_m is in m, *1e9 → nm, /unit_scale → display)
+
+            lines = [
+                "Measured",
+                f"  |a| = {m_la / s:.4g} {unit}",
+                f"  |b| = {m_lb / s:.4g} {unit}",
+                f"  angle = {m_angle:.2f}°",
+                "",
+                "Ideal",
+                f"  |a| = {ideal_a_m / self._unit_scale:.4g} {unit}",
+                f"  |b| = {ideal_b_m / self._unit_scale:.4g} {unit}",
+                f"  angle = {ideal_angle:.2f}°",
+                "",
+                "Linear correction",
+                f"  x scale = {result.x_scale:.5f}",
+                f"  y/x    = {result.y_over_x:.5f}",
+                f"  shear  = {result.shear:.5f}",
+                f"  rot    = {result.rotation_deg:.3f}°",
+                "  matrix =",
+                f"  [{result.matrix[0,0]:+.5f}  {result.matrix[0,1]:+.5f}]",
+                f"  [{result.matrix[1,0]:+.5f}  {result.matrix[1,1]:+.5f}]",
+            ]
+            self._correction_lbl.setText("\n".join(lines))
+        except Exception as exc:
+            self._correction_lbl.setText(f"(error: {exc})")
 
     def _on_type_changed(self, idx: int) -> None:
         if self._updating_controls:
