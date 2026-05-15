@@ -39,6 +39,7 @@ _SUPPORTED_OPS: frozenset[str] = frozenset({
     "fft_soft_border",
     "periodic_notch_filter",
     "linear_undistort",
+    "affine_lattice_correction",
     "set_zero_point",
     "set_zero_plane",
     "roi",
@@ -565,6 +566,16 @@ def apply_processing_state(
                 a,
                 shear_x=float(p.get("shear_x", 0.0)),
                 scale_y=float(p.get("scale_y", 1.0)),
+            )
+        elif step.op == "affine_lattice_correction":
+            matrix = np.asarray(p["matrix"], dtype=np.float64)
+            a = _proc.affine_lattice_correction(
+                a,
+                matrix,
+                expand_canvas=bool(p.get("expand_canvas", True)),
+                interpolation=str(p.get("interpolation", "bilinear")),
+                fill_mode=str(p.get("fill_mode", "nan")),
+                fill_value=float(p["fill_value"]) if p.get("fill_value") is not None else None,
             )
         elif step.op == "set_zero_point":
             a = _proc.set_zero_point(

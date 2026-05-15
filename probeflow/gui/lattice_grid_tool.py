@@ -464,6 +464,8 @@ class LatticeGridPanel(QWidget):
         image_w: int,
         image_h: int,
         parent=None,
+        get_image_fn=None,
+        apply_correction_fn=None,
     ):
         super().__init__(parent)
         self._item = item
@@ -471,6 +473,9 @@ class LatticeGridPanel(QWidget):
         self._cal = calibration
         self._image_w = image_w
         self._image_h = image_h
+        self._get_image_fn = get_image_fn
+        self._apply_correction_fn = apply_correction_fn
+        self._correction: Optional[LatticeCorrection] = None
 
         self._unit_scale, self._unit_label = _choose_display_unit(calibration)
         self._updating_controls = False
@@ -707,17 +712,57 @@ class LatticeGridPanel(QWidget):
 
         dist_lay.addStretch(1)
 
-        # ── stage 2 placeholders ──────────────────────────────────────────────
-        preview_btn = QPushButton("Preview correction…")
-        preview_btn.setFont(QFont("Helvetica", 9))
-        preview_btn.setFixedHeight(24)
-        preview_btn.setEnabled(False)
-        apply_btn = QPushButton("Apply correction…")
-        apply_btn.setFont(QFont("Helvetica", 9))
-        apply_btn.setFixedHeight(24)
-        apply_btn.setEnabled(False)
-        dist_lay.addWidget(preview_btn)
-        dist_lay.addWidget(apply_btn)
+        # ── correction options ────────────────────────────────────────────────
+        opts_grp = QGroupBox("Correction options")
+        opts_grp.setFont(QFont("Helvetica", 9))
+        opts_lay = QVBoxLayout(opts_grp)
+        opts_lay.setSpacing(3)
+        opts_lay.setContentsMargins(6, 6, 6, 4)
+
+        interp_row = QHBoxLayout()
+        interp_lbl = QLabel("Interpolation:")
+        interp_lbl.setFont(QFont("Helvetica", 9))
+        interp_lbl.setMinimumWidth(85)
+        self._interp_combo = QComboBox()
+        self._interp_combo.setFont(QFont("Helvetica", 9))
+        self._interp_combo.setFixedHeight(22)
+        self._interp_combo.addItems(["Bilinear", "Nearest", "Bicubic"])
+        interp_row.addWidget(interp_lbl)
+        interp_row.addWidget(self._interp_combo, 1)
+        opts_lay.addLayout(interp_row)
+
+        fill_row = QHBoxLayout()
+        fill_lbl = QLabel("Fill:")
+        fill_lbl.setFont(QFont("Helvetica", 9))
+        fill_lbl.setMinimumWidth(85)
+        self._fill_combo = QComboBox()
+        self._fill_combo.setFont(QFont("Helvetica", 9))
+        self._fill_combo.setFixedHeight(22)
+        self._fill_combo.addItems(["NaN", "Background", "Zero"])
+        fill_row.addWidget(fill_lbl)
+        fill_row.addWidget(self._fill_combo, 1)
+        opts_lay.addLayout(fill_row)
+
+        self._expand_cb = QCheckBox("Expand canvas to fit corrected image")
+        self._expand_cb.setFont(QFont("Helvetica", 9))
+        self._expand_cb.setChecked(True)
+        opts_lay.addWidget(self._expand_cb)
+
+        dist_lay.addWidget(opts_grp)
+
+        # ── apply buttons ─────────────────────────────────────────────────────
+        self._preview_btn = QPushButton("Preview correction…")
+        self._preview_btn.setFont(QFont("Helvetica", 9))
+        self._preview_btn.setFixedHeight(24)
+        self._preview_btn.setEnabled(False)
+        self._preview_btn.clicked.connect(self._on_preview)
+        self._apply_btn = QPushButton("Apply correction")
+        self._apply_btn.setFont(QFont("Helvetica", 9))
+        self._apply_btn.setFixedHeight(24)
+        self._apply_btn.setEnabled(False)
+        self._apply_btn.clicked.connect(self._on_apply)
+        dist_lay.addWidget(self._preview_btn)
+        dist_lay.addWidget(self._apply_btn)
 
         self._tabs.addTab(dist_tab, "Distortion")
 
@@ -935,6 +980,9 @@ class LatticeGridPanel(QWidget):
             ideal_angle = self._ideal_angle_spin.value()
 
             if ideal_a_m < 1e-25 or ideal_b_m < 1e-25:
+                self._correction = None
+                self._preview_btn.setEnabled(False)
+                self._apply_btn.setEnabled(False)
                 self._correction_lbl.setText("(enter ideal lattice above)")
                 return
 
@@ -955,8 +1003,16 @@ class LatticeGridPanel(QWidget):
             result = compute_correction(measured, ideal)
 
             if isinstance(result, str):
+                self._correction = None
+                self._preview_btn.setEnabled(False)
+                self._apply_btn.setEnabled(False)
                 self._correction_lbl.setText(f"Warning: {result}")
                 return
+
+            self._correction = result
+            can_act = self._get_image_fn is not None
+            self._preview_btn.setEnabled(can_act)
+            self._apply_btn.setEnabled(self._apply_correction_fn is not None)
 
             m_la = math.hypot(*m_a_nm)
             m_lb = math.hypot(*m_b_nm)
@@ -986,7 +1042,106 @@ class LatticeGridPanel(QWidget):
             ]
             self._correction_lbl.setText("\n".join(lines))
         except Exception as exc:
+            self._correction = None
+            self._preview_btn.setEnabled(False)
+            self._apply_btn.setEnabled(False)
             self._correction_lbl.setText(f"(error: {exc})")
+
+    # ── correction action helpers ─────────────────────────────────────────────
+
+    def _correction_matrix_px(self) -> Optional[np.ndarray]:
+        """Return the pixel-space correction matrix, or None if unavailable."""
+        if self._correction is None:
+            return None
+        T_nm = self._correction.matrix
+        px_nm_x = self._cal.px_size_x * 1e9
+        px_nm_y = self._cal.px_size_y * 1e9
+        if px_nm_x <= 0 or px_nm_y <= 0:
+            return None
+        S = np.diag([1.0 / px_nm_x, 1.0 / px_nm_y])
+        S_inv = np.diag([px_nm_x, px_nm_y])
+        return S @ T_nm @ S_inv
+
+    def _correction_options(self) -> dict:
+        interp_map = {"Bilinear": "bilinear", "Nearest": "nearest", "Bicubic": "bicubic"}
+        fill_map = {"NaN": "nan", "Background": "background", "Zero": "zero"}
+        return {
+            "interpolation": interp_map.get(self._interp_combo.currentText(), "bilinear"),
+            "fill_mode": fill_map.get(self._fill_combo.currentText(), "nan"),
+            "expand_canvas": self._expand_cb.isChecked(),
+        }
+
+    def _on_preview(self) -> None:
+        if self._get_image_fn is None or self._correction is None:
+            return
+        T_px = self._correction_matrix_px()
+        if T_px is None:
+            return
+        arr = self._get_image_fn()
+        if arr is None:
+            return
+        from probeflow.processing.image import affine_lattice_correction
+        try:
+            opts = self._correction_options()
+            corrected = affine_lattice_correction(
+                arr,
+                T_px,
+                expand_canvas=opts["expand_canvas"],
+                interpolation=opts["interpolation"],
+                fill_mode=opts["fill_mode"],
+            )
+        except Exception as exc:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "Preview failed", str(exc))
+            return
+
+        import matplotlib
+        matplotlib.use("QtAgg")
+        import matplotlib.pyplot as plt
+        from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+        from PySide6.QtWidgets import QDialog, QVBoxLayout as _VBox
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Lattice correction preview")
+        dlg.resize(600, 600)
+        fig, axes = plt.subplots(1, 2, figsize=(10, 5))
+        axes[0].set_title("Before")
+        axes[0].imshow(arr, origin="upper", cmap="gray",
+                       vmin=float(np.nanpercentile(arr, 2)),
+                       vmax=float(np.nanpercentile(arr, 98)))
+        axes[0].axis("off")
+        axes[1].set_title("After (preview)")
+        axes[1].imshow(corrected, origin="upper", cmap="gray",
+                       vmin=float(np.nanpercentile(arr, 2)),
+                       vmax=float(np.nanpercentile(arr, 98)))
+        axes[1].axis("off")
+        fig.tight_layout()
+        canvas = FigureCanvasQTAgg(fig)
+        vbox = _VBox(dlg)
+        vbox.addWidget(canvas)
+        dlg.exec()
+        plt.close(fig)
+
+    def _on_apply(self) -> None:
+        if self._apply_correction_fn is None or self._correction is None:
+            return
+        T_px = self._correction_matrix_px()
+        if T_px is None:
+            return
+        opts = self._correction_options()
+        corr = self._correction
+        op_params = {
+            "matrix": T_px.tolist(),
+            "expand_canvas": opts["expand_canvas"],
+            "interpolation": opts["interpolation"],
+            "fill_mode": opts["fill_mode"],
+            "measured_a_nm": list(corr.measured.a_nm),
+            "measured_b_nm": list(corr.measured.b_nm),
+            "ideal_a_nm": corr.ideal.a_nm,
+            "ideal_b_nm": corr.ideal.b_nm,
+            "ideal_angle_deg": corr.ideal.angle_deg,
+        }
+        self._apply_correction_fn("affine_lattice_correction", op_params)
 
     def _on_type_changed(self, idx: int) -> None:
         if self._updating_controls:
@@ -1642,12 +1797,17 @@ def open_real_space_tool(
     scan_range_m: tuple,
     image_shape: tuple,
     parent=None,
+    get_image_fn=None,
+    apply_correction_fn=None,
 ) -> tuple[LatticeGridItem, LatticeGridPanel]:
     """
     Create a lattice grid overlay on an ImageCanvas.
 
     Installs the interaction controller immediately with edit mode active.
     Returns (item, panel); caller adds the panel to the UI (e.g. as a dock).
+
+    get_image_fn: callable() → np.ndarray | None — returns current image array
+    apply_correction_fn: callable(op_name, op_params) — applies a geometric op
     """
     Ny, Nx = image_shape
     cx, cy = Nx / 2.0, Ny / 2.0
@@ -1662,7 +1822,11 @@ def open_real_space_tool(
     controller = LatticeGridController(item, canvas)
     controller.install()
 
-    panel = LatticeGridPanel(item, controller, cal, Nx, Ny, parent=parent)
+    panel = LatticeGridPanel(
+        item, controller, cal, Nx, Ny, parent=parent,
+        get_image_fn=get_image_fn,
+        apply_correction_fn=apply_correction_fn,
+    )
     controller.set_panel(panel)
     item.grid_changed.connect(panel.sync_from_model)
 

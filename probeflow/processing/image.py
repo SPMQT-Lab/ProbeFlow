@@ -2562,7 +2562,136 @@ def linear_undistort(
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# 18.  blend_forward_backward  (ImageJ Blend_Images port)
+# 18.  affine_lattice_correction
+# ═════════════════════════════════════════════════════════════════════════════
+
+def affine_lattice_correction(
+    arr: np.ndarray,
+    matrix: np.ndarray,
+    *,
+    expand_canvas: bool = True,
+    interpolation: str = "bilinear",
+    fill_mode: str = "nan",
+    fill_value: float | None = None,
+) -> np.ndarray:
+    """Apply a 2×2 affine lattice correction to a scan plane.
+
+    ``matrix`` is the forward pixel-space transform: it maps a point in the
+    measured (distorted) image to the corresponding point in the ideal
+    (corrected) image, with both expressed relative to the image centre.
+
+    For a correction computed in physical nm space, convert to pixel space
+    first::
+
+        S = np.diag([1 / px_nm_x, 1 / px_nm_y])
+        T_px = S @ T_nm @ np.linalg.inv(S)
+
+    For square pixels (px_nm_x == px_nm_y) T_px == T_nm, so no conversion
+    is needed.
+
+    Parameters
+    ----------
+    arr : 2-D float ndarray
+    matrix : (2, 2) ndarray
+        Pixel-space forward transform (measured → ideal) around image centre.
+    expand_canvas : bool
+        If True, enlarge the output canvas so no transformed corner is cropped.
+    interpolation : {'nearest', 'bilinear', 'bicubic'}
+        scipy.ndimage order: 0, 1, 3.
+    fill_mode : {'nan', 'background', 'zero'}
+        Fill for regions outside the input image extent.
+    fill_value : float or None
+        Explicit fill for ``fill_mode='background'``; defaults to
+        ``nanmedian(arr)``.
+    """
+    import math as _math
+    from scipy.ndimage import map_coordinates
+
+    if arr.ndim != 2:
+        raise ValueError("affine_lattice_correction expects a 2-D array")
+    matrix = np.asarray(matrix, dtype=np.float64)
+    if matrix.shape != (2, 2):
+        raise ValueError(f"matrix must be shape (2, 2), got {matrix.shape}")
+    cond = np.linalg.cond(matrix)
+    if not np.isfinite(cond) or cond > 1e10:
+        raise ValueError("Correction matrix is singular or near-singular.")
+
+    order_map = {"nearest": 0, "bilinear": 1, "bicubic": 3}
+    if interpolation not in order_map:
+        raise ValueError(
+            f"interpolation must be one of {sorted(order_map)!r}, "
+            f"got {interpolation!r}"
+        )
+    if fill_mode not in {"nan", "background", "zero"}:
+        raise ValueError(
+            f"fill_mode must be 'nan', 'background', or 'zero', got {fill_mode!r}"
+        )
+
+    Ny, Nx = arr.shape
+    a = arr.astype(np.float64, copy=True)
+
+    # Replace NaN/inf with finite mean for interpolation; restore below
+    nan_mask = ~np.isfinite(a)
+    if nan_mask.any():
+        finite_vals = a[~nan_mask]
+        temp_fill = float(finite_vals.mean()) if finite_vals.size else 0.0
+        a[nan_mask] = temp_fill
+
+    T_inv = np.linalg.inv(matrix)
+
+    # Transform origin = image centre
+    cx_in = (Nx - 1) / 2.0
+    cy_in = (Ny - 1) / 2.0
+
+    if expand_canvas:
+        # Forward-transform the 4 input corners to find output bounds.
+        # Corners relative to image centre: (±cx_in, ±cy_in) in (x=col, y=row).
+        hw, hh = cx_in, cy_in
+        corners = np.array([[-hw, -hh], [hw, -hh], [-hw, hh], [hw, hh]])
+        corners_out = (matrix @ corners.T).T  # shape (4, 2): (dx_col, dy_row)
+        c_min = corners_out[:, 0].min()
+        c_max = corners_out[:, 0].max()
+        r_min = corners_out[:, 1].min()
+        r_max = corners_out[:, 1].max()
+        Nx_out = int(_math.ceil(c_max - c_min)) + 1
+        Ny_out = int(_math.ceil(r_max - r_min)) + 1
+        cx_out = -c_min   # column in output image where the origin (input centre) lands
+        cy_out = -r_min
+    else:
+        Nx_out, Ny_out = Nx, Ny
+        cx_out, cy_out = cx_in, cy_in
+
+    # Build output pixel grid and compute source coords via inverse mapping.
+    rows_out, cols_out = np.indices((Ny_out, Nx_out), dtype=np.float64)
+    dc_out = cols_out - cx_out
+    dr_out = rows_out - cy_out
+    coords_out = np.vstack([dc_out.ravel(), dr_out.ravel()])  # (2, N)
+    coords_in_rel = T_inv @ coords_out                         # (2, N)
+    col_src = coords_in_rel[0] + cx_in
+    row_src = coords_in_rel[1] + cy_in
+
+    if fill_mode == "background":
+        cval = fill_value if fill_value is not None else float(np.nanmedian(arr))
+    else:
+        cval = 0.0
+
+    out = map_coordinates(
+        a,
+        np.vstack([row_src, col_src]),
+        order=order_map[interpolation],
+        mode="constant",
+        cval=cval,
+    ).reshape(Ny_out, Nx_out)
+
+    if fill_mode == "nan":
+        oob = (row_src < 0) | (row_src > Ny - 1) | (col_src < 0) | (col_src > Nx - 1)
+        out[oob.reshape(Ny_out, Nx_out)] = np.nan
+
+    return out
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 19.  blend_forward_backward  (ImageJ Blend_Images port)
 # ═════════════════════════════════════════════════════════════════════════════
 
 def blend_forward_backward(

@@ -2354,8 +2354,20 @@ class ImageViewerDialog(QDialog):
         from probeflow.gui.lattice_grid_tool import open_real_space_tool
         scan_range = self._scan_range_m or (float(arr.shape[1]) * 1e-9,
                                             float(arr.shape[0]) * 1e-9)
+
+        def _get_image():
+            return self._display_arr if self._display_arr is not None else self._raw_arr
+
+        def _apply_lattice_correction(op_name: str, op_params: dict) -> None:
+            ops = list(self._processing.get("geometric_ops") or [])
+            ops.append({"op": op_name, "params": op_params})
+            self._processing["geometric_ops"] = ops
+            self._refresh_processing_display()
+
         item, panel = open_real_space_tool(
             self._zoom_lbl, scan_range, arr.shape, parent=self,
+            get_image_fn=_get_image,
+            apply_correction_fn=_apply_lattice_correction,
         )
         self._lattice_grid_item = item
         dock = QDockWidget("Lattice Grid", self._viewer_main)

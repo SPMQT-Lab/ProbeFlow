@@ -234,6 +234,24 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
         if op_name in ("flip_horizontal", "flip_vertical",
                        "rotate_90_cw", "rotate_180", "rotate_270_cw"):
             _append_step(ProcessingStep(op_name, {}))
+        elif op_name == "affine_lattice_correction":
+            import numpy as _np
+            raw_matrix = op_params.get("matrix")
+            if raw_matrix is None:
+                continue
+            try:
+                matrix = _np.asarray(raw_matrix, dtype=float).tolist()
+            except (TypeError, ValueError):
+                continue
+            params: dict = {
+                "matrix": matrix,
+                "expand_canvas": bool(op_params.get("expand_canvas", True)),
+                "interpolation": str(op_params.get("interpolation", "bilinear")),
+                "fill_mode": str(op_params.get("fill_mode", "nan")),
+            }
+            if op_params.get("fill_value") is not None:
+                params["fill_value"] = float(op_params["fill_value"])
+            _append_step(ProcessingStep("affine_lattice_correction", params))
         elif op_name == "rotate_arbitrary":
             _append_step(ProcessingStep("rotate_arbitrary", {
                 "angle_degrees": float(op_params.get("angle_degrees", 0.0)),
