@@ -75,7 +75,10 @@ def test_measure_delta_reports_dx_dy_slope_and_units():
     assert measurement.dy == pytest.approx(4.0)
     assert measurement.slope == pytest.approx(2.0)
     assert measurement.slope_unit == "pA/V"
-    assert "Displayed trace measurement" in format_measurement_summary(measurement)
+    summary = format_measurement_summary(measurement)
+    assert "ΔV" in summary
+    assert "ΔI" in summary
+    assert "slope" in summary
     assert "dx" in measurement_to_tsv(measurement)
 
 

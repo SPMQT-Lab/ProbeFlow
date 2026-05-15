@@ -962,7 +962,8 @@ def test_viewer_adds_line_profile_summary_to_measurement_table(qapp):
 
     result = table.rows[0]
     assert result.kind == "line_profile"
-    assert result.values["height_peak_to_peak"] == pytest.approx(4.0)
+    assert result.values["height_difference"] == pytest.approx(4.0)
+    assert "height_peak_to_peak" not in result.values
     assert result.values["x2"] == pytest.approx(4.0)
     assert result.values["y2"] == pytest.approx(2.0)
     assert result.context["roi_id"] == line.id
@@ -1245,12 +1246,14 @@ def test_line_profile_panel_empty_clears_source_title(qapp):
     panel.set_source_label("Line ROI: line_1 (abc12345)", theme={})
 
     assert panel._ax.get_title() == "Line ROI: line_1 (abc12345)"
-    assert panel._add_measurement_btn.isEnabled()
+    assert panel._add_summary_btn.isEnabled()
+    assert not panel._add_delta_btn.isEnabled()  # no points selected yet
 
     panel.show_empty(theme={})
 
     assert panel._ax.get_title() == ""
-    assert not panel._add_measurement_btn.isEnabled()
+    assert not panel._add_summary_btn.isEnabled()
+    assert not panel._add_delta_btn.isEnabled()
 
 
 def test_viewer_transform_updates_roi_set_coordinates(qapp):

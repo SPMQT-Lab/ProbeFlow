@@ -45,7 +45,7 @@ def test_measurement_export_flattens_values_and_context():
     assert flat["context.data_basis"] == "displayed_trace"
     assert "value.dx" in text
     assert payload["measurements"][0]["values"]["dy"] == 6.4
-    assert measurement_main_value(result) == ("dx", 0.25, "V")
+    assert measurement_main_value(result) == ("dy", 6.4, "pA")
 
 
 def test_spectrum_delta_converts_to_generic_measurement_with_display_context():
@@ -153,6 +153,8 @@ def test_line_profile_measurement_summarizes_profile():
 
     assert result.kind == "line_profile"
     assert result.values["length"] == pytest.approx(2.0)
-    assert result.values["height_peak_to_peak"] == pytest.approx(6.0)
+    assert result.values["height_difference"] == pytest.approx(6.0)
+    assert "height_peak_to_peak" not in result.values
+    assert "height_mean" not in result.values
     assert result.values["x2"] == pytest.approx(2.0)
     assert result.context["roi_id"] == "roi-line"

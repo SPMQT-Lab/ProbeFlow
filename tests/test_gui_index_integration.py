@@ -681,10 +681,16 @@ class TestViewerRenderSizing:
         dlg._zoom_lbl.zoom_by(0.5)
         qapp.processEvents()
 
+        # zoom_by sets mode to "manual"; navigation preserves the manual zoom
         dlg._go_next()
         qapp.processEvents()
+        assert dlg._zoom_lbl.zoom() == pytest.approx(0.5)
 
-        assert dlg._zoom_lbl.zoom() == 1.0
+        # reset_zoom sets mode to "one_to_one"; subsequent navigation resets
+        dlg._zoom_lbl.reset_zoom()
+        dlg._go_prev()
+        qapp.processEvents()
+        assert dlg._zoom_lbl.zoom() == pytest.approx(1.0)
 
         dlg.close()
         dlg.deleteLater()
@@ -1399,7 +1405,9 @@ class TestSpecViewerRawData:
         assert dlg._measurement.dx == pytest.approx(2.0)
         assert dlg._measurement.dy == pytest.approx(2.0)
         assert dlg._measurement.slope == pytest.approx(1.0)
-        assert "Displayed trace measurement" in dlg._measure_lbl.text()
+        lbl = dlg._measure_lbl.text()
+        assert "slope" in lbl
+        assert "=" in lbl
         dlg._copy_measurement()
         assert "trace\tx1\ty1" in qapp.clipboard().text()
         dlg._add_measurement_result()
