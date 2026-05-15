@@ -300,6 +300,21 @@ def save_config(cfg: dict) -> None:
         pass
 
 
+def _format_scan_conditions(entry) -> str:
+    """Return a compact bias/current string for the image viewer header."""
+    parts = []
+    bias_mv = getattr(entry, "bias_mv", None)
+    current_pa = getattr(entry, "current_pa", None)
+    if bias_mv is not None:
+        parts.append(f"{bias_mv / 1000:.4g} V")
+    if current_pa is not None:
+        if abs(current_pa) >= 1000:
+            parts.append(f"{current_pa / 1000:.4g} nA")
+        else:
+            parts.append(f"{current_pa:.4g} pA")
+    return ", ".join(parts)
+
+
 # ── Viewer and browse support lives in extracted GUI modules. ───────────────
 
 class ImageViewerDialog(QDialog):
@@ -380,6 +395,12 @@ class ImageViewerDialog(QDialog):
         self._title_lbl.setFont(QFont("Helvetica", 12, QFont.Bold))
         self._title_lbl.setAlignment(Qt.AlignCenter)
         root.addWidget(self._title_lbl)
+
+        self._conditions_lbl = QLabel()
+        self._conditions_lbl.setFont(QFont("Helvetica", 9))
+        self._conditions_lbl.setAlignment(Qt.AlignCenter)
+        self._conditions_lbl.setStyleSheet("color: palette(mid);")
+        root.addWidget(self._conditions_lbl)
 
         # main splitter: image | right panel
         splitter = QSplitter(Qt.Horizontal)
@@ -1377,6 +1398,7 @@ class ImageViewerDialog(QDialog):
             self._image_measurements.clear_feature_points(silent=True)
         self._title_lbl.setText(entry.stem)
         self.setWindowTitle(entry.stem)
+        self._conditions_lbl.setText(_format_scan_conditions(entry))
         self._pos_lbl.setText(f"{self._idx + 1} / {len(self._entries)}")
         self._prev_btn.setEnabled(self._idx > 0)
         self._next_btn.setEnabled(self._idx < len(self._entries) - 1)

@@ -145,6 +145,7 @@ class ImageCanvas(QGraphicsView):
         self.setFocusPolicy(Qt.StrongFocus)
 
         self._zoom: float = 1.0
+        self._view_scale_mode: str = "one_to_one"
         self._image_pixmap: Optional[QPixmap] = None
         self._image_size: Optional[tuple[int, int]] = None
         self._raw_arr: Optional[np.ndarray] = None
@@ -222,7 +223,11 @@ class ImageCanvas(QGraphicsView):
         self._text_overlay_item.setVisible(False)
 
         if reset_zoom:
-            self._zoom = 1.0
+            if self._view_scale_mode == "fit":
+                self._compute_fit_zoom()
+            elif self._view_scale_mode == "one_to_one":
+                self._zoom = 1.0
+            # "manual": keep current zoom
 
         self._rebuild_marker_items()
         self._rebuild_zero_marker_items()
@@ -242,17 +247,19 @@ class ImageCanvas(QGraphicsView):
         self.pixmap_resized.emit(w)
 
     def zoom_by(self, factor: float) -> None:
+        self._view_scale_mode = "manual"
         self._zoom = max(0.25, min(8.0, self._zoom * factor))
         self._apply_zoom()
 
     def reset_zoom(self) -> None:
+        self._view_scale_mode = "one_to_one"
         self._zoom = 1.0
         self._apply_zoom()
 
     def zoom(self) -> float:
         return self._zoom
 
-    def fit_to_view(self) -> None:
+    def _compute_fit_zoom(self) -> None:
         if self._image_size is None:
             return
         Nx, Ny = self._image_size
@@ -267,11 +274,14 @@ class ImageCanvas(QGraphicsView):
         else:
             avail_w = self.parentWidget().width() if self.parentWidget() else Nx
             avail_h = self.parentWidget().height() if self.parentWidget() else Ny
-
         if Nx <= 0 or Ny <= 0 or avail_w <= 0 or avail_h <= 0:
             return
         zoom = min(avail_w / Nx, avail_h / Ny)
         self._zoom = max(0.25, min(8.0, zoom))
+
+    def fit_to_view(self) -> None:
+        self._view_scale_mode = "fit"
+        self._compute_fit_zoom()
         self._apply_zoom()
 
     # ── compat shims (QLabel interface) ──────────────────────────────────────
