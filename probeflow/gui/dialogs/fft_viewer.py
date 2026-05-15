@@ -59,17 +59,10 @@ class FFTViewerDialog(QDialog):
         self._update_info_panel()
         self._redraw()
 
-    # ── layout ─────────────────────────────────────────────────────────────────
+    # ── layout helpers (shared with subclasses) ────────────────────────────────
 
-    def _build(self):
-        bg = self._theme.get("bg", "#1e1e1e")
-        fg = self._theme.get("fg", "#dddddd")
-
-        lay = QVBoxLayout(self)
-        lay.setSpacing(4)
-        lay.setContentsMargins(6, 6, 6, 4)
-
-        # ── toolbar ───────────────────────────────────────────────────────────
+    def _build_toolbar_row(self) -> QHBoxLayout:
+        """Create toolbar with Scale/LUT/Window/DC controls and zoom/export buttons."""
         tb = QHBoxLayout()
         tb.setSpacing(6)
 
@@ -112,10 +105,10 @@ class FFTViewerDialog(QDialog):
         tb.addStretch(1)
 
         for label, tip, slot in [
-            ("Fit",  "Zoom to fit full FFT extent",    self._zoom_fit),
-            ("Ctr",  "Zoom to centre (quarter range)", self._zoom_centre),
-            ("  +  ", "Zoom in",                       lambda: self._zoom_by(0.5)),
-            ("  −  ", "Zoom out",                      lambda: self._zoom_by(2.0)),
+            ("Fit",   "Zoom to fit full FFT extent",    self._zoom_fit),
+            ("Ctr",   "Zoom to centre (quarter range)", self._zoom_centre),
+            ("  +  ", "Zoom in",                        lambda: self._zoom_by(0.5)),
+            ("  −  ", "Zoom out",                       lambda: self._zoom_by(2.0)),
         ]:
             btn = QPushButton(label)
             btn.setFont(QFont("Helvetica", 9))
@@ -133,42 +126,13 @@ class FFTViewerDialog(QDialog):
         exp_btn.clicked.connect(self._on_export)
         tb.addWidget(exp_btn)
 
-        lay.addLayout(tb)
+        return tb
 
-        # ── body row: left column | right column ──────────────────────────────
-        body_row = QHBoxLayout()
-        body_row.setSpacing(4)
+    def _build_fft_column(self) -> QVBoxLayout:
+        """Create FFT canvas + intensity/radial tab panel; set instance attrs."""
+        bg = self._theme.get("bg", "#1e1e1e")
+        fg = self._theme.get("fg", "#dddddd")
 
-        # ── left column: real-space image + info panel ────────────────────────
-        left_col = QVBoxLayout()
-        left_col.setSpacing(2)
-
-        self._fig_real = Figure(figsize=(4.8, 4.5), dpi=90)
-        self._fig_real.patch.set_facecolor(bg)
-        self._canvas_real = FigureCanvasQTAgg(self._fig_real)
-        self._ax_real = self._fig_real.add_subplot(111)
-        self._ax_real.set_facecolor(bg)
-        for sp in self._ax_real.spines.values():
-            sp.set_color(fg)
-        self._ax_real.tick_params(colors=fg, labelsize=9)
-        self._fig_real.subplots_adjust(left=0.14, right=0.97, top=0.93, bottom=0.14)
-        left_col.addWidget(self._canvas_real, 1)
-
-        info_frame = QFrame()
-        info_frame.setFixedHeight(250)
-        info_lay = QVBoxLayout(info_frame)
-        info_lay.setContentsMargins(8, 6, 8, 4)
-        info_lay.setSpacing(2)
-        self._info_lbl = QLabel("")
-        self._info_lbl.setFont(QFont("Courier", 9))
-        self._info_lbl.setAlignment(Qt.AlignTop | Qt.AlignLeft)
-        info_lay.addWidget(self._info_lbl)
-        info_lay.addStretch(1)
-        left_col.addWidget(info_frame)
-
-        body_row.addLayout(left_col, 1)
-
-        # ── right column: FFT image + tab panel ───────────────────────────────
         right_col = QVBoxLayout()
         right_col.setSpacing(2)
 
@@ -183,7 +147,6 @@ class FFTViewerDialog(QDialog):
         self._fig_fft.subplots_adjust(left=0.14, right=0.97, top=0.93, bottom=0.14)
         right_col.addWidget(self._canvas_fft, 1)
 
-        # tab panel (fixed height, aligned with info_frame)
         self._tab_widget = QTabWidget()
         self._tab_widget.setFixedHeight(250)
         self._tab_widget.setFont(QFont("Helvetica", 9))
@@ -246,8 +209,60 @@ class FFTViewerDialog(QDialog):
         tab_row.addWidget(self._tab_right_spacer)
         right_col.addLayout(tab_row)
 
-        body_row.addLayout(right_col, 1)
+        return right_col
 
+    def _connect_canvas_events(self) -> None:
+        """Wire mpl events for the FFT canvas and radial panel."""
+        self._canvas_fft.mpl_connect("scroll_event",         self._on_scroll)
+        self._canvas_fft.mpl_connect("button_press_event",   self._on_press)
+        self._canvas_fft.mpl_connect("button_release_event", self._on_release)
+        self._canvas_fft.mpl_connect("motion_notify_event",  self._on_motion)
+        self._canvas_fft.mpl_connect("draw_event",           self._sync_tab_width)
+        self._radial_canvas.mpl_connect("motion_notify_event", self._on_motion)
+
+    def _build(self):
+        bg = self._theme.get("bg", "#1e1e1e")
+        fg = self._theme.get("fg", "#dddddd")
+
+        lay = QVBoxLayout(self)
+        lay.setSpacing(4)
+        lay.setContentsMargins(6, 6, 6, 4)
+
+        lay.addLayout(self._build_toolbar_row())
+
+        # ── body row: left column | right column ──────────────────────────────
+        body_row = QHBoxLayout()
+        body_row.setSpacing(4)
+
+        # ── left column: real-space image + info panel ────────────────────────
+        left_col = QVBoxLayout()
+        left_col.setSpacing(2)
+
+        self._fig_real = Figure(figsize=(4.8, 4.5), dpi=90)
+        self._fig_real.patch.set_facecolor(bg)
+        self._canvas_real = FigureCanvasQTAgg(self._fig_real)
+        self._ax_real = self._fig_real.add_subplot(111)
+        self._ax_real.set_facecolor(bg)
+        for sp in self._ax_real.spines.values():
+            sp.set_color(fg)
+        self._ax_real.tick_params(colors=fg, labelsize=9)
+        self._fig_real.subplots_adjust(left=0.14, right=0.97, top=0.93, bottom=0.14)
+        left_col.addWidget(self._canvas_real, 1)
+
+        info_frame = QFrame()
+        info_frame.setFixedHeight(250)
+        info_lay = QVBoxLayout(info_frame)
+        info_lay.setContentsMargins(8, 6, 8, 4)
+        info_lay.setSpacing(2)
+        self._info_lbl = QLabel("")
+        self._info_lbl.setFont(QFont("Courier", 9))
+        self._info_lbl.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        info_lay.addWidget(self._info_lbl)
+        info_lay.addStretch(1)
+        left_col.addWidget(info_frame)
+
+        body_row.addLayout(left_col, 1)
+        body_row.addLayout(self._build_fft_column(), 1)
         lay.addLayout(body_row, 1)
 
         # ── status bar ────────────────────────────────────────────────────────
@@ -257,13 +272,8 @@ class FFTViewerDialog(QDialog):
         lay.addWidget(self._status_lbl)
 
         # ── canvas event connections ──────────────────────────────────────────
-        self._canvas_fft.mpl_connect("scroll_event",         self._on_scroll)
-        self._canvas_fft.mpl_connect("button_press_event",   self._on_press)
-        self._canvas_fft.mpl_connect("button_release_event", self._on_release)
-        self._canvas_fft.mpl_connect("motion_notify_event",  self._on_motion)
-        self._canvas_fft.mpl_connect("draw_event",           self._sync_tab_width)
+        self._connect_canvas_events()
         self._canvas_real.mpl_connect("motion_notify_event", self._on_motion)
-        self._radial_canvas.mpl_connect("motion_notify_event", self._on_motion)
 
     # ── FFT computation ────────────────────────────────────────────────────────
 
@@ -332,9 +342,12 @@ class FFTViewerDialog(QDialog):
     # ── drawing ────────────────────────────────────────────────────────────────
 
     def _redraw(self):
+        self._redraw_real_panel()
+        self._redraw_fft_panel()
+
+    def _redraw_real_panel(self):
         bg = self._theme.get("bg", "#1e1e1e")
         fg = self._theme.get("fg", "#dddddd")
-
         ax = self._ax_real
         ax.cla()
         ax.set_facecolor(bg)
@@ -353,7 +366,11 @@ class FFTViewerDialog(QDialog):
         ax.tick_params(colors=fg, labelsize=8)
         for spine in ax.spines.values():
             spine.set_color(fg)
+        self._canvas_real.draw_idle()
 
+    def _redraw_fft_panel(self):
+        bg = self._theme.get("bg", "#1e1e1e")
+        fg = self._theme.get("fg", "#dddddd")
         ax = self._ax_fft
         ax.cla()
         ax.set_facecolor(bg)
@@ -381,10 +398,8 @@ class FFTViewerDialog(QDialog):
             spine.set_color(fg)
         ax.axhline(0, color=fg, lw=0.4, alpha=0.35)
         ax.axvline(0, color=fg, lw=0.4, alpha=0.35)
-
         self._update_histogram(disp)
         self._update_radial_profile(disp)
-        self._canvas_real.draw_idle()
         self._canvas_fft.draw_idle()
 
     # ── tab-width sync ────────────────────────────────────────────────────────
@@ -483,7 +498,7 @@ class FFTViewerDialog(QDialog):
             self._status_lbl.setText(
                 f"q={q:.3f} nm⁻¹  d={d_str}  ⟨{scale_lbl}⟩={val:.4g}"
             )
-        elif event.inaxes is self._ax_real and event.xdata is not None:
+        elif event.inaxes is getattr(self, "_ax_real", None) and event.xdata is not None:
             self._status_lbl.setText(
                 f"x={event.xdata:.2f} nm  y={event.ydata:.2f} nm"
             )
