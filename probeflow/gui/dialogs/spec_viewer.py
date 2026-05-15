@@ -7,13 +7,13 @@ import numpy as np
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFileDialog,
-    QGridLayout, QGroupBox, QHBoxLayout, QLabel, QPushButton, QScrollArea,
-    QSizePolicy, QSpinBox, QSplitter, QTableWidget, QTableWidgetItem,
-    QVBoxLayout, QWidget,
+    QAbstractSpinBox, QApplication, QCheckBox, QComboBox, QDialog,
+    QDoubleSpinBox, QFileDialog, QGridLayout, QGroupBox, QHBoxLayout, QLabel,
+    QPushButton, QScrollArea, QSizePolicy, QSpinBox, QSplitter, QTableWidget,
+    QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from probeflow.gui.models import VertFile
@@ -108,6 +108,26 @@ def _focus_in_parameter_inputs(focus: QWidget | None, inputs: list[QWidget]) -> 
         if line_edit is not None and focus is line_edit:
             return True
     return False
+
+
+class _NoWheelFilter(QObject):
+    """Ignores wheel events on spinboxes so panel scrolling doesn't change values."""
+
+    def eventFilter(self, obj, event):
+        if isinstance(obj, QAbstractSpinBox) and event.type() == QEvent.Wheel:
+            event.ignore()
+            return True
+        return False
+
+
+_NO_WHEEL_FILTER: _NoWheelFilter | None = None
+
+
+def _no_wheel_filter() -> _NoWheelFilter:
+    global _NO_WHEEL_FILTER
+    if _NO_WHEEL_FILTER is None:
+        _NO_WHEEL_FILTER = _NoWheelFilter()
+    return _NO_WHEEL_FILTER
 
 
 class SpecViewerDialog(QDialog):
@@ -349,6 +369,11 @@ class SpecViewerDialog(QDialog):
             self._plot_mode_cb,
             self._offset_spin,
         ])
+        _filt = _no_wheel_filter()
+        for _w in self._parameter_inputs:
+            if isinstance(_w, QAbstractSpinBox):
+                _w.installEventFilter(_filt)
+                _w.setFocusPolicy(Qt.StrongFocus)
 
         analysis_lay.addWidget(QLabel("File:"), 0, 0)
         analysis_lay.addWidget(self._file_lbl, 0, 1)

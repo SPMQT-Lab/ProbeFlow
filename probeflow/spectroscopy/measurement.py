@@ -173,21 +173,29 @@ def measurement_to_tsv(measurement: SpectrumDeltaMeasurement) -> str:
 
 
 def format_measurement_summary(measurement: SpectrumDeltaMeasurement) -> str:
-    """Return compact displayed-trace measurement text."""
-
+    """Return a compact two-line delta measurement display."""
     p1 = measurement.point1
-    p2 = measurement.point2
-    return (
-        "Displayed trace measurement | "
-        f"Trace: {p1.trace_name} | "
-        f"P1: {p1.x_label}={_fmt_value(p1.x, p1.x_unit)}, "
-        f"{p1.y_label}={_fmt_value(p1.y, p1.y_unit)} | "
-        f"P2: {p2.x_label}={_fmt_value(p2.x, p2.x_unit)}, "
-        f"{p2.y_label}={_fmt_value(p2.y, p2.y_unit)} | "
-        f"Delta x={_fmt_value(measurement.dx, p1.x_unit)}, "
-        f"Delta y={_fmt_value(measurement.dy, p1.y_unit)}, "
-        f"slope={_fmt_value(measurement.slope, measurement.slope_unit)}"
-    )
+    dx_sym = _axis_delta_symbol(p1.x_label)
+    dy_sym = _axis_delta_symbol(p1.y_label)
+    dx_str = f"{dx_sym} = {_fmt_value(measurement.dx, p1.x_unit)}"
+    dy_str = f"{dy_sym} = {_fmt_value(measurement.dy, p1.y_unit)}"
+    slope_str = f"slope = {_fmt_value(measurement.slope, measurement.slope_unit)}"
+    return f"{dx_str}     {dy_str}     {slope_str}"
+
+
+def _axis_delta_symbol(label: str) -> str:
+    """Return a Δ symbol for a spectroscopy axis label."""
+    stripped = label.strip()
+    lower = stripped.lower()
+    if lower in ("bias", "v", "voltage"):
+        return "ΔV"
+    if lower in ("current", "i"):
+        return "ΔI"
+    if "di/dv" in lower:
+        return "Δ(dI/dV)"
+    if stripped and len(stripped) <= 5:
+        return f"Δ{stripped}"
+    return "Δy" if label else "Δx"
 
 
 def _point_from_trace(trace: DisplayedSpectrum, idx: int) -> SpectrumMeasurementPoint:

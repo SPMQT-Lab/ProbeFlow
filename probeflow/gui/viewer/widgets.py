@@ -226,7 +226,8 @@ class LineProfilePanel(QWidget):
     """
 
     export_csv_clicked = Signal()
-    add_measurement_clicked = Signal()
+    add_delta_measurement_clicked = Signal()
+    add_profile_summary_clicked = Signal()
     width_changed      = Signal(int)
 
     # Catppuccin Mocha colours used for measurement markers
@@ -273,6 +274,24 @@ class LineProfilePanel(QWidget):
 
         btn_row = QHBoxLayout()
         btn_row.setContentsMargins(0, 0, 0, 0)
+        self._add_delta_btn = QPushButton("Add Δ measurement")
+        self._add_delta_btn.setFont(QFont("Helvetica", 8))
+        self._add_delta_btn.setFixedHeight(20)
+        self._add_delta_btn.setEnabled(False)
+        self._add_delta_btn.setToolTip(
+            "Save the Δx and Δy between the two selected profile points."
+        )
+        self._add_delta_btn.clicked.connect(self.add_delta_measurement_clicked)
+        btn_row.addWidget(self._add_delta_btn)
+        self._add_summary_btn = QPushButton("Add profile summary")
+        self._add_summary_btn.setFont(QFont("Helvetica", 8))
+        self._add_summary_btn.setFixedHeight(20)
+        self._add_summary_btn.setEnabled(False)
+        self._add_summary_btn.setToolTip(
+            "Add statistics of the whole line profile to the measurements table."
+        )
+        self._add_summary_btn.clicked.connect(self.add_profile_summary_clicked)
+        btn_row.addWidget(self._add_summary_btn)
         btn_row.addStretch()
         self._export_btn = QPushButton("Export CSV…")
         self._export_btn.setFont(QFont("Helvetica", 8))
@@ -281,15 +300,6 @@ class LineProfilePanel(QWidget):
         self._export_btn.setToolTip("Export line profile data as CSV")
         self._export_btn.clicked.connect(self.export_csv_clicked)
         btn_row.addWidget(self._export_btn)
-        self._add_measurement_btn = QPushButton("Add measurement")
-        self._add_measurement_btn.setFont(QFont("Helvetica", 8))
-        self._add_measurement_btn.setFixedHeight(20)
-        self._add_measurement_btn.setEnabled(False)
-        self._add_measurement_btn.setToolTip(
-            "Add a summary of the current displayed line profile to the measurements table."
-        )
-        self._add_measurement_btn.clicked.connect(self.add_measurement_clicked)
-        btn_row.addWidget(self._add_measurement_btn)
         lay.addLayout(btn_row)
 
         self._x_vals = None
@@ -357,7 +367,8 @@ class LineProfilePanel(QWidget):
         self._y_vals = None
         self._source_label = ""
         self._export_btn.setEnabled(False)
-        self._add_measurement_btn.setEnabled(False)
+        self._add_summary_btn.setEnabled(False)
+        self._add_delta_btn.setEnabled(False)
 
     def plot_profile(self, x_vals, values, *, x_label: str = "Distance [nm]",
                      y_label: str, theme: Optional[dict] = None) -> None:
@@ -388,7 +399,8 @@ class LineProfilePanel(QWidget):
         self._y_label = y_label
         self._source_label = ""
         self._export_btn.setEnabled(True)
-        self._add_measurement_btn.setEnabled(True)
+        self._add_summary_btn.setEnabled(True)
+        self._add_delta_btn.setEnabled(False)
 
     def set_source_label(self, source_label: str | None,
                          theme: Optional[dict] = None) -> None:
@@ -450,11 +462,29 @@ class LineProfilePanel(QWidget):
             self._meas_pts.clear()
             self._clear_meas_artists()
             self._meas_label.setVisible(False)
+            self._add_delta_btn.setEnabled(False)
         self._meas_pts.append((event.xdata, event.ydata))
         self._redraw_meas()
         if len(self._meas_pts) == 2:
             self._update_meas_label()
+            self._add_delta_btn.setEnabled(True)
         self._canvas.draw_idle()
+
+    def meas_delta(self) -> dict | None:
+        """Return current two-point delta measurement data, or None if not ready."""
+        if len(self._meas_pts) != 2 or self._x_vals is None:
+            return None
+        (x1, y1), (x2, y2) = self._meas_pts
+        return {
+            "delta_x": abs(x2 - x1),
+            "delta_y": y2 - y1,
+            "p1_distance": x1,
+            "p1_height": y1,
+            "p2_distance": x2,
+            "p2_height": y2,
+            "x_unit": self._extract_unit(self._x_label),
+            "y_unit": self._extract_unit(self._y_label),
+        }
 
     def _clear_meas_artists(self) -> None:
         for a in self._meas_artists:

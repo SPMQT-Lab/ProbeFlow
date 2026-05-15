@@ -190,6 +190,53 @@ def line_profile_measurement(
     )
 
 
+def line_profile_delta_measurement(
+    *,
+    delta_x: float,
+    delta_y: float,
+    p1_distance: float,
+    p1_height: float,
+    p2_distance: float,
+    p2_height: float,
+    measurement_id: str,
+    source_label: str,
+    source_path: str | None = None,
+    channel: str | None = None,
+    x_unit: str | None = None,
+    y_unit: str | None = None,
+    roi_id: str | None = None,
+    roi_name: str | None = None,
+    data_basis: str = "processed_image",
+    notes: str = "",
+) -> MeasurementResult:
+    """Return a measurement record for a two-point line-profile delta."""
+    values: dict[str, Scalar] = {
+        "delta_x": float(delta_x),
+        "delta_y": float(delta_y),
+        "p1_distance": float(p1_distance),
+        "p1_height": float(p1_height),
+        "p2_distance": float(p2_distance),
+        "p2_height": float(p2_height),
+    }
+    context: dict[str, Scalar] = {
+        "data_basis": data_basis,
+        "roi_id": roi_id,
+        "roi_name": roi_name,
+    }
+    return MeasurementResult(
+        measurement_id=measurement_id,
+        kind="line_profile_delta",
+        source_label=source_label,
+        source_path=source_path,
+        channel=channel,
+        x_unit=x_unit,
+        y_unit=y_unit,
+        values=values,
+        context=context,
+        notes=notes,
+    )
+
+
 def _mask_from_roi_or_mask(
     shape: tuple[int, ...],
     *,

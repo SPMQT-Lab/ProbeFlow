@@ -30,6 +30,7 @@ KIND_LABELS: dict[str, str] = {
     "roi_stats": "ROI statistics",
     "step_height": "Step height",
     "line_profile": "Line profile",
+    "line_profile_delta": "Line profile Δ",
     "spectrum_delta": "Spectrum Δ",
 }
 
@@ -44,13 +45,15 @@ VALUE_LABELS: dict[str, str] = {
     "dominant_frequency": "Dominant frequency",
     "dx": "Δx",
     "dy": "Δy",
+    "delta_x": "Δx",
+    "delta_y": "Δy",
 }
 
 
 class MeasurementResultsTable(QWidget):
     """Small table for measured values that can be copied or exported."""
 
-    _HEADERS = ["ID", "Kind", "Source", "Channel", "Main value", "Units", "Notes"]
+    _HEADERS = ["ID", "Kind", "Channel", "Main value", "Units", "Notes"]
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -134,11 +137,10 @@ class MeasurementResultsTable(QWidget):
         row = self._table.rowCount()
         self._table.insertRow(row)
         key, value, unit = measurement_main_value(result)
-        main_value = "" if value is None else f"{VALUE_LABELS.get(key, key)}={_fmt_value(value)}"
+        main_value = "" if value is None else _fmt_value(value)
         values = [
             result.measurement_id,
             KIND_LABELS.get(result.kind, result.kind),
-            result.source_label,
             result.channel or "",
             main_value,
             unit or result.z_unit or result.y_unit or result.x_unit or "",
@@ -203,32 +205,84 @@ class MeasurementResultsTable(QWidget):
 def _format_details(result: MeasurementResult) -> str:
     lines: list[str] = []
     lines.append(f"{result.measurement_id}  —  {KIND_LABELS.get(result.kind, result.kind)}")
+    lines.append("")
+
+    x_unit = result.x_unit or ""
+    y_unit = result.z_unit or result.y_unit or ""
+
+    if result.kind == "line_profile_delta":
+        dy = result.values.get("delta_y")
+        dx = result.values.get("delta_x")
+        if dy is not None:
+            lines.append(f"Main value: Δy = {_fmt_value(dy)} {y_unit}".rstrip())
+        if dx is not None:
+            lines.append(f"Δx = {_fmt_value(dx)} {x_unit}".rstrip())
+        if result.channel:
+            lines.append(f"Channel: {result.channel}")
+        roi_name = result.context.get("roi_name")
+        if roi_name:
+            lines.append(f"Line ROI: {roi_name}")
+        p1d = result.values.get("p1_distance")
+        p1h = result.values.get("p1_height")
+        p2d = result.values.get("p2_distance")
+        p2h = result.values.get("p2_height")
+        if p1d is not None and p2d is not None:
+            lines.append(
+                f"P1: {_fmt_value(p1d)} {x_unit}, {_fmt_value(p1h)} {y_unit}".rstrip()
+            )
+            lines.append(
+                f"P2: {_fmt_value(p2d)} {x_unit}, {_fmt_value(p2h)} {y_unit}".rstrip()
+            )
+    elif result.kind == "spectrum_delta":
+        dy = result.values.get("dy")
+        dx = result.values.get("dx")
+        slope = result.values.get("slope")
+        slope_unit = (
+            f"{y_unit}/{x_unit}".strip("/") if (x_unit or y_unit) else ""
+        )
+        if dy is not None:
+            lines.append(f"Main value: Δy = {_fmt_value(dy)} {y_unit}".rstrip())
+        if dx is not None:
+            lines.append(f"Δx = {_fmt_value(dx)} {x_unit}".rstrip())
+        if slope is not None:
+            lines.append(f"Slope = {_fmt_value(slope)} {slope_unit}".rstrip())
+        if result.channel:
+            lines.append(f"Channel: {result.channel}")
+    else:
+        if result.channel:
+            lines.append(f"Channel: {result.channel}")
+        unit_parts = []
+        if x_unit:
+            unit_parts.append(f"x={x_unit}")
+        if y_unit and y_unit != x_unit:
+            unit_parts.append(f"y={y_unit}")
+        if result.z_unit and result.z_unit not in (x_unit, y_unit):
+            unit_parts.append(f"z={result.z_unit}")
+        if unit_parts:
+            lines.append("Units:  " + "  ".join(unit_parts))
+        if result.values:
+            lines.append("Values:")
+            for k, v in result.values.items():
+                label = VALUE_LABELS.get(k, k)
+                lines.append(f"  {label}: {_fmt_value(v)}")
+
+    if result.notes:
+        lines.append(f"Notes: {result.notes}")
+
+    lines.append("")
+    lines.append("── Technical metadata ──")
     if result.source_label:
         lines.append(f"Source: {result.source_label}")
     if result.source_path and result.source_path != result.source_label:
         lines.append(f"File:   {result.source_path}")
-    if result.channel:
-        lines.append(f"Channel: {result.channel}")
-    unit_parts = []
-    if result.x_unit:
-        unit_parts.append(f"x={result.x_unit}")
-    if result.y_unit and result.y_unit != result.x_unit:
-        unit_parts.append(f"y={result.y_unit}")
-    if result.z_unit:
-        unit_parts.append(f"z={result.z_unit}")
-    if unit_parts:
-        lines.append("Units:  " + "  ".join(unit_parts))
-    if result.values:
-        lines.append("Values:")
-        for k, v in result.values.items():
-            label = VALUE_LABELS.get(k, k)
-            lines.append(f"  {label}: {_fmt_value(v)}")
-    if result.context:
-        ctx_items = [f"{k}={v}" for k, v in result.context.items() if v is not None]
-        if ctx_items:
-            lines.append("Context: " + "  ".join(ctx_items))
-    if result.notes:
-        lines.append(f"Notes: {result.notes}")
+    ctx_tech = {
+        k: v for k, v in result.context.items()
+        if v is not None and k not in ("roi_name",)
+    }
+    if ctx_tech:
+        for k, v in ctx_tech.items():
+            lines.append(f"  {k}: {v}")
+
     return "\n".join(lines)
 
 

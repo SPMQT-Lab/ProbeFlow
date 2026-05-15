@@ -43,10 +43,11 @@ def measurement_main_value(result: MeasurementResult) -> tuple[str, Scalar, str 
     """Return a compact display value for a measurement table row."""
     height_unit = result.z_unit or result.context.get("height_unit")
     preferences = {
-        "spectrum_delta": ("dx", result.x_unit),
+        "spectrum_delta": ("dy", result.y_unit),
         "roi_stats": ("mean_height", height_unit),
         "step_height": ("height_difference", height_unit),
         "line_profile": ("length", result.x_unit),
+        "line_profile_delta": ("delta_y", result.y_unit),
         "feature_maxima": ("n_points", None),
         "point_fft": ("dominant_frequency", result.x_unit),
     }

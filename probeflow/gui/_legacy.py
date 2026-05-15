@@ -884,6 +884,12 @@ class ImageViewerDialog(QDialog):
         self._zoom_lbl.roi_context_menu_requested.connect(self._on_roi_canvas_context_menu)
         self._line_profile_panel.export_csv_clicked.connect(self._on_export_line_profile_csv)
         self._line_profile_panel.width_changed.connect(self._on_line_profile_width_changed)
+        self._line_profile_panel.add_delta_measurement_clicked.connect(
+            self._image_measurements.add_current_line_profile_delta_measurement
+        )
+        self._line_profile_panel.add_profile_summary_clicked.connect(
+            self._image_measurements.add_current_line_profile_measurement
+        )
 
         roi_empty_lbl = QLabel(
             "ROI tools live in the ROI Manager dock. Choose a drawing tool above "

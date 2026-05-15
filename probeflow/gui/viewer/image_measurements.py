@@ -32,6 +32,7 @@ from probeflow.measurements.fft_points import (
     points_to_mask,
 )
 from probeflow.measurements.image import (
+    line_profile_delta_measurement,
     line_profile_measurement,
     roi_statistics,
     step_height_from_rois,
@@ -201,6 +202,41 @@ class ImageMeasurementController:
             )
             return
         self.add_line_profile_measurement_for_roi(roi_id)
+
+    def add_current_line_profile_delta_measurement(self) -> None:
+        panel = getattr(self._viewer, "_line_profile_panel", None)
+        if panel is None:
+            self._set_status("No line profile panel available.")
+            return
+        delta = panel.meas_delta()
+        if delta is None:
+            self._set_status("Select two points on the line profile first.")
+            return
+        roi_id = self._active_line_roi_id()
+        roi = self._roi(roi_id)
+        try:
+            entry, _scale, _unit, channel, source_label = self._source_info()
+        except Exception as exc:
+            self._set_status(f"Could not read source info: {exc}")
+            return
+        result = line_profile_delta_measurement(
+            delta_x=delta["delta_x"],
+            delta_y=delta["delta_y"],
+            p1_distance=delta["p1_distance"],
+            p1_height=delta["p1_height"],
+            p2_distance=delta["p2_distance"],
+            p2_height=delta["p2_height"],
+            measurement_id=self._table.next_measurement_id(),
+            source_label=source_label,
+            source_path=str(entry.path),
+            channel=channel,
+            x_unit=delta["x_unit"] or None,
+            y_unit=delta["y_unit"] or None,
+            roi_id=roi.id if roi else None,
+            roi_name=roi.name if roi else None,
+            notes=f"Line profile Δ{' for ' + roi.name if roi else ''}",
+        )
+        self._record(result)
 
     def add_line_profile_measurement_for_roi(self, roi_id: str) -> None:
         roi = self._roi(roi_id)
