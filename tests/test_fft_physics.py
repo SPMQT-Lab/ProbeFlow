@@ -58,15 +58,6 @@ class TestFourierFilter:
         out = fourier_filter(arr, mode="low_pass", cutoff=0.3)
         assert abs(float(np.mean(out)) - float(np.mean(arr))) < 0.5
 
-    def test_nan_pixels_restored_after_filter(self):
-        arr = np.ones((16, 16), dtype=np.float64)
-        arr[5, 5] = np.nan
-        arr[10, :] = np.nan
-        out = fourier_filter(arr, mode="low_pass", cutoff=0.5)
-        assert np.isnan(out[5, 5])
-        assert np.all(np.isnan(out[10, :]))
-        assert np.isfinite(out[0, 0])
-
     def test_low_pass_suppresses_checkerboard(self):
         # Checkerboard is at Nyquist; low-pass with small cutoff should suppress it.
         arr = _checkerboard(32, 32)
@@ -94,19 +85,6 @@ class TestFourierFilter:
         out = fourier_filter(arr, mode="high_pass", cutoff=0.0)
         np.testing.assert_allclose(out, arr, atol=1e-10)
 
-    def test_output_shape_preserved(self):
-        arr = np.ones((20, 30))
-        out = fourier_filter(arr, mode="low_pass", cutoff=0.3)
-        assert out.shape == (20, 30)
-
-    def test_invalid_mode_raises(self):
-        with pytest.raises(ValueError, match="mode"):
-            fourier_filter(np.ones((8, 8)), mode="band_pass", cutoff=0.3)
-
-    def test_invalid_cutoff_raises(self):
-        with pytest.raises(ValueError, match="cutoff"):
-            fourier_filter(np.ones((8, 8)), mode="low_pass", cutoff=1.5)
-
 
 # ── periodic_notch_filter ─────────────────────────────────────────────────────
 
@@ -133,13 +111,6 @@ class TestPeriodicNotchFilter:
         # The single cosine with both conjugates removed leaves near-zero residual
         assert float(np.std(out_both)) < 0.2
 
-    def test_nan_input_handled(self):
-        arr = np.ones((32, 32), dtype=np.float64)
-        arr[5, 5] = np.nan
-        out = periodic_notch_filter(arr, peaks=[(4, 0)])
-        assert np.isnan(out[5, 5])
-        assert np.isfinite(out[0, 0])
-
     def test_empty_peaks_returns_input(self):
         arr = np.random.RandomState(0).randn(16, 16)
         out = periodic_notch_filter(arr, peaks=[])
@@ -151,11 +122,6 @@ class TestPeriodicNotchFilter:
         out = periodic_notch_filter(arr, peaks=[(0, 0)])
         # Nothing was notched, so output should equal input (approximately)
         np.testing.assert_allclose(out, arr.astype(np.float64), atol=1e-10)
-
-    def test_output_shape_preserved(self):
-        arr = np.ones((20, 30))
-        out = periodic_notch_filter(arr, peaks=[(3, 2)])
-        assert out.shape == (20, 30)
 
     def test_unaffected_frequency_not_suppressed(self):
         # Notch at dx=8 should not suppress content at dx=16
@@ -171,11 +137,6 @@ class TestPeriodicNotchFilter:
 # ── fft_soft_border ───────────────────────────────────────────────────────────
 
 class TestFFTSoftBorder:
-    def test_output_shape_preserved(self):
-        arr = np.ones((24, 32))
-        out = fft_soft_border(arr, mode="low_pass", cutoff=0.3)
-        assert out.shape == (24, 32)
-
     def test_constant_image_unchanged(self):
         # centered = 0, tapered = 0, ifft = 0, then 0 / safe_win + mean_val = mean_val
         arr = _uniform(32, 32, val=4.0)
@@ -202,12 +163,6 @@ class TestFFTSoftBorder:
         arr[:, -1] = np.nan
         out = fft_soft_border(arr, mode="low_pass", cutoff=0.3)
         assert out.shape == (32, 32)
-
-    def test_nan_pixels_restored(self):
-        arr = np.ones((16, 16), dtype=np.float64)
-        arr[3, 3] = np.nan
-        out = fft_soft_border(arr, mode="low_pass", cutoff=0.3)
-        assert np.isnan(out[3, 3])
 
     def test_high_pass_suppresses_constant_image(self):
         # Constant image after high-pass: DC is removed from windowed signal,

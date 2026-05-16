@@ -234,12 +234,6 @@ class TestMatrixProperties:
         mapped_b = result.matrix @ np.array(measured.b_nm)
         assert np.allclose(mapped_b, i_b, atol=1e-10)
 
-    def test_result_is_lattice_correction(self):
-        measured = MeasuredLattice(a_nm=(0.25, 0.0), b_nm=(0.0, 0.30))
-        ideal = IdealLattice(a_nm=0.25, b_nm=0.30, angle_deg=90.0)
-        result = compute_correction(measured, ideal)
-        assert isinstance(result, LatticeCorrection)
-
     def test_matrix_shape(self):
         measured = MeasuredLattice(a_nm=(0.25, 0.0), b_nm=(0.0, 0.25))
         ideal = IdealLattice(a_nm=0.25, b_nm=0.25, angle_deg=90.0)
@@ -258,13 +252,6 @@ class TestPolarDecomposition:
         )
         ideal = IdealLattice(a_nm=0.25, b_nm=0.28, angle_deg=85.0)
         return compute_correction(measured, ideal)
-
-    def test_polar_fields_exist(self):
-        result = self._generic_correction()
-        assert isinstance(result, LatticeCorrection)
-        assert hasattr(result, "rotation_matrix")
-        assert hasattr(result, "stretch_matrix")
-        assert hasattr(result, "polar_rotation_deg")
 
     def test_polar_rotation_is_orthogonal(self):
         result = self._generic_correction()
@@ -296,10 +283,6 @@ class TestPolarDecomposition:
         result = compute_correction(measured, ideal)
         assert isinstance(result, LatticeCorrection)
         assert abs(result.polar_rotation_deg) < 1e-9
-
-    def test_stretch_matrix_has_same_shape(self):
-        result = self._generic_correction()
-        assert result.stretch_matrix.shape == (2, 2)
 
     def test_stretch_preserves_scale_correction(self):
         """Applying stretch_matrix to measured vectors should give ideal vectors

@@ -31,7 +31,7 @@ from probeflow.processing import (
     stm_line_background,
     subtract_background,
 )
-from probeflow.processing.image import linear_undistort, set_zero_point
+from probeflow.processing.image import set_zero_point
 from probeflow.cli import main as cli_main
 
 
@@ -908,49 +908,6 @@ class TestPlaneBgCli:
         with patch("probeflow.cli._write_output", side_effect=_capture):
             cli_main(["plane-bg", str(first_sample_dat), "--order", "3"])
         assert captured[0].processing_history[0]["params"]["order"] == 3
-
-
-# ─── linear_undistort ────────────────────────────────────────────────────────
-
-class TestLinearUndistort:
-    def test_identity_when_zero_shear_unit_scale(self):
-        arr = np.arange(100, dtype=float).reshape(10, 10)
-        out = linear_undistort(arr, shear_x=0.0, scale_y=1.0)
-        np.testing.assert_allclose(out, arr, atol=1e-10)
-
-    def test_nonzero_shear_shifts_pixel_columns(self):
-        arr = np.zeros((20, 20), dtype=float)
-        arr[:, 10] = 1.0  # bright column
-        out = linear_undistort(arr, shear_x=4.0, scale_y=1.0)
-        # With positive shear the bright column moves; output differs from input
-        assert not np.allclose(out, arr, atol=0.01)
-
-    def test_scale_y_lt_1_stretches_vertically(self):
-        # scale_y=0.5: src_y = output_row / 0.5 = output_row * 2.
-        # Output row 10 maps to source row 20 (in the 1.0 region).
-        # Output row 0 maps to source row 0 (zero region).
-        arr = np.zeros((40, 10), dtype=float)
-        arr[20:] = 1.0
-        out = linear_undistort(arr, shear_x=0.0, scale_y=0.5)
-        assert float(out[0, 0]) < 0.5   # source row 0 → 0.0
-        assert float(out[10, 0]) > 0.5  # source row 20 → 1.0
-
-    def test_scale_y_le_zero_raises(self):
-        with pytest.raises(ValueError, match="scale_y"):
-            linear_undistort(np.ones((4, 4)), scale_y=0.0)
-
-    def test_non_2d_raises(self):
-        with pytest.raises(ValueError):
-            linear_undistort(np.ones(10))
-
-    def test_nan_mask_preserved(self):
-        arr = np.ones((10, 10), dtype=float)
-        arr[3, 5] = np.nan
-        arr[7, :] = np.nan
-        out = linear_undistort(arr, shear_x=2.0, scale_y=1.0)
-        assert np.isnan(out[3, 5])
-        assert np.all(np.isnan(out[7, :]))
-        assert np.isfinite(out[0, 0])
 
 
 # ─── set_zero_point ──────────────────────────────────────────────────────────

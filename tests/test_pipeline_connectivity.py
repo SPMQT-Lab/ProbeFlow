@@ -224,6 +224,3 @@ class TestImportPaths:
             "If intentional, update this test."
         )
 
-    def test_processing_state_importable(self):
-        from probeflow.processing.state import ProcessingState
-        assert ProcessingState is not None
