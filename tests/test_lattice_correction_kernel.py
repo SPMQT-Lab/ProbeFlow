@@ -192,3 +192,24 @@ class TestProcessingState:
         step = ProcessingStep("affine_lattice_correction", params)
         assert step.params["ideal_a_nm"] == pytest.approx(0.25)
         assert step.params["ideal_angle_deg"] == pytest.approx(90.0)
+
+
+# ── 10. fill × interpolation parametrized matrix ─────────────────────────────
+
+@pytest.mark.parametrize("fill_mode", ["nan", "background", "zero"])
+@pytest.mark.parametrize("interp", ["nearest", "bilinear", "bicubic"])
+class TestFillInterpolationMatrix:
+    """9-case matrix: every fill_mode × interpolation combination must run
+    without error and return a finite result somewhere in the output."""
+
+    def test_runs_without_error(self, fill_mode: str, interp: str):
+        arr = _ramp_image()
+        out = affine_lattice_correction(
+            arr,
+            np.diag([0.9, 1.1]),
+            fill_mode=fill_mode,
+            interpolation=interp,
+            expand_canvas=True,
+        )
+        assert out.ndim == 2
+        assert np.isfinite(out).any()
