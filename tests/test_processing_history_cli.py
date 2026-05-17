@@ -231,7 +231,7 @@ class TestPipelineHistory:
             captured.append(scan)
             return tmp_path / "out.sxm"
 
-        with patch("probeflow.cli._write_output", side_effect=_capture):
+        with patch("probeflow.cli.commands.processing._write_output", side_effect=_capture):
             rc = main([
                 "pipeline", str(first_sample_dat),
                 "-o", str(tmp_path / "out.sxm"),

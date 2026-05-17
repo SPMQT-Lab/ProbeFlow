@@ -905,7 +905,7 @@ class TestPlaneBgCli:
             captured.append(scan)
             return tmp_path / "out.sxm"
 
-        with patch("probeflow.cli._write_output", side_effect=_capture):
+        with patch("probeflow.cli.processing_ops._write_output", side_effect=_capture):
             cli_main(["plane-bg", str(first_sample_dat), "--order", "3"])
         assert captured[0].processing_history[0]["params"]["order"] == 3
 
