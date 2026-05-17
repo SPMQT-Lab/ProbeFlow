@@ -1316,7 +1316,7 @@ def test_viewer_arbitrary_transform_removes_rois(qapp):
 def test_viewer_refresh_display_array_passes_roi_set(qapp, monkeypatch):
     from probeflow.core.roi import ROI, ROISet
     from probeflow.gui import ImageViewerDialog
-    import probeflow.gui._legacy as gui_mod
+    import probeflow.gui.dialogs.image_viewer as _iv_mod
 
     roi_set = ROISet(image_id="img1")
     roi = ROI.new("rectangle", {"x": 0.0, "y": 0.0, "width": 2.0, "height": 2.0})
@@ -1327,7 +1327,7 @@ def test_viewer_refresh_display_array_passes_roi_set(qapp, monkeypatch):
         seen["roi_set"] = roi_set
         return arr + 1.0
 
-    monkeypatch.setattr(gui_mod, "_apply_processing", fake_apply)
+    monkeypatch.setattr(_iv_mod, "_apply_processing", fake_apply)
 
     dlg = ImageViewerDialog.__new__(ImageViewerDialog)
     dlg._display_arr = None
@@ -1353,7 +1353,7 @@ def test_viewer_refresh_display_array_passes_roi_set(qapp, monkeypatch):
 def test_viewer_refresh_display_array_blocks_stale_roi_reference(qapp, monkeypatch):
     from probeflow.core.roi import ROISet
     from probeflow.gui import ImageViewerDialog
-    import probeflow.gui._legacy as gui_mod
+    import probeflow.gui.dialogs.image_viewer as _iv_mod
 
     class FakeStatus:
         def __init__(self):
@@ -1368,7 +1368,7 @@ def test_viewer_refresh_display_array_blocks_stale_roi_reference(qapp, monkeypat
         called.append(True)
         return arr + 1.0
 
-    monkeypatch.setattr(gui_mod, "_apply_processing", fake_apply)
+    monkeypatch.setattr(_iv_mod, "_apply_processing", fake_apply)
 
     dlg = ImageViewerDialog.__new__(ImageViewerDialog)
     dlg._display_arr = None
@@ -1397,7 +1397,7 @@ def test_viewer_refresh_display_array_blocks_stale_roi_reference(qapp, monkeypat
 def test_viewer_refresh_display_array_blocks_export_after_processing_error(qapp, monkeypatch):
     from probeflow.core.roi import ROISet
     from probeflow.gui import ImageViewerDialog
-    import probeflow.gui._legacy as gui_mod
+    import probeflow.gui.dialogs.image_viewer as _iv_mod
 
     class FakeStatus:
         def __init__(self):
@@ -1409,7 +1409,7 @@ def test_viewer_refresh_display_array_blocks_export_after_processing_error(qapp,
     def fail_apply(arr, processing, roi_set=None):
         raise RuntimeError("bad processing setting")
 
-    monkeypatch.setattr(gui_mod, "_apply_processing", fail_apply)
+    monkeypatch.setattr(_iv_mod, "_apply_processing", fail_apply)
 
     dlg = ImageViewerDialog.__new__(ImageViewerDialog)
     dlg._display_arr = None

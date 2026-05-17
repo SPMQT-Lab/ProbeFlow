@@ -710,7 +710,8 @@ class TestViewerRenderSizing:
                 loader.run()
 
         monkeypatch.setattr(ImageViewerDialog, "_load_current", lambda self: None)
-        monkeypatch.setattr(gui_mod, "_apply_processing", fake_apply)
+        import probeflow.gui.dialogs.image_viewer as _iv_mod
+        monkeypatch.setattr(_iv_mod, "_apply_processing", fake_apply)
 
         entry = SxmFile(path=Path("scan.sxm"), stem="scan")
         dlg = ImageViewerDialog(entry, [entry], "gray", THEMES["dark"])
