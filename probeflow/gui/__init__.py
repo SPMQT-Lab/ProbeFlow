@@ -46,6 +46,7 @@ from probeflow.gui.styling import (
     _sep,
     _build_qss,
 )
+from probeflow.gui.utils import _open_url, _format_scan_conditions
 from probeflow.gui.models import (
     PLANE_NAMES,
     SxmFile,
@@ -94,7 +95,6 @@ _LEGACY_EXPORTS = {
     "_DefinitionsDialog",
     "_DevSidebar",
     "_TerminalPane",
-    "_open_url",
 }
 
 # Names that have been fully extracted to probeflow.gui.dialogs.
