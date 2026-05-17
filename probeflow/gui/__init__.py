@@ -25,6 +25,27 @@ from typing import Any
 import sys
 
 from probeflow.gui import models, rendering
+from probeflow.gui.config import (
+    CONFIG_PATH,
+    DEFAULT_CUSHION,
+    LOGO_PATH,
+    LOGO_GIF_PATH,
+    LOGO_NAV_PATH,
+    GITHUB_URL,
+    GUI_FONT_SIZES,
+    GUI_FONT_DEFAULT,
+    normalise_gui_font_size,
+    load_config,
+    save_config,
+)
+from probeflow.gui.styling import (
+    NAVBAR_DARK_BG,
+    NAVBAR_LIGHT_BG,
+    NAVBAR_H,
+    THEMES,
+    _sep,
+    _build_qss,
+)
 from probeflow.gui.models import (
     PLANE_NAMES,
     SxmFile,
@@ -56,14 +77,10 @@ _LEGACY_EXPORTS = {
     "AboutDialog",
     "BrowseInfoPanel",
     "BrowseToolPanel",
-    "CONFIG_PATH",
     "ConvertPanel",
     "ConvertSidebar",
-    "DEFAULT_CUSHION",
     "DeveloperTerminalWidget",
     "FFTViewerDialog",
-    "GUI_FONT_DEFAULT",
-    "GUI_FONT_SIZES",
     "ImageViewerDialog",
     "Navbar",
     "PeriodicFilterDialog",
@@ -73,17 +90,11 @@ _LEGACY_EXPORTS = {
     "SpecOverlayDialog",
     "SpecViewerDialog",
     "STMBackgroundDialog",
-    "THEMES",
     "ThumbnailGrid",
     "_DefinitionsDialog",
     "_DevSidebar",
     "_TerminalPane",
-    "_build_qss",
     "_open_url",
-    "_sep",
-    "load_config",
-    "normalise_gui_font_size",
-    "save_config",
 }
 
 # Names that have been fully extracted to probeflow.gui.dialogs.
