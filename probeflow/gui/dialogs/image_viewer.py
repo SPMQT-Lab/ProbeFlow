@@ -1637,9 +1637,20 @@ class ImageViewerDialog(QDialog):
         )
 
     def _invert_active_image_roi(self) -> None:
+        _area_kinds = {"rectangle", "ellipse", "polygon", "freehand", "multipolygon"}
+        had_area = (
+            self._active_image_roi() is not None
+            and self._active_image_roi().kind in _area_kinds
+        )
         invert_active_roi(
             self._image_roi_set, self._current_array_shape(), self._on_image_roi_set_changed,
         )
+        if had_area and hasattr(self, "_scope_cb"):
+            self._scope_cb.setCurrentText("ROI filters only")
+            if hasattr(self, "_status_lbl"):
+                self._status_lbl.setText(
+                    "ROI inverted. Filters will apply inside the inverted area."
+                )
 
     def _select_nth_image_roi(self, n: int) -> None:
         select_nth_roi(self._image_roi_set, n, self._on_image_roi_set_changed)
