@@ -1769,7 +1769,7 @@ class ImageViewerDialog(QDialog):
 
     def _selected_or_active_image_roi_id(self) -> "str | None":
         return selected_or_active_roi_id(
-            self._image_roi_set, getattr(self, "_roi_dock", None),
+            getattr(self, "_image_roi_set", None), getattr(self, "_roi_dock", None),
         )
 
     def _rename_active_image_roi(self) -> None:
@@ -1926,7 +1926,7 @@ class ImageViewerDialog(QDialog):
 
     def _active_line_roi_id(self) -> "str | None":
         """Return the active ROI id if it is a line ROI, else None."""
-        if not self._image_roi_set:
+        if not getattr(self, "_image_roi_set", None):
             return None
         active_id = self._image_roi_set.active_roi_id
         if not active_id:
