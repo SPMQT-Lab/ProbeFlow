@@ -237,6 +237,57 @@ def line_profile_delta_measurement(
     )
 
 
+def line_periodicity_measurement(
+    result: "Any",
+    *,
+    measurement_id: str,
+    source_label: str,
+    source_path: str | None = None,
+    channel: str | None = None,
+    roi_id: str | None = None,
+    roi_name: str | None = None,
+    background: str = "linear",
+    smoothing: str = "light_gaussian",
+    width_px: float = 1.0,
+    data_basis: str = "processed_image",
+    notes: str = "",
+) -> MeasurementResult:
+    """Wrap a PeriodicityResult in a MeasurementResult for the table."""
+    import math
+    values: dict[str, Scalar] = {
+        "period_m": result.period_m if not math.isnan(result.period_m) else None,
+        "line_length_m": result.line_length_m,
+        "n_periods": result.n_periods,
+        "n_samples": result.n_samples,
+    }
+    if result.uncertainty_m is not None:
+        values["uncertainty_m"] = result.uncertainty_m
+    context: dict[str, Scalar] = {
+        "method": result.method,
+        "background": background,
+        "smoothing": smoothing,
+        "quality": result.quality,
+        "message": result.message,
+        "roi_id": roi_id,
+        "roi_name": roi_name,
+        "width_px": width_px,
+        "data_basis": data_basis,
+    }
+    return MeasurementResult(
+        measurement_id=measurement_id,
+        kind="line_periodicity",
+        source_label=source_label,
+        source_path=source_path,
+        channel=channel,
+        x_unit="m",
+        y_unit="m",
+        z_unit=None,
+        values=values,
+        context=context,
+        notes=notes,
+    )
+
+
 def _mask_from_roi_or_mask(
     shape: tuple[int, ...],
     *,

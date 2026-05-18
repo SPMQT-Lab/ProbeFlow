@@ -32,6 +32,7 @@ from probeflow.measurements.fft_points import (
     points_to_mask,
 )
 from probeflow.measurements.image import (
+    line_periodicity_measurement,
     line_profile_delta_measurement,
     line_profile_measurement,
     roi_statistics,
@@ -50,13 +51,18 @@ class ImageMeasurementController:
         table: Any,
         feature_panel: Any | None = None,
         point_mask_panel: Any | None = None,
+        line_periodicity_panel: Any | None = None,
     ):
         self._viewer = viewer
         self._table = table
         self._feature_panel = feature_panel
         self._point_mask_panel = point_mask_panel
+        self._line_periodicity_panel = line_periodicity_panel
         self._feature_points: list[Any] = []
         self._feature_metadata: dict[str, object] = {}
+        self._last_periodicity_result: Any = None
+        self._last_periodicity_diag: Any = None
+        self._last_periodicity_settings: dict = {}
         if feature_panel is not None:
             feature_panel.detectRequested.connect(self.detect_feature_maxima_for_active_roi)
             feature_panel.copyPointsRequested.connect(self.copy_feature_points)
@@ -67,6 +73,14 @@ class ImageMeasurementController:
             point_mask_panel.exportMaskCsvRequested.connect(self.export_point_mask_csv)
             point_mask_panel.computeFftRequested.connect(self.compute_point_mask_fft)
             point_mask_panel.exportFftCsvRequested.connect(self.export_point_fft_csv)
+        if line_periodicity_panel is not None:
+            line_periodicity_panel.findPeriodicityRequested.connect(
+                self.find_periodicity_for_active_line_roi
+            )
+            line_periodicity_panel.copyResultRequested.connect(self.copy_periodicity_result)
+            line_periodicity_panel.exportProfileCsvRequested.connect(
+                self.export_periodicity_profile_csv
+            )
 
     @property
     def feature_points(self) -> list[Any]:
@@ -88,6 +102,7 @@ class ImageMeasurementController:
             "roi_stats": is_area,
             "step_height": selected_area_pair,
             "line_profile": is_line or self._active_line_roi_id() is not None,
+            "line_periodicity": is_line or self._active_line_roi_id() is not None,
             "feature_maxima": True,  # works on full image when no area ROI is active
             "copy_points": bool(self._feature_points),
             "export_points_csv": bool(self._feature_points),
@@ -202,6 +217,151 @@ class ImageMeasurementController:
             )
             return
         self.add_line_profile_measurement_for_roi(roi_id)
+
+    def find_periodicity_for_active_line_roi(self) -> None:
+        from probeflow.analysis.line_periodicity import estimate_line_periodicity, format_result_text
+
+        roi_id = self._active_line_roi_id()
+        if roi_id is None:
+            self._set_status("Draw or select a line ROI first.")
+            if self._line_periodicity_panel is not None:
+                self._line_periodicity_panel.show_message("Draw or select a line ROI first.")
+            return
+
+        roi = self._roi(roi_id)
+        arr = self._display_arr()
+        if roi is None or roi.kind != "line" or arr is None:
+            return
+
+        settings = (
+            self._line_periodicity_panel.settings()
+            if self._line_periodicity_panel is not None
+            else {}
+        )
+        method = str(settings.get("method", "autocorrelation"))
+        background = str(settings.get("background", "linear"))
+        smoothing = str(settings.get("smoothing", "light_gaussian"))
+        width_px = float(settings.get("width_px", 1.0))
+        min_period_m = settings.get("min_period_m")
+        max_period_m = settings.get("max_period_m")
+
+        try:
+            self._viewer._on_roi_line_profile(roi_id)
+            distance_m, values = self._line_profile_m(roi, width_px=width_px)
+            result, diag = estimate_line_periodicity(
+                distance_m,
+                values,
+                method=method,
+                background=background,
+                smoothing=smoothing,
+                min_period_m=min_period_m,
+                max_period_m=max_period_m,
+            )
+            self._last_periodicity_result = result
+            self._last_periodicity_diag = diag
+            self._last_periodicity_settings = {
+                "background": background,
+                "smoothing": smoothing,
+            }
+            if self._line_periodicity_panel is not None:
+                self._line_periodicity_panel.set_result(result)
+
+            entry, _scale, _unit, channel, source_label = self._source_info()
+            meas = line_periodicity_measurement(
+                result,
+                measurement_id=self._table.next_measurement_id(),
+                source_label=source_label,
+                source_path=str(entry.path),
+                channel=channel,
+                roi_id=roi.id,
+                roi_name=roi.name,
+                background=background,
+                smoothing=smoothing,
+                width_px=width_px,
+                notes=f"Line periodicity for {roi.name}",
+            )
+            self._record(meas)
+            self._show_periodicity_plot_dialog(result, diag)
+        except Exception as exc:
+            msg = f"Could not estimate periodicity: {exc}"
+            self._set_status(msg)
+            if self._line_periodicity_panel is not None:
+                self._line_periodicity_panel.show_message(msg)
+
+    def copy_periodicity_result(self) -> None:
+        from probeflow.analysis.line_periodicity import format_result_text
+
+        if self._last_periodicity_result is None:
+            return
+        s = self._last_periodicity_settings
+        text = format_result_text(
+            self._last_periodicity_result,
+            background=s.get("background", ""),
+            smoothing=s.get("smoothing", ""),
+        )
+        QApplication.clipboard().setText(text)
+        self._set_status("Copied periodicity result.")
+
+    def export_periodicity_profile_csv(self) -> None:
+        if self._last_periodicity_diag is None:
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self._viewer,
+            "Export periodicity profile CSV",
+            str(Path.home() / "probeflow_periodicity_profile.csv"),
+            "CSV files (*.csv)",
+        )
+        if not path:
+            return
+        diag = self._last_periodicity_diag
+        rows = ["s_m,s_nm,z_raw,z_processed"]
+        for s, z_r, z_p in zip(diag.s_m, diag.z_raw, diag.z_processed):
+            rows.append(f"{s:.6e},{s * 1e9:.6e},{z_r:.6e},{z_p:.6e}")
+        Path(path).write_text("\n".join(rows), encoding="utf-8")
+        # Optionally export autocorrelation if available
+        if diag.autocorr_lag_m is not None and diag.autocorr is not None:
+            ac_path = Path(path).with_stem(Path(path).stem + "_autocorr")
+            ac_rows = ["lag_m,lag_nm,autocorrelation"]
+            for lag, ac in zip(diag.autocorr_lag_m, diag.autocorr):
+                ac_rows.append(f"{lag:.6e},{lag * 1e9:.6e},{ac:.6e}")
+            ac_path.write_text("\n".join(ac_rows), encoding="utf-8")
+        self._set_status(f"Periodicity profile → {path}")
+
+    def _show_periodicity_plot_dialog(self, result, diag) -> None:
+        from probeflow.gui.dialogs.line_periodicity_plot import PeriodicityPlotDialog
+
+        existing = getattr(self, "_periodicity_plot_dialog", None)
+        if existing is not None and not existing.isHidden():
+            existing.update_plot(result, diag)
+            existing.raise_()
+            return
+        dialog = PeriodicityPlotDialog(
+            result, diag,
+            theme=getattr(self._viewer, "_t", None),
+            parent=self._viewer,
+        )
+        self._periodicity_plot_dialog = dialog
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def _line_profile_m(self, roi, *, width_px: float = 1.0) -> tuple:
+        """Return raw (distance_m, values) without unit conversion."""
+        from probeflow.processing.image import line_profile
+
+        arr = self._display_arr()
+        px_x, px_y = self._viewer._pixel_size_xy_m()
+        distance_m, values = line_profile(
+            arr,
+            roi=roi,
+            pixel_size_x_m=px_x,
+            pixel_size_y_m=px_y,
+            width_px=max(1.0, width_px),
+        )
+        return (
+            np.asarray(distance_m, dtype=np.float64),
+            np.asarray(values, dtype=np.float64),
+        )
 
     def add_current_line_profile_delta_measurement(self) -> None:
         panel = getattr(self._viewer, "_line_profile_panel", None)

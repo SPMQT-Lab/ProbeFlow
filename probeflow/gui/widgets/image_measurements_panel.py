@@ -18,6 +18,7 @@ from probeflow.gui.widgets.feature_detection_panel import (
     FeatureDetectionPanel,
     PointMaskFFTPanel,
 )
+from probeflow.gui.widgets.line_periodicity_panel import LinePeriodicityPanel
 from probeflow.gui.widgets.measurement_table import MeasurementResultsTable
 
 
@@ -34,12 +35,14 @@ class ImageMeasurementsPanel(QWidget):
         ("ROI statistics", "roi_stats"),
         ("Step height", "step_height"),
         ("Line profile", "line_profile"),
+        ("Line periodicity", "line_periodicity"),
     ]
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.feature_panel = FeatureDetectionPanel(self)
         self.point_mask_panel = PointMaskFFTPanel(self)
+        self.line_periodicity_panel = LinePeriodicityPanel(self)
         self.table = MeasurementResultsTable(self)
         self._mode_pages: dict[str, int] = {}
         self._action_buttons: dict[str, QPushButton] = {}
@@ -117,6 +120,8 @@ class ImageMeasurementsPanel(QWidget):
             self.lineProfileRequested,
         ))
         self._mode_pages["line_profile"] = 4
+        self._setup_stack.addWidget(self.line_periodicity_panel)
+        self._mode_pages["line_periodicity"] = 5
         lay.addWidget(self._setup_stack)
 
         results_lbl = QLabel("Results")

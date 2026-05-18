@@ -301,36 +301,11 @@ class ImageViewerDialog(QDialog):
         toolbar.addStretch()
         left_lay.addLayout(toolbar)
 
-        drawing_bar = QHBoxLayout()
-        drawing_bar.setSpacing(4)
-        drawing_lbl = QLabel("Draw")
-        drawing_lbl.setFont(QFont("Helvetica", 8, QFont.Bold))
-        drawing_bar.addWidget(drawing_lbl)
-        self._drawing_group = QButtonGroup(self)
-        self._drawing_group.setExclusive(True)
-        for key, label, tip in (
-            ("pan",       "✋ Pan",     "Pan (drag to scroll)"),
-            ("rectangle", "▭ Rect",    "Rectangle ROI  [R]"),
-            ("ellipse",   "◯ Ellipse", "Ellipse ROI  [E]"),
-            ("polygon",   "⬠ Poly",   "Polygon ROI — click vertices, double-click to close  [P]"),
-            ("freehand",  "〰 Free",   "Freehand ROI — drag to draw  [F]"),
-            ("line",      "— Line",    "Line ROI  [L]"),
-            ("point",     "• Point",   "Point ROI  [T]"),
-        ):
-            btn = QPushButton(label)
-            btn.setCheckable(True)
-            btn.setFixedHeight(24)
-            btn.setMinimumWidth(44)
-            btn.setFont(QFont("Helvetica", 8))
-            btn.setToolTip(tip)
-            self._drawing_group.addButton(btn)
-            btn.setProperty("drawing_tool", key)
-            if key == "pan":
-                btn.setChecked(True)
-            drawing_bar.addWidget(btn)
-        self._drawing_group.buttonClicked.connect(self._on_drawing_tool_clicked)
-        drawing_bar.addStretch()
-        left_lay.addLayout(drawing_bar)
+        from probeflow.gui.image_quick_toolbar import ImageQuickToolbar
+        self._quick_toolbar = ImageQuickToolbar(self)
+        self._quick_toolbar.mode_requested.connect(self._on_quick_toolbar_mode)
+        self._quick_toolbar.action_requested.connect(self._on_quick_toolbar_action)
+        left_lay.addWidget(self._quick_toolbar)
 
         # Rulers scroll together with the image (placed in the same scroll
         # viewport via a small grid container).
@@ -794,6 +769,7 @@ class ImageViewerDialog(QDialog):
             self._measurement_table,
             self._feature_detection_panel,
             self._measurement_panel.point_mask_panel,
+            self._measurement_panel.line_periodicity_panel,
         )
         self._measurement_panel.roiStatsRequested.connect(
             self._image_measurements.add_active_roi_stats_measurement
@@ -900,10 +876,17 @@ class ImageViewerDialog(QDialog):
         file_menu.addAction(close_action)
 
         view_menu = menu_bar.addMenu("View")
-        fit_action = QAction("Fit image", self)
+        auto_contrast_action = QAction("Auto contrast", self)
+        auto_contrast_action.triggered.connect(self._on_auto_clip)
+        view_menu.addAction(auto_contrast_action)
+        reset_contrast_action = QAction("Reset contrast", self)
+        reset_contrast_action.triggered.connect(self._on_reset_display)
+        view_menu.addAction(reset_contrast_action)
+        view_menu.addSeparator()
+        fit_action = QAction("Fit image to window", self)
         fit_action.triggered.connect(self._zoom_lbl.fit_to_view)
         view_menu.addAction(fit_action)
-        native_action = QAction("Native size", self)
+        native_action = QAction("View at 1:1", self)
         native_action.triggered.connect(self._zoom_lbl.reset_zoom)
         view_menu.addAction(native_action)
         view_menu.addSeparator()
@@ -934,6 +917,16 @@ class ImageViewerDialog(QDialog):
             view_menu.addAction(action)
 
         processing_menu = menu_bar.addMenu("Processing")
+        plane_action = QAction("Plane/background subtraction…", self)
+        plane_action.triggered.connect(self._on_simple_background)
+        processing_menu.addAction(plane_action)
+        stm_bg_top_action = QAction("STM scan-line background…", self)
+        stm_bg_top_action.triggered.connect(self._on_open_stm_background)
+        processing_menu.addAction(stm_bg_top_action)
+        bad_lines_top_action = QAction("Bad scan-line correction…", self)
+        bad_lines_top_action.triggered.connect(self._on_preview_bad_lines)
+        processing_menu.addAction(bad_lines_top_action)
+        processing_menu.addSeparator()
         self._add_combo_menu(
             processing_menu, "Align rows", self._processing_panel._align_combo,
             ["None", "Median", "Mean"],
@@ -954,11 +947,6 @@ class ImageViewerDialog(QDialog):
             processing_menu, "Edge filter", self._processing_panel._edge_combo,
             ["None", "Laplacian", "LoG", "DoG"],
         )
-        processing_menu.addSeparator()
-
-        stm_background_action = QAction("STM Background...", self)
-        stm_background_action.triggered.connect(self._on_open_stm_background)
-        processing_menu.addAction(stm_background_action)
         processing_menu.addSeparator()
 
         zero_action = QAction("Zero plane", self)
@@ -1031,6 +1019,12 @@ class ImageViewerDialog(QDialog):
         invert_action.triggered.connect(self._invert_active_image_roi)
         self._viewer_roi_actions["invert"] = invert_action
         roi_menu.addAction(invert_action)
+        mask_action = QAction("Mask from selection", self)
+        mask_action.triggered.connect(self._on_mask_selection)
+        self._viewer_roi_actions["mask"] = mask_action
+        roi_menu.addAction(mask_action)
+        # Planned ROI menu additions: Grow ROI, Shrink ROI, Specify ROI.
+        # These should remain hidden or disabled until implemented in the ROI backend.
 
         measurements_menu = menu_bar.addMenu("Measurements")
         add_roi_stats_action = QAction("Add active ROI statistics", self)
@@ -1051,6 +1045,12 @@ class ImageViewerDialog(QDialog):
         )
         self._viewer_measurement_actions["line_profile"] = add_line_profile_action
         measurements_menu.addAction(add_line_profile_action)
+        find_periodicity_action = QAction("Find periodicity from line profile…", self)
+        find_periodicity_action.triggered.connect(
+            self._image_measurements.find_periodicity_for_active_line_roi
+        )
+        self._viewer_measurement_actions["line_periodicity"] = find_periodicity_action
+        measurements_menu.addAction(find_periodicity_action)
         detect_maxima_action = QAction("Detect maxima in active ROI", self)
         detect_maxima_action.triggered.connect(
             self._image_measurements.detect_feature_maxima_for_active_roi
@@ -1071,6 +1071,14 @@ class ImageViewerDialog(QDialog):
         show_measurements_action = QAction("Show measurements", self)
         show_measurements_action.triggered.connect(self._show_measurements)
         measurements_menu.addAction(show_measurements_action)
+
+        fft_menu = menu_bar.addMenu("FFT")
+        open_fft_action = QAction("Open FFT viewer…", self)
+        open_fft_action.triggered.connect(self._on_open_fft_viewer)
+        fft_menu.addAction(open_fft_action)
+        periodic_filter_action = QAction("Periodic filter…", self)
+        periodic_filter_action.triggered.connect(self._on_periodic_filter)
+        fft_menu.addAction(periodic_filter_action)
 
         export_menu = menu_bar.addMenu("Export")
         save_png_action = QAction("Save PNG copy", self)
@@ -1551,8 +1559,8 @@ class ImageViewerDialog(QDialog):
 
     def _on_canvas_tool_changed(self, kind: str) -> None:
         """Canvas emitted tool_changed (e.g. after Escape or drawing completion)."""
-        for btn in self._drawing_group.buttons():
-            btn.setChecked(btn.property("drawing_tool") == kind)
+        if hasattr(self, "_quick_toolbar"):
+            self._quick_toolbar.set_active_mode(kind)
         self._sync_line_profile_visibility(kind)
         from probeflow.gui.tool_manager import _TOOL_HINTS
         if hasattr(self, "_status_lbl"):
@@ -1827,21 +1835,28 @@ class ImageViewerDialog(QDialog):
                 if hasattr(self, "_measurement_panel"):
                     self._measurement_panel.set_measurement_type("line_profile")
 
+        _area_kinds = {"rectangle", "ellipse", "polygon", "freehand", "multipolygon"}
+        roi_id = self._selected_or_active_image_roi_id()
+        roi = self._image_roi_set.get(roi_id) if (self._image_roi_set and roi_id) else None
+        is_area = roi is not None and roi.kind in _area_kinds
+
         if hasattr(self, "_viewer_roi_actions"):
-            roi_id = self._selected_or_active_image_roi_id()
-            roi = self._image_roi_set.get(roi_id) if (self._image_roi_set and roi_id) else None
-            is_area = roi is not None and roi.kind in {
-                "rectangle", "ellipse", "polygon", "freehand", "multipolygon"
-            }
             for key, action in self._viewer_roi_actions.items():
                 action.setEnabled(roi is not None)
-                if key == "invert":
+                if key in ("invert", "mask"):
                     action.setEnabled(is_area)
 
         if hasattr(self, "_viewer_measurement_actions"):
             states = self._image_measurements.action_enabled_state()
             for key, action in self._viewer_measurement_actions.items():
                 action.setEnabled(states.get(key, True))
+
+        if hasattr(self, "_quick_toolbar"):
+            is_line = bool(self._active_line_roi_id())
+            self._quick_toolbar.set_action_enabled("line_periodicity", is_line)
+            self._quick_toolbar.set_action_enabled("line_profile", is_line)
+            self._quick_toolbar.set_action_enabled("mask_selection", is_area)
+            self._quick_toolbar.set_action_enabled("invert_selection", is_area)
 
     def _set_selection_tool(self, kind: str) -> None:
         """Compat shim: delegates to _set_drawing_tool, mapping 'none' → 'pan'."""
@@ -1853,8 +1868,8 @@ class ImageViewerDialog(QDialog):
         from probeflow.gui.tool_manager import TOOLS
         if kind not in TOOLS:
             kind = "pan"
-        for btn in self._drawing_group.buttons():
-            btn.setChecked(btn.property("drawing_tool") == kind)
+        if hasattr(self, "_quick_toolbar"):
+            self._quick_toolbar.set_active_mode(kind)
         self._zoom_lbl.set_tool(kind)
         self._sync_line_profile_visibility(kind)
         from probeflow.gui.tool_manager import _TOOL_HINTS
@@ -1862,16 +1877,49 @@ class ImageViewerDialog(QDialog):
             self._status_lbl.setText(_TOOL_HINTS.get(kind, ""))
         self._sync_viewer_menu_actions()
 
-    def _on_drawing_tool_clicked(self, button) -> None:
+    def _on_quick_toolbar_mode(self, key: str) -> None:
+        """Handle a drawing-mode request from the quick toolbar."""
         if self._set_zero_plane_btn.isChecked():
             self._set_zero_plane_btn.setChecked(False)
-        kind = button.property("drawing_tool") or "pan"
-        self._zoom_lbl.set_tool(kind)
-        self._sync_line_profile_visibility(kind)
-        from probeflow.gui.tool_manager import _TOOL_HINTS
+        self._set_drawing_tool(key)
+
+    def _on_quick_toolbar_action(self, key: str) -> None:
+        """Dispatch an action request from the quick toolbar to existing handlers."""
+        dispatch = {
+            "clear_selection":   self._delete_active_image_roi,
+            "auto_contrast":     self._on_auto_clip,
+            "plane_background":  self._on_simple_background,
+            "stm_background":    self._on_open_stm_background,
+            "bad_lines":         self._on_preview_bad_lines,
+            "open_fft":          self._on_open_fft_viewer,
+            "open_lattice_grid": self._on_open_lattice_grid,
+            "line_periodicity":  self._image_measurements.find_periodicity_for_active_line_roi,
+            "line_profile":      self._image_measurements.add_current_line_profile_measurement,
+            "mask_selection":    self._on_mask_selection,
+            "invert_selection":  self._invert_active_image_roi,
+        }
+        handler = dispatch.get(key)
+        if handler is not None:
+            handler()
+
+    def _on_mask_selection(self) -> None:
+        """Apply ROI-scoped filter mask from the active area ROI."""
+        roi_id = self._selected_or_active_image_roi_id()
+        roi = self._image_roi_set.get(roi_id) if self._image_roi_set and roi_id else None
+        _area_kinds = {"rectangle", "ellipse", "polygon", "freehand", "multipolygon"}
+        is_area = roi is not None and roi.kind in _area_kinds
+        if not is_area:
+            if hasattr(self, "_status_lbl"):
+                self._status_lbl.setText(
+                    "Select an area ROI first to use mask-based processing."
+                )
+            return
+        self._scope_cb.setCurrentText("ROI filters only")
+        self._show_sidebar_tab("processing")
         if hasattr(self, "_status_lbl"):
-            self._status_lbl.setText(_TOOL_HINTS.get(kind, ""))
-        self._sync_viewer_menu_actions()
+            self._status_lbl.setText(
+                f"ROI filter scope set to '{roi.name}'. Filters now apply inside the ROI only."
+            )
 
     def _active_line_roi_id(self) -> "str | None":
         """Return the active ROI id if it is a line ROI, else None."""

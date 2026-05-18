@@ -32,11 +32,23 @@ from probeflow.analysis.lattice import (
     extract_lattice,
     write_lattice_pdf,
 )
+from probeflow.analysis.line_periodicity import (
+    PeriodicityDiagnostic,
+    PeriodicityResult,
+    estimate_line_periodicity,
+    format_period,
+    format_result_text,
+)
 from probeflow.analysis.xmgrace_export import Curve, build_agr, export_bundle
 
 __all__ = [
     "Classification",
     "Curve",
+    "PeriodicityDiagnostic",
+    "PeriodicityResult",
+    "estimate_line_periodicity",
+    "format_period",
+    "format_result_text",
     "Detection",
     "LatticeParams",
     "LatticeResult",

@@ -20,6 +20,7 @@ from probeflow.measurements.fft_points import (
     points_to_mask,
 )
 from probeflow.measurements.image import (
+    line_periodicity_measurement,
     line_profile_measurement,
     roi_statistics,
     step_height_from_rois,
@@ -34,6 +35,7 @@ from probeflow.measurements.spectrum import spectrum_delta_to_result
 __all__ = [
     "FeaturePoint",
     "MeasurementResult",
+    "line_periodicity_measurement",
     "PointFFTResult",
     "detect_local_maxima",
     "feature_maxima_result",
