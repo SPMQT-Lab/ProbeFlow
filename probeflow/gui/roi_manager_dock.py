@@ -22,6 +22,8 @@ from PySide6.QtWidgets import (
     QSizePolicy, QVBoxLayout, QWidget,
 )
 
+from probeflow.core import AREA_ROI_KINDS
+
 _KIND_PREFIX = {
     "rectangle":    "▭ ",
     "ellipse":      "◯ ",
@@ -31,8 +33,6 @@ _KIND_PREFIX = {
     "line":         "— ",
     "point":        "• ",
 }
-
-_AREA_KINDS = {"rectangle", "ellipse", "polygon", "freehand", "multipolygon"}
 
 
 class ROIManagerDock(QDockWidget):
@@ -248,12 +248,12 @@ class ROIManagerDock(QDockWidget):
         roi_ids = self._selected_roi_ids()
         roi_set = self._roi_set_getter()
         roi = roi_set.get(roi_id) if (roi_set and roi_id) else None
-        is_area = roi is not None and roi.kind in _AREA_KINDS
+        is_area = roi is not None and roi.kind in AREA_ROI_KINDS
         is_line = roi is not None and roi.kind == "line"
         selected_area_pair = False
         if roi_set is not None and len(roi_ids) == 2:
             selected = [roi_set.get(rid) for rid in roi_ids]
-            selected_area_pair = all(r is not None and r.kind in _AREA_KINDS for r in selected)
+            selected_area_pair = all(r is not None and r.kind in AREA_ROI_KINDS for r in selected)
 
         menu = QMenu(self)
 

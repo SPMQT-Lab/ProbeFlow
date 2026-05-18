@@ -96,8 +96,13 @@ def export_png(
         if _FONT_PATH.exists():
             try:
                 font = _IFont.truetype(str(_FONT_PATH), size=font_size)
-            except Exception:
-                pass
+            except Exception as exc:
+                import warnings
+                warnings.warn(
+                    f"PNG export: could not load font {_FONT_PATH} ({exc}), using default",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
         if font is None:
             font = _IFont.load_default()
 

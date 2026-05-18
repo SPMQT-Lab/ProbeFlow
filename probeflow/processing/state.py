@@ -22,6 +22,8 @@ from typing import Any
 
 import numpy as np
 
+from probeflow.core.roi import AREA_ROI_KINDS
+
 
 # ── Supported operations (must match probeflow.processing function names) ─────
 
@@ -421,9 +423,7 @@ def _resolve_mask_roi_param(
             stacklevel=4,
         )
         return None
-    if getattr(roi, "kind", None) not in {
-        "rectangle", "ellipse", "polygon", "freehand", "multipolygon",
-    }:
+    if getattr(roi, "kind", None) not in AREA_ROI_KINDS:
         import warnings
         warnings.warn(
             f"stm_background: {prefix}_roi_id={roi_id!r} is not an area ROI — "

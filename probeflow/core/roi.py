@@ -531,7 +531,7 @@ def invert_mask(mask: np.ndarray) -> np.ndarray:
 
 # ── Shapely-backed geometry algebra ───────────────────────────────────────────
 
-_AREA_KINDS: frozenset[str] = frozenset(
+AREA_ROI_KINDS: frozenset[str] = frozenset(
     {"rectangle", "ellipse", "polygon", "freehand", "multipolygon"}
 )
 
@@ -579,7 +579,7 @@ def _roi_to_shapely(roi: "ROI"):
 
     raise ValueError(
         f"Cannot convert ROI kind {roi.kind!r} to Shapely geometry. "
-        f"Supported: {sorted(_AREA_KINDS)}"
+        f"Supported: {sorted(AREA_ROI_KINDS)}"
     )
 
 
@@ -651,10 +651,10 @@ def invert(roi: "ROI", image_shape: tuple[int, int]) -> "ROI":
         New ROI with a generated UUID and name ``"not_<roi.name>"``.  The
         ``coord_system`` of the input is preserved.
     """
-    if roi.kind not in _AREA_KINDS:
+    if roi.kind not in AREA_ROI_KINDS:
         raise ValueError(
             f"invert does not support ROI kind {roi.kind!r}. "
-            f"Supported: {sorted(_AREA_KINDS)}"
+            f"Supported: {sorted(AREA_ROI_KINDS)}"
         )
     from shapely.geometry import box as _box
     Ny, Nx = image_shape
@@ -705,10 +705,10 @@ def combine(
         raise ValueError("combine requires at least one ROI")
 
     for r in rois:
-        if r.kind not in _AREA_KINDS:
+        if r.kind not in AREA_ROI_KINDS:
             raise ValueError(
                 f"combine does not support ROI kind {r.kind!r} ({r.name!r}). "
-                f"Only area kinds are supported: {sorted(_AREA_KINDS)}"
+                f"Only area kinds are supported: {sorted(AREA_ROI_KINDS)}"
             )
 
     geometries = [_roi_to_shapely(r) for r in rois]

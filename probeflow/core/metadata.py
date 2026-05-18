@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from probeflow.core.common import _f
 
@@ -36,14 +36,14 @@ class ScanMetadata:
     source_format: str                          # "createc_dat" | "nanonis_sxm" | "rhk_sm4"
     item_type: str = "scan"
     display_name: str = ""
-    shape: Optional[tuple[int, int]] = None     # (Ny, Nx)
+    shape: tuple[int, int] | None = None        # (Ny, Nx)
     plane_names: tuple[str, ...] = ()
     units: tuple[str, ...] = ()                 # parallel to plane_names
-    scan_range: Optional[tuple[float, float]] = None  # (width_m, height_m)
-    bias: Optional[float] = None                # V
-    setpoint: Optional[float] = None            # A (tunnel current setpoint)
-    comment: Optional[str] = None
-    acquisition_datetime: Optional[str] = None
+    scan_range: tuple[float, float] | None = None  # (width_m, height_m)
+    bias: float | None = None                   # V
+    setpoint: float | None = None               # A (tunnel current setpoint)
+    comment: str | None = None
+    acquisition_datetime: str | None = None
     raw_header: dict[str, Any] = field(default_factory=dict)
     experiment_metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -205,7 +205,7 @@ def _extract_createc_fields(hdr: dict) -> tuple:
     return bias, setpoint, comment, acq_dt
 
 
-def _positive_or_none(value: Optional[float]) -> Optional[float]:
+def _positive_or_none(value: float | None) -> float | None:
     if value is None:
         return None
     return value if value > 0 else None

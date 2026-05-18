@@ -21,7 +21,7 @@ from probeflow.core.scan_loader import SUPPORTED_SUFFIXES, load_scan
 from probeflow.core.metadata import ScanMetadata, metadata_from_scan, read_scan_metadata
 from probeflow.core.indexing import ProbeFlowItem, index_folder
 from probeflow.core.loaders import LoadSignature, identify_scan_file, identify_spectrum_file
-from probeflow.core.roi import ROI, ROISet
+from probeflow.core.roi import AREA_ROI_KINDS, ROI, ROISet
 
 __all__ = [
     "PLANE_CANON_NAMES",
@@ -39,4 +39,5 @@ __all__ = [
     "identify_spectrum_file",
     "ROI",
     "ROISet",
+    "AREA_ROI_KINDS",
 ]

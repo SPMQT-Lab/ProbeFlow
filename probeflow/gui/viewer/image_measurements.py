@@ -39,7 +39,7 @@ from probeflow.measurements.image import (
     step_height_from_rois,
 )
 
-_AREA_KINDS = {"rectangle", "ellipse", "polygon", "freehand", "multipolygon"}
+from probeflow.core import AREA_ROI_KINDS
 
 
 class ImageMeasurementController:
@@ -91,12 +91,12 @@ class ImageMeasurementController:
         """Return enabled states for viewer measurement menu actions."""
         roi_id = self._selected_or_active_roi_id()
         roi = self._roi(roi_id)
-        is_area = roi is not None and roi.kind in _AREA_KINDS
+        is_area = roi is not None and roi.kind in AREA_ROI_KINDS
         is_line = roi is not None and roi.kind == "line"
         selected_rois = [self._roi(rid) for rid in self.selected_roi_ids()]
         selected_area_pair = (
             len(selected_rois) == 2
-            and all(r is not None and r.kind in _AREA_KINDS for r in selected_rois)
+            and all(r is not None and r.kind in AREA_ROI_KINDS for r in selected_rois)
         )
         return {
             "roi_stats": is_area,
@@ -185,8 +185,8 @@ class ImageMeasurementController:
         roi_b = self._roi(roi_ids[1])
         if (
             roi_a is None or roi_b is None
-            or roi_a.kind not in _AREA_KINDS
-            or roi_b.kind not in _AREA_KINDS
+            or roi_a.kind not in AREA_ROI_KINDS
+            or roi_b.kind not in AREA_ROI_KINDS
         ):
             self._set_status("Step height requires two area ROIs.")
             return
@@ -439,7 +439,7 @@ class ImageMeasurementController:
         roi_id = self._selected_or_active_roi_id()
         roi = self._roi(roi_id) if roi_id else None
         # Non-area ROIs (line, point) are not valid for maxima detection — use full image
-        if roi is not None and roi.kind not in _AREA_KINDS:
+        if roi is not None and roi.kind not in AREA_ROI_KINDS:
             roi, roi_id = None, None
         settings = self._feature_panel.settings() if self._feature_panel else {}
         self._run_feature_maxima(roi_id=roi_id, settings=settings)
@@ -454,7 +454,7 @@ class ImageMeasurementController:
         arr = self._display_arr()
         if roi is None or arr is None:
             return
-        if roi.kind not in _AREA_KINDS:
+        if roi.kind not in AREA_ROI_KINDS:
             self._set_status("Feature maxima detection requires an area ROI.")
             return
         if settings is None and self._feature_panel is not None:

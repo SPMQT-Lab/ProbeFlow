@@ -108,6 +108,7 @@ from probeflow.provenance import (
     processing_history_from_scan,
 )
 from probeflow.gui.processing import ProcessingControlPanel
+from probeflow.core import AREA_ROI_KINDS
 from probeflow.core.scan_loader import load_scan
 from probeflow.gui.viewer.scan_load import load_scan_for_viewer, ViewerScanData
 from probeflow.gui.viewer.processed_export import (
@@ -1382,7 +1383,7 @@ class ImageViewerDialog(QDialog):
         roi_name = None
         if (
             active_roi is not None
-            and active_roi.kind in {"rectangle", "ellipse", "polygon", "freehand", "multipolygon"}
+            and active_roi.kind in AREA_ROI_KINDS
         ):
             try:
                 roi_mask = active_roi.to_mask(arr.shape[:2])
@@ -1574,7 +1575,7 @@ class ImageViewerDialog(QDialog):
         roi = roi_set.get(roi_id) if roi_set else None
         if roi is None:
             return
-        is_area = roi.kind in {"rectangle", "ellipse", "polygon", "freehand", "multipolygon"}
+        is_area = roi.kind in AREA_ROI_KINDS
         is_line = roi.kind == "line"
         menu = QMenu(self)
         act_active = menu.addAction("Set Active")
@@ -1637,10 +1638,9 @@ class ImageViewerDialog(QDialog):
         )
 
     def _invert_active_image_roi(self) -> None:
-        _area_kinds = {"rectangle", "ellipse", "polygon", "freehand", "multipolygon"}
         had_area = (
             self._active_image_roi() is not None
-            and self._active_image_roi().kind in _area_kinds
+            and self._active_image_roi().kind in AREA_ROI_KINDS
         )
         invert_active_roi(
             self._image_roi_set, self._current_array_shape(), self._on_image_roi_set_changed,
@@ -1846,13 +1846,12 @@ class ImageViewerDialog(QDialog):
                 if hasattr(self, "_measurement_panel"):
                     self._measurement_panel.set_measurement_type("line_profile")
 
-        _area_kinds = {"rectangle", "ellipse", "polygon", "freehand", "multipolygon"}
         roi = None
         is_area = False
         if hasattr(self, "_image_roi_set"):
             roi_id = self._selected_or_active_image_roi_id()
             roi = self._image_roi_set.get(roi_id) if (self._image_roi_set and roi_id) else None
-            is_area = roi is not None and roi.kind in _area_kinds
+            is_area = roi is not None and roi.kind in AREA_ROI_KINDS
 
         if hasattr(self, "_viewer_roi_actions"):
             for key, action in self._viewer_roi_actions.items():
@@ -1920,8 +1919,7 @@ class ImageViewerDialog(QDialog):
         """Apply ROI-scoped filter mask from the active area ROI."""
         roi_id = self._selected_or_active_image_roi_id()
         roi = self._image_roi_set.get(roi_id) if self._image_roi_set and roi_id else None
-        _area_kinds = {"rectangle", "ellipse", "polygon", "freehand", "multipolygon"}
-        is_area = roi is not None and roi.kind in _area_kinds
+        is_area = roi is not None and roi.kind in AREA_ROI_KINDS
         if not is_area:
             if hasattr(self, "_status_lbl"):
                 self._status_lbl.setText(
@@ -2311,7 +2309,7 @@ class ImageViewerDialog(QDialog):
         active_area_roi_id = (
             active_roi.id
             if active_roi is not None
-            and active_roi.kind in {"rectangle", "ellipse", "polygon", "freehand", "multipolygon"}
+            and active_roi.kind in AREA_ROI_KINDS
             else None
         )
         wants_filter_roi = self._scope_cb.currentIndex() == 1

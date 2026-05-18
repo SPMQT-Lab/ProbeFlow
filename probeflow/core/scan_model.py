@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, List, Tuple
+from typing import Any
 
 import numpy as np
 
@@ -55,12 +55,12 @@ class Scan:
         this Scan.
     """
 
-    planes: List[np.ndarray]
-    plane_names: List[str]
-    plane_units: List[str]
-    plane_synthetic: List[bool]
+    planes: list[np.ndarray]
+    plane_names: list[str]
+    plane_units: list[str]
+    plane_synthetic: list[bool]
     header: dict
-    scan_range_m: Tuple[float, float]
+    scan_range_m: tuple[float, float]
     source_path: Path
     source_format: str
     experiment_metadata: dict[str, Any] = field(default_factory=dict)
@@ -73,16 +73,16 @@ class Scan:
 
     def __init__(
         self,
-        planes: List[np.ndarray],
-        plane_names: List[str],
-        plane_units: List[str],
-        plane_synthetic: List[bool],
+        planes: list[np.ndarray],
+        plane_names: list[str],
+        plane_units: list[str],
+        plane_synthetic: list[bool],
         header: dict,
-        scan_range_m: Tuple[float, float],
+        scan_range_m: tuple[float, float],
         source_path: Path,
         source_format: str,
         processing_state: Any | None = None,
-        processing_history: List[dict] | None = None,
+        processing_history: list[dict] | None = None,
         experiment_metadata: dict[str, Any] | None = None,
     ) -> None:
         self.planes = planes
@@ -164,12 +164,12 @@ class Scan:
         )
 
     @property
-    def processing_history(self) -> List[dict]:
+    def processing_history(self) -> list[dict]:
         """History entries derived from ``processing_state``."""
         return list(self._processing_history_entries())
 
     @processing_history.setter
-    def processing_history(self, entries: List[dict] | None) -> None:
+    def processing_history(self, entries: list[dict] | None) -> None:
         from probeflow.processing.history import processing_state_from_history
         self._processing_state = processing_state_from_history(entries)
         self._processing_history_timestamps = [
@@ -183,7 +183,7 @@ class Scan:
         return len(self.planes)
 
     @property
-    def dims(self) -> Tuple[int, int]:
+    def dims(self) -> tuple[int, int]:
         """Scan dimensions as ``(Nx, Ny)`` (matches Nanonis SCAN_PIXELS)."""
         if not self.planes:
             return (0, 0)
