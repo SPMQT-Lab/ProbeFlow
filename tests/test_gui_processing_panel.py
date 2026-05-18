@@ -1506,6 +1506,7 @@ def test_viewer_save_provenance_action_writes_json(qapp, monkeypatch, tmp_path):
 def test_viewer_save_processed_image_action_dispatches_writer(qapp, monkeypatch, tmp_path):
     from probeflow.gui import ImageViewerDialog, SxmFile, THEMES
     import probeflow.gui._legacy as gui_mod
+    import probeflow.gui.dialogs.image_viewer as iv_mod
 
     monkeypatch.setattr(ImageViewerDialog, "_load_current", lambda self: None)
 
@@ -1517,31 +1518,26 @@ def test_viewer_save_processed_image_action_dispatches_writer(qapp, monkeypatch,
         "getSaveFileName",
         lambda *args, **kwargs: (str(out), ""),
     )
-    calls = []
 
     class FakeScan:
-        def save_csv(self, path, plane_idx=0, provenance=None):
-            calls.append(("csv", Path(path), plane_idx, provenance))
+        processing_state = type("PS", (), {"steps": []})()
+
+    saved_calls = []
+
+    def fake_save_processed_image(scan, plane_idx, path, **kwargs):
+        saved_calls.append((plane_idx, path))
+        return f"Saved processed image -> {path.name}"
 
     monkeypatch.setattr(
         dlg,
         "_processed_scan_for_export",
         lambda: (FakeScan(), 2),
     )
-    monkeypatch.setattr(
-        dlg,
-        "_processed_export_provenance",
-        lambda scan, path, plane_idx: "prov",
-    )
-    monkeypatch.setattr(
-        dlg,
-        "_preflight_processed_export_sidecar",
-        lambda path: calls.append(("preflight", Path(path))),
-    )
+    monkeypatch.setattr(iv_mod, "save_processed_image", fake_save_processed_image)
 
     dlg._on_save_processed_image()
 
-    assert calls == [("preflight", out), ("csv", out, 2, "prov")]
+    assert saved_calls == [(2, out)]
     assert "Saved processed image" in dlg._status_lbl.text()
 
     dlg.close()

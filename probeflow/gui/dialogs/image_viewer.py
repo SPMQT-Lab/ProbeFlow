@@ -109,6 +109,14 @@ from probeflow.provenance import (
 )
 from probeflow.gui.processing import ProcessingControlPanel
 from probeflow.core.scan_loader import load_scan
+from probeflow.gui.viewer.scan_load import load_scan_for_viewer, ViewerScanData
+from probeflow.gui.viewer.processed_export import (
+    build_processed_scan_for_export,
+    build_processed_export_provenance,
+    save_processed_image,
+    save_provenance_json,
+    write_processed_export_sidecar,
+)
 
 # Dialogs imported from their specific submodule files to avoid circular imports
 # (this module lives inside probeflow.gui.dialogs).
@@ -1224,38 +1232,25 @@ class ImageViewerDialog(QDialog):
             self._zoom_lbl.setPixmap(QPixmap())
         self._zoom_lbl.set_markers([])
         self._load_image_roi_set(entry)
-        try:
-            _scan = load_scan(entry.path)
-            self._set_scan_channel_choices(_scan)
-            if self._pending_initial_plane_idx is not None:
-                target = max(0, min(self._pending_initial_plane_idx, _scan.n_planes - 1))
-                self._ch_cb.blockSignals(True)
-                self._ch_cb.setCurrentIndex(target)
-                self._ch_cb.blockSignals(False)
-                self._pending_initial_plane_idx = None
-            idx = max(0, min(self._ch_cb.currentIndex(), _scan.n_planes - 1))
-            self._raw_arr = _scan.planes[idx] if _scan.n_planes > 0 else None
-            self._scan_header  = _scan.header or {}
-            self._scan_range_m = _scan.scan_range_m
-            self._scan_shape   = _scan.planes[0].shape if _scan.planes else None
-            self._scan_format  = entry.source_format
-            self._scan_plane_names = list(_scan.plane_names)
-            self._scan_plane_units = list(_scan.plane_units)
-            self._source_processing_history = processing_history_from_scan(
-                _scan,
-                channel_index=idx,
-                channel_name=self._ch_cb.currentText() or None,
-                processing_state={"steps": []},
-            )
-        except Exception:
-            self._raw_arr      = None
-            self._scan_header  = {}
-            self._scan_range_m = None
-            self._scan_shape   = None
-            self._scan_format  = ""
-            self._scan_plane_names = list(PLANE_NAMES)
-            self._scan_plane_units = ["m", "m", "A", "A"]
-            self._source_processing_history = None
+        if self._pending_initial_plane_idx is not None:
+            target_ch = self._pending_initial_plane_idx
+            self._pending_initial_plane_idx = None
+        else:
+            target_ch = self._ch_cb.currentIndex()
+        data: ViewerScanData = load_scan_for_viewer(entry.path, target_ch)
+        self._set_scan_channel_choices_from_names(data.plane_names, data.plane_units)
+        clamped = max(0, min(target_ch, max(data.n_planes - 1, 0)))
+        self._ch_cb.blockSignals(True)
+        self._ch_cb.setCurrentIndex(clamped)
+        self._ch_cb.blockSignals(False)
+        self._raw_arr          = data.raw_arr
+        self._scan_header      = data.scan_header
+        self._scan_range_m     = data.scan_range_m
+        self._scan_shape       = data.scan_shape
+        self._scan_format      = data.source_format
+        self._scan_plane_names = data.plane_names
+        self._scan_plane_units = data.plane_units
+        self._source_processing_history = data.processing_history
         self._rebuild_processing_history()
 
     def _rebuild_processing_history(self) -> None:
@@ -1450,6 +1445,11 @@ class ImageViewerDialog(QDialog):
         names = list(scan.plane_names) if scan.plane_names else [
             f"Channel {i}" for i in range(scan.n_planes)
         ]
+        self._set_scan_channel_choices_from_names(names, list(getattr(scan, "plane_units", [])))
+
+    def _set_scan_channel_choices_from_names(self, names: list[str], units: list[str]) -> None:
+        if not names:
+            return
         current = self._ch_cb.currentIndex()
         if [self._ch_cb.itemText(i) for i in range(self._ch_cb.count())] == names:
             return
@@ -2421,71 +2421,8 @@ class ImageViewerDialog(QDialog):
     def _processed_scan_for_export(self):
         entry = self._entries[self._idx]
         arr = self._display_arr if self._display_arr is not None else self._raw_arr
-        if arr is None:
-            raise ValueError("No image data loaded.")
-        scan = load_scan(entry.path)
-        idx = max(0, min(self._ch_cb.currentIndex(), scan.n_planes - 1))
-        scan.planes[idx] = np.asarray(arr, dtype=np.float64).copy()
-        state = processing_state_from_gui(self._processing or {})
-        if state.steps:
-            scan.record_processing_state(state)
-        return scan, idx
-
-    def _processed_export_provenance(self, scan, out_path, plane_idx: int):
-        suffix = Path(out_path).suffix.lower().lstrip(".") or "export"
-        from probeflow.provenance.export import build_scan_export_provenance
-
-        return build_scan_export_provenance(
-            scan,
-            channel_index=plane_idx,
-            channel_name=(
-                scan.plane_names[plane_idx]
-                if plane_idx < len(scan.plane_names) else self._ch_cb.currentText()
-            ),
-            processing_state=scan.processing_state,
-            display_state=self._current_display_settings(),
-            export_kind=f"viewer_{suffix}",
-            output_path=out_path,
-            roi_set=self._image_roi_set,
-            processing_history=(
-                self._processing_history.to_dict()
-                if self._processing_history is not None else None
-            ),
-        )
-
-    def _preflight_processed_export_sidecar(self, out_path) -> None:
-        suffix = Path(out_path).suffix.lower().lstrip(".") or "export"
-        if suffix == "png":
-            return
-        from probeflow.provenance.export import check_provenance_sidecar_collisions
-
-        check_provenance_sidecar_collisions(
-            out_path,
-            legacy=False,
-            probeflow=True,
-        )
-
-    def _write_processed_export_sidecar(
-        self,
-        scan,
-        out_path,
-        plane_idx: int,
-        provenance=None,
-    ) -> None:
-        suffix = Path(out_path).suffix.lower().lstrip(".") or "export"
-        if suffix == "png":
-            return
-        from probeflow.provenance.export import write_provenance_sidecars
-
-        prov = provenance
-        if prov is None:
-            prov = self._processed_export_provenance(scan, out_path, plane_idx)
-        write_provenance_sidecars(
-            out_path,
-            prov,
-            legacy=False,
-            probeflow=True,
-            export_format=suffix,
+        return build_processed_scan_for_export(
+            entry.path, self._ch_cb.currentIndex(), arr, self._processing or {},
         )
 
     def _on_save_processed_image(self):
@@ -2509,56 +2446,22 @@ class ImageViewerDialog(QDialog):
             out = out.with_suffix(".sxm")
         try:
             scan, plane_idx = self._processed_scan_for_export()
-            suffix = out.suffix.lower()
-            provenance = None
-            if suffix not in {".png", ".sxm"}:
-                provenance = self._processed_export_provenance(scan, out, plane_idx)
-                self._preflight_processed_export_sidecar(out)
-            if suffix == ".png":
-                scan.save_png(
-                    out,
-                    plane_idx=plane_idx,
-                    colormap=self._viewer_colormap,
-                    clip_low=self._clip_low,
-                    clip_high=self._clip_high,
-                    add_scalebar=True,
-                )
-            elif suffix == ".pdf":
-                scan.save_pdf(
-                    out,
-                    plane_idx=plane_idx,
-                    colormap=self._viewer_colormap,
-                    clip_low=self._clip_low,
-                    clip_high=self._clip_high,
-                    provenance=provenance,
-                )
-            elif suffix == ".csv":
-                scan.save_csv(out, plane_idx=plane_idx, provenance=provenance)
-            elif suffix == ".gwy":
-                scan.save_gwy(out, plane_idx=plane_idx)
-                self._write_processed_export_sidecar(
-                    scan,
-                    out,
-                    plane_idx,
-                    provenance=provenance,
-                )
-            elif suffix == ".sxm":
-                if scan.processing_state.steps and scan.n_planes > 1:
-                    self._status_lbl.setText(
-                        "Processed SXM export is blocked because SXM writes all planes. "
-                        "Use PNG/CSV/PDF/GWY for the selected plane until per-plane "
-                        "SXM processing provenance is supported."
-                    )
-                    return
-                scan.save_sxm(out)
-            else:
-                self._status_lbl.setText(
-                    "Unsupported processed image format. Use .sxm, .png, .csv, .pdf, or .gwy."
-                )
-                return
-            self._status_lbl.setText(f"Saved processed image -> {out.name}")
-        except Exception as exc:
-            self._status_lbl.setText(f"Save processed image error: {exc}")
+        except ValueError as exc:
+            self._status_lbl.setText(str(exc))
+            return
+        msg = save_processed_image(
+            scan, plane_idx, out,
+            colormap=self._viewer_colormap,
+            clip_low=self._clip_low,
+            clip_high=self._clip_high,
+            display_settings=self._current_display_settings(),
+            roi_set=self._image_roi_set,
+            processing_history=(
+                self._processing_history.to_dict()
+                if self._processing_history is not None else None
+            ),
+        )
+        self._status_lbl.setText(msg)
 
     def _on_save_provenance(self):
         if not self._assert_exportable_processing():
@@ -2579,19 +2482,16 @@ class ImageViewerDialog(QDialog):
         if not out.suffix:
             out = out.with_suffix(".probeflow.json")
         try:
-            record = build_export_record(
+            msg, record = save_provenance_json(
                 self._processing_history,
-                export_path=out,
-                export_format="provenance_json",
+                out,
                 display_settings=self._current_display_settings(),
             )
-            out.parent.mkdir(parents=True, exist_ok=True)
-            out.write_text(record.to_json(indent=2, default=str), encoding="utf-8")
             self._last_export_record = record
             self._history_text.setText(
                 "\n".join(display_lines(record.processing_history))
             )
-            self._status_lbl.setText(f"Saved provenance -> {out.name}")
+            self._status_lbl.setText(msg)
         except Exception as exc:
             self._status_lbl.setText(f"Save provenance error: {exc}")
 

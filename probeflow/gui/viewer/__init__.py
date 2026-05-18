@@ -11,6 +11,11 @@ from typing import Any
 
 
 _EXPORTS: dict[str, str] = {
+    "ViewerScanData": "scan_load",
+    "load_scan_for_viewer": "scan_load",
+    "build_processed_scan_for_export": "processed_export",
+    "save_processed_image": "processed_export",
+    "save_provenance_json": "processed_export",
     "BadLinePreviewController": "bad_line_preview",
     "DeferredPlaneAction": "deferred_action",
     "DisplaySliderController": "display_sliders",
