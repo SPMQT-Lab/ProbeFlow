@@ -1836,9 +1836,12 @@ class ImageViewerDialog(QDialog):
                     self._measurement_panel.set_measurement_type("line_profile")
 
         _area_kinds = {"rectangle", "ellipse", "polygon", "freehand", "multipolygon"}
-        roi_id = self._selected_or_active_image_roi_id()
-        roi = self._image_roi_set.get(roi_id) if (self._image_roi_set and roi_id) else None
-        is_area = roi is not None and roi.kind in _area_kinds
+        roi = None
+        is_area = False
+        if hasattr(self, "_image_roi_set"):
+            roi_id = self._selected_or_active_image_roi_id()
+            roi = self._image_roi_set.get(roi_id) if (self._image_roi_set and roi_id) else None
+            is_area = roi is not None and roi.kind in _area_kinds
 
         if hasattr(self, "_viewer_roi_actions"):
             for key, action in self._viewer_roi_actions.items():
