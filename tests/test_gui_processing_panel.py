@@ -200,16 +200,13 @@ def test_viewer_dialog_keeps_standard_processing_visible(qapp, monkeypatch):
     assert dlg._processing_panel.isHidden() is False
     assert not hasattr(dlg, "_set_zero_btn")
     assert not hasattr(dlg, "_selection_widget")
-    assert hasattr(dlg, "_drawing_group")
-    labels = {
-        btn.property("drawing_tool"): btn.text()
-        for btn in dlg._drawing_group.buttons()
-    }
+    assert hasattr(dlg, "_quick_toolbar")
+    labels = {key: btn.text() for key, btn in dlg._quick_toolbar._mode_btns.items()}
     assert set(labels.keys()) == {"pan", "rectangle", "ellipse", "polygon",
                                    "freehand", "line", "point"}
-    assert labels["pan"] == "✋ Pan"
-    assert labels["rectangle"] == "▭ Rect"
-    assert labels["line"] == "— Line"
+    assert labels["pan"] == "Pan"
+    assert labels["rectangle"] == "Rect"
+    assert labels["line"] == "Line"
     assert dlg._set_zero_plane_btn.isHidden() is False
     assert not hasattr(dlg, "_patch_roi_cb")
     assert not any(cb.text() == "Patch selection" for cb in dlg.findChildren(QCheckBox))
@@ -274,6 +271,7 @@ def test_viewer_dialog_menus_mirror_existing_controls(qapp, monkeypatch):
         "Processing",
         "ROI",
         "Measurements",
+        "FFT",
         "Export",
         "Help",
     ]
@@ -307,7 +305,7 @@ def test_viewer_dialog_menus_mirror_existing_controls(qapp, monkeypatch):
         action("Processing", "Radial FFT")
     with pytest.raises(AssertionError):
         action("Processing", "FFT soft border")
-    assert action("Processing", "STM Background...").isEnabled() is True
+    assert action("Processing", "STM scan-line background…").isEnabled() is True
     assert action("View", "Histogram / Contrast").isEnabled() is True
     assert action("View", "Processing panel").isEnabled() is True
     assert action("View", "ROI panel").isEnabled() is True
@@ -322,7 +320,7 @@ def test_viewer_dialog_menus_mirror_existing_controls(qapp, monkeypatch):
     action("View", "Histogram / Contrast").trigger()
     assert dlg._sidebar_tabs.tabText(dlg._sidebar_tabs.currentIndex()) == "View"
     dlg._display_arr = np.ones((8, 8), dtype=float)
-    action("Processing", "STM Background...").trigger()
+    action("Processing", "STM scan-line background…").trigger()
     qapp.processEvents()
     assert dlg._stm_background_dialog.windowTitle() == "STM Background"
     assert dlg._stm_background_dialog.isVisible()
