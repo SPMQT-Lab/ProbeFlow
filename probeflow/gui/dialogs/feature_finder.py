@@ -74,6 +74,13 @@ class FeatureFinderDialog(QDialog):
         self._build()
         self._sync_threshold_controls()
 
+    # ── Public API ─────────────────────────────────────────────────────────────
+
+    @property
+    def result(self) -> FeatureDetectionResult | None:
+        """Last detection result, or None if not yet run."""
+        return self._result
+
     # ── Build ──────────────────────────────────────────────────────────────────
 
     def _build(self) -> None:

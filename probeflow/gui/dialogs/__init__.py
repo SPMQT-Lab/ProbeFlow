@@ -9,7 +9,9 @@ from probeflow.gui.dialogs.definitions import (
     _DefinitionsPanel,
 )
 from probeflow.gui.dialogs.feature_finder import FeatureFinderDialog
+from probeflow.gui.dialogs.feature_lattice_dialog import FeatureLatticeDialog
 from probeflow.gui.dialogs.fft_viewer import FFTViewerDialog
+from probeflow.gui.dialogs.pair_correlation import PairCorrelationDialog
 from probeflow.gui.dialogs.periodic_filter import PeriodicFilterDialog
 from probeflow.gui.dialogs.point_fft import PointMaskFFTDialog
 from probeflow.gui.dialogs.spec_mapping import SpecMappingDialog, ViewerSpecMappingDialog
@@ -23,7 +25,9 @@ __all__ = [
     "_DefinitionsDialog",
     "_DefinitionsPanel",
     "FeatureFinderDialog",
+    "FeatureLatticeDialog",
     "FFTViewerDialog",
+    "PairCorrelationDialog",
     "ImageViewerDialog",
     "PeriodicFilterDialog",
     "PointMaskFFTDialog",

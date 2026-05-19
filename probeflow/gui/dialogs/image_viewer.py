@@ -764,6 +764,27 @@ class ImageViewerDialog(QDialog):
         measurements_lay.addWidget(feature_finder_btn)
 
         measurements_lay.addWidget(_sep())
+        measurements_lay.addWidget(_sec_lbl("Feature measurements"))
+        pair_corr_btn = QPushButton("Pair correlation…")
+        pair_corr_btn.setFont(QFont("Helvetica", 8))
+        pair_corr_btn.setFixedHeight(26)
+        pair_corr_btn.setToolTip(
+            "Compute g(r) radial pair-correlation from feature points or point ROIs."
+        )
+        pair_corr_btn.clicked.connect(self._on_open_pair_correlation)
+        measurements_lay.addWidget(pair_corr_btn)
+
+        feat_lat_btn = QPushButton("Feature-to-lattice…")
+        feat_lat_btn.setFont(QFont("Helvetica", 8))
+        feat_lat_btn.setFixedHeight(26)
+        feat_lat_btn.setToolTip(
+            "Compare detected features to the active lattice grid: "
+            "matching, off-lattice count, RMS displacement and occupancy."
+        )
+        feat_lat_btn.clicked.connect(self._on_open_feature_lattice)
+        measurements_lay.addWidget(feat_lat_btn)
+
+        measurements_lay.addWidget(_sep())
 
         self._measure_results_panel = MeasurementResultsPanel()
         measurements_lay.addWidget(self._measure_results_panel, 1)
@@ -1109,6 +1130,12 @@ class ImageViewerDialog(QDialog):
         feature_finder_action = QAction("Feature finder…", self)
         feature_finder_action.triggered.connect(self._on_open_feature_finder)
         measurements_menu.addAction(feature_finder_action)
+        pair_corr_action = QAction("Pair correlation…", self)
+        pair_corr_action.triggered.connect(self._on_open_pair_correlation)
+        measurements_menu.addAction(pair_corr_action)
+        feat_lat_action = QAction("Feature-to-lattice comparison…", self)
+        feat_lat_action.triggered.connect(self._on_open_feature_lattice)
+        measurements_menu.addAction(feat_lat_action)
         measurements_menu.addSeparator()
         self._image_measurements.add_detected_point_menu_actions(
             measurements_menu,
@@ -2329,6 +2356,7 @@ class ImageViewerDialog(QDialog):
             theme=self._t,
             parent=self,
         )
+        self._feature_finder_dlg = dlg
         dlg.show()
 
     def _on_measure_distance(self) -> None:
@@ -2434,6 +2462,160 @@ class ImageViewerDialog(QDialog):
             return self._entries[self._idx].stem
         except (AttributeError, IndexError, TypeError):
             return ""
+
+    def _collect_point_sources_m(self) -> dict[str, "np.ndarray"]:
+        """Collect available point sources as (N,2) arrays in metres."""
+        import numpy as _np
+        sources: dict[str, _np.ndarray] = {}
+        px_x, px_y = self._pixel_size_xy_m()
+
+        ff_dlg = getattr(self, "_feature_finder_dlg", None)
+        if ff_dlg is not None and ff_dlg.result is not None and ff_dlg.result.points:
+            pts_m = _np.array([
+                [pt.x_px * px_x, pt.y_px * px_y]
+                for pt in ff_dlg.result.points
+            ])
+            sources["Feature result"] = pts_m
+
+        roi_set = self._image_roi_set
+        if roi_set is not None:
+            dock = getattr(self, "_roi_dock", None)
+            sel_ids = list(dock.selected_roi_ids()) if dock and hasattr(dock, "selected_roi_ids") else []
+            sel_pts = [
+                roi_set.get(rid) for rid in sel_ids
+                if roi_set.get(rid) and roi_set.get(rid).kind == "point"
+            ]
+            if sel_pts:
+                sources["Selected point ROIs"] = _np.array([
+                    [float(r.geometry["x"]) * px_x, float(r.geometry["y"]) * px_y]
+                    for r in sel_pts
+                ])
+            all_pts = [r for r in roi_set.rois if r.kind == "point"]
+            if all_pts:
+                sources["All point ROIs"] = _np.array([
+                    [float(r.geometry["x"]) * px_x, float(r.geometry["y"]) * px_y]
+                    for r in all_pts
+                ])
+        return sources
+
+    def _collect_point_sources_px(self) -> dict[str, "np.ndarray"]:
+        """Collect available point sources as (N,2) arrays in pixel coordinates."""
+        import numpy as _np
+        sources: dict[str, _np.ndarray] = {}
+
+        ff_dlg = getattr(self, "_feature_finder_dlg", None)
+        if ff_dlg is not None and ff_dlg.result is not None and ff_dlg.result.points:
+            sources["Feature result"] = _np.array([
+                [pt.x_px, pt.y_px] for pt in ff_dlg.result.points
+            ])
+
+        roi_set = self._image_roi_set
+        if roi_set is not None:
+            dock = getattr(self, "_roi_dock", None)
+            sel_ids = list(dock.selected_roi_ids()) if dock and hasattr(dock, "selected_roi_ids") else []
+            sel_pts = [
+                roi_set.get(rid) for rid in sel_ids
+                if roi_set.get(rid) and roi_set.get(rid).kind == "point"
+            ]
+            if sel_pts:
+                sources["Selected point ROIs"] = _np.array([
+                    [float(r.geometry["x"]), float(r.geometry["y"])]
+                    for r in sel_pts
+                ])
+            all_pts = [r for r in roi_set.rois if r.kind == "point"]
+            if all_pts:
+                sources["All point ROIs"] = _np.array([
+                    [float(r.geometry["x"]), float(r.geometry["y"])]
+                    for r in all_pts
+                ])
+        return sources
+
+    def _on_open_pair_correlation(self) -> None:
+        sources = self._collect_point_sources_m()
+        if not sources:
+            self._status_lbl.setText(
+                "Run Feature finder or select point ROIs first."
+            )
+            return
+        arr = self._display_arr if self._display_arr is not None else self._raw_arr
+        roi_area_m2 = None
+        if arr is not None and self._image_roi_set is not None:
+            active = self._active_image_roi()
+            if active is not None and active.kind in AREA_ROI_KINDS:
+                try:
+                    mask = active.to_mask(arr.shape[:2])
+                    px_x, px_y = self._pixel_size_xy_m()
+                    roi_area_m2 = float(mask.sum()) * px_x * px_y
+                except Exception:
+                    pass
+        px_x, px_y = self._pixel_size_xy_m()
+        _, ch_unit, _ = self._channel_unit()
+        from probeflow.gui.dialogs.pair_correlation import PairCorrelationDialog
+
+        def _add(result):
+            from probeflow.analysis.measurements import MeasurementResult
+            import dataclasses
+            result = dataclasses.replace(
+                result,
+                id=f"M{self._measure_results_panel.result_count() + 1}",
+            )
+            self._measure_results_panel.add_result(result)
+            self._show_sidebar_tab("measurements")
+
+        dlg = PairCorrelationDialog(
+            sources,
+            roi_area_m2=roi_area_m2,
+            pixel_size_x_m=px_x,
+            pixel_size_y_m=px_y,
+            source_label=self._source_label(),
+            channel=ch_unit,
+            on_add_result=_add,
+            theme=self._t,
+            parent=self,
+        )
+        dlg.show()
+
+    def _on_open_feature_lattice(self) -> None:
+        sources = self._collect_point_sources_px()
+        if not sources:
+            self._status_lbl.setText(
+                "Run Feature finder or select point ROIs first."
+            )
+            return
+        item = getattr(self, "_lattice_grid_item", None)
+        if item is None:
+            self._status_lbl.setText("Open the Lattice/Grid tool first.")
+            return
+        grid = item.grid()
+        arr = self._display_arr if self._display_arr is not None else self._raw_arr
+        px_x, px_y = self._pixel_size_xy_m()
+        _, ch_unit, _ = self._channel_unit()
+        from probeflow.gui.dialogs.feature_lattice_dialog import FeatureLatticeDialog
+
+        def _add(result):
+            import dataclasses
+            result = dataclasses.replace(
+                result,
+                id=f"M{self._measure_results_panel.result_count() + 1}",
+            )
+            self._measure_results_panel.add_result(result)
+            self._show_sidebar_tab("measurements")
+
+        dlg = FeatureLatticeDialog(
+            sources,
+            lattice_origin_px=grid.origin_px,
+            a_px=grid.a_px,
+            b_px=grid.b_px,
+            pixel_size_x_m=px_x,
+            pixel_size_y_m=px_y,
+            image_shape=arr.shape[:2] if arr is not None else None,
+            source_label=self._source_label(),
+            channel=ch_unit,
+            on_add_result=_add,
+            theme=self._t,
+            parent=self,
+        )
+        dlg.show()
 
     def _on_open_fft_viewer(self):
         arr = self._display_arr if self._display_arr is not None else self._raw_arr
