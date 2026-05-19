@@ -552,6 +552,26 @@ class ImageCanvas(QGraphicsView):
     def _snap(pos: QPointF) -> QPointF:
         return QPointF(int(pos.x()), int(pos.y()))
 
+    def _movable_overlay_at(self, view_pos: QPoint,
+                            radius: int = 12) -> "QGraphicsItem | None":
+        """Return the first ItemIsMovable scene item near view_pos, or None.
+
+        Uses a manual screen-space distance check so that
+        ItemIgnoresTransformations handles are found correctly at any zoom.
+        """
+        for item in self.scene().items():
+            flags = item.flags()
+            if not (flags & QGraphicsItem.ItemIsMovable):
+                continue
+            if flags & QGraphicsItem.ItemIgnoresTransformations:
+                vp = self.mapFromScene(item.pos())
+                if abs(vp.x() - view_pos.x()) <= radius and abs(vp.y() - view_pos.y()) <= radius:
+                    return item
+            else:
+                if item in self.items(view_pos):
+                    return item
+        return None
+
     def _roi_at_pos(self, view_pos: QPoint) -> "str | None":
         """Return the ROI id under the given view-space position, or None."""
         items_under = self.items(view_pos)
@@ -843,6 +863,14 @@ class ImageCanvas(QGraphicsView):
                 # Click on a non-active ROI — activate it
                 self.roi_activate_requested.emit(roi_id)
             else:
+                # Check for draggable overlay items (angle handles etc.) before
+                # starting a pan.  ItemIgnoresTransformations items need a
+                # manual screen-space distance check because QGraphicsView hit
+                # testing for those items can miss at non-unity zoom.
+                hit = self._movable_overlay_at(event.pos())
+                if hit is not None:
+                    super().mousePressEvent(event)
+                    return
                 self._left_pan_start = event.pos()
                 self.setCursor(Qt.ClosedHandCursor)
             event.accept()
