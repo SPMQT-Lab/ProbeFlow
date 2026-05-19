@@ -1741,20 +1741,25 @@ class ImageViewerDialog(QDialog):
                   or next(iter(units.values()), None))
         z_unit = (units.get("mean_height") or units.get("height_m")
                   or units.get("mean_height_m"))
+        context = {
+            k: v for k, v in {
+                "summary": legacy_r.summary,
+                "roi_id": getattr(legacy_r, "roi_id", None),
+            }.items() if v
+        }
+        context.update(dict(getattr(legacy_r, "context", {}) or {}))
+        source_path = context.get("source_path") or legacy_r.source
         return R(
             measurement_id=measurement_id,
             kind=legacy_r.kind,
             source_label=legacy_r.source or "",
-            source_path=legacy_r.source,
+            source_path=source_path,
             channel=legacy_r.channel,
             x_unit=x_unit,
             y_unit=None,
             z_unit=z_unit,
             values=values,
-            context={k: v for k, v in {
-                "summary": legacy_r.summary,
-                "roi_id": getattr(legacy_r, "roi_id", None),
-            }.items() if v},
+            context=context,
             notes=legacy_r.notes or "",
         )
 
@@ -2392,11 +2397,21 @@ class ImageViewerDialog(QDialog):
             self._status_lbl.setText("No image loaded.")
             return
         px_x_m, px_y_m = self._pixel_size_xy_m()
+        roi_mask = None
+        active_roi = self._active_image_roi()
+        if active_roi is not None and active_roi.kind in AREA_ROI_KINDS:
+            try:
+                mask = active_roi.to_mask(arr.shape[:2])
+            except Exception:
+                mask = None
+            if mask is not None and mask.any():
+                roi_mask = mask
         from probeflow.gui.dialogs.feature_finder import FeatureFinderDialog
         dlg = FeatureFinderDialog(
             arr,
             pixel_size_x_m=px_x_m,
             pixel_size_y_m=px_y_m,
+            roi_mask=roi_mask,
             theme=self._t,
             parent=self,
         )
@@ -2522,6 +2537,14 @@ class ImageViewerDialog(QDialog):
             ])
             sources["Feature result"] = pts_m
 
+        measure_ctrl = getattr(self, "_image_measurements", None)
+        measure_points = list(getattr(measure_ctrl, "feature_points", []) or [])
+        if measure_points:
+            sources["Detected feature maxima"] = _np.array([
+                [float(pt.x_px) * px_x, float(pt.y_px) * px_y]
+                for pt in measure_points
+            ])
+
         roi_set = self._image_roi_set
         if roi_set is not None:
             dock = getattr(self, "_roi_dock", None)
@@ -2552,6 +2575,14 @@ class ImageViewerDialog(QDialog):
         if ff_dlg is not None and ff_dlg.result is not None and ff_dlg.result.points:
             sources["Feature result"] = _np.array([
                 [pt.x_px, pt.y_px] for pt in ff_dlg.result.points
+            ])
+
+        measure_ctrl = getattr(self, "_image_measurements", None)
+        measure_points = list(getattr(measure_ctrl, "feature_points", []) or [])
+        if measure_points:
+            sources["Detected feature maxima"] = _np.array([
+                [float(pt.x_px), float(pt.y_px)]
+                for pt in measure_points
             ])
 
         roi_set = self._image_roi_set
@@ -2595,6 +2626,8 @@ class ImageViewerDialog(QDialog):
                     pass
         px_x, px_y = self._pixel_size_xy_m()
         _, ch_unit, _ = self._channel_unit()
+        entries = getattr(self, "_entries", [])
+        entry = entries[self._idx] if entries else None
         from probeflow.gui.dialogs.pair_correlation import PairCorrelationDialog
 
         def _add(result):
@@ -2609,6 +2642,7 @@ class ImageViewerDialog(QDialog):
             pixel_size_x_m=px_x,
             pixel_size_y_m=px_y,
             source_label=self._source_label(),
+            source_path=str(entry.path) if entry is not None else None,
             channel=ch_unit,
             on_add_result=_add,
             theme=self._t,
@@ -2631,6 +2665,8 @@ class ImageViewerDialog(QDialog):
         arr = self._display_arr if self._display_arr is not None else self._raw_arr
         px_x, px_y = self._pixel_size_xy_m()
         _, ch_unit, _ = self._channel_unit()
+        entries = getattr(self, "_entries", [])
+        entry = entries[self._idx] if entries else None
         from probeflow.gui.dialogs.feature_lattice_dialog import FeatureLatticeDialog
 
         def _add(result):
@@ -2648,6 +2684,7 @@ class ImageViewerDialog(QDialog):
             pixel_size_y_m=px_y,
             image_shape=arr.shape[:2] if arr is not None else None,
             source_label=self._source_label(),
+            source_path=str(entry.path) if entry is not None else None,
             channel=ch_unit,
             on_add_result=_add,
             theme=self._t,
@@ -3084,4 +3121,3 @@ class ImageViewerDialog(QDialog):
         if stm_dlg is not None and stm_dlg.isVisible():
             stm_dlg.close()
         super().closeEvent(event)
-

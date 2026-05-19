@@ -60,6 +60,7 @@ class PairCorrelationDialog(QDialog):
         pixel_size_x_m: float = 1e-10,
         pixel_size_y_m: float = 1e-10,
         source_label: str = "",
+        source_path: str | None = None,
         channel: str = "",
         on_add_result: Callable[[MeasurementResult], None] | None = None,
         theme: dict | None = None,
@@ -75,6 +76,7 @@ class PairCorrelationDialog(QDialog):
         self._px_x_m = float(pixel_size_x_m)
         self._px_y_m = float(pixel_size_y_m)
         self._source_label = source_label
+        self._source_path = source_path
         self._channel = channel
         self._on_add_result = on_add_result
         self._t = theme or {}
@@ -281,6 +283,30 @@ class PairCorrelationDialog(QDialog):
             values["first_peak_nm"] = r.first_peak_m * 1e9
             units["first_peak_nm"] = "nm"
         values["quality"] = r.quality
+        bin_width_m = None
+        if len(r.r_m) > 1:
+            bin_width_m = float(r.r_m[1] - r.r_m[0])
+        elif self._bw_sb.value() > 0:
+            bin_width_m = float(self._bw_sb.value() * 1e-9)
+        r_max_m = None
+        if len(r.r_m) > 0:
+            r_max_m = float(r.r_m[-1] + 0.5 * (bin_width_m or 0.0))
+        elif self._rmax_sb.value() > 0:
+            r_max_m = float(self._rmax_sb.value() * 1e-9)
+        context = {
+            "point_source": src_name,
+            "source_path": self._source_path,
+            "roi_area_m2": self._roi_area_m2,
+            "r_max_m": r_max_m,
+            "r_max_mode": "manual" if self._rmax_sb.value() > 0 else "auto",
+            "bin_width_m": bin_width_m,
+            "bin_width_mode": "manual" if self._bw_sb.value() > 0 else "auto",
+            "pixel_size_x_m": self._px_x_m,
+            "pixel_size_y_m": self._px_y_m,
+            "edge_correction": "not_applied",
+            "message": r.message,
+            "data_basis": "feature_points_physical",
+        }
 
         from probeflow.analysis.measurements import MeasurementResult
         result = MeasurementResult(
@@ -292,6 +318,7 @@ class PairCorrelationDialog(QDialog):
             summary=summary,
             values=values,
             units=units,
+            context=context,
             notes=src_name,
         )
         self._on_add_result(result)

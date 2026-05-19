@@ -969,6 +969,86 @@ def test_viewer_adds_line_profile_summary_to_measurement_table(qapp):
     assert result.y_unit == "nm"
 
 
+def test_periodicity_secondary_exports_include_method_context(qapp, monkeypatch, tmp_path):
+    from PySide6.QtWidgets import QFileDialog
+    from probeflow.core.roi import ROI, ROISet
+    from probeflow.gui import ImageViewerDialog, SxmFile
+    from probeflow.gui.viewer import ImageMeasurementController
+
+    class FakeLinePeriodicityPanel:
+        def __init__(self):
+            self.findPeriodicityRequested = _FakeSignal()
+            self.copyResultRequested = _FakeSignal()
+            self.exportProfileCsvRequested = _FakeSignal()
+            self.result = None
+
+        def settings(self):
+            return {
+                "method": "fft",
+                "background": "none",
+                "smoothing": "none",
+                "width_px": 3.0,
+                "min_period_m": 5e-9,
+                "max_period_m": 20e-9,
+            }
+
+        def set_result(self, result):
+            self.result = result
+
+        def show_message(self, _message):
+            return None
+
+    x = np.arange(128, dtype=np.float64)
+    image = np.tile(np.sin(2.0 * np.pi * x / 12.0), (8, 1))
+    roi_set = ROISet(image_id="img1")
+    line = ROI.new("line", {"x1": 0.0, "y1": 4.0, "x2": 127.0, "y2": 4.0}, name="wave")
+    roi_set.add(line)
+    roi_set.set_active(line.id)
+
+    dlg = ImageViewerDialog.__new__(ImageViewerDialog)
+    dlg._image_roi_set = roi_set
+    dlg._display_arr = image
+    dlg._entries = [SxmFile(path=Path("/tmp/example.sxm"), stem="example", Nx=128, Ny=8)]
+    dlg._idx = 0
+    dlg._channel_unit = lambda: (1.0, "nm", "Height")
+    dlg._pixel_size_xy_m = lambda: (1e-9, 1e-9)
+    dlg._active_line_roi_id = lambda: line.id
+    dlg._on_roi_line_profile = lambda _roi_id: None
+    dlg._status_lbl = _FakeStatus()
+
+    table = _FakeMeasurementTable()
+    panel = FakeLinePeriodicityPanel()
+    controller = ImageMeasurementController(dlg, table, line_periodicity_panel=panel)
+    controller._show_periodicity_plot_dialog = lambda *_args, **_kwargs: None
+
+    controller.find_periodicity_for_active_line_roi()
+    controller.copy_periodicity_result()
+    copied = qapp.clipboard().text()
+
+    assert "Method: fft" in copied
+    assert "ROI: wave" in copied
+    assert "Source: example:Height" in copied
+    assert "Width: 3 px" in copied
+    assert "Period bounds: 5 nm to 20 nm" in copied
+    assert "Quality:" in copied
+
+    csv_path = tmp_path / "periodicity_profile.csv"
+    monkeypatch.setattr(
+        QFileDialog,
+        "getSaveFileName",
+        lambda *args, **kwargs: (str(csv_path), ""),
+    )
+    controller.export_periodicity_profile_csv()
+
+    text = csv_path.read_text(encoding="utf-8")
+    assert "# export_type,probeflow_line_periodicity_profile" in text
+    assert "# roi_name,wave" in text
+    assert "# method,fft" in text
+    assert "# width_px,3" in text
+    assert "# min_period_m,5e-09" in text
+    assert "s_m,s_nm,z_raw,z_processed" in text
+
+
 def test_viewer_feature_maxima_action_adds_summary_measurement(
     qapp, monkeypatch, tmp_path,
 ):
@@ -1072,6 +1152,107 @@ def test_viewer_feature_maxima_roi_action_uses_panel_settings(qapp):
     assert ",nm,nm,nm," in QApplication.clipboard().text()
 
 
+def test_viewer_point_source_collectors_include_measure_tab_feature_points(qapp):
+    from types import SimpleNamespace
+
+    from probeflow.gui import ImageViewerDialog
+    from probeflow.measurements.models import FeaturePoint
+
+    dlg = ImageViewerDialog.__new__(ImageViewerDialog)
+    dlg._pixel_size_xy_m = lambda: (2e-9, 3e-9)
+    dlg._feature_finder_dlg = None
+    dlg._image_roi_set = None
+    dlg._image_measurements = SimpleNamespace(
+        feature_points=[
+            FeaturePoint(
+                point_id="P0001",
+                x_px=4.0,
+                y_px=5.0,
+                x_phys=4.0,
+                y_phys=5.0,
+                z_value=1.0,
+                channel="Height",
+                source_label="example",
+            ),
+        ]
+    )
+
+    px_sources = dlg._collect_point_sources_px()
+    m_sources = dlg._collect_point_sources_m()
+
+    assert "Detected feature maxima" in px_sources
+    np.testing.assert_allclose(px_sources["Detected feature maxima"], [[4.0, 5.0]])
+    np.testing.assert_allclose(m_sources["Detected feature maxima"], [[8e-9, 15e-9]])
+
+
+def test_feature_finder_receives_active_area_roi_mask(qapp, monkeypatch):
+    from probeflow.core.roi import ROI, ROISet
+    from probeflow.gui import ImageViewerDialog
+    import probeflow.gui.dialogs.feature_finder as feature_finder_module
+
+    image = np.zeros((8, 8), dtype=float)
+    roi_set = ROISet(image_id="img1")
+    roi = ROI.new("rectangle", {"x": 2, "y": 1, "width": 3, "height": 4}, name="scope")
+    roi_set.add(roi)
+    roi_set.set_active(roi.id)
+    captured = {}
+
+    class FakeFeatureFinderDialog:
+        def __init__(self, *args, **kwargs):
+            captured["roi_mask"] = kwargs.get("roi_mask")
+
+        def show(self):
+            captured["shown"] = True
+
+    monkeypatch.setattr(
+        feature_finder_module,
+        "FeatureFinderDialog",
+        FakeFeatureFinderDialog,
+    )
+    dlg = ImageViewerDialog.__new__(ImageViewerDialog)
+    dlg._display_arr = image
+    dlg._raw_arr = None
+    dlg._image_roi_set = roi_set
+    dlg._pixel_size_xy_m = lambda: (1e-9, 1e-9)
+    dlg._t = {}
+    dlg._status_lbl = _FakeStatus()
+
+    dlg._on_open_feature_finder()
+
+    expected = roi.to_mask(image.shape)
+    assert captured["shown"] is True
+    np.testing.assert_array_equal(captured["roi_mask"], expected)
+
+
+def test_legacy_measurement_context_survives_dock_conversion(qapp):
+    from probeflow.analysis.measurements import MeasurementResult as LegacyResult
+    from probeflow.gui import ImageViewerDialog
+
+    legacy = LegacyResult(
+        id="M?",
+        kind="pair_corr",
+        source="scan:Height",
+        channel="Height",
+        roi_id=None,
+        summary="Points: 25",
+        values={"n_points": 25, "quality": "good"},
+        context={
+            "source_path": "/tmp/scan.sxm",
+            "point_source": "Detected feature maxima",
+            "edge_correction": "not_applied",
+            "bin_width_m": 5e-10,
+        },
+    )
+    dlg = ImageViewerDialog.__new__(ImageViewerDialog)
+
+    result = dlg._to_dock_result(legacy, "M0001")
+
+    assert result.source_path == "/tmp/scan.sxm"
+    assert result.context["point_source"] == "Detected feature maxima"
+    assert result.context["edge_correction"] == "not_applied"
+    assert result.context["bin_width_m"] == pytest.approx(5e-10)
+
+
 def test_viewer_feature_maxima_failure_clears_stale_overlay(qapp):
     image = np.zeros((7, 7), dtype=float)
     image[2, 2] = 10.0
@@ -1136,8 +1317,16 @@ def test_viewer_feature_maxima_exports_point_mask_and_fft(qapp, monkeypatch, tmp
     controller.export_point_mask_csv()
     controller.export_point_fft_csv()
 
-    assert "1" in mask_path.read_text(encoding="utf-8")
+    mask_text = mask_path.read_text(encoding="utf-8")
+    assert "# export_type,probeflow_feature_point_mask" in mask_text
+    assert "# source_path,/tmp/example.sxm" in mask_text
+    assert "# threshold_mode,absolute" in mask_text
+    assert "# radius_px,1" in mask_text
+    assert "1" in mask_text
     fft_text = fft_path.read_text(encoding="utf-8")
+    assert "# export_type,probeflow_point_mask_fft" in fft_text
+    assert "# source_path,/tmp/example.sxm" in fft_text
+    assert "# mask_shape_y,8" in fft_text
     assert "qx,qy,magnitude,unit" in fft_text
     assert "cycles/nm" in fft_text
 

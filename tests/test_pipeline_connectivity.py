@@ -146,6 +146,38 @@ class TestGUIAdapterCoverage:
         assert len(state.steps) == 1
         assert state.steps[0].op == "affine_lattice_correction"
 
+    def test_affine_lattice_correction_preserves_scientific_metadata(self):
+        matrix = [[1.0, 0.0], [0.0, 1.0]]
+        full_matrix = [[1.1, 0.0], [0.0, 0.9]]
+        gui = {"geometric_ops": [{
+            "op": "affine_lattice_correction",
+            "params": {
+                "matrix": matrix,
+                "full_matrix": full_matrix,
+                "expand_canvas": True,
+                "interpolation": "bilinear",
+                "fill_mode": "nan",
+                "preserve_orientation": True,
+                "polar_rotation_deg": 12.5,
+                "measured_a_nm": [0.25, 0.0],
+                "measured_b_nm": [0.05, 0.30],
+                "ideal_a_nm": 0.25,
+                "ideal_b_nm": 0.25,
+                "ideal_angle_deg": 90.0,
+            },
+        }]}
+        state = processing_state_from_gui(gui)
+        params = state.steps[0].params
+
+        assert params["full_matrix"] == full_matrix
+        assert params["preserve_orientation"] is True
+        assert params["polar_rotation_deg"] == pytest.approx(12.5)
+        assert params["measured_a_nm"] == pytest.approx([0.25, 0.0])
+        assert params["measured_b_nm"] == pytest.approx([0.05, 0.30])
+        assert params["ideal_a_nm"] == pytest.approx(0.25)
+        assert params["ideal_b_nm"] == pytest.approx(0.25)
+        assert params["ideal_angle_deg"] == pytest.approx(90.0)
+
     def test_stm_line_bg_in_geometric_ops_produces_no_step(self):
         # stm_line_bg has dispatch in state.py but NO path in gui_adapter.py.
         # Passing it as a geometric_ops entry should be silently skipped.
@@ -223,4 +255,3 @@ class TestImportPaths:
             "LatticeCorrection has been added to probeflow.analysis public API. "
             "If intentional, update this test."
         )
-

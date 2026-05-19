@@ -49,9 +49,15 @@ from probeflow.spectroscopy.transforms import make_displayed_spectrum
 
 _DISPLAY_PIPELINE_TOOLTIP = (
     "Displayed/exported spectra are derived copies: raw x/y -> smoothing -> "
-    "derivative -> normalization -> outlier mask -> vertical offset. "
+    "numerical derivative -> normalization -> outlier mask -> vertical offset. "
     "The loaded raw spectroscopy arrays and source files are not modified."
 )
+_DERIVATIVE_NUMERIC_LABEL = "Numerical dy/dx"
+
+
+def _derivative_enabled(label: str) -> bool:
+    return label in {_DERIVATIVE_NUMERIC_LABEL, "dI/dV"}
+
 _SMOOTHING_TOOLTIP = (
     "Smoothing is applied only to displayed copies. Savitzky-Golay uses an odd "
     "window length greater than the polynomial order; invalid GUI values are "
@@ -281,10 +287,10 @@ class SpecViewerDialog(QDialog):
         self._savgol_order_spin.editingFinished.connect(self._on_processing_changed)
 
         self._derivative_cb = QComboBox()
-        self._derivative_cb.addItems(["Off", "dI/dV"])
+        self._derivative_cb.addItems(["Off", _DERIVATIVE_NUMERIC_LABEL])
         self._derivative_cb.setFont(QFont("Helvetica", 9))
         self._derivative_cb.setToolTip(
-            "Show numerical dy/dx on displayed copies; for current-vs-bias this is dI/dV."
+            "Compute a numerical derivative of the displayed y channel with respect to x."
         )
         self._derivative_cb.currentTextChanged.connect(self._on_processing_changed)
 
@@ -639,7 +645,7 @@ class SpecViewerDialog(QDialog):
 
     def _normalization_formula(self) -> str:
         return normalization_formula_text(
-            derivative=self._derivative_cb.currentText() == "dI/dV",
+            derivative=_derivative_enabled(self._derivative_cb.currentText()),
             mode_label=self._normalize_cb.currentText(),
             constant=float(self._norm_constant_spin.value()),
             channel=self._norm_channel_cb.currentText(),
@@ -668,7 +674,7 @@ class SpecViewerDialog(QDialog):
             smoothing_mode=smoothing,
             smoothing_points=points,
             savgol_polyorder=polyorder,
-            derivative=self._derivative_cb.currentText() == "dI/dV",
+            derivative=_derivative_enabled(self._derivative_cb.currentText()),
             normalize_mode=normalize,
             normalize_constant=float(self._norm_constant_spin.value()),
             normalize_channel=self._norm_channel_cb.currentText() or None,
@@ -1386,9 +1392,9 @@ class SpecOverlayDialog(QDialog):
         ctrl_lay.addWidget(self._savgol_order_spin)
 
         self._derivative_cb = QComboBox()
-        self._derivative_cb.addItems(["Off", "dI/dV"])
+        self._derivative_cb.addItems(["Off", _DERIVATIVE_NUMERIC_LABEL])
         self._derivative_cb.setToolTip(
-            "Show numerical dy/dx on displayed copies; for current-vs-bias this is dI/dV."
+            "Compute a numerical derivative of the displayed y channel with respect to x."
         )
         self._derivative_cb.currentTextChanged.connect(self._redraw)
         ctrl_lay.addWidget(QLabel("Derivative"))
@@ -1583,7 +1589,7 @@ class SpecOverlayDialog(QDialog):
 
     def _normalization_formula(self) -> str:
         return normalization_formula_text(
-            derivative=self._derivative_cb.currentText() == "dI/dV",
+            derivative=_derivative_enabled(self._derivative_cb.currentText()),
             mode_label=self._normalize_cb.currentText(),
             constant=float(self._norm_constant_spin.value()),
             channel=self._norm_channel_cb.currentText(),
@@ -1643,7 +1649,7 @@ class SpecOverlayDialog(QDialog):
             smoothing_mode=smoothing,
             smoothing_points=int(self._smooth_points_spin.value()),
             savgol_polyorder=int(self._savgol_order_spin.value()),
-            derivative=self._derivative_cb.currentText() == "dI/dV",
+            derivative=_derivative_enabled(self._derivative_cb.currentText()),
             normalize_mode=normalize,
             normalize_constant=float(self._norm_constant_spin.value()),
             normalize_channel=self._norm_channel_cb.currentText() or None,

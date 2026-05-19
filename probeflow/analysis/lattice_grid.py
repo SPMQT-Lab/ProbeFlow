@@ -338,6 +338,15 @@ class RealSpaceCalibration:
         wy = vy * self.px_size_y
         return math.hypot(wx, wy)
 
+    def vector_angle_deg(self, a_px: Vec2, b_px: Vec2) -> float:
+        """Angle between two pixel-space vectors after physical calibration."""
+        ax, ay = a_px
+        bx, by = b_px
+        return _angle_between_vectors_deg(
+            (ax * self.px_size_x, ay * self.px_size_y),
+            (bx * self.px_size_x, by * self.px_size_y),
+        )
+
     def origin_m(self, origin_px: Vec2) -> Vec2:
         """Origin position in metres."""
         return (origin_px[0] * self.px_size_x, origin_px[1] * self.px_size_y)
@@ -392,6 +401,18 @@ def _fmt(value_m: float, unit: str, decimals: int = 3) -> str:
     return f"{value_m:.{decimals}g} {unit}"
 
 
+def _angle_between_vectors_deg(a: Vec2, b: Vec2) -> float:
+    ax, ay = a
+    bx, by = b
+    la = math.hypot(ax, ay)
+    lb = math.hypot(bx, by)
+    if la == 0.0 or lb == 0.0:
+        return 0.0
+    dot = ax * bx + ay * by
+    cos_theta = max(-1.0, min(1.0, dot / (la * lb)))
+    return math.degrees(math.acos(cos_theta))
+
+
 def _choose_unit(value_m: float) -> tuple[float, str]:
     """Return (scale_factor, unit_string) for the most readable representation."""
     value_nm = value_m * 1e9
@@ -423,7 +444,7 @@ def format_real_space_measurements(
         abs((ax * cal.px_size_x) * (by * cal.px_size_y)
             - (ay * cal.px_size_y) * (bx * cal.px_size_x))
     )
-    angle = grid.angle_deg()
+    angle = cal.vector_angle_deg(grid.a_px, grid.b_px)
 
     # Choose unit based on a-vector
     scale, unit = _choose_unit(la_m)
@@ -468,7 +489,7 @@ def format_reciprocal_measurements(
             return f"{d_nm:.3g} nm"
         return f"{d_nm * 10:.3g} Å"
 
-    angle = grid.angle_deg()
+    angle = _angle_between_vectors_deg(qvec_a, qvec_b)
     qax, qay = qvec_a
     qbx, qby = qvec_b
     area_q = abs(qax * qby - qay * qbx)

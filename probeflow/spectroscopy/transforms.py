@@ -66,9 +66,9 @@ def make_displayed_spectrum(
         x, y = numerical_derivative(x, y)
         y_unit = f"{y_unit}/{trace.x_unit}".rstrip("/") if y_unit else ""
         if trace.x_unit == "V" and _looks_like_current(trace.y_channel, y_label):
-            y_label = "dI/dV"
+            y_label = "numerical dI/dV"
         else:
-            y_label = f"d({y_label})/d{trace.x_unit or 'x'}"
+            y_label = f"numerical d({y_label})/d{trace.x_unit or 'x'}"
 
     y = apply_normalization(
         y,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import os
 
 import numpy as np
 import pytest
@@ -12,6 +13,18 @@ from probeflow.analysis.feature_lattice import (
     compare_features_to_lattice,
     default_match_radius,
 )
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+
+@pytest.fixture
+def qapp():
+    try:
+        from PySide6.QtWidgets import QApplication
+    except Exception as exc:
+        pytest.skip(f"PySide6 unavailable: {exc}")
+    app = QApplication.instance()
+    return app if app is not None else QApplication([])
 
 
 def _square_lattice_pts(n: int, spacing: float, origin=(0.0, 0.0)):
@@ -65,6 +78,26 @@ def test_noisy_points_rms_matches_noise():
     assert result.n_matched == 25
     assert result.rms_displacement_px is not None
     assert 0.2 < result.rms_displacement_px < 1.0
+
+
+def test_physical_displacement_uses_per_axis_pixel_calibration():
+    pts = np.array([
+        [1.0, 0.0],
+        [0.0, 1.0],
+    ])
+    result = compare_features_to_lattice(
+        pts,
+        (0.0, 0.0),
+        (10.0, 0.0),
+        (0.0, 10.0),
+        match_radius_px=2.0,
+        pixel_size_x_m=1e-9,
+        pixel_size_y_m=2e-9,
+    )
+    assert result.rms_displacement_m == pytest.approx(math.sqrt((1e-18 + 4e-18) / 2))
+    assert result.mean_displacement_m == pytest.approx(1.5e-9)
+    assert result.assignments[0].displacement_m == pytest.approx(1e-9)
+    assert result.assignments[1].displacement_m == pytest.approx(2e-9)
 
 
 # ── off-lattice points ────────────────────────────────────────────────────────
@@ -157,3 +190,39 @@ def test_single_point_handled():
         match_radius_px=2.0,
     )
     assert result.n_features == 1
+
+
+def test_dialog_measurement_context_preserves_lattice_and_match_settings(qapp):
+    from probeflow.gui.dialogs.feature_lattice_dialog import FeatureLatticeDialog
+
+    captured = []
+    dlg = FeatureLatticeDialog(
+        {"Detected feature maxima": np.array([[0.5, 0.0], [10.0, 0.5]])},
+        lattice_origin_px=(0.0, 0.0),
+        a_px=(10.0, 0.0),
+        b_px=(0.0, 12.0),
+        pixel_size_x_m=1e-9,
+        pixel_size_y_m=2e-9,
+        image_shape=(48, 40),
+        source_label="scan:Height",
+        source_path="/tmp/scan.sxm",
+        channel="Height",
+        on_add_result=captured.append,
+    )
+    dlg._radius_sb.setValue(2.5)
+
+    dlg._run()
+    dlg._add_to_table()
+
+    result = captured[0]
+    assert result.context["point_source"] == "Detected feature maxima"
+    assert result.context["source_path"] == "/tmp/scan.sxm"
+    assert result.context["match_radius_px"] == pytest.approx(2.5)
+    assert result.context["match_radius_mode"] == "manual"
+    assert result.context["lattice_a_x_px"] == pytest.approx(10.0)
+    assert result.context["lattice_b_y_px"] == pytest.approx(12.0)
+    assert result.context["pixel_size_y_m"] == pytest.approx(2e-9)
+    assert result.context["image_shape_y"] == 48
+    assert result.context["occupancy_region"] == "image_bounds"
+    dlg.close()
+    dlg.deleteLater()

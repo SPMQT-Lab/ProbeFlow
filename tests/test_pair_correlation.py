@@ -3,11 +3,24 @@
 from __future__ import annotations
 
 import math
+import os
 
 import numpy as np
 import pytest
 
 from probeflow.analysis.pair_correlation import compute_pair_correlation
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+
+@pytest.fixture
+def qapp():
+    try:
+        from PySide6.QtWidgets import QApplication
+    except Exception as exc:
+        pytest.skip(f"PySide6 unavailable: {exc}")
+    app = QApplication.instance()
+    return app if app is not None else QApplication([])
 
 
 def _square_lattice(n: int, spacing_m: float) -> np.ndarray:
@@ -104,6 +117,39 @@ def test_message_contains_edge_correction_note():
     pts = _square_lattice(6, 1e-9)
     result = compute_pair_correlation(pts)
     assert "edge correction" in result.message.lower()
+
+
+def test_dialog_measurement_context_preserves_bins_area_and_warning(qapp):
+    from probeflow.gui.dialogs.pair_correlation import PairCorrelationDialog
+
+    captured = []
+    dlg = PairCorrelationDialog(
+        {"Detected feature maxima": _square_lattice(5, 1e-9)},
+        roi_area_m2=25e-18,
+        pixel_size_x_m=1e-9,
+        pixel_size_y_m=2e-9,
+        source_label="scan:Height",
+        source_path="/tmp/scan.sxm",
+        channel="Height",
+        on_add_result=captured.append,
+    )
+    dlg._rmax_sb.setValue(4.0)
+    dlg._bw_sb.setValue(0.5)
+
+    dlg._run()
+    dlg._add_to_table()
+
+    result = captured[0]
+    assert result.context["point_source"] == "Detected feature maxima"
+    assert result.context["source_path"] == "/tmp/scan.sxm"
+    assert result.context["roi_area_m2"] == pytest.approx(25e-18)
+    assert result.context["r_max_m"] == pytest.approx(4e-9)
+    assert result.context["bin_width_m"] == pytest.approx(0.5e-9)
+    assert result.context["edge_correction"] == "not_applied"
+    assert "edge correction" in result.context["message"].lower()
+    assert result.context["pixel_size_y_m"] == pytest.approx(2e-9)
+    dlg.close()
+    dlg.deleteLater()
 
 
 def test_invalid_array_raises():

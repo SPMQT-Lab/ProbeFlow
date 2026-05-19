@@ -8,6 +8,8 @@ small GUI export actions.
 
 from __future__ import annotations
 
+import csv
+import io
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +42,30 @@ from probeflow.measurements.image import (
 )
 
 from probeflow.core import AREA_ROI_KINDS
+
+
+def _csv_text(rows: list[list[str]]) -> str:
+    out = io.StringIO()
+    writer = csv.writer(out)
+    writer.writerows(rows)
+    return out.getvalue()
+
+
+def _metadata_value(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, float):
+        return f"{value:.12g}"
+    return str(value)
+
+
+def _format_period_bound_nm(value: Any) -> str:
+    if value is None:
+        return ""
+    try:
+        return f"{float(value) * 1e9:.12g} nm"
+    except (TypeError, ValueError):
+        return str(value)
 
 
 class ImageMeasurementController:
@@ -260,13 +286,26 @@ class ImageMeasurementController:
             self._last_periodicity_result = result
             self._last_periodicity_diag = diag
             self._last_periodicity_settings = {
+                "method": method,
                 "background": background,
                 "smoothing": smoothing,
+                "width_px": width_px,
+                "min_period_m": min_period_m,
+                "max_period_m": max_period_m,
+                "roi_id": roi.id,
+                "roi_name": roi.name,
             }
             if self._line_periodicity_panel is not None:
                 self._line_periodicity_panel.set_result(result)
 
             entry, _scale, _unit, channel, source_label = self._source_info()
+            self._last_periodicity_settings.update({
+                "source_label": source_label,
+                "source_path": str(entry.path),
+                "channel": channel,
+                "quality": result.quality,
+                "message": result.message,
+            })
             meas = line_periodicity_measurement(
                 result,
                 measurement_id=self._table.next_measurement_id(),
@@ -299,6 +338,9 @@ class ImageMeasurementController:
             background=s.get("background", ""),
             smoothing=s.get("smoothing", ""),
         )
+        context = self._periodicity_context_lines()
+        if context:
+            text = f"{text}\n" + "\n".join(context)
         QApplication.clipboard().setText(text)
         self._set_status("Copied periodicity result.")
 
@@ -314,18 +356,71 @@ class ImageMeasurementController:
         if not path:
             return
         diag = self._last_periodicity_diag
-        rows = ["s_m,s_nm,z_raw,z_processed"]
+        rows = self._periodicity_csv_rows("probeflow_line_periodicity_profile")
+        rows.append(["s_m", "s_nm", "z_raw", "z_processed"])
         for s, z_r, z_p in zip(diag.s_m, diag.z_raw, diag.z_processed):
-            rows.append(f"{s:.6e},{s * 1e9:.6e},{z_r:.6e},{z_p:.6e}")
-        Path(path).write_text("\n".join(rows), encoding="utf-8")
+            rows.append([
+                f"{s:.6e}",
+                f"{s * 1e9:.6e}",
+                f"{z_r:.6e}",
+                f"{z_p:.6e}",
+            ])
+        Path(path).write_text(_csv_text(rows), encoding="utf-8")
         # Optionally export autocorrelation if available
         if diag.autocorr_lag_m is not None and diag.autocorr is not None:
             ac_path = Path(path).with_stem(Path(path).stem + "_autocorr")
-            ac_rows = ["lag_m,lag_nm,autocorrelation"]
+            ac_rows = self._periodicity_csv_rows("probeflow_line_periodicity_autocorr")
+            ac_rows.append(["lag_m", "lag_nm", "autocorrelation"])
             for lag, ac in zip(diag.autocorr_lag_m, diag.autocorr):
-                ac_rows.append(f"{lag:.6e},{lag * 1e9:.6e},{ac:.6e}")
-            ac_path.write_text("\n".join(ac_rows), encoding="utf-8")
+                ac_rows.append([f"{lag:.6e}", f"{lag * 1e9:.6e}", f"{ac:.6e}"])
+            ac_path.write_text(_csv_text(ac_rows), encoding="utf-8")
         self._set_status(f"Periodicity profile → {path}")
+
+    def _periodicity_context_lines(self) -> list[str]:
+        s = self._last_periodicity_settings
+        lines: list[str] = []
+        roi_name = s.get("roi_name")
+        roi_id = s.get("roi_id")
+        if roi_name:
+            lines.append(f"ROI: {roi_name}")
+        elif roi_id:
+            lines.append(f"ROI id: {roi_id}")
+        if s.get("source_label"):
+            lines.append(f"Source: {s['source_label']}")
+        if s.get("channel"):
+            lines.append(f"Channel: {s['channel']}")
+        if s.get("width_px") is not None:
+            lines.append(f"Width: {_metadata_value(s['width_px'])} px")
+        min_period = _format_period_bound_nm(s.get("min_period_m"))
+        max_period = _format_period_bound_nm(s.get("max_period_m"))
+        if min_period or max_period:
+            lines.append(f"Period bounds: {min_period or 'none'} to {max_period or 'none'}")
+        if s.get("quality"):
+            lines.append(f"Quality: {s['quality']}")
+        if s.get("message"):
+            lines.append(f"Message: {s['message']}")
+        return lines
+
+    def _periodicity_csv_rows(self, export_type: str) -> list[list[str]]:
+        s = self._last_periodicity_settings
+        rows: list[list[str]] = [["# export_type", export_type]]
+        for key in (
+            "source_label",
+            "source_path",
+            "channel",
+            "roi_id",
+            "roi_name",
+            "method",
+            "background",
+            "smoothing",
+            "width_px",
+            "min_period_m",
+            "max_period_m",
+            "quality",
+            "message",
+        ):
+            rows.append([f"# {key}", _metadata_value(s.get(key))])
+        return rows
 
     def _show_periodicity_plot_dialog(self, result, diag) -> None:
         from probeflow.gui.dialogs.line_periodicity_plot import PeriodicityPlotDialog
@@ -621,7 +716,15 @@ class ImageMeasurementController:
             "CSV files (*.csv)",
         )
         if path:
-            Path(path).write_text(point_mask_to_csv_text(mask), encoding="utf-8")
+            metadata = self._point_mask_export_metadata(
+                mask,
+                radius_px=_radius_px,
+                shape_mode=_shape_mode,
+            )
+            Path(path).write_text(
+                point_mask_to_csv_text(mask, metadata=metadata),
+                encoding="utf-8",
+            )
             self._set_status(f"Point mask -> {path}")
 
     def compute_point_mask_fft(self, *, show_dialog: bool = True) -> None:
@@ -664,7 +767,19 @@ class ImageMeasurementController:
             "CSV files (*.csv)",
         )
         if path:
-            Path(path).write_text(point_fft_to_csv_text(fft_result), encoding="utf-8")
+            metadata = self._point_mask_export_metadata(
+                mask,
+                radius_px=radius_px,
+                shape_mode=_shape_mode,
+            )
+            metadata.update({
+                "export_type": "probeflow_point_mask_fft",
+                "fft_units": fft_result.units,
+            })
+            Path(path).write_text(
+                point_fft_to_csv_text(fft_result, metadata=metadata),
+                encoding="utf-8",
+            )
             self._set_status(f"Point-mask FFT -> {path}")
 
     def clear_feature_points(self, *, silent: bool = False) -> None:
@@ -678,6 +793,40 @@ class ImageMeasurementController:
         self._sync_actions()
         if not silent:
             self._set_status("Cleared feature maxima overlay.")
+
+    def _point_mask_export_metadata(
+        self,
+        mask: np.ndarray,
+        *,
+        radius_px: int,
+        shape_mode: str,
+    ) -> dict[str, object]:
+        px_x_nm, px_y_nm = self._pixel_size_nm()
+        metadata = {
+            "export_type": "probeflow_feature_point_mask",
+            "source_label": self._feature_metadata.get("source_label"),
+            "source_path": self._feature_metadata.get("source_path"),
+            "channel": self._feature_metadata.get("channel"),
+            "roi_id": self._feature_metadata.get("roi_id"),
+            "roi_name": self._feature_metadata.get("roi_name"),
+            "selection_scope": self._feature_metadata.get("selection_scope"),
+            "threshold_mode": self._feature_metadata.get("threshold_mode"),
+            "threshold_value": self._feature_metadata.get("threshold_value"),
+            "min_distance_px": self._feature_metadata.get("min_distance_px"),
+            "smoothing_sigma": self._feature_metadata.get("smoothing_sigma"),
+            "exclude_border": self._feature_metadata.get("exclude_border"),
+            "point_count": len(self._feature_points),
+            "mask_pixels": int(np.count_nonzero(mask)),
+            "mask_shape_y": int(mask.shape[0]),
+            "mask_shape_x": int(mask.shape[1]),
+            "radius_px": int(radius_px),
+            "shape_mode": shape_mode,
+            "pixel_size_x_nm": px_x_nm,
+            "pixel_size_y_nm": px_y_nm,
+            "x_unit": "nm",
+            "y_unit": "nm",
+        }
+        return {key: value for key, value in metadata.items() if value is not None}
 
     def _record(self, result) -> None:
         self._table.add_result(result)

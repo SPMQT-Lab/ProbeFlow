@@ -85,7 +85,11 @@ def fft_from_point_mask(
     )
 
 
-def point_mask_to_csv_text(mask: np.ndarray) -> str:
+def point_mask_to_csv_text(
+    mask: np.ndarray,
+    *,
+    metadata: dict[str, object] | None = None,
+) -> str:
     """Return a 0/1 CSV matrix for a binary point mask."""
     import csv
     import io
@@ -95,12 +99,19 @@ def point_mask_to_csv_text(mask: np.ndarray) -> str:
         raise ValueError("point mask must be 2-D")
     out = io.StringIO()
     writer = csv.writer(out)
+    if metadata:
+        for key, value in metadata.items():
+            writer.writerow([f"# {key}", _metadata_value(value)])
     for row in arr:
         writer.writerow(["1" if value else "0" for value in row])
     return out.getvalue()
 
 
-def point_fft_to_csv_text(result: PointFFTResult) -> str:
+def point_fft_to_csv_text(
+    result: PointFFTResult,
+    *,
+    metadata: dict[str, object] | None = None,
+) -> str:
     """Return long-form CSV text for a point-mask FFT result."""
     import csv
     import io
@@ -112,6 +123,9 @@ def point_fft_to_csv_text(result: PointFFTResult) -> str:
     qy = result.qy if result.qy is not None else np.arange(mag.shape[0], dtype=float)
     out = io.StringIO()
     writer = csv.writer(out)
+    if metadata:
+        for key, value in metadata.items():
+            writer.writerow([f"# {key}", _metadata_value(value)])
     writer.writerow(["qx", "qy", "magnitude", "unit"])
     for row, qy_value in enumerate(qy):
         for col, qx_value in enumerate(qx):
@@ -197,3 +211,11 @@ def _point_xy(point: FeaturePoint | tuple[float, float]) -> tuple[float, float]:
     if isinstance(point, FeaturePoint):
         return point.x_px, point.y_px
     return float(point[0]), float(point[1])
+
+
+def _metadata_value(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, float):
+        return f"{value:.12g}"
+    return str(value)

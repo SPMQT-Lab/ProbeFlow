@@ -72,6 +72,7 @@ class FeatureLatticeDialog(QDialog):
         pixel_size_y_m: float = 1e-10,
         image_shape: tuple[int, int] | None = None,
         source_label: str = "",
+        source_path: str | None = None,
         channel: str = "",
         on_add_result: Callable[[MeasurementResult], None] | None = None,
         theme: dict | None = None,
@@ -90,6 +91,7 @@ class FeatureLatticeDialog(QDialog):
         self._px_y_m = float(pixel_size_y_m)
         self._image_shape = image_shape
         self._source_label = source_label
+        self._source_path = source_path
         self._channel = channel
         self._on_add_result = on_add_result
         self._t = theme or {}
@@ -220,6 +222,8 @@ class FeatureLatticeDialog(QDialog):
                 pts, self._origin, self._a, self._b,
                 match_radius_px=match_r,
                 image_shape=self._image_shape,
+                pixel_size_x_m=self._px_x_m,
+                pixel_size_y_m=self._px_y_m,
             )
         except ValueError as exc:
             self._result_lbl.setText(f"Error: {exc}")
@@ -293,11 +297,8 @@ class FeatureLatticeDialog(QDialog):
             f"Off-lattice: {comp.n_off_lattice}",
             f"Duplicate sites: {comp.n_duplicate_sites}",
         ]
-        if comp.rms_displacement_px is not None:
-            # Convert px → physical using average pixel size.
-            avg_px_m = 0.5 * (self._px_x_m + self._px_y_m)
-            rms_m = comp.rms_displacement_px * avg_px_m
-            v, u = _fmt_m(rms_m)
+        if comp.rms_displacement_m is not None:
+            v, u = _fmt_m(comp.rms_displacement_m)
             lines.append(f"RMS disp.: {v:.4g} {u}")
         if comp.occupancy is not None:
             lines.append(f"Occupancy: {comp.occupancy * 100:.1f} %")
@@ -311,15 +312,13 @@ class FeatureLatticeDialog(QDialog):
         comp = self._comparison
         src_name = self._src_cb.currentText()
 
-        avg_px_m = 0.5 * (self._px_x_m + self._px_y_m)
         summary_parts = [
             f"Features: {comp.n_features}",
             f"Matched: {comp.n_matched}",
             f"Off-lattice: {comp.n_off_lattice}",
         ]
-        if comp.rms_displacement_px is not None:
-            rms_m = comp.rms_displacement_px * avg_px_m
-            v, u = _fmt_m(rms_m)
+        if comp.rms_displacement_m is not None:
+            v, u = _fmt_m(comp.rms_displacement_m)
             summary_parts.append(f"RMS: {v:.4g} {u}")
         if comp.occupancy is not None:
             summary_parts.append(f"Occ: {comp.occupancy * 100:.1f}%")
@@ -332,17 +331,38 @@ class FeatureLatticeDialog(QDialog):
             "n_duplicate_sites": comp.n_duplicate_sites,
         }
         units: dict = {}
-        if comp.rms_displacement_px is not None:
-            rms_m = comp.rms_displacement_px * avg_px_m
-            values["rms_displacement_m"] = rms_m
+        if comp.rms_displacement_m is not None:
+            values["rms_displacement_m"] = comp.rms_displacement_m
             units["rms_displacement_m"] = "m"
-        if comp.mean_displacement_px is not None:
-            mean_m = comp.mean_displacement_px * avg_px_m
-            values["mean_displacement_m"] = mean_m
+        if comp.mean_displacement_m is not None:
+            values["mean_displacement_m"] = comp.mean_displacement_m
             units["mean_displacement_m"] = "m"
         if comp.occupancy is not None:
             values["occupancy"] = comp.occupancy
             units["occupancy"] = "fraction"
+        match_radius_px = (
+            float(self._radius_sb.value())
+            if self._radius_sb.value() > 0
+            else float(self._default_radius)
+        )
+        context = {
+            "point_source": src_name,
+            "source_path": self._source_path,
+            "match_radius_px": match_radius_px,
+            "match_radius_mode": "manual" if self._radius_sb.value() > 0 else "auto",
+            "lattice_origin_x_px": float(self._origin[0]),
+            "lattice_origin_y_px": float(self._origin[1]),
+            "lattice_a_x_px": float(self._a[0]),
+            "lattice_a_y_px": float(self._a[1]),
+            "lattice_b_x_px": float(self._b[0]),
+            "lattice_b_y_px": float(self._b[1]),
+            "pixel_size_x_m": self._px_x_m,
+            "pixel_size_y_m": self._px_y_m,
+            "image_shape_y": int(self._image_shape[0]) if self._image_shape else None,
+            "image_shape_x": int(self._image_shape[1]) if self._image_shape else None,
+            "occupancy_region": "image_bounds" if self._image_shape else "not_computed",
+            "data_basis": "feature_points_pixel_lattice",
+        }
 
         mr = MeasurementResult(
             id="M?",
@@ -353,6 +373,7 @@ class FeatureLatticeDialog(QDialog):
             summary=summary,
             values=values,
             units=units,
+            context=context,
             notes=src_name,
         )
         self._on_add_result(mr)

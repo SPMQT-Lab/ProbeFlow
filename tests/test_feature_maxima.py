@@ -171,8 +171,20 @@ def test_point_mask_and_fft_exports_are_self_describing():
         radius_px=1,
     )
 
-    mask_csv = point_mask_to_csv_text(mask)
-    fft_csv = point_fft_to_csv_text(result)
+    metadata = {
+        "export_type": "probeflow_feature_point_mask",
+        "source_path": "/tmp/scan.sxm",
+        "radius_px": 1,
+        "shape_mode": "square",
+        "point_count": len(points),
+        "pixel_size_x_nm": 0.5,
+        "pixel_size_y_nm": 0.5,
+    }
+    mask_csv = point_mask_to_csv_text(mask, metadata=metadata)
+    fft_csv = point_fft_to_csv_text(
+        result,
+        metadata={**metadata, "export_type": "probeflow_point_mask_fft"},
+    )
     summary = point_fft_summary_result(
         result,
         measurement_id="M0002",
@@ -182,8 +194,12 @@ def test_point_mask_and_fft_exports_are_self_describing():
         shape_mode="square",
     )
 
-    assert mask_csv.splitlines()[0].startswith("1,1")
+    assert "# export_type,probeflow_feature_point_mask" in mask_csv
+    assert "# source_path,/tmp/scan.sxm" in mask_csv
+    assert "# radius_px,1" in mask_csv
     assert "qx,qy,magnitude,unit" in fft_csv
+    assert "# export_type,probeflow_point_mask_fft" in fft_csv
+    assert "# pixel_size_x_nm,0.5" in fft_csv
     assert "cycles/nm" in fft_csv
     assert summary.kind == "point_fft"
     assert summary.values["n_points"] == 2

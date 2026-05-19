@@ -251,6 +251,34 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
             }
             if op_params.get("fill_value") is not None:
                 params["fill_value"] = float(op_params["fill_value"])
+            if op_params.get("full_matrix") is not None:
+                try:
+                    params["full_matrix"] = _np.asarray(
+                        op_params["full_matrix"], dtype=float
+                    ).tolist()
+                except (TypeError, ValueError):
+                    pass
+            if "preserve_orientation" in op_params:
+                params["preserve_orientation"] = bool(
+                    op_params["preserve_orientation"]
+                )
+            for key in (
+                "polar_rotation_deg",
+                "ideal_a_nm",
+                "ideal_b_nm",
+                "ideal_angle_deg",
+            ):
+                if op_params.get(key) is not None:
+                    try:
+                        params[key] = float(op_params[key])
+                    except (TypeError, ValueError):
+                        pass
+            for key in ("measured_a_nm", "measured_b_nm"):
+                if op_params.get(key) is not None:
+                    try:
+                        params[key] = [float(v) for v in op_params[key]]
+                    except (TypeError, ValueError):
+                        pass
             _append_step(ProcessingStep("affine_lattice_correction", params))
         elif op_name == "rotate_arbitrary":
             _append_step(ProcessingStep("rotate_arbitrary", {

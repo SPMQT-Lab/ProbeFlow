@@ -27,6 +27,7 @@ class MeasurementResult:
     summary: str
     values: dict[str, float | int | str | None]
     units: dict[str, str] = field(default_factory=dict)
+    context: dict[str, float | int | str | None] = field(default_factory=dict)
     notes: str = ""
 
 

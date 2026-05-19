@@ -243,7 +243,7 @@ def test_didv_trace_preserves_length_and_units():
 
     assert displayed.y_display.shape == x.shape
     assert displayed.y_unit == "A/V"
-    assert displayed.y_label == "dI/dV"
+    assert displayed.y_label == "numerical dI/dV"
     np.testing.assert_allclose(displayed.y_display[5:-5], 2e-9, rtol=1e-10)
 
 

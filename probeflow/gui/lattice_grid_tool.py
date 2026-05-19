@@ -1033,7 +1033,7 @@ class LatticeGridPanel(QWidget):
             m_b_nm = (bx_px * px_nm_x, by_px * px_nm_y)
             m_la = math.hypot(*m_a_nm)
             m_lb = math.hypot(*m_b_nm)
-            m_angle = grid.angle_deg()
+            m_angle = self._cal.vector_angle_deg(grid.a_px, grid.b_px)
             unit = self._unit_label
             s = self._unit_scale * 1e9
 

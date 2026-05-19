@@ -21,6 +21,8 @@ class FeatureLatticeAssignment:
     site_xy_px: tuple[float, float]    # ideal site position in pixels
     displacement_px: float             # Euclidean distance to ideal site
     matched: bool                      # True if within match_radius_px
+    displacement_xy_m: tuple[float, float] | None = None
+    displacement_m: float | None = None
 
 
 @dataclass(frozen=True)
@@ -35,6 +37,8 @@ class FeatureLatticeComparison:
     mean_displacement_px: float | None
     occupancy: float | None
     assignments: tuple[FeatureLatticeAssignment, ...]
+    rms_displacement_m: float | None = None
+    mean_displacement_m: float | None = None
 
 
 def compare_features_to_lattice(
@@ -45,6 +49,8 @@ def compare_features_to_lattice(
     *,
     match_radius_px: float,
     image_shape: tuple[int, int] | None = None,
+    pixel_size_x_m: float | None = None,
+    pixel_size_y_m: float | None = None,
 ) -> FeatureLatticeComparison:
     """Assign each feature point to its nearest lattice site.
 
@@ -62,6 +68,9 @@ def compare_features_to_lattice(
     image_shape
         (height, width) of the image. Used to count total lattice sites for
         occupancy. Pass ``None`` to skip occupancy calculation.
+    pixel_size_x_m, pixel_size_y_m
+        Optional physical pixel sizes. When provided, matched displacement
+        summaries are also returned in metres.
     """
     pts = np.asarray(points_xy_px, dtype=np.float64)
     if pts.ndim == 1 and pts.shape[0] == 2:
@@ -79,6 +88,7 @@ def compare_features_to_lattice(
         raise ValueError(
             "Lattice vectors are (near-)singular: cannot invert basis matrix."
         )
+    pixel_sizes = _physical_pixel_sizes(pixel_size_x_m, pixel_size_y_m)
     inv_ax = by / det
     inv_ay = -ay / det
     inv_bx = -bx / det
@@ -93,14 +103,26 @@ def compare_features_to_lattice(
         j = int(round(v))
         sx = ox + i * ax + j * bx
         sy = oy + i * ay + j * by
-        disp = math.hypot(x - sx, y - sy)
+        dx_px = x - sx
+        dy_px = y - sy
+        disp = math.hypot(dx_px, dy_px)
         matched = disp <= match_radius_px
+        disp_xy_m = None
+        disp_m = None
+        if pixel_sizes is not None:
+            px_x_m, px_y_m = pixel_sizes
+            dx_m = dx_px * px_x_m
+            dy_m = dy_px * px_y_m
+            disp_xy_m = (dx_m, dy_m)
+            disp_m = math.hypot(dx_m, dy_m)
         assignments.append(FeatureLatticeAssignment(
             feature_xy_px=(x, y),
             site_ij=(i, j),
             site_xy_px=(sx, sy),
             displacement_px=disp,
             matched=matched,
+            displacement_xy_m=disp_xy_m,
+            displacement_m=disp_m,
         ))
 
     asn_tuple = tuple(assignments)
@@ -116,6 +138,18 @@ def compare_features_to_lattice(
     matched_disps = [a.displacement_px for a in asn_tuple if a.matched]
     rms_disp = float(math.sqrt(sum(d * d for d in matched_disps) / len(matched_disps))) if matched_disps else None
     mean_disp = float(sum(matched_disps) / len(matched_disps)) if matched_disps else None
+    matched_disps_m = [
+        a.displacement_m for a in asn_tuple
+        if a.matched and a.displacement_m is not None
+    ]
+    rms_disp_m = (
+        float(math.sqrt(sum(d * d for d in matched_disps_m) / len(matched_disps_m)))
+        if matched_disps_m else None
+    )
+    mean_disp_m = (
+        float(sum(matched_disps_m) / len(matched_disps_m))
+        if matched_disps_m else None
+    )
 
     # Occupancy: count sites within image bounds.
     occupancy = None
@@ -135,6 +169,8 @@ def compare_features_to_lattice(
         mean_displacement_px=mean_disp,
         occupancy=occupancy,
         assignments=asn_tuple,
+        rms_displacement_m=rms_disp_m,
+        mean_displacement_m=mean_disp_m,
     )
 
 
@@ -146,6 +182,21 @@ def default_match_radius(
     mag_a = math.hypot(float(a_px[0]), float(a_px[1]))
     mag_b = math.hypot(float(b_px[0]), float(b_px[1]))
     return 0.35 * min(mag_a, mag_b)
+
+
+def _physical_pixel_sizes(
+    pixel_size_x_m: float | None,
+    pixel_size_y_m: float | None,
+) -> tuple[float, float] | None:
+    if pixel_size_x_m is None and pixel_size_y_m is None:
+        return None
+    if pixel_size_x_m is None or pixel_size_y_m is None:
+        raise ValueError("pixel_size_x_m and pixel_size_y_m must be provided together.")
+    px_x = float(pixel_size_x_m)
+    px_y = float(pixel_size_y_m)
+    if not (math.isfinite(px_x) and math.isfinite(px_y) and px_x > 0.0 and px_y > 0.0):
+        raise ValueError("pixel sizes must be finite positive values.")
+    return px_x, px_y
 
 
 def _count_sites_in_bounds(

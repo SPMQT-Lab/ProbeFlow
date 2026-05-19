@@ -1231,11 +1231,11 @@ class TestSpecViewerRawData:
         cb = QCheckBox("I")
         cb.setChecked(True)
         dlg._checkboxes = {"I": cb}
-        dlg._derivative_cb.setCurrentText("dI/dV")
+        dlg._derivative_cb.setCurrentText("Numerical dy/dx")
 
         text = dlg._current_csv_text()
 
-        assert "dI/dV" in text or "Current channel" in text
+        assert "numerical dI/dV" in text
         assert "nA/V" in text
         assert ",2" in text
 

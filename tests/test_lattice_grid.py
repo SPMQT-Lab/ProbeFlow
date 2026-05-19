@@ -413,6 +413,23 @@ class TestFormatRealSpace:
         d = format_real_space_measurements(g, self.cal)
         assert "60" in d["angle"]
 
+    def test_angle_uses_non_square_pixel_calibration(self):
+        cal = RealSpaceCalibration(
+            px_size_x=1e-9,
+            px_size_y=2e-9,
+            image_width=100,
+            image_height=100,
+        )
+        g = LatticeGrid(
+            kind="rectangular",
+            space="real",
+            origin_px=(0, 0),
+            a_px=(10.0, 0.0),
+            b_px=(10.0, 10.0),
+        )
+        d = format_real_space_measurements(g, cal)
+        assert d["angle"].startswith("63")
+
     def test_unit_in_output(self):
         g = LatticeGrid.make_square(0, 0, 50)
         d = format_real_space_measurements(g, self.cal)
@@ -453,6 +470,25 @@ class TestFormatReciprocal:
         g = LatticeGrid.make_square(128, 128, 20, space="reciprocal")
         d = format_reciprocal_measurements(g, self.cal)
         assert "90" in d["angle"]
+
+    def test_angle_uses_reciprocal_axis_scaling(self):
+        qx = np.linspace(-5.0, 5.0, 101)
+        qy = np.linspace(-10.0, 10.0, 101)
+        cal = ReciprocalCalibration(
+            qx_axis=qx,
+            qy_axis=qy,
+            image_width=101,
+            image_height=101,
+        )
+        g = LatticeGrid(
+            kind="rectangular",
+            space="reciprocal",
+            origin_px=(50, 50),
+            a_px=(10.0, 0.0),
+            b_px=(10.0, 10.0),
+        )
+        d = format_reciprocal_measurements(g, cal)
+        assert d["angle"].startswith("63")
 
 
 # ── edge cases ────────────────────────────────────────────────────────────────
