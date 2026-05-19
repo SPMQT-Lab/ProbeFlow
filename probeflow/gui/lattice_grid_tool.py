@@ -39,6 +39,10 @@ from probeflow.analysis.lattice_grid import (
 from probeflow.analysis.lattice_distortion import (
     IdealLattice, MeasuredLattice, LatticeCorrection, compute_correction,
 )
+from probeflow.analysis.lattice_correction_workflow import (
+    lattice_correction_matrix_px,
+    lattice_correction_operation_params,
+)
 
 # ── colours ───────────────────────────────────────────────────────────────────
 
@@ -1104,17 +1108,12 @@ class LatticeGridPanel(QWidget):
         """
         if self._correction is None:
             return None
-        if self._preserve_orientation_cb.isChecked():
-            T_nm = self._correction.stretch_matrix
-        else:
-            T_nm = self._correction.matrix
-        px_nm_x = self._cal.px_size_x * 1e9
-        px_nm_y = self._cal.px_size_y * 1e9
-        if px_nm_x <= 0 or px_nm_y <= 0:
-            return None
-        S = np.diag([1.0 / px_nm_x, 1.0 / px_nm_y])
-        S_inv = np.diag([px_nm_x, px_nm_y])
-        return S @ T_nm @ S_inv
+        return lattice_correction_matrix_px(
+            self._correction,
+            pixel_size_x_m=self._cal.px_size_x,
+            pixel_size_y_m=self._cal.px_size_y,
+            preserve_orientation=self._preserve_orientation_cb.isChecked(),
+        )
 
     def _correction_options(self) -> dict:
         interp_map = {"Bilinear": "bilinear", "Nearest": "nearest", "Bicubic": "bicubic"}
@@ -1211,8 +1210,7 @@ class LatticeGridPanel(QWidget):
     def _on_apply(self) -> None:
         if self._apply_correction_fn is None or self._correction is None:
             return
-        T_px = self._correction_matrix_px()
-        if T_px is None:
+        if self._correction_matrix_px() is None:
             return
 
         # Clear preview before applying so the viewer is in sync
@@ -1222,26 +1220,17 @@ class LatticeGridPanel(QWidget):
 
         opts = self._correction_options()
         corr = self._correction
-        # Full nm-space matrix for provenance; pixel-space applied matrix is T_px
-        px_nm_x = self._cal.px_size_x * 1e9
-        px_nm_y = self._cal.px_size_y * 1e9
-        S_scale = np.diag([1.0 / px_nm_x, 1.0 / px_nm_y])
-        S_scale_inv = np.diag([px_nm_x, px_nm_y])
-        full_T_px = (S_scale @ corr.matrix @ S_scale_inv).tolist()
-        op_params = {
-            "matrix": T_px.tolist(),
-            "full_matrix": full_T_px,
-            "expand_canvas": opts["expand_canvas"],
-            "interpolation": opts["interpolation"],
-            "fill_mode": opts["fill_mode"],
-            "preserve_orientation": opts["preserve_orientation"],
-            "polar_rotation_deg": corr.polar_rotation_deg,
-            "measured_a_nm": list(corr.measured.a_nm),
-            "measured_b_nm": list(corr.measured.b_nm),
-            "ideal_a_nm": corr.ideal.a_nm,
-            "ideal_b_nm": corr.ideal.b_nm,
-            "ideal_angle_deg": corr.ideal.angle_deg,
-        }
+        op_params = lattice_correction_operation_params(
+            corr,
+            pixel_size_x_m=self._cal.px_size_x,
+            pixel_size_y_m=self._cal.px_size_y,
+            expand_canvas=opts["expand_canvas"],
+            interpolation=opts["interpolation"],
+            fill_mode=opts["fill_mode"],
+            preserve_orientation=opts["preserve_orientation"],
+        )
+        if op_params is None:
+            return
         self._apply_correction_fn("affine_lattice_correction", op_params)
 
         # Hide the grid overlay — it was measured on the pre-correction image

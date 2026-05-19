@@ -110,6 +110,11 @@ from probeflow.provenance import (
 )
 from probeflow.gui.processing import ProcessingControlPanel
 from probeflow.core import AREA_ROI_KINDS
+from probeflow.gui.roi_context import (
+    active_area_roi_area_m2,
+    collect_point_sources_m,
+    collect_point_sources_px,
+)
 from probeflow.core.scan_loader import load_scan
 from probeflow.gui.viewer.scan_load import load_scan_for_viewer, ViewerScanData
 from probeflow.gui.viewer.processed_export import (
@@ -1729,39 +1734,23 @@ class ImageViewerDialog(QDialog):
 
     def _to_dock_result(self, legacy_r, measurement_id: str):
         """Convert a legacy MeasurementResult to the newer dock format."""
-        from probeflow.measurements.models import MeasurementResult as R
-        units = dict(getattr(legacy_r, "units", {}) or {})
-        values = dict(legacy_r.values)
-        if legacy_r.kind == "roi_stats":
-            if "mean" in values and "mean_height" not in values:
-                values["mean_height"] = values.pop("mean")
-            if "mean" in units and "mean_height" not in units:
-                units["mean_height"] = units.pop("mean")
-        x_unit = (units.get("length_m") or units.get("angle_deg")
-                  or next(iter(units.values()), None))
-        z_unit = (units.get("mean_height") or units.get("height_m")
-                  or units.get("mean_height_m"))
-        context = {
-            k: v for k, v in {
-                "summary": legacy_r.summary,
-                "roi_id": getattr(legacy_r, "roi_id", None),
-            }.items() if v
-        }
-        context.update(dict(getattr(legacy_r, "context", {}) or {}))
-        source_path = context.get("source_path") or legacy_r.source
-        return R(
-            measurement_id=measurement_id,
-            kind=legacy_r.kind,
-            source_label=legacy_r.source or "",
-            source_path=source_path,
-            channel=legacy_r.channel,
-            x_unit=x_unit,
-            y_unit=None,
-            z_unit=z_unit,
-            values=values,
-            context=context,
-            notes=legacy_r.notes or "",
-        )
+        from probeflow.measurements.adapters import legacy_measurement_to_result
+
+        return legacy_measurement_to_result(legacy_r, measurement_id)
+
+    def _add_dialog_measurement_result(self, result) -> None:
+        from dataclasses import replace
+
+        from probeflow.measurements.models import MeasurementResult
+
+        mid = self._measurement_table.next_measurement_id()
+        if isinstance(result, MeasurementResult):
+            dock_result = replace(result, measurement_id=mid)
+        else:
+            dock_result = self._to_dock_result(result, mid)
+        self._measurement_table.add_result(dock_result)
+        self._measurement_dock.show()
+        self._measurement_dock.raise_()
 
     def _invert_image_roi(self, roi_id: str) -> None:
         invert_roi(
@@ -2525,86 +2514,32 @@ class ImageViewerDialog(QDialog):
 
     def _collect_point_sources_m(self) -> dict[str, "np.ndarray"]:
         """Collect available point sources as (N,2) arrays in metres."""
-        import numpy as _np
-        sources: dict[str, _np.ndarray] = {}
         px_x, px_y = self._pixel_size_xy_m()
-
         ff_dlg = getattr(self, "_feature_finder_dlg", None)
-        if ff_dlg is not None and ff_dlg.result is not None and ff_dlg.result.points:
-            pts_m = _np.array([
-                [pt.x_px * px_x, pt.y_px * px_y]
-                for pt in ff_dlg.result.points
-            ])
-            sources["Feature result"] = pts_m
-
         measure_ctrl = getattr(self, "_image_measurements", None)
-        measure_points = list(getattr(measure_ctrl, "feature_points", []) or [])
-        if measure_points:
-            sources["Detected feature maxima"] = _np.array([
-                [float(pt.x_px) * px_x, float(pt.y_px) * px_y]
-                for pt in measure_points
-            ])
-
-        roi_set = self._image_roi_set
-        if roi_set is not None:
-            dock = getattr(self, "_roi_dock", None)
-            sel_ids = list(dock.selected_roi_ids()) if dock and hasattr(dock, "selected_roi_ids") else []
-            sel_pts = [
-                roi_set.get(rid) for rid in sel_ids
-                if roi_set.get(rid) and roi_set.get(rid).kind == "point"
-            ]
-            if sel_pts:
-                sources["Selected point ROIs"] = _np.array([
-                    [float(r.geometry["x"]) * px_x, float(r.geometry["y"]) * px_y]
-                    for r in sel_pts
-                ])
-            all_pts = [r for r in roi_set.rois if r.kind == "point"]
-            if all_pts:
-                sources["All point ROIs"] = _np.array([
-                    [float(r.geometry["x"]) * px_x, float(r.geometry["y"]) * px_y]
-                    for r in all_pts
-                ])
-        return sources
+        dock = getattr(self, "_roi_dock", None)
+        sel_ids = list(dock.selected_roi_ids()) if dock and hasattr(dock, "selected_roi_ids") else []
+        return collect_point_sources_m(
+            pixel_size_x_m=px_x,
+            pixel_size_y_m=px_y,
+            feature_finder_result=getattr(ff_dlg, "result", None),
+            measurement_points=getattr(measure_ctrl, "feature_points", []) or [],
+            roi_set=self._image_roi_set,
+            selected_roi_ids=sel_ids,
+        )
 
     def _collect_point_sources_px(self) -> dict[str, "np.ndarray"]:
         """Collect available point sources as (N,2) arrays in pixel coordinates."""
-        import numpy as _np
-        sources: dict[str, _np.ndarray] = {}
-
         ff_dlg = getattr(self, "_feature_finder_dlg", None)
-        if ff_dlg is not None and ff_dlg.result is not None and ff_dlg.result.points:
-            sources["Feature result"] = _np.array([
-                [pt.x_px, pt.y_px] for pt in ff_dlg.result.points
-            ])
-
         measure_ctrl = getattr(self, "_image_measurements", None)
-        measure_points = list(getattr(measure_ctrl, "feature_points", []) or [])
-        if measure_points:
-            sources["Detected feature maxima"] = _np.array([
-                [float(pt.x_px), float(pt.y_px)]
-                for pt in measure_points
-            ])
-
-        roi_set = self._image_roi_set
-        if roi_set is not None:
-            dock = getattr(self, "_roi_dock", None)
-            sel_ids = list(dock.selected_roi_ids()) if dock and hasattr(dock, "selected_roi_ids") else []
-            sel_pts = [
-                roi_set.get(rid) for rid in sel_ids
-                if roi_set.get(rid) and roi_set.get(rid).kind == "point"
-            ]
-            if sel_pts:
-                sources["Selected point ROIs"] = _np.array([
-                    [float(r.geometry["x"]), float(r.geometry["y"])]
-                    for r in sel_pts
-                ])
-            all_pts = [r for r in roi_set.rois if r.kind == "point"]
-            if all_pts:
-                sources["All point ROIs"] = _np.array([
-                    [float(r.geometry["x"]), float(r.geometry["y"])]
-                    for r in all_pts
-                ])
-        return sources
+        dock = getattr(self, "_roi_dock", None)
+        sel_ids = list(dock.selected_roi_ids()) if dock and hasattr(dock, "selected_roi_ids") else []
+        return collect_point_sources_px(
+            feature_finder_result=getattr(ff_dlg, "result", None),
+            measurement_points=getattr(measure_ctrl, "feature_points", []) or [],
+            roi_set=self._image_roi_set,
+            selected_roi_ids=sel_ids,
+        )
 
     def _on_open_pair_correlation(self) -> None:
         sources = self._collect_point_sources_m()
@@ -2614,27 +2549,22 @@ class ImageViewerDialog(QDialog):
             )
             return
         arr = self._display_arr if self._display_arr is not None else self._raw_arr
+        px_x, px_y = self._pixel_size_xy_m()
         roi_area_m2 = None
         if arr is not None and self._image_roi_set is not None:
-            active = self._active_image_roi()
-            if active is not None and active.kind in AREA_ROI_KINDS:
-                try:
-                    mask = active.to_mask(arr.shape[:2])
-                    px_x, px_y = self._pixel_size_xy_m()
-                    roi_area_m2 = float(mask.sum()) * px_x * px_y
-                except Exception:
-                    pass
-        px_x, px_y = self._pixel_size_xy_m()
+            roi_area_m2 = active_area_roi_area_m2(
+                self._active_image_roi(),
+                arr.shape[:2],
+                pixel_size_x_m=px_x,
+                pixel_size_y_m=px_y,
+            )
         _, ch_unit, _ = self._channel_unit()
         entries = getattr(self, "_entries", [])
         entry = entries[self._idx] if entries else None
         from probeflow.gui.dialogs.pair_correlation import PairCorrelationDialog
 
         def _add(result):
-            mid = self._measurement_table.next_measurement_id()
-            self._measurement_table.add_result(self._to_dock_result(result, mid))
-            self._measurement_dock.show()
-            self._measurement_dock.raise_()
+            self._add_dialog_measurement_result(result)
 
         dlg = PairCorrelationDialog(
             sources,
@@ -2670,10 +2600,7 @@ class ImageViewerDialog(QDialog):
         from probeflow.gui.dialogs.feature_lattice_dialog import FeatureLatticeDialog
 
         def _add(result):
-            mid = self._measurement_table.next_measurement_id()
-            self._measurement_table.add_result(self._to_dock_result(result, mid))
-            self._measurement_dock.show()
-            self._measurement_dock.raise_()
+            self._add_dialog_measurement_result(result)
 
         dlg = FeatureLatticeDialog(
             sources,

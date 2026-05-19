@@ -5,6 +5,15 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from probeflow.analysis.lattice_correction_workflow import (
+    lattice_correction_matrix_px,
+    lattice_correction_operation_params,
+)
+from probeflow.analysis.lattice_distortion import (
+    IdealLattice,
+    MeasuredLattice,
+    compute_correction,
+)
 from probeflow.processing.image import affine_lattice_correction
 from probeflow.processing.state import ProcessingStep, apply_processing_state, ProcessingState
 
@@ -23,6 +32,73 @@ def _ramp_image(Ny: int = 64, Nx: int = 64) -> np.ndarray:
     arr = np.zeros((Ny, Nx), dtype=np.float64)
     arr[:, :] = np.linspace(0, 1, Nx)
     return arr
+
+
+def _sample_correction():
+    correction = compute_correction(
+        MeasuredLattice(a_nm=(2.0, 0.0), b_nm=(0.2, 1.0)),
+        IdealLattice(a_nm=1.0, b_nm=1.0, angle_deg=90.0),
+    )
+    assert not isinstance(correction, str)
+    return correction
+
+
+def test_lattice_correction_matrix_px_converts_non_square_pixels():
+    correction = _sample_correction()
+    matrix = lattice_correction_matrix_px(
+        correction,
+        pixel_size_x_m=1e-9,
+        pixel_size_y_m=2e-9,
+        preserve_orientation=False,
+    )
+    expected = np.diag([1.0, 0.5]) @ correction.matrix @ np.diag([1.0, 2.0])
+
+    np.testing.assert_allclose(matrix, expected)
+
+
+def test_lattice_correction_operation_params_records_applied_and_full_matrices():
+    correction = _sample_correction()
+    params = lattice_correction_operation_params(
+        correction,
+        pixel_size_x_m=1e-9,
+        pixel_size_y_m=2e-9,
+        expand_canvas=True,
+        interpolation="bilinear",
+        fill_mode="nan",
+        preserve_orientation=True,
+    )
+    applied = lattice_correction_matrix_px(
+        correction,
+        pixel_size_x_m=1e-9,
+        pixel_size_y_m=2e-9,
+        preserve_orientation=True,
+    )
+    full = lattice_correction_matrix_px(
+        correction,
+        pixel_size_x_m=1e-9,
+        pixel_size_y_m=2e-9,
+        preserve_orientation=False,
+    )
+
+    assert params is not None
+    np.testing.assert_allclose(params["matrix"], applied)
+    np.testing.assert_allclose(params["full_matrix"], full)
+    assert params["preserve_orientation"] is True
+    assert params["measured_a_nm"] == [2.0, 0.0]
+
+
+def test_lattice_correction_operation_params_rejects_invalid_pixel_size():
+    params = lattice_correction_operation_params(
+        _sample_correction(),
+        pixel_size_x_m=0.0,
+        pixel_size_y_m=1e-9,
+        expand_canvas=True,
+        interpolation="bilinear",
+        fill_mode="nan",
+        preserve_orientation=False,
+    )
+
+    assert params is None
 
 
 # ── 1. identity matrix ────────────────────────────────────────────────────────

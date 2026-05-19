@@ -31,8 +31,8 @@ from probeflow.analysis.feature_lattice import (
     compare_features_to_lattice,
     default_match_radius,
 )
-from probeflow.analysis.measurements import MeasurementResult
 from probeflow.analysis.simple_measurements import _fmt_m
+from probeflow.measurements.models import MeasurementResult
 
 
 def _sep() -> QFrame:
@@ -330,16 +330,12 @@ class FeatureLatticeDialog(QDialog):
             "n_off_lattice": comp.n_off_lattice,
             "n_duplicate_sites": comp.n_duplicate_sites,
         }
-        units: dict = {}
         if comp.rms_displacement_m is not None:
             values["rms_displacement_m"] = comp.rms_displacement_m
-            units["rms_displacement_m"] = "m"
         if comp.mean_displacement_m is not None:
             values["mean_displacement_m"] = comp.mean_displacement_m
-            units["mean_displacement_m"] = "m"
         if comp.occupancy is not None:
             values["occupancy"] = comp.occupancy
-            units["occupancy"] = "fraction"
         match_radius_px = (
             float(self._radius_sb.value())
             if self._radius_sb.value() > 0
@@ -362,17 +358,19 @@ class FeatureLatticeDialog(QDialog):
             "image_shape_x": int(self._image_shape[1]) if self._image_shape else None,
             "occupancy_region": "image_bounds" if self._image_shape else "not_computed",
             "data_basis": "feature_points_pixel_lattice",
+            "summary": summary,
         }
 
         mr = MeasurementResult(
-            id="M?",
+            measurement_id="M?",
             kind="feat_lattice",
-            source=self._source_label,
+            source_label=self._source_label,
+            source_path=self._source_path,
             channel=self._channel,
-            roi_id=None,
-            summary=summary,
+            x_unit="px",
+            y_unit="px",
+            z_unit=None,
             values=values,
-            units=units,
             context=context,
             notes=src_name,
         )

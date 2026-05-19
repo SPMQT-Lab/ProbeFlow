@@ -10,6 +10,7 @@ from probeflow.measurements.export import (
     measurements_to_json_text,
     measurements_to_tsv,
 )
+from probeflow.measurements.adapters import legacy_measurement_to_result
 from probeflow.measurements.features import detect_local_maxima, feature_maxima_result
 from probeflow.measurements.fft_points import (
     PointFFTResult,
@@ -36,6 +37,7 @@ __all__ = [
     "FeaturePoint",
     "MeasurementResult",
     "line_periodicity_measurement",
+    "legacy_measurement_to_result",
     "PointFFTResult",
     "detect_local_maxima",
     "feature_maxima_result",

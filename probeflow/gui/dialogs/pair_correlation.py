@@ -25,8 +25,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from probeflow.analysis.measurements import MeasurementResult
 from probeflow.analysis.pair_correlation import PairCorrelationResult, compute_pair_correlation
+from probeflow.measurements.models import MeasurementResult
 
 
 def _sep() -> QFrame:
@@ -272,16 +272,12 @@ class PairCorrelationDialog(QDialog):
         summary = "  ".join(lines)
 
         values: dict = {"n_points": r.n_points}
-        units: dict = {}
         if r.density_m2 is not None:
             values["density_nm2"] = r.density_m2 * 1e-18
-            units["density_nm2"] = "nm⁻²"
         if r.nearest_neighbour_median_m is not None:
             values["nn_median_nm"] = r.nearest_neighbour_median_m * 1e9
-            units["nn_median_nm"] = "nm"
         if r.first_peak_m is not None:
             values["first_peak_nm"] = r.first_peak_m * 1e9
-            units["first_peak_nm"] = "nm"
         values["quality"] = r.quality
         bin_width_m = None
         if len(r.r_m) > 1:
@@ -306,18 +302,19 @@ class PairCorrelationDialog(QDialog):
             "edge_correction": "not_applied",
             "message": r.message,
             "data_basis": "feature_points_physical",
+            "summary": summary,
         }
 
-        from probeflow.analysis.measurements import MeasurementResult
         result = MeasurementResult(
-            id="M?",
+            measurement_id="M?",
             kind="pair_corr",
-            source=self._source_label,
+            source_label=self._source_label,
+            source_path=self._source_path,
             channel=self._channel,
-            roi_id=None,
-            summary=summary,
+            x_unit="nm",
+            y_unit=None,
+            z_unit=None,
             values=values,
-            units=units,
             context=context,
             notes=src_name,
         )

@@ -13,6 +13,7 @@ from probeflow.measurements.export import (
     measurements_to_json_text,
     measurements_to_tsv,
 )
+from probeflow.measurements.adapters import legacy_measurement_to_result
 from probeflow.measurements.image import (
     line_profile_measurement,
     roi_statistics,
@@ -46,6 +47,32 @@ def test_measurement_export_flattens_values_and_context():
     assert "value.dx" in text
     assert payload["measurements"][0]["values"]["dy"] == 6.4
     assert measurement_main_value(result) == ("dy", 6.4, "pA")
+
+
+def test_legacy_measurement_adapter_preserves_context_and_units():
+    from probeflow.analysis.measurements import MeasurementResult as LegacyResult
+
+    legacy = LegacyResult(
+        id="M?",
+        kind="roi_stats",
+        source="scan:Height",
+        channel="Height",
+        roi_id="roi-1",
+        summary="mean = 2.5 nm",
+        values={"mean": 2.5, "n_pixels": 4},
+        units={"mean": "nm"},
+        context={"source_path": "/tmp/scan.sxm", "roi_name": "terrace"},
+    )
+
+    result = legacy_measurement_to_result(legacy, "M0009")
+
+    assert result.measurement_id == "M0009"
+    assert result.kind == "roi_stats"
+    assert result.source_path == "/tmp/scan.sxm"
+    assert result.values["mean_height"] == pytest.approx(2.5)
+    assert result.z_unit == "nm"
+    assert result.context["roi_id"] == "roi-1"
+    assert result.context["roi_name"] == "terrace"
 
 
 def test_spectrum_delta_converts_to_generic_measurement_with_display_context():
