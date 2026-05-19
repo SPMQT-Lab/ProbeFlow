@@ -14,6 +14,13 @@ from PySide6.QtWidgets import (
 )
 
 from probeflow.gui.models import FolderEntry, PLANE_NAMES, SxmFile, VertFile, _card_meta_str
+
+
+def _card_compact_meta_str(entry: SxmFile) -> str:
+    """Compact V/I-only line for small thumbnail cards."""
+    v_str = f"V: {entry.bias_mv:.0f} mV"    if entry.bias_mv    is not None else "V: ?"
+    i_str = f"I: {entry.current_pa:.0f} pA" if entry.current_pa is not None else "I: ?"
+    return f"{v_str}  |  {i_str}"
 from probeflow.gui.rendering import (
     CMAP_KEY,
     CMAP_NAMES,
@@ -570,12 +577,16 @@ class _BrowseCard(QFrame):
     IMG_W  = 180
     IMG_H  = 150
 
-    def __init__(self, entry, t: dict, meta_text: str, parent=None):
+    def __init__(self, entry, t: dict, meta_text: str,
+                 compact_meta_text: str = "", parent=None):
         super().__init__(parent)
         self.entry     = entry
         self._t        = t
         self._sel      = False
         self._orig_pixmap: QPixmap | None = None
+        self._full_meta    = meta_text
+        self._compact_meta = compact_meta_text or meta_text
+        self._compact_mode = False
 
         self.setFixedSize(self.CARD_W, self.CARD_H)
         self.setCursor(QCursor(Qt.PointingHandCursor))
@@ -593,6 +604,10 @@ class _BrowseCard(QFrame):
         self.name_lbl = QLabel(lbl_text)
         self.name_lbl.setAlignment(Qt.AlignCenter)
         self.name_lbl.setFont(QFont("Helvetica", 10))
+        # Don't reserve space for name_lbl when it's hidden in compact mode.
+        _sp = self.name_lbl.sizePolicy()
+        _sp.setRetainSizeWhenHidden(False)
+        self.name_lbl.setSizePolicy(_sp)
 
         self.meta_lbl = QLabel(meta_text)
         self.meta_lbl.setAlignment(Qt.AlignCenter)
@@ -620,6 +635,20 @@ class _BrowseCard(QFrame):
                 self.img_lbl.setPixmap(
                     self._orig_pixmap.scaled(img_w, img_h,
                         Qt.KeepAspectRatio, Qt.SmoothTransformation))
+
+    def set_compact_mode(self, compact: bool) -> None:
+        """In compact mode: hide the name label and show only V/I meta; filename as tooltip."""
+        if self._compact_mode == compact:
+            return
+        self._compact_mode = compact
+        if compact:
+            self.name_lbl.setVisible(False)
+            self.meta_lbl.setText(self._compact_meta)
+            self.setToolTip(self.entry.stem)
+        else:
+            self.name_lbl.setVisible(True)
+            self.meta_lbl.setText(self._full_meta)
+            self.setToolTip("")
 
     def set_selected(self, val: bool):
         self._sel = val
@@ -669,7 +698,9 @@ class ScanCard(_BrowseCard):
     context_action_requested = Signal(object, str)  # SxmFile, action key
 
     def __init__(self, entry: SxmFile, t: dict, parent=None):
-        super().__init__(entry, t, _card_meta_str(entry), parent=parent)
+        super().__init__(entry, t, _card_meta_str(entry),
+                         compact_meta_text=_card_compact_meta_str(entry),
+                         parent=parent)
 
     def contextMenuEvent(self, event):
         menu = QMenu(self)
@@ -699,7 +730,9 @@ class SpecCard(_BrowseCard):
         sweep = entry.sweep_type.replace("_", " ") if entry.sweep_type != "unknown" else "VERT"
         pts   = f"{entry.n_points} pts" if entry.n_points else ""
         meta  = "  |  ".join(filter(None, [entry.measurement_label, sweep, pts]))
-        super().__init__(entry, t, meta, parent=parent)
+        super().__init__(entry, t, meta,
+                         compact_meta_text=sweep,
+                         parent=parent)
 
 
 # ── FolderCard ────────────────────────────────────────────────────────────────
@@ -993,6 +1026,7 @@ class ThumbnailGrid(QWidget):
         self._load_token                                       = object()
         self._current_cols: int                                = 1
         self._filter_mode: str                                 = "all"
+        self._thumbnail_size_name: str                         = "large"
 
         # navigation state
         self._root:        Optional[Path] = None
@@ -1126,6 +1160,8 @@ class ThumbnailGrid(QWidget):
                 card.context_action_requested.connect(self.card_context_action)
             card.clicked.connect(self._on_card_click)
             card.double_clicked.connect(self._on_card_dbl)
+            if self._thumbnail_size_name == "small":
+                card.set_compact_mode(True)
             self._cards[key] = card
 
         # Populate the grid honouring the current filter.
@@ -1435,6 +1471,8 @@ class ThumbnailGrid(QWidget):
         sizes = _CARD_SIZE_PRESETS.get(name)
         if sizes is None:
             return
+        self._thumbnail_size_name = name
+        compact = (name == "small")
         _BrowseCard.CARD_W = sizes["CARD_W"]
         _BrowseCard.CARD_H = sizes["CARD_H"]
         _BrowseCard.IMG_W  = sizes["IMG_W"]
@@ -1442,4 +1480,5 @@ class ThumbnailGrid(QWidget):
         for card in self._cards.values():
             card.resize_to(sizes["CARD_W"], sizes["CARD_H"],
                            sizes["IMG_W"], sizes["IMG_H"])
+            card.set_compact_mode(compact)
         self._relayout_filtered()
