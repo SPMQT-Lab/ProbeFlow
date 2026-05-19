@@ -35,7 +35,7 @@ from probeflow.core.scan_loader import load_scan
 
 _CARD_SIZE_PRESETS = {
     "large": {"CARD_W": 200, "CARD_H": 220, "IMG_W": 180, "IMG_H": 150},
-    "small": {"CARD_W": 170, "CARD_H": 187, "IMG_W": 153, "IMG_H": 128},
+    "small": {"CARD_W": 160, "CARD_H": 176, "IMG_W": 144, "IMG_H": 120},
 }
 
 
