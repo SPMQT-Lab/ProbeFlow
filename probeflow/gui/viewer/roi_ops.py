@@ -45,6 +45,14 @@ def delete_active_roi(roi_set, on_changed: Callable) -> None:
         delete_roi(roi_set, active_id, on_changed)
 
 
+def delete_all_rois(roi_set, on_changed: Callable) -> None:
+    if roi_set is None:
+        return
+    for roi_id in [r.id for r in roi_set.rois]:
+        roi_set.remove(roi_id)
+    on_changed()
+
+
 def invert_roi(
     roi_set,
     roi_id: str,

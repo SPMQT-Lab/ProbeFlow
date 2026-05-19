@@ -70,6 +70,7 @@ from probeflow.gui.viewer import (
     active_roi,
     active_roi_id,
     delete_active_roi,
+    delete_all_rois,
     delete_roi,
     export_histogram,
     export_line_profile,
@@ -92,7 +93,7 @@ from probeflow.gui.viewer import (
     show_roi_histogram,
     transform_roi_set_for_display_op,
 )
-from probeflow.gui.widgets import ImageMeasurementsPanel, MeasurementResultsPanel
+from probeflow.gui.widgets import ImageMeasurementsPanel
 from probeflow.gui.image_canvas import ImageCanvas
 from probeflow.gui.roi_manager_dock import ROIManagerDock
 from probeflow.processing.gui_adapter import processing_state_from_gui
@@ -788,8 +789,11 @@ class ImageViewerDialog(QDialog):
 
         measurements_lay.addWidget(_sep())
 
-        self._measure_results_panel = MeasurementResultsPanel()
-        measurements_lay.addWidget(self._measure_results_panel, 1)
+        results_hint = QLabel("Results appear in the Measurements panel →")
+        results_hint.setFont(QFont("Helvetica", 8))
+        results_hint.setWordWrap(True)
+        results_hint.setStyleSheet("color: palette(mid);")
+        measurements_lay.addWidget(results_hint)
 
         self._status_lbl = QLabel("")
         self._status_lbl.setFont(QFont("Helvetica", 8))
@@ -1716,6 +1720,44 @@ class ImageViewerDialog(QDialog):
     def _delete_active_image_roi(self) -> None:
         delete_active_roi(self._image_roi_set, self._on_image_roi_set_changed)
 
+    def _clear_all_image_marks(self) -> None:
+        delete_all_rois(self._image_roi_set, self._on_image_roi_set_changed)
+        if self._angle_overlay is not None:
+            scene = self._zoom_lbl.scene()
+            self._angle_overlay.remove_from_scene(scene)
+            self._angle_overlay = None
+
+    def _to_dock_result(self, legacy_r, measurement_id: str):
+        """Convert a legacy MeasurementResult to the newer dock format."""
+        from probeflow.measurements.models import MeasurementResult as R
+        units = dict(getattr(legacy_r, "units", {}) or {})
+        values = dict(legacy_r.values)
+        if legacy_r.kind == "roi_stats":
+            if "mean" in values and "mean_height" not in values:
+                values["mean_height"] = values.pop("mean")
+            if "mean" in units and "mean_height" not in units:
+                units["mean_height"] = units.pop("mean")
+        x_unit = (units.get("length_m") or units.get("angle_deg")
+                  or next(iter(units.values()), None))
+        z_unit = (units.get("mean_height") or units.get("height_m")
+                  or units.get("mean_height_m"))
+        return R(
+            measurement_id=measurement_id,
+            kind=legacy_r.kind,
+            source_label=legacy_r.source or "",
+            source_path=legacy_r.source,
+            channel=legacy_r.channel,
+            x_unit=x_unit,
+            y_unit=None,
+            z_unit=z_unit,
+            values=values,
+            context={k: v for k, v in {
+                "summary": legacy_r.summary,
+                "roi_id": getattr(legacy_r, "roi_id", None),
+            }.items() if v},
+            notes=legacy_r.notes or "",
+        )
+
     def _invert_image_roi(self, roi_id: str) -> None:
         invert_roi(
             self._image_roi_set, roi_id,
@@ -1984,7 +2026,7 @@ class ImageViewerDialog(QDialog):
     def _on_quick_toolbar_action(self, key: str) -> None:
         """Dispatch an action request from the quick toolbar to existing handlers."""
         dispatch = {
-            "clear_selection":   self._delete_active_image_roi,
+            "clear_selection":   self._clear_all_image_marks,
             "auto_contrast":     self._on_auto_clip,
             "plane_background":  self._on_simple_background,
             "stm_background":    self._on_open_stm_background,
@@ -2372,7 +2414,7 @@ class ImageViewerDialog(QDialog):
             return
         from probeflow.analysis.simple_measurements import measure_line_distance
         px_x_m, px_y_m = self._pixel_size_xy_m()
-        mid = f"M{self._measure_results_panel.result_count() + 1}"
+        mid = self._measurement_table.next_measurement_id()
         _, ch_unit, _ = self._channel_unit()
         result = measure_line_distance(
             roi, px_x_m, px_y_m,
@@ -2380,8 +2422,9 @@ class ImageViewerDialog(QDialog):
             source=self._source_label(),
             channel=ch_unit,
         )
-        self._measure_results_panel.add_result(result)
-        self._show_sidebar_tab("measurements")
+        self._measurement_table.add_result(self._to_dock_result(result, mid))
+        self._measurement_dock.show()
+        self._measurement_dock.raise_()
         self._status_lbl.setText(result.summary)
 
     def _on_measure_angle(self) -> None:
@@ -2397,20 +2440,24 @@ class ImageViewerDialog(QDialog):
             self._angle_overlay.remove_from_scene(scene)
         self._angle_overlay = AngleOverlayItem(p1, p2, p3, scene)
         deg = self._angle_overlay.angle_deg
-        from probeflow.analysis.measurements import MeasurementResult
-        mid = f"M{self._measure_results_panel.result_count() + 1}"
-        result = MeasurementResult(
-            id=mid,
+        from probeflow.measurements.models import MeasurementResult as R
+        mid = self._measurement_table.next_measurement_id()
+        result = R(
+            measurement_id=mid,
             kind="angle",
-            source=self._source_label(),
+            source_label=self._source_label(),
+            source_path=self._source_label(),
             channel=None,
-            roi_id=None,
-            summary=f"{deg:.2f}°",
+            x_unit="°",
+            y_unit=None,
+            z_unit=None,
             values={"angle_deg": deg},
-            units={"angle_deg": "°"},
+            context={},
+            notes="",
         )
-        self._measure_results_panel.add_result(result)
-        self._show_sidebar_tab("measurements")
+        self._measurement_table.add_result(result)
+        self._measurement_dock.show()
+        self._measurement_dock.raise_()
         self._status_lbl.setText(f"Angle: {deg:.2f}°  (drag handles to adjust)")
 
     def _on_measure_roi_stats(self) -> None:
@@ -2437,7 +2484,7 @@ class ImageViewerDialog(QDialog):
         phys_arr = arr.astype(float) * float(scale)
         from probeflow.analysis.roi_statistics import compute_roi_statistics
         px_x_m, px_y_m = self._pixel_size_xy_m()
-        mid = f"M{self._measure_results_panel.result_count() + 1}"
+        mid = self._measurement_table.next_measurement_id()
         result = compute_roi_statistics(
             phys_arr, mask,
             pixel_size_x_m=px_x_m,
@@ -2449,8 +2496,9 @@ class ImageViewerDialog(QDialog):
             roi_id=roi.id,
             roi_name=roi.name,
         )
-        self._measure_results_panel.add_result(result)
-        self._show_sidebar_tab("measurements")
+        self._measurement_table.add_result(self._to_dock_result(result, mid))
+        self._measurement_dock.show()
+        self._measurement_dock.raise_()
         self._status_lbl.setText(result.summary)
 
     def _source_label(self) -> str:
@@ -2550,14 +2598,10 @@ class ImageViewerDialog(QDialog):
         from probeflow.gui.dialogs.pair_correlation import PairCorrelationDialog
 
         def _add(result):
-            from probeflow.analysis.measurements import MeasurementResult
-            import dataclasses
-            result = dataclasses.replace(
-                result,
-                id=f"M{self._measure_results_panel.result_count() + 1}",
-            )
-            self._measure_results_panel.add_result(result)
-            self._show_sidebar_tab("measurements")
+            mid = self._measurement_table.next_measurement_id()
+            self._measurement_table.add_result(self._to_dock_result(result, mid))
+            self._measurement_dock.show()
+            self._measurement_dock.raise_()
 
         dlg = PairCorrelationDialog(
             sources,
@@ -2590,13 +2634,10 @@ class ImageViewerDialog(QDialog):
         from probeflow.gui.dialogs.feature_lattice_dialog import FeatureLatticeDialog
 
         def _add(result):
-            import dataclasses
-            result = dataclasses.replace(
-                result,
-                id=f"M{self._measure_results_panel.result_count() + 1}",
-            )
-            self._measure_results_panel.add_result(result)
-            self._show_sidebar_tab("measurements")
+            mid = self._measurement_table.next_measurement_id()
+            self._measurement_table.add_result(self._to_dock_result(result, mid))
+            self._measurement_dock.show()
+            self._measurement_dock.raise_()
 
         dlg = FeatureLatticeDialog(
             sources,

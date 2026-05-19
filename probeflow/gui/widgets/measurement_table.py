@@ -32,6 +32,8 @@ KIND_LABELS: dict[str, str] = {
     "line_profile": "Line profile",
     "line_profile_delta": "Line profile Δ",
     "spectrum_delta": "Spectrum Δ",
+    "distance": "Distance",
+    "angle":    "Angle",
 }
 
 VALUE_LABELS: dict[str, str] = {

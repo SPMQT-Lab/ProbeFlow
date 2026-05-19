@@ -51,6 +51,8 @@ def measurement_main_value(result: MeasurementResult) -> tuple[str, Scalar, str 
         "feature_maxima": ("n_points", None),
         "point_fft": ("dominant_frequency", result.x_unit),
         "line_periodicity": ("period_m", "m"),
+        "distance": ("length_m", "m"),
+        "angle":    ("angle_deg", "°"),
     }
     key, unit = preferences.get(result.kind, ("", None))
     if key and key in result.values:

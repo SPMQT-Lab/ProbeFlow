@@ -27,6 +27,7 @@ _EXPORTS: dict[str, str] = {
     "active_roi": "roi_ops",
     "active_roi_id": "roi_ops",
     "delete_active_roi": "roi_ops",
+    "delete_all_rois": "roi_ops",
     "delete_roi": "roi_ops",
     "export_histogram": "histogram_export",
     "export_line_profile": "line_profile_export",
