@@ -102,7 +102,7 @@ class ProbeFlowWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("ProbeFlow")
         self.setMinimumSize(1100, 720)
-        self.resize(1280, 800)
+        self.resize(1480, 800)
 
         self._cfg      = load_config()
         self._dark     = self._cfg.get("dark_mode", True)
@@ -246,6 +246,11 @@ class ProbeFlowWindow(QMainWindow):
         self._browse_tools.overlay_spectra_requested.connect(self._on_overlay_selected_spectra)
         self._browse_tools.filter_changed.connect(self._on_filter_changed)
         self._browse_tools.thumbnail_channel_changed.connect(self._on_thumbnail_channel_changed)
+        self._browse_tools.thumbnail_size_changed.connect(self._on_thumbnail_size_changed)
+        # Apply saved thumbnail size preference.
+        saved_size = self._cfg.get("thumbnail_size", "large")
+        if saved_size != "large":
+            self._grid.set_thumbnail_size(saved_size)
         # Sync initial filter state from the toolbar into the grid so the
         # two agree even before the first folder is opened.
         self._grid.apply_filter(self._browse_tools.get_filter_mode())
@@ -691,6 +696,9 @@ class ProbeFlowWindow(QMainWindow):
                 f"Thumbnail align rows: {label} — queued {n} image thumbnail"
                 f"{'s' if n != 1 else ''}")
         self._sync_menu_actions()
+
+    def _on_thumbnail_size_changed(self, name: str) -> None:
+        self._grid.set_thumbnail_size(name)
 
     def _refresh_primary_channel_previews(self):
         primary = self._grid.get_primary()
@@ -1193,9 +1201,10 @@ class ProbeFlowWindow(QMainWindow):
             "do_sxm":        self._convert_sidebar.sxm_cb.isChecked(),
             "clip_low":      self._convert_sidebar.clip_low_spin.value(),
             "clip_high":     self._convert_sidebar.clip_high_spin.value(),
-            "colormap":      self._browse_tools.cmap_cb.currentText(),
-            "browse_filter": self._browse_tools.get_filter_mode(),
-            "gui_font_size": self._gui_font_size,
+            "colormap":       self._browse_tools.cmap_cb.currentText(),
+            "browse_filter":  self._browse_tools.get_filter_mode(),
+            "gui_font_size":  self._gui_font_size,
+            "thumbnail_size": self._browse_tools.size_cb.currentText().lower(),
         })
         super().closeEvent(event)
 

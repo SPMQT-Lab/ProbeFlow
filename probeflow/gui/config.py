@@ -39,6 +39,7 @@ def load_config() -> dict:
         "colormap":        DEFAULT_CMAP_LABEL,
         "browse_filter":   "all",
         "gui_font_size":   GUI_FONT_DEFAULT,
+        "thumbnail_size":  "large",
     }
     try:
         import json

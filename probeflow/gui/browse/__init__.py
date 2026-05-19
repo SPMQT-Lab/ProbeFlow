@@ -33,6 +33,12 @@ from probeflow.gui.workers import (
 from probeflow.core.scan_loader import load_scan
 
 
+_CARD_SIZE_PRESETS = {
+    "large": {"CARD_W": 200, "CARD_H": 220, "IMG_W": 180, "IMG_H": 150},
+    "small": {"CARD_W": 170, "CARD_H": 187, "IMG_W": 153, "IMG_H": 128},
+}
+
+
 def _sep() -> QFrame:
     line = QFrame()
     line.setFrameShape(QFrame.HLine)
@@ -58,6 +64,7 @@ class BrowseToolPanel(QWidget):
     overlay_spectra_requested  = Signal()
     filter_changed             = Signal(str)   # "all" | "images" | "spectra"
     thumbnail_channel_changed  = Signal(str)
+    thumbnail_size_changed     = Signal(str)   # "large" | "small"
 
     def __init__(self, t: dict, cfg: dict, parent=None):
         super().__init__(parent)
@@ -170,6 +177,17 @@ class BrowseToolPanel(QWidget):
         )
         self.align_rows_cb.currentTextChanged.connect(self._on_align_changed)
         lay.addWidget(self.align_rows_cb)
+
+        size_lbl = QLabel("Thumbnail size")
+        size_lbl.setFont(QFont("Helvetica", 9, QFont.Bold))
+        lay.addWidget(size_lbl)
+        self.size_cb = QComboBox()
+        self.size_cb.addItems(["Large", "Small"])
+        self.size_cb.setCurrentText(cfg.get("thumbnail_size", "large").capitalize())
+        self.size_cb.setFont(QFont("Helvetica", 10))
+        self.size_cb.currentTextChanged.connect(
+            lambda t: self.thumbnail_size_changed.emit(t.lower()))
+        lay.addWidget(self.size_cb)
         lay.addWidget(_sep())
 
         self._map_spectra_btn = QPushButton("Map spectra to images\u2026")
@@ -557,6 +575,7 @@ class _BrowseCard(QFrame):
         self.entry     = entry
         self._t        = t
         self._sel      = False
+        self._orig_pixmap: QPixmap | None = None
 
         self.setFixedSize(self.CARD_W, self.CARD_H)
         self.setCursor(QCursor(Qt.PointingHandCursor))
@@ -587,10 +606,20 @@ class _BrowseCard(QFrame):
     def set_pixmap(self, pixmap: QPixmap):
         if getattr(self, "img_lbl", None) is None:
             return
+        self._orig_pixmap = pixmap
         self.img_lbl.setPixmap(
             pixmap.scaled(self.IMG_W, self.IMG_H,
                           Qt.KeepAspectRatio, Qt.SmoothTransformation))
         self.img_lbl.setText("")
+
+    def resize_to(self, card_w: int, card_h: int, img_w: int, img_h: int) -> None:
+        self.setFixedSize(card_w, card_h)
+        if getattr(self, "img_lbl", None) is not None:
+            self.img_lbl.setFixedSize(img_w, img_h)
+            if self._orig_pixmap is not None:
+                self.img_lbl.setPixmap(
+                    self._orig_pixmap.scaled(img_w, img_h,
+                        Qt.KeepAspectRatio, Qt.SmoothTransformation))
 
     def set_selected(self, val: bool):
         self._sel = val
@@ -1400,3 +1429,17 @@ class ThumbnailGrid(QWidget):
             self._grid.addWidget(card, row, col, Qt.AlignTop | Qt.AlignLeft)
             card.setVisible(True)
             i += 1
+
+    def set_thumbnail_size(self, name: str) -> None:
+        """Switch all cards to a size preset ("large" or "small")."""
+        sizes = _CARD_SIZE_PRESETS.get(name)
+        if sizes is None:
+            return
+        _BrowseCard.CARD_W = sizes["CARD_W"]
+        _BrowseCard.CARD_H = sizes["CARD_H"]
+        _BrowseCard.IMG_W  = sizes["IMG_W"]
+        _BrowseCard.IMG_H  = sizes["IMG_H"]
+        for card in self._cards.values():
+            card.resize_to(sizes["CARD_W"], sizes["CARD_H"],
+                           sizes["IMG_W"], sizes["IMG_H"])
+        self._relayout_filtered()
