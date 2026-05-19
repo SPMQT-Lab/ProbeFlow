@@ -35,12 +35,12 @@ from probeflow.gui.roi_items import make_roi_item, update_roi_item_style
 
 # ── Preview-item styling ──────────────────────────────────────────────────────
 
-_PEN_PREVIEW   = QPen(QColor("#fab387"), 2.0, Qt.DashLine)
+_PEN_PREVIEW   = QPen(QColor("#fab387"), 1.5, Qt.DashLine)
 _BRUSH_PREVIEW = QBrush(QColor(250, 179, 135, 40))
 _PEN_VERTEX    = QPen(QColor("#fab387"), 1.0)
 _BRUSH_VERTEX  = QBrush(QColor("#fab387"))
 
-_DRAWING_TOOLS = frozenset({"rectangle", "ellipse", "polygon", "freehand", "line", "point"})
+_DRAWING_TOOLS = frozenset({"rectangle", "ellipse", "polygon", "freehand", "line", "point", "angle"})
 
 
 class ImageCanvas(QGraphicsView):
@@ -67,6 +67,9 @@ class ImageCanvas(QGraphicsView):
     roi_copy_requested        = Signal(str)   # roi_id
     roi_paste_requested       = Signal()
     roi_activate_requested    = Signal(str)   # roi_id
+
+    # Angle tool signal
+    angle_points_ready        = Signal(QPointF, QPointF, QPointF)  # p1, p2 (vertex), p3
 
     # ── inner items ──────────────────────────────────────────────────────────
 
@@ -506,7 +509,7 @@ class ImageCanvas(QGraphicsView):
     def set_tool(self, kind: str) -> None:
         """Switch to the named drawing tool, cancelling any in-progress drawing."""
         if kind not in ("pan", "rectangle", "ellipse", "polygon",
-                        "freehand", "line", "point"):
+                        "freehand", "line", "point", "angle"):
             kind = "pan"
         if kind != self._tool:
             self._cancel_drawing()
@@ -670,6 +673,39 @@ class ImageCanvas(QGraphicsView):
         self.scene().addItem(path_item)
         self._preview_item = path_item
 
+    def _update_angle_preview(self, cursor_pos: "QPointF | None" = None) -> None:
+        pts = self._draw_pts
+        self._clear_preview()
+        if not pts:
+            return
+        # Vertex dots at collected points
+        for p in pts:
+            dot = QGraphicsEllipseItem(QRectF(p.x() - 2, p.y() - 2, 4, 4))
+            dot.setPen(_PEN_VERTEX)
+            dot.setBrush(_BRUSH_VERTEX)
+            dot.setZValue(51)
+            self.scene().addItem(dot)
+            self._preview_vertices.append(dot)
+        # Committed arm P1→P2 once both points are collected
+        if len(pts) >= 2:
+            arm = QGraphicsLineItem(pts[0].x(), pts[0].y(), pts[1].x(), pts[1].y())
+            arm.setPen(_PEN_PREVIEW)
+            arm.setZValue(50)
+            self.scene().addItem(arm)
+            self._preview_item = arm
+        # Live arm from last collected point to cursor
+        if cursor_pos is not None and pts:
+            live = QGraphicsLineItem(
+                pts[-1].x(), pts[-1].y(), cursor_pos.x(), cursor_pos.y()
+            )
+            live.setPen(_PEN_PREVIEW)
+            live.setZValue(50)
+            self.scene().addItem(live)
+            if self._preview_item is None:
+                self._preview_item = live
+            else:
+                self._preview_vertices.append(live)
+
     # ── ROI creation ─────────────────────────────────────────────────────────
 
     def _auto_name(self, kind: str) -> str:
@@ -824,6 +860,18 @@ class ImageCanvas(QGraphicsView):
             event.accept()
             return
 
+        if tool == "angle":
+            self._draw_pts.append(scene_pos)
+            self._update_angle_preview()
+            if len(self._draw_pts) >= 3:
+                p1, p2, p3 = self._draw_pts[0], self._draw_pts[1], self._draw_pts[2]
+                self._clear_preview()
+                self._draw_pts = []
+                self.angle_points_ready.emit(p1, p2, p3)
+                self.set_tool("pan")
+            event.accept()
+            return
+
         if tool == "freehand":
             self._draw_pts = [scene_pos]
             self._freehand_active = True
@@ -923,6 +971,8 @@ class ImageCanvas(QGraphicsView):
                     self._update_freehand_preview()
             if tool == "polygon" and self._draw_pts:
                 self._update_polygon_preview(cursor_pos=scene_pos)
+            if tool == "angle" and self._draw_pts:
+                self._update_angle_preview(cursor_pos=scene_pos)
 
         # ── hover highlight (pan mode, no drag) ───────────────────────────────
         if self._tool == "pan" and not (event.buttons() & Qt.LeftButton):

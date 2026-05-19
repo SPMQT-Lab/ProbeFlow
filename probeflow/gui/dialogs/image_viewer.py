@@ -181,6 +181,7 @@ class ImageViewerDialog(QDialog):
         # Controllers initialised inside _build() after their dependent widgets are created.
         self._spec_overlay: "SpecOverlayController | None" = None
         self._zero_ctrl: "SetZeroPlaneController | None" = None
+        self._angle_overlay: "object | None" = None  # AngleOverlayItem, imported lazily
         self._proc_undo_ctrl: "ProcessingUndoController | None" = None
         self._display_slider_ctrl: "DisplaySliderController | None" = None
         self._bad_line_preview_ctrl: "BadLinePreviewController | None" = None
@@ -688,6 +689,7 @@ class ImageViewerDialog(QDialog):
         self._zoom_lbl.roi_activate_requested.connect(self._on_canvas_roi_activate)
         self._zoom_lbl.tool_changed.connect(self._on_canvas_tool_changed)
         self._zoom_lbl.roi_context_menu_requested.connect(self._on_roi_canvas_context_menu)
+        self._zoom_lbl.angle_points_ready.connect(self._on_angle_points_ready)
         self._line_profile_panel.export_csv_clicked.connect(self._on_export_line_profile_csv)
         self._line_profile_panel.width_changed.connect(self._on_line_profile_width_changed)
 
@@ -742,7 +744,7 @@ class ImageViewerDialog(QDialog):
         measurements_lay.addWidget(roi_stats_btn)
 
         measurements_lay.addWidget(_sep())
-        measurements_lay.addWidget(_sec_lbl("Feature && Lattice"))
+        measurements_lay.addWidget(_sec_lbl("Feature & Lattice"))
         lattice_btn = QPushButton("Add lattice grid…")
         lattice_btn.setFont(QFont("Helvetica", 8))
         lattice_btn.setFixedHeight(26)
@@ -2383,38 +2385,33 @@ class ImageViewerDialog(QDialog):
         self._status_lbl.setText(result.summary)
 
     def _on_measure_angle(self) -> None:
-        """Measure acute angle between two selected line ROIs → new panel."""
-        roi_set = self._image_roi_set
-        if roi_set is None:
-            self._status_lbl.setText("No ROIs loaded.")
-            return
-        dock = getattr(self, "_roi_dock", None)
-        sel_ids = list(dock.selected_roi_ids()) if dock and hasattr(dock, "selected_roi_ids") else []
-        line_ids = [rid for rid in sel_ids
-                    if roi_set.get(rid) and roi_set.get(rid).kind == "line"]
-        if len(line_ids) < 2:
-            active_id = roi_set.active_roi_id
-            if active_id and roi_set.get(active_id) and roi_set.get(active_id).kind == "line":
-                if active_id not in line_ids:
-                    line_ids.append(active_id)
-        if len(line_ids) < 2:
-            self._status_lbl.setText("Select two line ROIs first.")
-            return
-        roi_a = roi_set.get(line_ids[0])
-        roi_b = roi_set.get(line_ids[1])
-        from probeflow.analysis.simple_measurements import measure_angle_between_lines
-        px_x_m, px_y_m = self._pixel_size_xy_m()
+        """Switch to the 3-point angle tool; handles emitted from angle_points_ready."""
+        self._zoom_lbl.set_tool("angle")
+        self._status_lbl.setText("Click P1, P2 (vertex), P3 to measure angle")
+
+    def _on_angle_points_ready(self, p1, p2, p3) -> None:
+        """Create angle overlay and record result from the 3-point angle tool."""
+        from probeflow.gui.angle_overlay import AngleOverlayItem
+        scene = self._zoom_lbl.scene()
+        if self._angle_overlay is not None:
+            self._angle_overlay.remove_from_scene(scene)
+        self._angle_overlay = AngleOverlayItem(p1, p2, p3, scene)
+        deg = self._angle_overlay.angle_deg
+        from probeflow.analysis.measurements import MeasurementResult
         mid = f"M{self._measure_results_panel.result_count() + 1}"
-        _, ch_unit, _ = self._channel_unit()
-        result = measure_angle_between_lines(
-            roi_a, roi_b, px_x_m, px_y_m,
-            measurement_id=mid,
+        result = MeasurementResult(
+            id=mid,
+            kind="angle",
             source=self._source_label(),
-            channel=ch_unit,
+            channel=None,
+            roi_id=None,
+            summary=f"{deg:.2f}°",
+            values={"angle_deg": deg},
+            units={"angle_deg": "°"},
         )
         self._measure_results_panel.add_result(result)
         self._show_sidebar_tab("measurements")
-        self._status_lbl.setText(result.summary)
+        self._status_lbl.setText(f"Angle: {deg:.2f}°  (drag handles to adjust)")
 
     def _on_measure_roi_stats(self) -> None:
         """Compute statistics for the active area ROI → new panel."""

@@ -23,9 +23,9 @@ if TYPE_CHECKING:
     from probeflow.core.roi import ROI
 
 
-_PEN_INACTIVE   = QPen(QColor("#89b4fa"), 1.5)
-_PEN_ACTIVE     = QPen(QColor("#22D3EE"), 3.0, Qt.DashLine)
-_PEN_HOVER      = QPen(QColor("#f9e2af"), 2.0)
+_PEN_INACTIVE   = QPen(QColor("#89b4fa"), 1.0)
+_PEN_ACTIVE     = QPen(QColor("#22D3EE"), 1.5, Qt.DashLine)
+_PEN_HOVER      = QPen(QColor("#f9e2af"), 1.5)
 _BRUSH_INACTIVE = QBrush(QColor(137, 180, 250, 30))
 _BRUSH_ACTIVE   = QBrush(QColor(34, 211, 238, 50))
 _BRUSH_HOVER    = QBrush(QColor(249, 226, 175, 45))
