@@ -728,6 +728,16 @@ class ImageViewerDialog(QDialog):
         )
         lattice_btn.clicked.connect(self._on_open_lattice_grid)
         measurements_lay.addWidget(lattice_btn)
+
+        feature_finder_btn = QPushButton("Feature finder…")
+        feature_finder_btn.setFont(QFont("Helvetica", 8))
+        feature_finder_btn.setFixedHeight(26)
+        feature_finder_btn.setToolTip(
+            "Find local maxima or minima, set thresholds, export coordinates, "
+            "and generate a feature image for selective FFT analysis."
+        )
+        feature_finder_btn.clicked.connect(self._on_open_feature_finder)
+        measurements_lay.addWidget(feature_finder_btn)
         measurements_lay.addStretch(1)
 
         self._status_lbl = QLabel("")
@@ -1058,6 +1068,9 @@ class ImageViewerDialog(QDialog):
         )
         self._viewer_measurement_actions["feature_maxima"] = detect_maxima_action
         measurements_menu.addAction(detect_maxima_action)
+        feature_finder_action = QAction("Feature finder…", self)
+        feature_finder_action.triggered.connect(self._on_open_feature_finder)
+        measurements_menu.addAction(feature_finder_action)
         measurements_menu.addSeparator()
         self._image_measurements.add_detected_point_menu_actions(
             measurements_menu,
@@ -2258,6 +2271,22 @@ class ImageViewerDialog(QDialog):
                 self._zoom_lbl.scene().removeItem(item)
 
         dock.visibilityChanged.connect(lambda v: _on_dock_closed() if not v else None)
+
+    def _on_open_feature_finder(self):
+        arr = self._display_arr if self._display_arr is not None else self._raw_arr
+        if arr is None:
+            self._status_lbl.setText("No image loaded.")
+            return
+        px_x_m, px_y_m = self._pixel_size_xy_m()
+        from probeflow.gui.dialogs.feature_finder import FeatureFinderDialog
+        dlg = FeatureFinderDialog(
+            arr,
+            pixel_size_x_m=px_x_m,
+            pixel_size_y_m=px_y_m,
+            theme=self._t,
+            parent=self,
+        )
+        dlg.show()
 
     def _on_open_fft_viewer(self):
         arr = self._display_arr if self._display_arr is not None else self._raw_arr

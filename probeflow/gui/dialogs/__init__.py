@@ -8,6 +8,7 @@ from probeflow.gui.dialogs.definitions import (
     _DefinitionsDialog,
     _DefinitionsPanel,
 )
+from probeflow.gui.dialogs.feature_finder import FeatureFinderDialog
 from probeflow.gui.dialogs.fft_viewer import FFTViewerDialog
 from probeflow.gui.dialogs.periodic_filter import PeriodicFilterDialog
 from probeflow.gui.dialogs.point_fft import PointMaskFFTDialog
@@ -21,6 +22,7 @@ __all__ = [
     "_DEFINITIONS_HTML",
     "_DefinitionsDialog",
     "_DefinitionsPanel",
+    "FeatureFinderDialog",
     "FFTViewerDialog",
     "ImageViewerDialog",
     "PeriodicFilterDialog",

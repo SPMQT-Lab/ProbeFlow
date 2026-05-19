@@ -1,0 +1,179 @@
+"""Tests for probeflow.analysis.feature_finder."""
+
+from __future__ import annotations
+
+import numpy as np
+import pytest
+
+from probeflow.analysis.feature_finder import (
+    FeatureDetectionResult,
+    FeaturePoint,
+    feature_points_to_image,
+    find_image_features,
+)
+
+
+def _gaussian(shape, cx, cy, amp=1.0, sigma=1.5):
+    yy, xx = np.mgrid[: shape[0], : shape[1]]
+    return amp * np.exp(-((xx - cx) ** 2 + (yy - cy) ** 2) / (2 * sigma ** 2))
+
+
+def _image(*peaks, shape=(64, 64)):
+    """Build image from a list of (cx, cy, amp) tuples."""
+    img = np.zeros(shape, dtype=float)
+    for cx, cy, amp in peaks:
+        img += _gaussian(shape, cx, cy, amp)
+    return img
+
+
+# --- Test 1: single bright Gaussian gives one maximum ---
+
+def test_single_bright_gaussian_gives_one_maximum():
+    img = _image((32, 32, 5.0))
+    result = find_image_features(
+        img,
+        mode="maxima",
+        threshold_mode="above",
+        threshold_low=1.0,
+        min_distance_px=3.0,
+    )
+    assert len(result.points) == 1
+    pt = result.points[0]
+    assert round(pt.x_px) == 32
+    assert round(pt.y_px) == 32
+
+
+# --- Test 2: single dark Gaussian gives one minimum ---
+
+def test_single_dark_gaussian_gives_one_minimum():
+    img = -_image((24, 24, 3.0))  # dark depression
+    result = find_image_features(
+        img,
+        mode="minima",
+        threshold_mode="below",
+        threshold_high=-0.5,
+        min_distance_px=3.0,
+    )
+    assert len(result.points) == 1
+    pt = result.points[0]
+    assert round(pt.x_px) == 24
+    assert round(pt.y_px) == 24
+
+
+# --- Test 3: nearby peaks merge when min_distance_px is large ---
+
+def test_nearby_peaks_merge_when_min_distance_large():
+    img = _image((30, 30, 5.0), (34, 30, 4.0))
+    result = find_image_features(
+        img,
+        mode="maxima",
+        threshold_mode="above",
+        threshold_low=0.5,
+        min_distance_px=10.0,
+    )
+    assert len(result.points) == 1
+
+
+# --- Test 4: nearby peaks are separate when min_distance_px is small ---
+
+def test_nearby_peaks_separate_when_min_distance_small():
+    img = _image((10, 32, 5.0), (52, 32, 4.5))
+    result = find_image_features(
+        img,
+        mode="maxima",
+        threshold_mode="above",
+        threshold_low=0.5,
+        min_distance_px=2.0,
+    )
+    assert len(result.points) == 2
+
+
+# --- Test 5: above-threshold detection excludes low peaks ---
+
+def test_above_threshold_excludes_low_peaks():
+    img = _image((16, 16, 1.0), (48, 48, 5.0))
+    result = find_image_features(
+        img,
+        mode="maxima",
+        threshold_mode="above",
+        threshold_low=2.0,
+        min_distance_px=3.0,
+    )
+    assert len(result.points) == 1
+    assert round(result.points[0].x_px) == 48
+
+
+# --- Test 6: between-threshold selects only intermediate features ---
+
+def test_between_threshold_selects_intermediate_features():
+    shape = (64, 64)
+    img = np.zeros(shape, dtype=float)
+    # Low: amp 1 at (10,10), Medium: amp 3 at (30,30), High: amp 8 at (50,50)
+    img += _gaussian(shape, 10, 10, amp=1.0)
+    img += _gaussian(shape, 30, 30, amp=3.0)
+    img += _gaussian(shape, 50, 50, amp=8.0)
+
+    result = find_image_features(
+        img,
+        mode="maxima",
+        threshold_mode="between",
+        threshold_low=1.5,
+        threshold_high=5.0,
+        min_distance_px=3.0,
+    )
+    # Only the medium peak should be within [1.5, 5.0]
+    assert len(result.points) == 1
+    assert round(result.points[0].x_px) == 30
+    assert round(result.points[0].y_px) == 30
+
+
+# --- Test 7: ROI mask excludes features outside ROI ---
+
+def test_roi_mask_excludes_features_outside():
+    img = _image((10, 10, 5.0), (50, 50, 5.0))
+    roi = np.zeros((64, 64), dtype=bool)
+    roi[:30, :30] = True  # only top-left quadrant
+
+    result = find_image_features(
+        img,
+        mode="maxima",
+        threshold_mode="above",
+        threshold_low=0.5,
+        min_distance_px=3.0,
+        roi_mask=roi,
+    )
+    assert len(result.points) == 1
+    pt = result.points[0]
+    assert pt.x_px < 30.0
+    assert pt.y_px < 30.0
+
+
+# --- Test 8: feature image generation places pixels at expected coordinates ---
+
+def test_feature_image_places_pixels_at_expected_coords():
+    points = [FeaturePoint(x_px=10.0, y_px=20.0, value=5.0)]
+    img = feature_points_to_image(points, (32, 32), radius_px=0.0)
+    assert img[20, 10] == pytest.approx(1.0)
+    assert img[20, 11] == pytest.approx(0.0)
+    assert img[19, 10] == pytest.approx(0.0)
+
+
+# --- Test 9: dilation increases feature area ---
+
+def test_dilation_increases_feature_area():
+    points = [FeaturePoint(x_px=16.0, y_px=16.0, value=1.0)]
+    shape = (32, 32)
+    single_pixel = feature_points_to_image(points, shape, radius_px=0.0)
+    dilated = feature_points_to_image(points, shape, radius_px=3.0)
+    assert int(np.count_nonzero(dilated)) > int(np.count_nonzero(single_pixel))
+
+
+# --- Test 10: smoothing preserves total feature image approximately ---
+
+def test_smoothing_preserves_total_feature_image():
+    points = [FeaturePoint(x_px=16.0, y_px=16.0, value=1.0)]
+    shape = (64, 64)
+    unsmoothed = feature_points_to_image(points, shape, radius_px=3.0, smoothing_sigma_px=0.0)
+    smoothed = feature_points_to_image(points, shape, radius_px=3.0, smoothing_sigma_px=1.5)
+    # Gaussian smoothing (with sufficient margin from edges) preserves total mass.
+    assert float(smoothed.sum()) == pytest.approx(float(unsmoothed.sum()), rel=0.01)
