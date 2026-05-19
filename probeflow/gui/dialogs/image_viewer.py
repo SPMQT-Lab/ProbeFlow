@@ -92,7 +92,7 @@ from probeflow.gui.viewer import (
     show_roi_histogram,
     transform_roi_set_for_display_op,
 )
-from probeflow.gui.widgets import ImageMeasurementsPanel
+from probeflow.gui.widgets import ImageMeasurementsPanel, MeasurementResultsPanel
 from probeflow.gui.image_canvas import ImageCanvas
 from probeflow.gui.roi_manager_dock import ROIManagerDock
 from probeflow.processing.gui_adapter import processing_state_from_gui
@@ -738,7 +738,11 @@ class ImageViewerDialog(QDialog):
         )
         feature_finder_btn.clicked.connect(self._on_open_feature_finder)
         measurements_lay.addWidget(feature_finder_btn)
-        measurements_lay.addStretch(1)
+
+        measurements_lay.addWidget(_sep())
+
+        self._measure_results_panel = MeasurementResultsPanel()
+        measurements_lay.addWidget(self._measure_results_panel, 1)
 
         self._status_lbl = QLabel("")
         self._status_lbl.setFont(QFont("Helvetica", 8))
@@ -1085,6 +1089,11 @@ class ImageViewerDialog(QDialog):
         show_measurements_action = QAction("Show measurements", self)
         show_measurements_action.triggered.connect(self._show_measurements)
         measurements_menu.addAction(show_measurements_action)
+        show_measure_tab_action = QAction("Measurement table (Measure tab)", self)
+        show_measure_tab_action.triggered.connect(
+            lambda: self._show_sidebar_tab("measurements")
+        )
+        measurements_menu.addAction(show_measure_tab_action)
 
         fft_menu = menu_bar.addMenu("FFT")
         open_fft_action = QAction("Open FFT viewer…", self)
