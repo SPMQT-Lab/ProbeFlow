@@ -705,20 +705,44 @@ class ImageViewerDialog(QDialog):
         roi_lay.addWidget(show_roi_btn)
         roi_lay.addStretch(1)
 
-        measurements_empty_lbl = QLabel(
-            "Measurements are shown in the Measurements dock.\n"
-            "Use Show Measurements to reopen it."
+        def _sec_lbl(text: str) -> QLabel:
+            lbl = QLabel(text)
+            lbl.setFont(QFont("Helvetica", 8))
+            lbl.setStyleSheet("font-weight: 600; color: palette(mid);")
+            return lbl
+
+        measurements_lay.addWidget(_sec_lbl("Quick measurements"))
+        distance_btn = QPushButton("Distance (active line ROI)")
+        distance_btn.setFont(QFont("Helvetica", 8))
+        distance_btn.setFixedHeight(26)
+        distance_btn.setToolTip(
+            "Measure the length and angle of the active line ROI."
         )
-        measurements_empty_lbl.setWordWrap(True)
-        measurements_lay.addWidget(measurements_empty_lbl)
-        show_measurements_btn = QPushButton("Show Measurements")
-        show_measurements_btn.setDefault(False)
-        show_measurements_btn.setAutoDefault(False)
-        show_measurements_btn.clicked.connect(self._show_measurements)
-        measurements_lay.addWidget(show_measurements_btn)
+        distance_btn.clicked.connect(self._on_measure_distance)
+        measurements_lay.addWidget(distance_btn)
+
+        angle_btn = QPushButton("Angle (two selected line ROIs)")
+        angle_btn.setFont(QFont("Helvetica", 8))
+        angle_btn.setFixedHeight(26)
+        angle_btn.setToolTip(
+            "Measure the acute angle between two selected line ROIs."
+        )
+        angle_btn.clicked.connect(self._on_measure_angle)
+        measurements_lay.addWidget(angle_btn)
 
         measurements_lay.addWidget(_sep())
+        measurements_lay.addWidget(_sec_lbl("ROI measurements"))
+        roi_stats_btn = QPushButton("ROI statistics (active area ROI)")
+        roi_stats_btn.setFont(QFont("Helvetica", 8))
+        roi_stats_btn.setFixedHeight(26)
+        roi_stats_btn.setToolTip(
+            "Compute area, mean, RMS roughness, and range for the active area ROI."
+        )
+        roi_stats_btn.clicked.connect(self._on_measure_roi_stats)
+        measurements_lay.addWidget(roi_stats_btn)
 
+        measurements_lay.addWidget(_sep())
+        measurements_lay.addWidget(_sec_lbl("Feature && Lattice"))
         lattice_btn = QPushButton("Add lattice grid…")
         lattice_btn.setFont(QFont("Helvetica", 8))
         lattice_btn.setFixedHeight(26)
@@ -1042,6 +1066,16 @@ class ImageViewerDialog(QDialog):
         # These should remain hidden or disabled until implemented in the ROI backend.
 
         measurements_menu = menu_bar.addMenu("Measurements")
+        ruler_action = QAction("Ruler / distance…", self)
+        ruler_action.triggered.connect(self._on_measure_distance)
+        measurements_menu.addAction(ruler_action)
+        angle_action = QAction("Angle measurement…", self)
+        angle_action.triggered.connect(self._on_measure_angle)
+        measurements_menu.addAction(angle_action)
+        roi_stats_new_action = QAction("ROI statistics…", self)
+        roi_stats_new_action.triggered.connect(self._on_measure_roi_stats)
+        measurements_menu.addAction(roi_stats_new_action)
+        measurements_menu.addSeparator()
         add_roi_stats_action = QAction("Add active ROI statistics", self)
         add_roi_stats_action.triggered.connect(
             self._image_measurements.add_active_roi_stats_measurement
@@ -2296,6 +2330,110 @@ class ImageViewerDialog(QDialog):
             parent=self,
         )
         dlg.show()
+
+    def _on_measure_distance(self) -> None:
+        """Measure length/angle of the active line ROI → new panel."""
+        roi_id = self._active_line_roi_id()
+        if roi_id is None:
+            self._status_lbl.setText("Select a line ROI first.")
+            return
+        roi = self._image_roi_set.get(roi_id) if self._image_roi_set else None
+        if roi is None:
+            return
+        from probeflow.analysis.simple_measurements import measure_line_distance
+        px_x_m, px_y_m = self._pixel_size_xy_m()
+        mid = f"M{self._measure_results_panel.result_count() + 1}"
+        _, ch_unit, _ = self._channel_unit()
+        result = measure_line_distance(
+            roi, px_x_m, px_y_m,
+            measurement_id=mid,
+            source=self._source_label(),
+            channel=ch_unit,
+        )
+        self._measure_results_panel.add_result(result)
+        self._show_sidebar_tab("measurements")
+        self._status_lbl.setText(result.summary)
+
+    def _on_measure_angle(self) -> None:
+        """Measure acute angle between two selected line ROIs → new panel."""
+        roi_set = self._image_roi_set
+        if roi_set is None:
+            self._status_lbl.setText("No ROIs loaded.")
+            return
+        dock = getattr(self, "_roi_dock", None)
+        sel_ids = list(dock.selected_roi_ids()) if dock and hasattr(dock, "selected_roi_ids") else []
+        line_ids = [rid for rid in sel_ids
+                    if roi_set.get(rid) and roi_set.get(rid).kind == "line"]
+        if len(line_ids) < 2:
+            active_id = roi_set.active_roi_id
+            if active_id and roi_set.get(active_id) and roi_set.get(active_id).kind == "line":
+                if active_id not in line_ids:
+                    line_ids.append(active_id)
+        if len(line_ids) < 2:
+            self._status_lbl.setText("Select two line ROIs first.")
+            return
+        roi_a = roi_set.get(line_ids[0])
+        roi_b = roi_set.get(line_ids[1])
+        from probeflow.analysis.simple_measurements import measure_angle_between_lines
+        px_x_m, px_y_m = self._pixel_size_xy_m()
+        mid = f"M{self._measure_results_panel.result_count() + 1}"
+        _, ch_unit, _ = self._channel_unit()
+        result = measure_angle_between_lines(
+            roi_a, roi_b, px_x_m, px_y_m,
+            measurement_id=mid,
+            source=self._source_label(),
+            channel=ch_unit,
+        )
+        self._measure_results_panel.add_result(result)
+        self._show_sidebar_tab("measurements")
+        self._status_lbl.setText(result.summary)
+
+    def _on_measure_roi_stats(self) -> None:
+        """Compute statistics for the active area ROI → new panel."""
+        roi_set = self._image_roi_set
+        arr = self._display_arr if self._display_arr is not None else self._raw_arr
+        if arr is None:
+            self._status_lbl.setText("No image loaded.")
+            return
+        if roi_set is None:
+            self._status_lbl.setText("No ROIs loaded.")
+            return
+        active_id = roi_set.active_roi_id
+        roi = roi_set.get(active_id) if active_id else None
+        if roi is None or roi.kind not in AREA_ROI_KINDS:
+            self._status_lbl.setText("Select an area ROI first.")
+            return
+        try:
+            mask = roi.to_mask(arr.shape[:2])
+        except Exception as exc:
+            self._status_lbl.setText(f"Could not create ROI mask: {exc}")
+            return
+        scale, ch_unit, _ = self._channel_unit()
+        phys_arr = arr.astype(float) * float(scale)
+        from probeflow.analysis.roi_statistics import compute_roi_statistics
+        px_x_m, px_y_m = self._pixel_size_xy_m()
+        mid = f"M{self._measure_results_panel.result_count() + 1}"
+        result = compute_roi_statistics(
+            phys_arr, mask,
+            pixel_size_x_m=px_x_m,
+            pixel_size_y_m=px_y_m,
+            z_unit=ch_unit,
+            measurement_id=mid,
+            source=self._source_label(),
+            channel=ch_unit,
+            roi_id=roi.id,
+            roi_name=roi.name,
+        )
+        self._measure_results_panel.add_result(result)
+        self._show_sidebar_tab("measurements")
+        self._status_lbl.setText(result.summary)
+
+    def _source_label(self) -> str:
+        """Short label for the currently loaded file, for measurement provenance."""
+        try:
+            return self._entries[self._idx].stem
+        except (AttributeError, IndexError, TypeError):
+            return ""
 
     def _on_open_fft_viewer(self):
         arr = self._display_arr if self._display_arr is not None else self._raw_arr
