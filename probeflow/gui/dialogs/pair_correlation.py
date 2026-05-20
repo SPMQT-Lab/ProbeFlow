@@ -62,6 +62,7 @@ class PairCorrelationDialog(QDialog):
         source_label: str = "",
         source_path: str | None = None,
         channel: str = "",
+        source_metadata: dict[str, dict[str, object]] | None = None,
         on_add_result: Callable[[MeasurementResult], None] | None = None,
         theme: dict | None = None,
         parent=None,
@@ -78,6 +79,7 @@ class PairCorrelationDialog(QDialog):
         self._source_label = source_label
         self._source_path = source_path
         self._channel = channel
+        self._source_metadata = source_metadata or {}
         self._on_add_result = on_add_result
         self._t = theme or {}
         self._result: PairCorrelationResult | None = None
@@ -304,6 +306,11 @@ class PairCorrelationDialog(QDialog):
             "data_basis": "feature_points_physical",
             "summary": summary,
         }
+        for key, value in self._source_metadata.get(src_name, {}).items():
+            if value is None:
+                continue
+            context_key = key if key.startswith("point_source_") else f"point_source_{key}"
+            context[context_key] = value
 
         result = MeasurementResult(
             measurement_id="M?",

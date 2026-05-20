@@ -207,6 +207,13 @@ def test_dialog_measurement_context_preserves_lattice_and_match_settings(qapp):
         source_label="scan:Height",
         source_path="/tmp/scan.sxm",
         channel="Height",
+        source_metadata={
+            "Detected feature maxima": {
+                "point_source_type": "feature_maxima",
+                "selection_scope": "roi",
+                "threshold_mode": "percentile",
+            }
+        },
         on_add_result=captured.append,
     )
     dlg._radius_sb.setValue(2.5)
@@ -224,5 +231,8 @@ def test_dialog_measurement_context_preserves_lattice_and_match_settings(qapp):
     assert result.context["pixel_size_y_m"] == pytest.approx(2e-9)
     assert result.context["image_shape_y"] == 48
     assert result.context["occupancy_region"] == "image_bounds"
+    assert result.context["point_source_type"] == "feature_maxima"
+    assert result.context["point_source_selection_scope"] == "roi"
+    assert result.context["point_source_threshold_mode"] == "percentile"
     dlg.close()
     dlg.deleteLater()

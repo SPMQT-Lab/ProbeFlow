@@ -112,8 +112,10 @@ from probeflow.gui.processing import ProcessingControlPanel
 from probeflow.core import AREA_ROI_KINDS
 from probeflow.gui.roi_context import (
     active_area_roi_area_m2,
-    collect_point_sources_m,
-    collect_point_sources_px,
+    collect_point_source_records,
+    point_source_arrays_m,
+    point_source_arrays_px,
+    point_source_metadata,
 )
 from probeflow.core.scan_loader import load_scan
 from probeflow.gui.viewer.scan_load import load_scan_for_viewer, ViewerScanData
@@ -2512,34 +2514,33 @@ class ImageViewerDialog(QDialog):
         except (AttributeError, IndexError, TypeError):
             return ""
 
-    def _collect_point_sources_m(self) -> dict[str, "np.ndarray"]:
-        """Collect available point sources as (N,2) arrays in metres."""
+    def _point_source_records(self):
         px_x, px_y = self._pixel_size_xy_m()
         ff_dlg = getattr(self, "_feature_finder_dlg", None)
         measure_ctrl = getattr(self, "_image_measurements", None)
         dock = getattr(self, "_roi_dock", None)
         sel_ids = list(dock.selected_roi_ids()) if dock and hasattr(dock, "selected_roi_ids") else []
-        return collect_point_sources_m(
+        return collect_point_source_records(
             pixel_size_x_m=px_x,
             pixel_size_y_m=px_y,
             feature_finder_result=getattr(ff_dlg, "result", None),
             measurement_points=getattr(measure_ctrl, "feature_points", []) or [],
+            measurement_metadata=getattr(measure_ctrl, "feature_metadata", {}) or {},
             roi_set=self._image_roi_set,
             selected_roi_ids=sel_ids,
         )
 
+    def _collect_point_sources_m(self) -> dict[str, "np.ndarray"]:
+        """Collect available point sources as (N,2) arrays in metres."""
+        return point_source_arrays_m(self._point_source_records())
+
     def _collect_point_sources_px(self) -> dict[str, "np.ndarray"]:
         """Collect available point sources as (N,2) arrays in pixel coordinates."""
-        ff_dlg = getattr(self, "_feature_finder_dlg", None)
-        measure_ctrl = getattr(self, "_image_measurements", None)
-        dock = getattr(self, "_roi_dock", None)
-        sel_ids = list(dock.selected_roi_ids()) if dock and hasattr(dock, "selected_roi_ids") else []
-        return collect_point_sources_px(
-            feature_finder_result=getattr(ff_dlg, "result", None),
-            measurement_points=getattr(measure_ctrl, "feature_points", []) or [],
-            roi_set=self._image_roi_set,
-            selected_roi_ids=sel_ids,
-        )
+        return point_source_arrays_px(self._point_source_records())
+
+    def _collect_point_source_metadata(self) -> dict[str, dict[str, object]]:
+        """Collect metadata for available point sources."""
+        return point_source_metadata(self._point_source_records())
 
     def _on_open_pair_correlation(self) -> None:
         sources = self._collect_point_sources_m()
@@ -2574,6 +2575,7 @@ class ImageViewerDialog(QDialog):
             source_label=self._source_label(),
             source_path=str(entry.path) if entry is not None else None,
             channel=ch_unit,
+            source_metadata=self._collect_point_source_metadata(),
             on_add_result=_add,
             theme=self._t,
             parent=self,
@@ -2613,6 +2615,7 @@ class ImageViewerDialog(QDialog):
             source_label=self._source_label(),
             source_path=str(entry.path) if entry is not None else None,
             channel=ch_unit,
+            source_metadata=self._collect_point_source_metadata(),
             on_add_result=_add,
             theme=self._t,
             parent=self,

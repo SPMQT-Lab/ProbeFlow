@@ -113,6 +113,11 @@ class ImageMeasurementController:
         """Return the currently detected feature points."""
         return list(self._feature_points)
 
+    @property
+    def feature_metadata(self) -> dict[str, object]:
+        """Return metadata for the currently detected feature points."""
+        return dict(self._feature_metadata)
+
     def action_enabled_state(self) -> dict[str, bool]:
         """Return enabled states for viewer measurement menu actions."""
         roi_id = self._selected_or_active_roi_id()

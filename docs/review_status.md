@@ -10,7 +10,7 @@ This document preserves the useful status from completed review artifacts after 
 |---|---|---|---|
 | Stage 1 scientific workflow and physics review | Completed | Pruned after summary preservation | Identified unit, provenance, feature workflow, lattice correction, pair-correlation, point-mask FFT, periodicity export, and spectroscopy wording issues. |
 | Stage 1 workflow physics fixes | Completed | Pruned after summary preservation | Concrete PF-STAGE1-001 through PF-STAGE1-010 fixes were implemented. Latest relevant commit: `2724b77 Improve scientific workflow provenance`. |
-| Stage 2 architecture, repetition, and maintainability review plus first implementation slice | Completed slice | `review_stage2_architecture_repetition_findings.md` | Produced the architecture/refactor queue and implemented the first bounded cleanup: measurement adapter, canonical pair/feature-lattice results, ROI point-source helper, and lattice correction operation helper. |
+| Stage 2 architecture, repetition, and maintainability review plus bounded implementation slices | Completed slices | `review_stage2_architecture_repetition_findings.md` | Produced the architecture/refactor queue and implemented bounded cleanup: measurement adapter, canonical pair/feature-lattice results, ROI point-source helper, feature-source metadata propagation, and lattice correction operation helper. |
 
 ## Stage 1 Preserved Outcome
 
@@ -39,14 +39,15 @@ The first implementation slice from Stage 2 addressed the highest-priority seams
 - Pair-correlation and feature-to-lattice dialogs now emit canonical `probeflow.measurements.models.MeasurementResult` rows.
 - Simple distance/angle and ROI-statistics producers now emit canonical measurement rows.
 - The legacy `MeasurementResultsPanel` public name now wraps the canonical measurement table.
-- `probeflow.gui.roi_context` now gathers downstream point sources and calculates active area ROI physical area outside the main viewer.
+- `probeflow.gui.roi_context` now gathers downstream point sources, preserves source metadata, and calculates active area ROI physical area outside the main viewer.
+- Pair-correlation and feature-to-lattice table rows now record point-source type, selection scope, and available detection settings.
 - `probeflow.analysis.lattice_correction_workflow` now builds pixel-space lattice correction matrices and processing/provenance operation parameters outside the lattice GUI panel.
 - Focused regression tests cover the adapter, ROI context helper, and lattice correction helper.
 
 The recommended next implementation stage is to address the remaining Stage 2 findings in this order:
 
-1. Unify legacy maxima/minima and measure-tab maxima as canonical point sources.
-2. Extend ROI context to line/area validation and add a small tool-launch coordinator.
+1. Extend ROI context to line/area validation and add a small tool-launch coordinator.
+2. Continue feature-source unification for point masks, point FFT, and detailed feature exports where source provenance is needed.
 3. Remove compatibility measurement shims only after no supported caller depends on legacy result rows.
 4. Add small unit-formatting and text-export helpers.
 5. Clean up spectroscopy and plotting duplication.

@@ -131,6 +131,13 @@ def test_dialog_measurement_context_preserves_bins_area_and_warning(qapp):
         source_label="scan:Height",
         source_path="/tmp/scan.sxm",
         channel="Height",
+        source_metadata={
+            "Detected feature maxima": {
+                "point_source_type": "feature_maxima",
+                "selection_scope": "roi",
+                "threshold_mode": "percentile",
+            }
+        },
         on_add_result=captured.append,
     )
     dlg._rmax_sb.setValue(4.0)
@@ -148,6 +155,9 @@ def test_dialog_measurement_context_preserves_bins_area_and_warning(qapp):
     assert result.context["edge_correction"] == "not_applied"
     assert "edge correction" in result.context["message"].lower()
     assert result.context["pixel_size_y_m"] == pytest.approx(2e-9)
+    assert result.context["point_source_type"] == "feature_maxima"
+    assert result.context["point_source_selection_scope"] == "roi"
+    assert result.context["point_source_threshold_mode"] == "percentile"
     dlg.close()
     dlg.deleteLater()
 
