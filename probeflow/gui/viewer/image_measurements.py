@@ -42,6 +42,14 @@ from probeflow.measurements.image import (
 )
 
 from probeflow.core import AREA_ROI_KINDS
+from probeflow.gui.roi_context import (
+    ROIContext,
+    active_line_roi_context,
+    selected_area_roi_contexts,
+    selected_or_active_area_roi_context,
+    selected_or_active_roi_context,
+    selected_roi_ids_for_context,
+)
 
 
 def _csv_text(rows: list[list[str]]) -> str:
@@ -120,15 +128,12 @@ class ImageMeasurementController:
 
     def action_enabled_state(self) -> dict[str, bool]:
         """Return enabled states for viewer measurement menu actions."""
-        roi_id = self._selected_or_active_roi_id()
-        roi = self._roi(roi_id)
+        roi_ctx = self._selected_or_active_roi_context()
+        roi = roi_ctx.roi
         is_area = roi is not None and roi.kind in AREA_ROI_KINDS
         is_line = roi is not None and roi.kind == "line"
-        selected_rois = [self._roi(rid) for rid in self.selected_roi_ids()]
-        selected_area_pair = (
-            len(selected_rois) == 2
-            and all(r is not None and r.kind in AREA_ROI_KINDS for r in selected_rois)
-        )
+        selected_ids = self.selected_roi_ids()
+        selected_area_pair = len(selected_ids) == 2 and len(self._selected_area_rois()) == 2
         return {
             "roi_stats": is_area,
             "step_height": selected_area_pair,
@@ -167,21 +172,22 @@ class ImageMeasurementController:
 
     def selected_roi_ids(self) -> list[str]:
         """Return selected ROI IDs from the dock, falling back to active ROI."""
-        dock = getattr(self._viewer, "_roi_dock", None)
-        if dock is not None and hasattr(dock, "selected_roi_ids"):
-            return list(dock.selected_roi_ids())
-        roi_id = self._selected_or_active_roi_id()
-        return [roi_id] if roi_id else []
+        return selected_roi_ids_for_context(self._roi_set(), self._roi_dock())
 
     def add_active_roi_stats_measurement(self) -> None:
-        roi_id = self._selected_or_active_roi_id()
-        if roi_id:
-            self.add_roi_stats_measurement(roi_id)
+        roi_ctx = self._selected_or_active_area_roi_context()
+        if roi_ctx.roi_id is None:
+            self._set_status("Select an area ROI first.")
+            return
+        self.add_roi_stats_measurement(roi_ctx.roi_id)
 
     def add_roi_stats_measurement(self, roi_id: str) -> None:
         roi = self._roi(roi_id)
         arr = self._display_arr()
         if roi is None or arr is None:
+            return
+        if roi.kind not in AREA_ROI_KINDS:
+            self._set_status("ROI statistics require an area ROI.")
             return
         try:
             entry, scale, unit, channel, source_label = self._source_info()
@@ -536,11 +542,8 @@ class ImageMeasurementController:
 
     def detect_feature_maxima_for_active_roi(self) -> None:
         """Detect maxima inside the active area ROI, or over the full image if none."""
-        roi_id = self._selected_or_active_roi_id()
-        roi = self._roi(roi_id) if roi_id else None
-        # Non-area ROIs (line, point) are not valid for maxima detection — use full image
-        if roi is not None and roi.kind not in AREA_ROI_KINDS:
-            roi, roi_id = None, None
+        roi_ctx = self._selected_or_active_area_roi_context()
+        roi_id = roi_ctx.roi_id
         settings = self._feature_panel.settings() if self._feature_panel else {}
         self._run_feature_maxima(roi_id=roi_id, settings=settings)
 
@@ -929,19 +932,38 @@ class ImageMeasurementController:
         return getattr(self._viewer, "_display_arr", None)
 
     def _roi(self, roi_id: str | None):
-        roi_set = getattr(self._viewer, "_image_roi_set", None)
+        roi_set = self._roi_set()
         return roi_set.get(roi_id) if roi_set is not None and roi_id else None
 
     def _selected_or_active_roi_id(self) -> str | None:
-        if hasattr(self._viewer, "_selected_or_active_image_roi_id"):
-            return self._viewer._selected_or_active_image_roi_id()
-        roi_set = getattr(self._viewer, "_image_roi_set", None)
-        return getattr(roi_set, "active_roi_id", None)
+        return self._selected_or_active_roi_context().roi_id
 
     def _active_line_roi_id(self) -> str | None:
         if hasattr(self._viewer, "_active_line_roi_id"):
             return self._viewer._active_line_roi_id()
-        return None
+        return active_line_roi_context(self._roi_set()).roi_id
+
+    def _selected_or_active_roi_context(self):
+        if hasattr(self._viewer, "_selected_or_active_image_roi_id"):
+            roi_id = self._viewer._selected_or_active_image_roi_id()
+            return ROIContext(
+                roi_id=roi_id,
+                roi=self._roi(roi_id),
+                source="viewer" if roi_id else "none",
+            )
+        return selected_or_active_roi_context(self._roi_set(), self._roi_dock())
+
+    def _selected_or_active_area_roi_context(self):
+        return selected_or_active_area_roi_context(self._roi_set(), self._roi_dock())
+
+    def _selected_area_rois(self):
+        return selected_area_roi_contexts(self._roi_set(), self._roi_dock())
+
+    def _roi_set(self):
+        return getattr(self._viewer, "_image_roi_set", None)
+
+    def _roi_dock(self):
+        return getattr(self._viewer, "_roi_dock", None)
 
     def _set_status(self, message: str) -> None:
         status = getattr(self._viewer, "_status_lbl", None)

@@ -9,12 +9,27 @@ import pytest
 
 from probeflow.core.roi import ROI, ROISet
 from probeflow.gui.roi_context import (
+    active_area_roi_context,
     active_area_roi_area_m2,
+    active_line_roi_context,
+    area_roi_mask,
     collect_point_source_records,
     collect_point_sources_m,
     collect_point_sources_px,
     point_source_metadata,
+    selected_area_roi_contexts,
+    selected_or_active_area_roi_context,
+    selected_or_active_roi_context,
+    selected_roi_ids_for_context,
 )
+
+
+class _FakeROIDock:
+    def __init__(self, selected_ids):
+        self._selected_ids = list(selected_ids)
+
+    def selected_roi_ids(self):
+        return list(self._selected_ids)
 
 
 def test_collect_point_sources_from_dialog_measurements_and_rois():
@@ -91,3 +106,74 @@ def test_active_area_roi_area_uses_both_pixel_axes():
     )
 
     assert area == pytest.approx(36.0)
+
+
+def test_roi_context_prefers_selected_roi_then_active_roi():
+    roi_set = ROISet(image_id="scan")
+    rect = ROI.new("rectangle", {"x": 1, "y": 1, "width": 2, "height": 2})
+    line = ROI.new("line", {"x1": 0, "y1": 0, "x2": 4, "y2": 0})
+    roi_set.add(rect)
+    roi_set.add(line)
+    roi_set.set_active(line.id)
+
+    assert selected_roi_ids_for_context(roi_set, None) == [line.id]
+    active_ctx = selected_or_active_roi_context(roi_set, None)
+    assert active_ctx.roi_id == line.id
+    assert active_ctx.source == "active"
+
+    selected_ctx = selected_or_active_roi_context(roi_set, _FakeROIDock([rect.id]))
+    assert selected_ctx.roi_id == rect.id
+    assert selected_ctx.source == "selected"
+
+
+def test_line_and_area_roi_contexts_validate_expected_kind():
+    roi_set = ROISet(image_id="scan")
+    rect = ROI.new("rectangle", {"x": 1, "y": 1, "width": 2, "height": 3})
+    line = ROI.new("line", {"x1": 0, "y1": 0, "x2": 4, "y2": 0})
+    roi_set.add(rect)
+    roi_set.add(line)
+
+    roi_set.set_active(line.id)
+    line_ctx = active_line_roi_context(roi_set)
+    assert line_ctx.roi_id == line.id
+    assert active_area_roi_context(roi_set).roi_id is None
+
+    area_ctx = selected_or_active_area_roi_context(roi_set, _FakeROIDock([rect.id]))
+    assert area_ctx.roi_id == rect.id
+    assert area_ctx.roi is rect
+
+    non_area_ctx = selected_or_active_area_roi_context(roi_set, _FakeROIDock([line.id]))
+    assert non_area_ctx.roi_id is None
+
+
+def test_area_roi_mask_rejects_non_area_and_empty_masks():
+    rect = ROI.new("rectangle", {"x": 1, "y": 1, "width": 2, "height": 3})
+    line = ROI.new("line", {"x1": 0, "y1": 0, "x2": 4, "y2": 0})
+    empty = ROI.new("rectangle", {"x": 20, "y": 20, "width": 2, "height": 2})
+
+    mask = area_roi_mask(rect, (8, 8))
+
+    assert mask is not None
+    assert mask.dtype == bool
+    assert mask.sum() == 6
+    assert area_roi_mask(line, (8, 8)) is None
+    assert area_roi_mask(empty, (8, 8)) is None
+    assert area_roi_mask(empty, (8, 8), require_non_empty=False).sum() == 0
+
+
+def test_selected_area_roi_contexts_returns_only_selected_area_rois():
+    roi_set = ROISet(image_id="scan")
+    rect_a = ROI.new("rectangle", {"x": 0, "y": 0, "width": 2, "height": 2})
+    rect_b = ROI.new("rectangle", {"x": 4, "y": 4, "width": 2, "height": 2})
+    line = ROI.new("line", {"x1": 0, "y1": 0, "x2": 4, "y2": 0})
+    roi_set.add(rect_a)
+    roi_set.add(rect_b)
+    roi_set.add(line)
+    roi_set.set_active(rect_a.id)
+
+    contexts = selected_area_roi_contexts(
+        roi_set,
+        _FakeROIDock([rect_a.id, line.id, rect_b.id]),
+    )
+
+    assert [ctx.roi_id for ctx in contexts] == [rect_a.id, rect_b.id]

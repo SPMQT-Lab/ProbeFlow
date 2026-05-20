@@ -111,11 +111,15 @@ from probeflow.provenance import (
 from probeflow.gui.processing import ProcessingControlPanel
 from probeflow.core import AREA_ROI_KINDS
 from probeflow.gui.roi_context import (
+    active_area_roi_context,
     active_area_roi_area_m2,
+    active_line_roi_context,
+    area_roi_mask,
     collect_point_source_records,
     point_source_arrays_m,
     point_source_arrays_px,
     point_source_metadata,
+    selected_or_active_area_roi_context,
 )
 from probeflow.core.scan_loader import load_scan
 from probeflow.gui.viewer.scan_load import load_scan_for_viewer, ViewerScanData
@@ -2040,10 +2044,11 @@ class ImageViewerDialog(QDialog):
 
     def _on_mask_selection(self) -> None:
         """Apply ROI-scoped filter mask from the active area ROI."""
-        roi_id = self._selected_or_active_image_roi_id()
-        roi = self._image_roi_set.get(roi_id) if self._image_roi_set and roi_id else None
-        is_area = roi is not None and roi.kind in AREA_ROI_KINDS
-        if not is_area:
+        roi_ctx = selected_or_active_area_roi_context(
+            self._image_roi_set,
+            getattr(self, "_roi_dock", None),
+        )
+        if roi_ctx.roi is None:
             if hasattr(self, "_status_lbl"):
                 self._status_lbl.setText(
                     "Select an area ROI first to use mask-based processing."
@@ -2053,18 +2058,13 @@ class ImageViewerDialog(QDialog):
         self._show_sidebar_tab("processing")
         if hasattr(self, "_status_lbl"):
             self._status_lbl.setText(
-                f"ROI filter scope set to '{roi.name}'. Filters now apply inside the ROI only."
+                f"ROI filter scope set to '{roi_ctx.roi.name}'. "
+                "Filters now apply inside the ROI only."
             )
 
     def _active_line_roi_id(self) -> "str | None":
         """Return the active ROI id if it is a line ROI, else None."""
-        if not getattr(self, "_image_roi_set", None):
-            return None
-        active_id = self._image_roi_set.active_roi_id
-        if not active_id:
-            return None
-        roi = self._image_roi_set.get(active_id)
-        return active_id if (roi and roi.kind == "line") else None
+        return active_line_roi_context(getattr(self, "_image_roi_set", None)).roi_id
 
     def _sync_line_profile_visibility(self, kind: str | None = None) -> None:
         if not hasattr(self, "_line_profile_panel"):
@@ -2389,14 +2389,12 @@ class ImageViewerDialog(QDialog):
             return
         px_x_m, px_y_m = self._pixel_size_xy_m()
         roi_mask = None
-        active_roi = self._active_image_roi()
-        if active_roi is not None and active_roi.kind in AREA_ROI_KINDS:
-            try:
-                mask = active_roi.to_mask(arr.shape[:2])
-            except Exception:
-                mask = None
-            if mask is not None and mask.any():
-                roi_mask = mask
+        roi_ctx = selected_or_active_area_roi_context(
+            self._image_roi_set,
+            getattr(self, "_roi_dock", None),
+        )
+        if roi_ctx.roi is not None:
+            roi_mask = area_roi_mask(roi_ctx.roi, arr.shape[:2])
         from probeflow.gui.dialogs.feature_finder import FeatureFinderDialog
         dlg = FeatureFinderDialog(
             arr,
@@ -2476,15 +2474,17 @@ class ImageViewerDialog(QDialog):
         if roi_set is None:
             self._status_lbl.setText("No ROIs loaded.")
             return
-        active_id = roi_set.active_roi_id
-        roi = roi_set.get(active_id) if active_id else None
-        if roi is None or roi.kind not in AREA_ROI_KINDS:
+        roi_ctx = selected_or_active_area_roi_context(
+            roi_set,
+            getattr(self, "_roi_dock", None),
+        )
+        roi = roi_ctx.roi
+        if roi is None:
             self._status_lbl.setText("Select an area ROI first.")
             return
-        try:
-            mask = roi.to_mask(arr.shape[:2])
-        except Exception as exc:
-            self._status_lbl.setText(f"Could not create ROI mask: {exc}")
+        mask = area_roi_mask(roi, arr.shape[:2])
+        if mask is None:
+            self._status_lbl.setText("Could not create a non-empty ROI mask.")
             return
         scale, ch_unit, _ = self._channel_unit()
         phys_arr = arr.astype(float) * float(scale)
@@ -2669,12 +2669,7 @@ class ImageViewerDialog(QDialog):
         panel_state.update(self._advanced_processing_state())
         has_roi_aware_local_filter = self._processing_has_roi_aware_local_filter(panel_state)
         active_roi = self._active_image_roi()
-        active_area_roi_id = (
-            active_roi.id
-            if active_roi is not None
-            and active_roi.kind in AREA_ROI_KINDS
-            else None
-        )
+        active_area_roi_id = active_area_roi_context(self._image_roi_set).roi_id
         wants_filter_roi = self._scope_cb.currentIndex() == 1
         if (
             wants_filter_roi

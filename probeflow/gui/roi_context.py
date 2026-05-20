@@ -22,6 +22,101 @@ class PointSource:
     metadata: dict[str, object]
 
 
+@dataclass(frozen=True)
+class ROIContext:
+    """Selected or active ROI resolved for a viewer action."""
+
+    roi_id: str | None
+    roi: Any | None
+    source: str
+
+
+def selected_roi_ids_for_context(roi_set: Any = None, roi_dock: Any = None) -> list[str]:
+    """Return dock-selected ROI IDs, falling back to the active ROI ID."""
+    selected = _dock_selected_roi_ids(roi_dock)
+    if selected:
+        return selected
+    active_id = getattr(roi_set, "active_roi_id", None)
+    return [active_id] if active_id else []
+
+
+def selected_or_active_roi_context(
+    roi_set: Any = None,
+    roi_dock: Any = None,
+) -> ROIContext:
+    """Return the first dock-selected ROI, falling back to the active ROI."""
+    selected = _dock_selected_roi_ids(roi_dock)
+    if selected:
+        roi_id = selected[0]
+        return ROIContext(roi_id=roi_id, roi=_roi_by_id(roi_set, roi_id), source="selected")
+    active_id = getattr(roi_set, "active_roi_id", None)
+    return ROIContext(
+        roi_id=active_id,
+        roi=_roi_by_id(roi_set, active_id),
+        source="active" if active_id else "none",
+    )
+
+
+def active_line_roi_context(roi_set: Any = None) -> ROIContext:
+    """Return the active line ROI, or an empty context."""
+    active_id = getattr(roi_set, "active_roi_id", None)
+    roi = _roi_by_id(roi_set, active_id)
+    if roi is not None and getattr(roi, "kind", None) == "line":
+        return ROIContext(roi_id=active_id, roi=roi, source="active")
+    return ROIContext(roi_id=None, roi=None, source="active")
+
+
+def selected_or_active_area_roi_context(
+    roi_set: Any = None,
+    roi_dock: Any = None,
+) -> ROIContext:
+    """Return the selected-or-active ROI only when it is an area ROI."""
+    ctx = selected_or_active_roi_context(roi_set, roi_dock)
+    if ctx.roi is not None and getattr(ctx.roi, "kind", None) in AREA_ROI_KINDS:
+        return ctx
+    return ROIContext(roi_id=None, roi=None, source=ctx.source)
+
+
+def active_area_roi_context(roi_set: Any = None) -> ROIContext:
+    """Return the active ROI only when it is an area ROI."""
+    active_id = getattr(roi_set, "active_roi_id", None)
+    roi = _roi_by_id(roi_set, active_id)
+    if roi is not None and getattr(roi, "kind", None) in AREA_ROI_KINDS:
+        return ROIContext(roi_id=active_id, roi=roi, source="active")
+    return ROIContext(roi_id=None, roi=None, source="active")
+
+
+def selected_area_roi_contexts(
+    roi_set: Any = None,
+    roi_dock: Any = None,
+) -> list[ROIContext]:
+    """Return area ROI contexts from the current dock selection."""
+    contexts: list[ROIContext] = []
+    for roi_id in _dock_selected_roi_ids(roi_dock):
+        roi = _roi_by_id(roi_set, roi_id)
+        if roi is not None and getattr(roi, "kind", None) in AREA_ROI_KINDS:
+            contexts.append(ROIContext(roi_id=roi_id, roi=roi, source="selected"))
+    return contexts
+
+
+def area_roi_mask(
+    roi: Any,
+    image_shape: tuple[int, int],
+    *,
+    require_non_empty: bool = True,
+) -> np.ndarray | None:
+    """Return a boolean mask for an area ROI, or None when invalid."""
+    if roi is None or getattr(roi, "kind", None) not in AREA_ROI_KINDS:
+        return None
+    try:
+        mask = np.asarray(roi.to_mask(image_shape), dtype=bool)
+    except Exception:
+        return None
+    if require_non_empty and not mask.any():
+        return None
+    return mask
+
+
 def collect_point_source_records(
     *,
     pixel_size_x_m: float,
@@ -164,11 +259,8 @@ def active_area_roi_area_m2(
     pixel_size_y_m: float,
 ) -> float | None:
     """Return the physical area of an active area ROI, or None."""
-    if active_roi is None or getattr(active_roi, "kind", None) not in AREA_ROI_KINDS:
-        return None
-    try:
-        mask = active_roi.to_mask(image_shape)
-    except Exception:
+    mask = area_roi_mask(active_roi, image_shape)
+    if mask is None:
         return None
     return float(mask.sum()) * float(pixel_size_x_m) * float(pixel_size_y_m)
 
@@ -206,6 +298,29 @@ def _selected_point_rois(roi_set: Any, selected_roi_ids: Iterable[str]) -> list[
         if roi is not None and roi.kind == "point":
             selected.append(roi)
     return selected
+
+
+def _dock_selected_roi_ids(roi_dock: Any = None) -> list[str]:
+    if roi_dock is None:
+        return []
+    if hasattr(roi_dock, "selected_roi_ids"):
+        try:
+            return [str(roi_id) for roi_id in roi_dock.selected_roi_ids()]
+        except Exception:
+            return []
+    if hasattr(roi_dock, "_selected_roi_id"):
+        try:
+            roi_id = roi_dock._selected_roi_id()
+        except Exception:
+            roi_id = None
+        return [str(roi_id)] if roi_id else []
+    return []
+
+
+def _roi_by_id(roi_set: Any, roi_id: str | None) -> Any | None:
+    if roi_set is None or not roi_id:
+        return None
+    return roi_set.get(roi_id)
 
 
 def _points_to_array(points: Iterable[Any]) -> np.ndarray:

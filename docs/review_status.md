@@ -39,14 +39,14 @@ The first implementation slice from Stage 2 addressed the highest-priority seams
 - Pair-correlation and feature-to-lattice dialogs now emit canonical `probeflow.measurements.models.MeasurementResult` rows.
 - Simple distance/angle and ROI-statistics producers now emit canonical measurement rows.
 - The legacy `MeasurementResultsPanel` public name now wraps the canonical measurement table.
-- `probeflow.gui.roi_context` now gathers downstream point sources, preserves source metadata, and calculates active area ROI physical area outside the main viewer.
+- `probeflow.gui.roi_context` now gathers downstream point sources, preserves source metadata, resolves line/area ROI context, and calculates active area ROI physical area outside the main viewer.
 - Pair-correlation and feature-to-lattice table rows now record point-source type, selection scope, and available detection settings.
 - `probeflow.analysis.lattice_correction_workflow` now builds pixel-space lattice correction matrices and processing/provenance operation parameters outside the lattice GUI panel.
 - Focused regression tests cover the adapter, ROI context helper, and lattice correction helper.
 
 The recommended next implementation stage is to address the remaining Stage 2 findings in this order:
 
-1. Extend ROI context to line/area validation and add a small tool-launch coordinator.
+1. Add a small tool-launch coordinator for pair-correlation, feature-lattice, and lattice-grid launch decisions.
 2. Continue feature-source unification for point masks, point FFT, and detailed feature exports where source provenance is needed.
 3. Remove compatibility measurement shims only after no supported caller depends on legacy result rows.
 4. Add small unit-formatting and text-export helpers.
