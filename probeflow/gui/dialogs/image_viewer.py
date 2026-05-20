@@ -115,6 +115,9 @@ from probeflow.gui.roi_context import (
     active_line_roi_context,
     area_roi_mask,
     collect_point_source_records,
+    point_source_arrays_m,
+    point_source_arrays_px,
+    point_source_metadata,
     selected_or_active_area_roi_context,
 )
 from probeflow.gui.viewer.tool_launch import (
@@ -2529,6 +2532,18 @@ class ImageViewerDialog(QDialog):
             roi_set=self._image_roi_set,
             selected_roi_ids=sel_ids,
         )
+
+    def _collect_point_sources_m(self) -> dict[str, "np.ndarray"]:
+        """Collect available point sources as (N,2) arrays in metres."""
+        return point_source_arrays_m(self._point_source_records())
+
+    def _collect_point_sources_px(self) -> dict[str, "np.ndarray"]:
+        """Collect available point sources as (N,2) arrays in pixel coordinates."""
+        return point_source_arrays_px(self._point_source_records())
+
+    def _collect_point_source_metadata(self) -> dict[str, dict[str, object]]:
+        """Collect metadata for available point sources."""
+        return point_source_metadata(self._point_source_records())
 
     def _on_open_pair_correlation(self) -> None:
         arr = self._display_arr if self._display_arr is not None else self._raw_arr
