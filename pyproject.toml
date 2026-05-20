@@ -39,6 +39,7 @@ include = ["probeflow", "probeflow.*"]
 probeflow = [
   "assets/*.gif",
   "assets/*.png",
+  "assets/toolbar/*.png",
   "data/file_cushions/*.bin",
   "data/file_cushions/*.json",
   "data/file_cushions/*.txt",

@@ -4,51 +4,31 @@
 
 # ProbeFlow
 
-ProbeFlow is a Python program for browsing scanning probe microscopy (SPM)
-data, applying standard image-processing and analysis operations, and exporting
-images or data with processing details alongside them.
+ProbeFlow is a lab workflow tool for scanning tunnelling microscopy and related
+SPM data. It helps you browse folders of scans and spectra, apply routine image
+corrections, draw ROIs, make common measurements, and export figures or data
+with enough context to understand how they were produced.
 
-It currently focuses on Createc and Nanonis files used in STM/SPM workflows.
-The aim is practical: open a folder of data, inspect scans and spectra, apply
-routine corrections, make simple measurements, and save outputs that record how
-they were produced.
+It currently focuses on Createc and Nanonis workflows:
 
-ProbeFlow is not a replacement for Gwyddion, Fiji/ImageJ, WSXM, or other
-specialist tools. It is a lab workflow tool for common browsing, processing,
-conversion, measurement, and export tasks.
-
-## Status
+- Open Createc `.dat` and Nanonis `.sxm` scan images.
+- Open Createc `.VERT` and Nanonis spectroscopy `.dat` traces.
+- Convert Createc `.dat` scans to Nanonis-compatible `.sxm`.
+- Process scans with row alignment, bad-line correction, background
+  subtraction, smoothing, FFT filters, notch filters, denoising, zeroing, and
+  simple geometry transforms.
+- Measure line profiles, periodicity, ROI statistics, FFTs, feature points,
+  pair correlations, lattice grids, unit cells, and spectroscopy traces.
+- Export PNG, PDF, CSV, JSON, SXM, and optional Gwyddion `.gwy` outputs.
 
 ProbeFlow is beta software. The GUI, CLI, Python API, and JSON sidecar formats
-may change between versions.
+may still change. Raw microscope files are treated as read-only; processing and
+export steps write separate output files and provenance sidecars where
+supported.
 
-Raw microscope input files are treated as read-only. Processing and export
-operations write to separate output paths and sidecar files.
+## Quick Start
 
-## What It Does
-
-- Browse folders containing supported scan and spectroscopy files.
-- Load Createc `.dat` scans and `.VERT` spectroscopy files.
-- Load Nanonis `.sxm` scans and Nanonis spectroscopy `.dat` files.
-- Convert Createc `.dat` scans to Nanonis-compatible `.sxm` files.
-- Apply standard image-processing operations such as row alignment, bad-line
-  correction, background subtraction, smoothing, FFT filtering, notch filtering,
-  denoising, zeroing, and simple geometric transforms.
-- Draw ROIs and use them for selected processing and analysis operations.
-- Make line profiles, histograms, FFT views, particle/feature summaries,
-  lattice estimates, unit-cell averages, and spectroscopy plots.
-- Inspect spectroscopy traces individually or as overlays/waterfalls, with basic
-  smoothing, approximate numerical `dI/dV`, outlier masking, simple
-  normalization, cursor readout, and CSV/JSON/TXT copy/export of displayed
-  values.
-- Export `.png`, `.pdf`, `.csv`, `.json`, `.sxm`, and optionally `.gwy` files.
-- Write provenance sidecars for exported files where supported, including
-  source information, channel information, display settings, processing state,
-  warnings, and ROI data when available.
-
-## Installation
-
-Python 3.11 or newer is required.
+Install from a checkout:
 
 ```bash
 git clone https://github.com/SPMQT-Lab/ProbeFlow.git
@@ -56,41 +36,26 @@ cd ProbeFlow
 python -m pip install -e .
 ```
 
-For development:
-
-```bash
-python -m pip install -e ".[dev,features]"
-pytest
-```
-
-Optional extras:
-
-```bash
-python -m pip install -e ".[features]"  # OpenCV / scikit-learn feature tools
-python -m pip install -e ".[gwyddion]"  # optional Gwyddion writer dependency
-```
-
-The experimental ScanFlow survey/PPTX integration is optional and is not
-installed with ProbeFlow by default.
-
-## Quick Start
-
 Launch the GUI:
 
 ```bash
 probeflow gui
 ```
 
-Inspect a scan from the command line:
+Typical first GUI workflow:
+
+1. Open a folder containing `.dat`, `.sxm`, or spectroscopy files.
+2. Select a scan or spectrum from the browser.
+3. Adjust display contrast and colormap.
+4. Draw an ROI or line profile if needed.
+5. Apply a correction or measurement.
+6. Export the image, table, profile, spectrum, or processed scan.
+
+Inspect or convert files from the command line:
 
 ```bash
 probeflow info scan.dat
 probeflow info scan.sxm --json
-```
-
-Convert a Createc `.dat` file to `.sxm`:
-
-```bash
 probeflow convert scan.dat scan.sxm
 ```
 
@@ -105,87 +70,81 @@ probeflow pipeline scan.dat \
 
 More CLI examples are in [docs/cli.md](docs/cli.md).
 
-## Supported Files
+## Installation Notes
 
-Input:
+Python 3.11 or newer is required.
 
-| File type | Use |
-|---|---|
-| Createc `.dat` | STM/SPM image scan |
-| Createc `.VERT` | Point spectroscopy |
-| Nanonis `.sxm` | STM/SPM image scan |
-| Nanonis `.dat` | Point spectroscopy |
-
-Createc `.dat` scans are decoded directly from the compressed image payload.
-The reader records original dimensions, trims interrupted rows when detected,
-and removes the known first stored column artifact before display or export.
-More detail is in [docs/createc_dat_reader.md](docs/createc_dat_reader.md).
-
-Output:
-
-| File type | Use |
-|---|---|
-| `.sxm` | Converted or processed scan data |
-| `.png` | Image export |
-| `.pdf` | Figure-style export |
-| `.csv` | Numerical data export |
-| `.json` | Metadata, provenance, or analysis output |
-| `.gwy` | Optional Gwyddion export, when `gwyfile` is installed |
-
-## GUI
-
-The GUI is started with:
+Optional feature and export dependencies:
 
 ```bash
-probeflow gui
+python -m pip install -e ".[features]"  # OpenCV / scikit-learn feature tools
+python -m pip install -e ".[gwyddion]"  # optional .gwy writer dependency
 ```
 
-It includes tools for folder browsing, viewing images, basic spectroscopy
-inspection, selected-spectrum overlays, ROI drawing, image processing,
-feature/lattice workflows, TV denoising, conversion, and export.
+Development install:
 
-Spectroscopy display transforms are non-destructive. Smoothing, derivative,
-normalization, outlier masking, and offsets are applied to derived display data,
-not to the raw arrays loaded from the source file.
+```bash
+python -m pip install -e ".[dev,features]"
+pytest
+```
 
-Preferences such as theme, recent folders, clip values, and font size are saved
-in `~/.probeflow_config.json`.
+The experimental ScanFlow survey/PPTX integration is optional and is not
+installed with ProbeFlow by default.
 
-## ROIs
+## Supported Files
+
+| Direction | File type | Use |
+|---|---|---|
+| Input | Createc `.dat` | STM/SPM image scan |
+| Input | Createc `.VERT` | Point spectroscopy |
+| Input | Nanonis `.sxm` | STM/SPM image scan |
+| Input | Nanonis `.dat` | Point spectroscopy |
+| Output | `.sxm` | Converted or processed scan data |
+| Output | `.png`, `.pdf` | Figure/image export |
+| Output | `.csv`, `.json` | Numerical data, metadata, or provenance |
+| Output | `.gwy` | Optional Gwyddion export when `gwyfile` is installed |
+
+Createc `.dat` reader details, including interrupted-scan handling and stored
+payload conventions, live in [docs/createc_dat_reader.md](docs/createc_dat_reader.md).
+
+## Key Workflows
+
+### Browse And Process Scans
+
+Use the GUI to browse scan folders, inspect channels, adjust display ranges,
+draw ROIs, and apply common corrections. Processing operations are recorded as
+processing state where supported so exported files can be audited later.
+
+### Measure Images
 
 ProbeFlow supports rectangle, ellipse, polygon, freehand, line, and point ROIs.
-ROIs are stored in pixel coordinates with `(x, y) = (column, row)` and origin at
-the top-left of the displayed image.
+Common image measurements include line profiles, periodicity estimates, ROI
+statistics, feature points, point-mask FFTs, pair correlation, feature-to-lattice
+comparison, and lattice/grid measurements.
 
-The default ROI sidecar for a scan is:
+ROIs are stored in pixel coordinates with `(x, y) = (column, row)` and origin at
+the top-left of the displayed image. The default ROI sidecar is:
 
 ```text
 <scan-stem>.rois.json
 ```
 
-ROI sidecars are used by the GUI and by CLI commands that accept named ROIs.
-Current limitations are simple: ROIs are stored in pixel coordinates, not
-physical coordinates, and session-level ROI project files are not implemented.
+### Inspect Spectroscopy
 
-## Provenance And Export Safety
+The spectroscopy viewer can inspect individual traces or overlays/waterfalls.
+Smoothing, derivative, normalization, outlier masking, and offsets operate on
+derived display data rather than overwriting the raw loaded arrays.
 
-ProbeFlow writes JSON sidecars for many exports. These sidecars are intended to
-answer practical questions such as:
+### Export With Context
 
-- what source file was used;
-- which channel was exported;
-- what display settings were used;
-- what processing state was recorded;
-- whether the output is processed rather than raw data;
-- which ROIs were included, when relevant.
-
-These sidecars are not a full electronic lab notebook. They are export records
-for helping users understand and audit saved files.
+ProbeFlow writes JSON sidecars for many exports. These records can include
+source file, source channel, display settings, processing state, warnings, and
+ROI data where relevant. They are not a full electronic lab notebook, but they
+make exported figures and data easier to interpret later.
 
 Export paths are conservative by default. Existing output artifacts and
 provenance sidecars are not overwritten unless overwrite options are used
-explicitly, such as CLI `--force` or writer API `overwrite=True` /
-`overwrite_sidecars=True`.
+explicitly, such as CLI `--force` or writer API `overwrite=True`.
 
 ## Python Use
 
@@ -212,16 +171,45 @@ z_smooth = smooth_spectrum(spec.channels["Z"], method="savgol")
 dzdv = numeric_derivative(spec.x_array, z_smooth)
 ```
 
-## Repository Layout
+## Documentation
+
+- [Command-line guide](docs/cli.md)
+- [Createc `.dat` reader notes](docs/createc_dat_reader.md)
+- [ROI manual workflow checklist](docs/roi_manual_test_checklist.md)
+- [Review and cleanup status](docs/review_status.md)
+- [Contributor notes](CONTRIBUTING.md)
+
+## Development
+
+Run the test suite:
+
+```bash
+pytest
+```
+
+Run the current lint check:
+
+```bash
+ruff check probeflow tests
+```
+
+Useful development scripts:
+
+```bash
+vulture probeflow/ tests/ whitelist.py --min-confidence 80
+python scripts/find_orphan_modules.py
+```
+
+Repository layout:
 
 ```text
 probeflow/
 |-- core/        # Scan model, loading dispatch, metadata, ROI, validation
-|-- assets/      # Packaged logo artwork
+|-- assets/      # Packaged logo and GUI assets
 |-- data/        # Packaged runtime resources
-|-- io/          # File sniffing, readers, writers, converters, sidecar helpers
+|-- io/          # File sniffing, readers, writers, converters, sidecars
 |-- processing/  # Numerical processing and ProcessingState
-|-- analysis/    # Particles, lattice, spectroscopy plotting, feature tools
+|-- analysis/    # Image, lattice, feature, and spectroscopy analysis helpers
 |-- provenance/  # Export provenance and graph data structures
 |-- gui/         # PySide6 GUI package
 |-- cli/         # Command-line interface
@@ -231,30 +219,6 @@ tests/           # pytest suite
 test_data/       # sample/manual input data
 docs/            # additional documentation
 ```
-
-Architecture notes for contributors are in [CONTRIBUTING.md](CONTRIBUTING.md).
-
-## Testing
-
-```bash
-python -m pip install -e ".[dev,features]"
-pytest
-ruff check probeflow tests
-```
-
-Dead-code checks:
-
-```bash
-vulture probeflow/ tests/ whitelist.py --min-confidence 80
-python scripts/find_orphan_modules.py
-```
-
-## Notes
-
-- Failed batch conversions are logged to `errors.json`.
-- Converted `.sxm` files should be checked in the target software when exact
-  interoperability matters.
-- Sidecar formats are JSON and may change while the project is beta.
 
 ## Acknowledgements
 

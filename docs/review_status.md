@@ -10,7 +10,8 @@ This document preserves the useful status from completed review artifacts after 
 |---|---|---|---|
 | Stage 1 scientific workflow and physics review | Completed | Pruned after summary preservation | Identified unit, provenance, feature workflow, lattice correction, pair-correlation, point-mask FFT, periodicity export, and spectroscopy wording issues. |
 | Stage 1 workflow physics fixes | Completed | Pruned after summary preservation | Concrete PF-STAGE1-001 through PF-STAGE1-010 fixes were implemented. Latest relevant commit: `2724b77 Improve scientific workflow provenance`. |
-| Stage 2 architecture, repetition, and maintainability review plus bounded implementation slices | Completed slices | `review_stage2_architecture_repetition_findings.md` | Produced the architecture/refactor queue and implemented bounded cleanup: measurement adapter, canonical pair/feature-lattice results, ROI point-source helper, launch-context helper, feature-source metadata propagation, and lattice correction operation helper. |
+| Stage 2 architecture, repetition, and maintainability review plus bounded implementation slices | Completed slices | Pruned after summary preservation | Produced the architecture/refactor queue and implemented bounded cleanup: measurement adapter, canonical pair/feature-lattice results, ROI point-source helper, launch-context helper, feature-source metadata propagation, and lattice correction operation helper. |
+| Stage 3 compatibility, stability, and release-safety review | Completed locally with release caveats | Pruned after summary preservation | Verified import/CLI/processing/provenance surfaces locally, fixed a Qt headless test-harness abort, verified a temp wheel includes toolbar assets, and documented remaining Python 3.11/3.12 matrix and GUI-smoke checks. |
 
 ## Stage 1 Preserved Outcome
 
@@ -28,10 +29,6 @@ Follow-up fixes addressed the concrete Stage 1 findings:
 Remaining Stage 1-derived long-term work is architectural rather than a direct defect fix: unify the feature maxima/minima workflows and add richer per-assignment or per-bin exports where detailed downstream analysis needs them.
 
 ## Stage 2 Preserved Outcome
-
-The Stage 2 review artifact is:
-
-- `review_stage2_architecture_repetition_findings.md`
 
 The bounded implementation slices from Stage 2 addressed the highest-priority seams without a broad refactor:
 
@@ -52,11 +49,34 @@ The recommended next implementation stage is to address the remaining Stage 2 fi
 3. Add small unit-formatting and text-export helpers.
 4. Clean up spectroscopy and plotting duplication.
 
+## Stage 3 Preserved Outcome
+
+The local compatibility/stability pass found no application-code S0/S1 blocker in the inspected import, CLI, optional dependency, processing-state, provenance, or package metadata surfaces. The current advertised CLI entry through `probeflow.cli.main` works for top-level, pipeline, info, convert, and GUI help paths. Backend imports remain GUI-free, and optional OpenCV, scikit-learn, and Gwyddion writer dependencies are lazy or guarded.
+
+One release-validation blocker was fixed in the test harness: mixed backend/GUI tests that instantiate `QApplication` now use the same subprocess Qt preflight skip as the main GUI test modules, preventing local headless Qt aborts from killing the full pytest run while preserving backend coverage in those files.
+
+Local validation completed with:
+
+- `ruff check probeflow tests`
+- `pytest tests/test_layout_compatibility.py tests/test_processing_state.py tests/test_export_provenance.py`
+- `pytest tests/test_feature_lattice.py tests/test_pair_correlation.py tests/test_lattice_grid.py -rs`
+- full `pytest`
+- temp wheel build from a copied worktree, including installed-wheel import/resource/CLI smoke checks
+
+The release caveats are:
+
+1. Python 3.11 and Python 3.12 were not available locally, so the Stage 3 check set still needs a true 3.11/3.12 matrix before release-complete status.
+2. Local Qt cannot initialize `QApplication`, so GUI tests skip under the preflight guard here; manual GUI smoke or CI on a working Qt platform is still needed.
+3. Toolbar assets and package-data metadata passed local wheel verification, but they still need to be included in the final release commit so clean checkouts reproduce that package result.
+
+## Housekeeping Notes
+
+Detailed root-level Stage 2/3 review outputs and the dated dead-code audit were pruned after this summary captured their useful conclusions. Future review or audit passes should update this file only when the outcome needs to remain visible to users or contributors.
+
 ## Current Non-Review Docs
 
 The following docs remain current user-facing or technical references and were intentionally kept:
 
 - `docs/cli.md`
 - `docs/createc_dat_reader.md`
-- `docs/dead_code_audit.md`
 - `docs/roi_manual_test_checklist.md`

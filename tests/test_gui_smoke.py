@@ -92,3 +92,16 @@ class TestNavbar:
         from probeflow.gui import Navbar
         nav = Navbar(dark=True)
         assert nav is not None
+
+
+# ── ImageQuickToolbar ────────────────────────────────────────────────────────
+
+class TestImageQuickToolbar:
+    def test_quick_toolbar_buttons_have_icons(self, qapp):
+        from probeflow.gui.image_quick_toolbar import ImageQuickToolbar
+
+        toolbar = ImageQuickToolbar()
+        buttons = list(toolbar._mode_btns.values()) + list(toolbar._action_btns.values())
+
+        assert len(buttons) == 18
+        assert all(not btn.icon().isNull() for btn in buttons)

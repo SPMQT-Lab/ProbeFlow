@@ -20,6 +20,15 @@ GUI_TEST_MODULES = {
     "test_gui_dialog_extraction.py",
 }
 
+MIXED_QT_FIXTURE_MODULES = {
+    "test_feature_lattice.py",
+    "test_pair_correlation.py",
+}
+
+MIXED_QT_TESTS = {
+    ("test_lattice_grid.py", "test_export_png_creates_file"),
+}
+
 
 def _qt_application_preflight() -> tuple[bool, str]:
     """Probe QApplication creation in a subprocess so Qt aborts do not kill pytest."""
@@ -53,11 +62,15 @@ def _qt_application_preflight() -> tuple[bool, str]:
 
 def pytest_collection_modifyitems(config, items):
     _ = config
-    gui_items = [
-        item for item in items
-        if Path(str(getattr(item, "path", getattr(item, "fspath", "")))).name
-        in GUI_TEST_MODULES
-    ]
+    gui_items = []
+    for item in items:
+        module_name = Path(str(getattr(item, "path", getattr(item, "fspath", "")))).name
+        if module_name in GUI_TEST_MODULES:
+            gui_items.append(item)
+        elif module_name in MIXED_QT_FIXTURE_MODULES and "qapp" in getattr(item, "fixturenames", ()):
+            gui_items.append(item)
+        elif (module_name, item.name) in MIXED_QT_TESTS:
+            gui_items.append(item)
     if not gui_items:
         return
 
