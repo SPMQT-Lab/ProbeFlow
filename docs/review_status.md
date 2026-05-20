@@ -10,7 +10,7 @@ This document preserves the useful status from completed review artifacts after 
 |---|---|---|---|
 | Stage 1 scientific workflow and physics review | Completed | Pruned after summary preservation | Identified unit, provenance, feature workflow, lattice correction, pair-correlation, point-mask FFT, periodicity export, and spectroscopy wording issues. |
 | Stage 1 workflow physics fixes | Completed | Pruned after summary preservation | Concrete PF-STAGE1-001 through PF-STAGE1-010 fixes were implemented. Latest relevant commit: `2724b77 Improve scientific workflow provenance`. |
-| Stage 2 architecture, repetition, and maintainability review plus bounded implementation slices | Completed slices | `review_stage2_architecture_repetition_findings.md` | Produced the architecture/refactor queue and implemented bounded cleanup: measurement adapter, canonical pair/feature-lattice results, ROI point-source helper, feature-source metadata propagation, and lattice correction operation helper. |
+| Stage 2 architecture, repetition, and maintainability review plus bounded implementation slices | Completed slices | `review_stage2_architecture_repetition_findings.md` | Produced the architecture/refactor queue and implemented bounded cleanup: measurement adapter, canonical pair/feature-lattice results, ROI point-source helper, launch-context helper, feature-source metadata propagation, and lattice correction operation helper. |
 
 ## Stage 1 Preserved Outcome
 
@@ -33,24 +33,24 @@ The Stage 2 review artifact is:
 
 - `review_stage2_architecture_repetition_findings.md`
 
-The first implementation slice from Stage 2 addressed the highest-priority seams without a broad refactor:
+The bounded implementation slices from Stage 2 addressed the highest-priority seams without a broad refactor:
 
 - `probeflow.measurements.adapters.legacy_measurement_to_result` is the single compatibility adapter for old analysis measurement rows.
 - Pair-correlation and feature-to-lattice dialogs now emit canonical `probeflow.measurements.models.MeasurementResult` rows.
 - Simple distance/angle and ROI-statistics producers now emit canonical measurement rows.
 - The legacy `MeasurementResultsPanel` public name now wraps the canonical measurement table.
 - `probeflow.gui.roi_context` now gathers downstream point sources, preserves source metadata, resolves line/area ROI context, and calculates active area ROI physical area outside the main viewer.
+- `probeflow.gui.viewer.tool_launch` now owns pair-correlation, feature-to-lattice, and lattice-grid launch precondition checks and source/context assembly.
 - Pair-correlation and feature-to-lattice table rows now record point-source type, selection scope, and available detection settings.
 - `probeflow.analysis.lattice_correction_workflow` now builds pixel-space lattice correction matrices and processing/provenance operation parameters outside the lattice GUI panel.
-- Focused regression tests cover the adapter, ROI context helper, and lattice correction helper.
+- Focused regression tests cover the adapter, ROI context helper, launch-context helper, and lattice correction helper.
 
 The recommended next implementation stage is to address the remaining Stage 2 findings in this order:
 
-1. Add a small tool-launch coordinator for pair-correlation, feature-lattice, and lattice-grid launch decisions.
-2. Continue feature-source unification for point masks, point FFT, and detailed feature exports where source provenance is needed.
-3. Remove compatibility measurement shims only after no supported caller depends on legacy result rows.
-4. Add small unit-formatting and text-export helpers.
-5. Clean up spectroscopy and plotting duplication.
+1. Continue feature-source unification for point masks, point FFT, and detailed feature exports where source provenance is needed.
+2. Remove compatibility measurement shims only after no supported caller depends on legacy result rows.
+3. Add small unit-formatting and text-export helpers.
+4. Clean up spectroscopy and plotting duplication.
 
 ## Current Non-Review Docs
 

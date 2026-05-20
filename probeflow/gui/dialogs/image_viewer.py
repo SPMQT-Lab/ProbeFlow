@@ -112,14 +112,15 @@ from probeflow.gui.processing import ProcessingControlPanel
 from probeflow.core import AREA_ROI_KINDS
 from probeflow.gui.roi_context import (
     active_area_roi_context,
-    active_area_roi_area_m2,
     active_line_roi_context,
     area_roi_mask,
     collect_point_source_records,
-    point_source_arrays_m,
-    point_source_arrays_px,
-    point_source_metadata,
     selected_or_active_area_roi_context,
+)
+from probeflow.gui.viewer.tool_launch import (
+    feature_lattice_launch_context,
+    lattice_grid_launch_context,
+    pair_correlation_launch_context,
 )
 from probeflow.core.scan_loader import load_scan
 from probeflow.gui.viewer.scan_load import load_scan_for_viewer, ViewerScanData
@@ -2332,12 +2333,11 @@ class ImageViewerDialog(QDialog):
 
     def _on_open_lattice_grid(self):
         arr = self._display_arr if self._display_arr is not None else self._raw_arr
-        if arr is None:
-            self._status_lbl.setText("No image loaded.")
+        context = lattice_grid_launch_context(arr, scan_range_m=self._scan_range_m)
+        if not context.ready:
+            self._status_lbl.setText(str(context.status_message))
             return
         from probeflow.gui.lattice_grid_tool import open_real_space_tool
-        scan_range = self._scan_range_m or (float(arr.shape[1]) * 1e-9,
-                                            float(arr.shape[0]) * 1e-9)
 
         def _get_image():
             return self._display_arr if self._display_arr is not None else self._raw_arr
@@ -2357,7 +2357,7 @@ class ImageViewerDialog(QDialog):
             self._refresh_processing_display()
 
         item, panel = open_real_space_tool(
-            self._zoom_lbl, scan_range, arr.shape, parent=self,
+            self._zoom_lbl, context.scan_range_m, context.image_shape, parent=self,
             get_image_fn=_get_image,
             apply_correction_fn=_apply_lattice_correction,
             preview_image_fn=_preview_lattice_correction,
@@ -2530,35 +2530,19 @@ class ImageViewerDialog(QDialog):
             selected_roi_ids=sel_ids,
         )
 
-    def _collect_point_sources_m(self) -> dict[str, "np.ndarray"]:
-        """Collect available point sources as (N,2) arrays in metres."""
-        return point_source_arrays_m(self._point_source_records())
-
-    def _collect_point_sources_px(self) -> dict[str, "np.ndarray"]:
-        """Collect available point sources as (N,2) arrays in pixel coordinates."""
-        return point_source_arrays_px(self._point_source_records())
-
-    def _collect_point_source_metadata(self) -> dict[str, dict[str, object]]:
-        """Collect metadata for available point sources."""
-        return point_source_metadata(self._point_source_records())
-
     def _on_open_pair_correlation(self) -> None:
-        sources = self._collect_point_sources_m()
-        if not sources:
-            self._status_lbl.setText(
-                "Run Feature finder or select point ROIs first."
-            )
-            return
         arr = self._display_arr if self._display_arr is not None else self._raw_arr
         px_x, px_y = self._pixel_size_xy_m()
-        roi_area_m2 = None
-        if arr is not None and self._image_roi_set is not None:
-            roi_area_m2 = active_area_roi_area_m2(
-                self._active_image_roi(),
-                arr.shape[:2],
-                pixel_size_x_m=px_x,
-                pixel_size_y_m=px_y,
-            )
+        context = pair_correlation_launch_context(
+            self._point_source_records(),
+            active_area_roi=self._active_image_roi(),
+            image_shape=arr.shape[:2] if arr is not None else None,
+            pixel_size_x_m=px_x,
+            pixel_size_y_m=px_y,
+        )
+        if not context.ready:
+            self._status_lbl.setText(str(context.status_message))
+            return
         _, ch_unit, _ = self._channel_unit()
         entries = getattr(self, "_entries", [])
         entry = entries[self._idx] if entries else None
@@ -2568,14 +2552,14 @@ class ImageViewerDialog(QDialog):
             self._add_dialog_measurement_result(result)
 
         dlg = PairCorrelationDialog(
-            sources,
-            roi_area_m2=roi_area_m2,
-            pixel_size_x_m=px_x,
-            pixel_size_y_m=px_y,
+            context.sources_m,
+            roi_area_m2=context.roi_area_m2,
+            pixel_size_x_m=context.pixel_size_x_m,
+            pixel_size_y_m=context.pixel_size_y_m,
             source_label=self._source_label(),
             source_path=str(entry.path) if entry is not None else None,
             channel=ch_unit,
-            source_metadata=self._collect_point_source_metadata(),
+            source_metadata=context.source_metadata,
             on_add_result=_add,
             theme=self._t,
             parent=self,
@@ -2583,19 +2567,20 @@ class ImageViewerDialog(QDialog):
         dlg.show()
 
     def _on_open_feature_lattice(self) -> None:
-        sources = self._collect_point_sources_px()
-        if not sources:
-            self._status_lbl.setText(
-                "Run Feature finder or select point ROIs first."
-            )
-            return
         item = getattr(self, "_lattice_grid_item", None)
-        if item is None:
-            self._status_lbl.setText("Open the Lattice/Grid tool first.")
-            return
-        grid = item.grid()
+        grid = item.grid() if item is not None else None
         arr = self._display_arr if self._display_arr is not None else self._raw_arr
         px_x, px_y = self._pixel_size_xy_m()
+        context = feature_lattice_launch_context(
+            self._point_source_records(),
+            lattice_grid=grid,
+            image_shape=arr.shape[:2] if arr is not None else None,
+            pixel_size_x_m=px_x,
+            pixel_size_y_m=px_y,
+        )
+        if not context.ready:
+            self._status_lbl.setText(str(context.status_message))
+            return
         _, ch_unit, _ = self._channel_unit()
         entries = getattr(self, "_entries", [])
         entry = entries[self._idx] if entries else None
@@ -2605,17 +2590,17 @@ class ImageViewerDialog(QDialog):
             self._add_dialog_measurement_result(result)
 
         dlg = FeatureLatticeDialog(
-            sources,
-            lattice_origin_px=grid.origin_px,
-            a_px=grid.a_px,
-            b_px=grid.b_px,
-            pixel_size_x_m=px_x,
-            pixel_size_y_m=px_y,
-            image_shape=arr.shape[:2] if arr is not None else None,
+            context.sources_px,
+            lattice_origin_px=context.lattice_origin_px,
+            a_px=context.a_px,
+            b_px=context.b_px,
+            pixel_size_x_m=context.pixel_size_x_m,
+            pixel_size_y_m=context.pixel_size_y_m,
+            image_shape=context.image_shape,
             source_label=self._source_label(),
             source_path=str(entry.path) if entry is not None else None,
             channel=ch_unit,
-            source_metadata=self._collect_point_source_metadata(),
+            source_metadata=context.source_metadata,
             on_add_result=_add,
             theme=self._t,
             parent=self,

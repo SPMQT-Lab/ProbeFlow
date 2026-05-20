@@ -23,11 +23,12 @@ Implementation status for this slice:
 - Updated simple distance/angle and ROI-statistics analysis producers to emit canonical measurement results directly.
 - Wrapped the legacy `MeasurementResultsPanel` name around the canonical measurement table.
 - Added `probeflow.gui.roi_context` for point-source collection, line/area ROI resolution, and active area ROI area calculation.
+- Added `probeflow.gui.viewer.tool_launch` for pair-correlation, feature-to-lattice, and lattice-grid launch precondition checks and source/context assembly.
 - Extended point-source records with canonical metadata so pair-correlation and feature-to-lattice measurements record source type, selection scope, and detection settings.
 - Added `probeflow.analysis.lattice_correction_workflow` for pixel-space lattice correction matrices and processing/provenance operation parameters.
-- Added targeted regression coverage for the adapter, ROI context helper, and lattice correction operation helper.
+- Added targeted regression coverage for the adapter, ROI context helper, launch-context helper, and lattice correction operation helper.
 
-Recommended next stage: continue with measured, test-backed extractions. Do not split large files mechanically. The remaining high-value work is to add a small tool-launch coordinator, continue feature-source unification for exports beyond pair/lattice tools, then add a shared unit-formatting helper.
+Recommended next stage: continue with measured, test-backed extractions. Do not split large files mechanically. The remaining high-value work is to continue feature-source unification for exports beyond pair/lattice tools, then add shared unit-formatting and text-export helpers.
 
 ## 2. Current Architecture Map
 
@@ -113,7 +114,7 @@ Recommended change: Extract two narrow GUI-side services before any file split: 
 
 Suggested verification: Existing GUI smoke tests plus focused tests for active/selected ROI fallback, point-source source names, pair-correlation source availability, and feature-to-lattice lattice-required behavior.
 
-Implementation status: Partially completed across the current slices. `probeflow.gui.roi_context` now owns point-source collection, line/area ROI resolution, area mask validation, and active area ROI area calculation, and the image viewer delegates those decisions. Point-source records now carry metadata into pair-correlation and feature-to-lattice measurement context. Remaining work is a small tool-launch coordinator and any later workflow-specific ROI context cases discovered during cleanup.
+Implementation status: Completed for the current target workflows. `probeflow.gui.roi_context` now owns point-source collection, line/area ROI resolution, area mask validation, and active area ROI area calculation. `probeflow.gui.viewer.tool_launch` owns pair-correlation, feature-to-lattice, and lattice-grid launch precondition checks and source/context assembly. Point-source records now carry metadata into pair-correlation and feature-to-lattice measurement context. Remaining work is limited to any later workflow-specific ROI context cases discovered during cleanup.
 
 ### PF-STAGE2-003
 
@@ -239,6 +240,7 @@ These helpers meet the "3+ call sites or concrete risk" threshold:
 |---|---|---|
 | `probeflow.measurements.adapters` | Implemented: single adapter from legacy analysis results to canonical measurement results during migration. | UI table code or dialog logic. |
 | `probeflow.gui.roi_context` | Implemented initial slices: active/selected line and area ROI context, area mask validation, active area ROI area, and metadata-bearing point sources from legacy feature result, measure-tab feature maxima, selected point ROIs, and all point ROIs in physical/pixel coordinates. | Backend mask validation or processing-state ROI resolution. |
+| `probeflow.gui.viewer.tool_launch` | Implemented: launch contexts for pair correlation, feature-to-lattice, and lattice-grid source/precondition assembly. | Dialog creation, Qt ownership, or scientific calculation code. |
 | `probeflow.analysis.lattice_correction_workflow` | Implemented: pixel-space correction matrix conversion and processing/provenance operation params. | Preview/apply widget state or image transformation kernel code. |
 | `probeflow.utils.units` | Display-only formatting for distance, area, density, reciprocal-space, and period bounds. | Changing stored SI values or backend APIs. |
 | `probeflow.gui.export_helpers` | Small text-save/copy wrappers with status callbacks. | Image export, processed scan export, or provenance serialization. |
@@ -252,8 +254,8 @@ Critical:
    - Remaining target: remove compatibility code only after external callers no longer need it.
 
 2. Continue extracting ROI and point-source context from `ImageViewerDialog`.
-   - Completed in current slices: point-source gathering, source metadata propagation, active/selected line and area ROI context, area mask validation, and active area ROI area calculation.
-   - Remaining target: a small launch coordinator.
+   - Completed in current slices: point-source gathering, source metadata propagation, active/selected line and area ROI context, area mask validation, active area ROI area calculation, and pair/feature-lattice launch contexts.
+   - Remaining target: any future workflow-specific context cleanup discovered while touching those workflows.
 
 Important:
 
