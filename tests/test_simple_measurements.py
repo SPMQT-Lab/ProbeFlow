@@ -90,7 +90,8 @@ def test_distance_bad_roi():
 def test_distance_summary_contains_units():
     roi = _line_roi(0, 0, 10, 0)
     result = measure_line_distance(roi, 1e-10, 1e-10)
-    assert "Å" in result.summary or "nm" in result.summary or "pm" in result.summary
+    summary = str(result.context["summary"])
+    assert "Å" in summary or "nm" in summary or "pm" in summary
 
 
 def test_distance_uses_roi_name_as_notes():
@@ -102,7 +103,7 @@ def test_distance_uses_roi_name_as_notes():
 def test_distance_measurement_id():
     roi = _line_roi(0, 0, 1, 0)
     result = measure_line_distance(roi, 1e-10, 1e-10, measurement_id="M42")
-    assert result.id == "M42"
+    assert result.measurement_id == "M42"
 
 
 # ── measure_angle_between_lines ───────────────────────────────────────────────
@@ -152,8 +153,8 @@ def test_angle_summary_contains_names():
     a = _line_roi(0, 0, 1, 0, name="LineA")
     b = _line_roi(0, 0, 0, 1, name="LineB")
     result = measure_angle_between_lines(a, b, 1e-10, 1e-10)
-    assert "LineA" in result.summary
-    assert "LineB" in result.summary
+    assert "LineA" in result.context["summary"]
+    assert "LineB" in result.context["summary"]
 
 
 # ── compute_roi_statistics ────────────────────────────────────────────────────
@@ -171,9 +172,9 @@ def test_roi_stats_uniform():
         z_unit="m",
     )
     assert result.kind == "roi_stats"
-    assert math.isclose(result.values["mean"], 1e-10, rel_tol=1e-9)
+    assert math.isclose(result.values["mean_height"], 1e-10, rel_tol=1e-9)
     assert math.isclose(result.values["rms_roughness"], 0.0, abs_tol=1e-15)
-    assert math.isclose(result.values["range"], 0.0, abs_tol=1e-15)
+    assert math.isclose(result.values["peak_to_peak"], 0.0, abs_tol=1e-15)
 
 
 def test_roi_stats_area():
@@ -256,9 +257,10 @@ def test_roi_stats_summary_contains_area_and_mean():
         pixel_size_x_m=1e-10, pixel_size_y_m=1e-10,
         z_unit="m",
     )
-    assert "Area" in result.summary
-    assert "Mean" in result.summary
-    assert "RMS" in result.summary
+    summary = str(result.context["summary"])
+    assert "Area" in summary
+    assert "Mean" in summary
+    assert "RMS" in summary
 
 
 def test_roi_stats_non_metre_z_unit():
@@ -269,5 +271,5 @@ def test_roi_stats_non_metre_z_unit():
         pixel_size_x_m=1e-10, pixel_size_y_m=1e-10,
         z_unit="nA",
     )
-    assert result.units["mean"] == "nA"
-    assert math.isclose(result.values["mean"], 42.0, rel_tol=1e-9)
+    assert result.z_unit == "nA"
+    assert math.isclose(result.values["mean_height"], 42.0, rel_tol=1e-9)

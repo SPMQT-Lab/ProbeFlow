@@ -37,15 +37,17 @@ The first implementation slice from Stage 2 addressed the highest-priority seams
 
 - `probeflow.measurements.adapters.legacy_measurement_to_result` is the single compatibility adapter for old analysis measurement rows.
 - Pair-correlation and feature-to-lattice dialogs now emit canonical `probeflow.measurements.models.MeasurementResult` rows.
+- Simple distance/angle and ROI-statistics producers now emit canonical measurement rows.
+- The legacy `MeasurementResultsPanel` public name now wraps the canonical measurement table.
 - `probeflow.gui.roi_context` now gathers downstream point sources and calculates active area ROI physical area outside the main viewer.
 - `probeflow.analysis.lattice_correction_workflow` now builds pixel-space lattice correction matrices and processing/provenance operation parameters outside the lattice GUI panel.
 - Focused regression tests cover the adapter, ROI context helper, and lattice correction helper.
 
 The recommended next implementation stage is to address the remaining Stage 2 findings in this order:
 
-1. Finish migrating remaining legacy measurement producers and retire or wrap the old result panel.
+1. Unify legacy maxima/minima and measure-tab maxima as canonical point sources.
 2. Extend ROI context to line/area validation and add a small tool-launch coordinator.
-3. Unify legacy maxima/minima and measure-tab maxima as canonical point sources.
+3. Remove compatibility measurement shims only after no supported caller depends on legacy result rows.
 4. Add small unit-formatting and text-export helpers.
 5. Clean up spectroscopy and plotting duplication.
 

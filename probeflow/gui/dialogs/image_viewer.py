@@ -2426,10 +2426,10 @@ class ImageViewerDialog(QDialog):
             source=self._source_label(),
             channel=ch_unit,
         )
-        self._measurement_table.add_result(self._to_dock_result(result, mid))
+        self._measurement_table.add_result(result)
         self._measurement_dock.show()
         self._measurement_dock.raise_()
-        self._status_lbl.setText(result.summary)
+        self._status_lbl.setText(str(result.context.get("summary") or ""))
 
     def _on_measure_angle(self) -> None:
         """Switch to the 3-point angle tool; handles emitted from angle_points_ready."""
@@ -2500,10 +2500,10 @@ class ImageViewerDialog(QDialog):
             roi_id=roi.id,
             roi_name=roi.name,
         )
-        self._measurement_table.add_result(self._to_dock_result(result, mid))
+        self._measurement_table.add_result(result)
         self._measurement_dock.show()
         self._measurement_dock.raise_()
-        self._status_lbl.setText(result.summary)
+        self._status_lbl.setText(str(result.context.get("summary") or ""))
 
     def _source_label(self) -> str:
         """Short label for the currently loaded file, for measurement provenance."""

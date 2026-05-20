@@ -1,15 +1,11 @@
-"""Distance and angle measurements from ROI geometry.
-
-GUI-free. Accepts ROI objects from probeflow.core.roi and returns
-MeasurementResult from probeflow.analysis.measurements.
-"""
+"""Distance and angle measurements from ROI geometry."""
 
 from __future__ import annotations
 
 import math
 from typing import Any
 
-from probeflow.analysis.measurements import MeasurementResult
+from probeflow.measurements.models import MeasurementResult
 
 
 def measure_line_distance(
@@ -54,23 +50,24 @@ def measure_line_distance(
     label = roi_name or getattr(roi, "name", str(getattr(roi, "id", "")))
 
     return MeasurementResult(
-        id=measurement_id or "M?",
+        measurement_id=measurement_id or "M?",
         kind="distance",
-        source=source,
+        source_label=source,
+        source_path=source or None,
         channel=channel,
-        roi_id=getattr(roi, "id", None),
-        summary=summary,
+        x_unit="m",
+        y_unit=None,
+        z_unit=None,
         values={
             "length_m": length_m,
             "dx_m": dx_m,
             "dy_m": dy_m,
             "angle_deg": angle_deg,
         },
-        units={
-            "length_m": "m",
-            "dx_m": "m",
-            "dy_m": "m",
-            "angle_deg": "deg",
+        context={
+            "summary": summary,
+            "roi_id": getattr(roi, "id", None),
+            "roi_name": label,
         },
         notes=label,
     )
@@ -118,14 +115,16 @@ def measure_angle_between_lines(
     summary = f"{angle_deg:.2f}°  ({name_a} ∧ {name_b})"
 
     return MeasurementResult(
-        id=measurement_id or "M?",
+        measurement_id=measurement_id or "M?",
         kind="angle",
-        source=source,
+        source_label=source,
+        source_path=source or None,
         channel=channel,
-        roi_id=None,
-        summary=summary,
+        x_unit="°",
+        y_unit=None,
+        z_unit=None,
         values={"angle_deg": angle_deg},
-        units={"angle_deg": "deg"},
+        context={"summary": summary},
         notes=f"{name_a} / {name_b}",
     )
 

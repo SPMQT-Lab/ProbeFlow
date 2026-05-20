@@ -1,8 +1,4 @@
-"""ROI statistics backend returning the new MeasurementResult format.
-
-GUI-free. Accepts a NumPy image array and a boolean mask and returns a
-MeasurementResult from probeflow.analysis.measurements.
-"""
+"""ROI statistics backend returning the canonical measurement format."""
 
 from __future__ import annotations
 
@@ -11,8 +7,8 @@ from typing import Any
 
 import numpy as np
 
-from probeflow.analysis.measurements import MeasurementResult
 from probeflow.analysis.simple_measurements import _fmt_m
+from probeflow.measurements.models import MeasurementResult
 
 
 def compute_roi_statistics(
@@ -75,28 +71,29 @@ def compute_roi_statistics(
     )
 
     return MeasurementResult(
-        id=measurement_id or "M?",
+        measurement_id=measurement_id or "M?",
         kind="roi_stats",
-        source=source,
+        source_label=source,
+        source_path=source or None,
         channel=channel,
-        roi_id=roi_id,
-        summary=summary,
+        x_unit="m",
+        y_unit="m",
+        z_unit=z_unit,
         values={
+            "area_m2": area_m2,
             "area_nm2": area_nm2,
             "n_finite_pixels": n,
-            "mean": mean_val,
-            "median": median_val,
-            "std_dev": std_val,
+            "mean_height": mean_val,
+            "median_height": median_val,
+            "std_height": std_val,
             "rms_roughness": rms_val,
-            "range": range_val,
+            "peak_to_peak": range_val,
         },
-        units={
-            "area_nm2": "nm²",
-            "mean": z_unit,
-            "median": z_unit,
-            "std_dev": z_unit,
-            "rms_roughness": z_unit,
-            "range": z_unit,
+        context={
+            "summary": summary,
+            "roi_id": roi_id,
+            "roi_name": roi_name,
+            "area_unit": "nm^2",
         },
         notes=roi_name,
     )

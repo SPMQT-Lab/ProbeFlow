@@ -11,7 +11,7 @@ ProbeFlow now has a stronger scientific workflow foundation than the Stage 1 rep
 Top architecture risks:
 
 1. Two measurement result models are active. `probeflow.analysis.measurements.MeasurementResult` and `probeflow.measurements.models.MeasurementResult` both claim to be the compact exportable result model. The image viewer converts between them in `ImageViewerDialog._to_dock_result`, which creates a high-risk maintenance point for units, provenance, IDs, and table/export behavior.
-2. `ImageViewerDialog` is still the central tool launcher and source collector. It is 3123 lines and still owns ROI statistics legacy flow, point-source collection, pair-correlation launch, feature-lattice launch, lattice-grid docking, export checks, and processing application.
+2. `ImageViewerDialog` is still the central tool launcher. It no longer owns normal-path measurement conversion or point-source collection, but it still coordinates pair-correlation launch, feature-lattice launch, lattice-grid docking, export checks, and processing application.
 3. `LatticeGridPanel` mixes user controls, calibrated physical-vector math, affine correction matrix construction, preview/apply state, and PNG/PDF grid export. The math is now physically improved, but the file is a high-blast-radius place to make future changes.
 4. Repeated patterns are now clear enough to extract surgically: unit formatting, ROI selection/mask construction, point-source collection, file export/copy plumbing, and preview/apply state.
 5. Spectroscopy has good backend separation but duplicated single-spectrum and overlay export/control methods inside one 1944-line dialog file.
@@ -20,19 +20,21 @@ Implementation status for this slice:
 
 - Added `probeflow.measurements.adapters.legacy_measurement_to_result` as the single compatibility adapter from legacy analysis results to the canonical measurement model.
 - Updated pair-correlation and feature-to-lattice dialogs to emit canonical measurement results directly.
+- Updated simple distance/angle and ROI-statistics analysis producers to emit canonical measurement results directly.
+- Wrapped the legacy `MeasurementResultsPanel` name around the canonical measurement table.
 - Added `probeflow.gui.roi_context` for point-source collection and active area ROI area calculation.
 - Added `probeflow.analysis.lattice_correction_workflow` for pixel-space lattice correction matrices and processing/provenance operation parameters.
 - Added targeted regression coverage for the adapter, ROI context helper, and lattice correction operation helper.
 
-Recommended next stage: continue with measured, test-backed extractions. Do not split large files mechanically. The remaining high-value work is to migrate the remaining legacy simple/ROI analysis measurement producers, unify feature maxima/minima point-source semantics, then add a shared unit-formatting helper.
+Recommended next stage: continue with measured, test-backed extractions. Do not split large files mechanically. The remaining high-value work is to unify feature maxima/minima point-source semantics, extend ROI context for line/area validation, then add a shared unit-formatting helper.
 
 ## 2. Current Architecture Map
 
 | Layer | Current role | Assessment |
 |---|---|---|
-| `probeflow.analysis` | GUI-free scientific analysis such as line periodicity, pair correlation, feature-to-lattice, lattice geometry, ROI stats, and simple measurements. | Mostly healthy. No Qt imports found. Some modules still return the older measurement model. |
+| `probeflow.analysis` | GUI-free scientific analysis such as line periodicity, pair correlation, feature-to-lattice, lattice geometry, ROI stats, and simple measurements. | Mostly healthy. No Qt imports found. Active measurement-producing workflows now use the canonical model. |
 | `probeflow.processing` | GUI-free array transformations and canonical processing state/history. | Mostly healthy. No Qt imports found. Processing history and geometric-op metadata are now strong. |
-| `probeflow.measurements` | Canonical generic measurement model, feature points, image measurement adapters, point-mask FFT, export helpers, and the legacy result adapter. | Good direction. Some legacy analysis producers still need migration. |
+| `probeflow.measurements` | Canonical generic measurement model, feature points, image measurement adapters, point-mask FFT, export helpers, and the legacy result adapter. | Good direction. Legacy adapter remains only for compatibility. |
 | `probeflow.spectroscopy` | Display transforms, normalization, smoothing, measurement, and export helpers for spectroscopy workflows. | Strong backend separation; GUI file duplicates orchestration/export code. |
 | `probeflow.gui.viewer` | Extracted controllers/helpers for image viewer measurements, ROI analysis, bad-line preview, exports, and processing. | Good extraction direction. `image_measurements.py` is now near the next split boundary. |
 | `probeflow.gui.dialogs` | Tool dialogs and the main image/spectroscopy viewers. | Functional, but the largest files still combine unrelated tool orchestration. |
@@ -57,7 +59,7 @@ Recommended next stage: continue with measured, test-backed extractions. Do not 
 | Workflow | GUI path | Backend path | Measurement/export path | Data/units path | Layering risk |
 |---|---|---|---|---|---|
 | Line profile and periodicity | Toolbar/Measure tab calls `ImageMeasurementController.find_periodicity_for_active_line_roi`. | `processing.image.line_profile`; `analysis.line_periodicity.estimate_line_periodicity`; `measurements.image.line_periodicity_measurement`. | Measurement table uses the newer result model; profile/autocorrelation CSV generated in `image_measurements.py`. | Distance is computed in metres using per-axis pixel size; displayed/exported context records method, width, bounds, quality. | Medium. Good backend split, but controller owns export formatting and dialog launch. |
-| ROI statistics | New controller path calls `measurements.image.roi_statistics`; legacy viewer path calls `analysis.roi_statistics.compute_roi_statistics`. | Two backend implementations/models remain active. | Legacy path converts via `_to_dock_result`; new path records directly. | Area uses both pixel axes in current backends. | High. Duplicate route and model conversion should be collapsed. |
+| ROI statistics | New controller path calls `measurements.image.roi_statistics`; viewer path calls `analysis.roi_statistics.compute_roi_statistics`. | Both paths now emit canonical measurement records. | Measurement table records directly without normal-path conversion. | Area uses both pixel axes in current backends. | Medium. Duplicate implementation remains, but the result schema risk is reduced. |
 | Feature finder, masks, FFT | Measure tab detects maxima in `ImageMeasurementController`; legacy dialog supports maxima/minima. | New: `measurements.features.detect_local_maxima`; legacy: `analysis.feature_finder.find_image_features`; mask/FFT: `measurements.fft_points`. | New path writes self-describing CSV/JSON and table rows; legacy CSV remains narrower. | New path stores nm coordinates and detection metadata; legacy result is pixel-first and dialog-local. | Medium/High. Functionally useful but split feature semantics still create maintenance drag. |
 | Pair correlation | Image viewer gets point sources from `gui.roi_context`, then opens `PairCorrelationDialog`. | `analysis.pair_correlation.compute_pair_correlation`. | Dialog emits canonical `measurements.models.MeasurementResult` rows. | Sources are physical metre coordinates; ROI area uses active area ROI mask and per-axis pixel sizes. | Medium. Calculation and model path are separated; source metadata still needs richer unification. |
 | Lattice/grid measurement | Image viewer docks `LatticeGridPanel`. | `analysis.lattice_grid` models/formatters; `analysis.lattice_distortion.compute_correction`. | Grid export via `gui.lattice_export`; correction applied as a geometric processing op. | Calibrated physical vectors are used in correction display and operation params. | High. UI panel also builds correction matrices and operation payloads. |
@@ -94,7 +96,7 @@ Recommended change: Make `probeflow.measurements.models.MeasurementResult` canon
 
 Suggested verification: Add targeted tests that pair correlation, feature-to-lattice, ROI stats, distance/angle, line periodicity, feature maxima, point FFT, and spectroscopy all export through `measurements.export` with source path, channel, units, values, and context intact.
 
-Implementation status: Partially completed in this slice. The compatibility adapter now lives in `probeflow.measurements.adapters`, and pair-correlation plus feature-to-lattice dialogs emit the canonical measurement model directly. Remaining migration targets are simple measurements, legacy ROI statistics, and retirement or wrapping of the old measurement panel.
+Implementation status: Completed for active producers in the current slices. The compatibility adapter now lives in `probeflow.measurements.adapters`; pair-correlation, feature-to-lattice, simple distance/angle, and ROI statistics emit the canonical measurement model directly; the old `MeasurementResultsPanel` name is a wrapper around the canonical table. The remaining legacy model is compatibility-only.
 
 ### PF-STAGE2-002
 
@@ -242,9 +244,9 @@ These helpers meet the "3+ call sites or concrete risk" threshold:
 
 Critical:
 
-1. Finish canonicalizing measurement results.
-   - Completed in this slice: one compatibility adapter plus canonical pair-correlation and feature-to-lattice results.
-   - Remaining target: migrate ROI stats and simple measurements or adapt them at their call boundaries; retire or wrap the old result panel.
+1. Keep canonical measurement results as the active path.
+   - Completed across the Stage 2 slices: one compatibility adapter; canonical pair-correlation, feature-to-lattice, simple distance/angle, and ROI-statistics results; old result panel wrapped around the canonical table.
+   - Remaining target: remove compatibility code only after external callers no longer need it.
 
 2. Continue extracting ROI and point-source context from `ImageViewerDialog`.
    - Completed in this slice: point-source gathering and active area ROI area calculation.
@@ -281,18 +283,16 @@ Cleanup:
 
 ## 10. Recommended Stage 3 Implementation Plan
 
-Stage 3A: Finish measurement model consolidation.
-- Migrate remaining legacy analysis result producers or adapt them at one non-GUI boundary.
-- Remove `_to_dock_result` as a workflow dependency once no old producers reach the viewer.
-- Retire or wrap the legacy `MeasurementResultsPanel`.
+Stage 3A: Feature source unification.
+- Route legacy maxima/minima and measure-tab maxima through a canonical point-source representation.
+- Preserve source, ROI scope, threshold/smoothing settings, and coordinate units.
 
 Stage 3B: Complete ROI context.
 - Extend `probeflow.gui.roi_context` to active/selected line and area ROI selection.
 - Add focused tests for line-required, area-required, empty-mask, and non-area fallback behavior.
 
-Stage 3C: Feature source unification.
-- Route legacy maxima/minima and measure-tab maxima through a canonical point-source representation.
-- Preserve source, ROI scope, threshold/smoothing settings, and coordinate units.
+Stage 3C: Compatibility cleanup.
+- Remove `_to_dock_result`, the legacy adapter, and `analysis.measurements` only after no supported caller depends on legacy result rows.
 
 Stage 3D: Cleanup helpers.
 - Unit formatting helper.
