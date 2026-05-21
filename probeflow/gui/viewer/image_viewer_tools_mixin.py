@@ -157,6 +157,7 @@ class ImageViewerToolsMixin:
         from probeflow.gui.dialogs.image_arithmetic import ImageArithmeticDialog
 
         scale, unit_label, _axis_label = self._channel_unit()
+        active_area_roi_id = active_area_roi_context(self._image_roi_set).roi_id
         dlg = ImageArithmeticDialog(
             self._entries,
             current_entry_index=self._idx,
@@ -165,6 +166,7 @@ class ImageViewerToolsMixin:
             current_scan_range_m=self._scan_range_m,
             display_scale=scale,
             display_unit=unit_label,
+            has_active_area_roi=active_area_roi_id is not None,
             parent=self,
         )
         if dlg.exec() != QDialog.Accepted:
@@ -180,7 +182,6 @@ class ImageViewerToolsMixin:
         }
         if scope == ImageArithmeticDialog.ACTIVE_AREA_ROI:
             active_roi = self._active_image_roi()
-            active_area_roi_id = active_area_roi_context(self._image_roi_set).roi_id
             if active_roi is not None and active_area_roi_id is None:
                 self._status_lbl.setText(
                     f"Active {active_roi.kind} ROI is not valid for image arithmetic; "

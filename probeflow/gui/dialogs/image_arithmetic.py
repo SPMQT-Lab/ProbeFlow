@@ -66,6 +66,7 @@ class ImageArithmeticDialog(QDialog):
         current_scan_range_m: tuple[float, float] | None,
         display_scale: float,
         display_unit: str,
+        has_active_area_roi: bool = False,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -80,7 +81,9 @@ class ImageArithmeticDialog(QDialog):
         self._display_unit = str(display_unit or "SI")
         self._scan_cache: dict[Path, Any] = {}
         self._accepted_spec: dict[str, Any] | None = None
-        self._accepted_scope = self.WHOLE_IMAGE
+        self._accepted_scope = (
+            self.ACTIVE_AREA_ROI if has_active_area_roi else self.WHOLE_IMAGE
+        )
 
         root = QVBoxLayout(self)
         root.setContentsMargins(14, 14, 14, 14)
@@ -104,6 +107,10 @@ class ImageArithmeticDialog(QDialog):
         self._scope_combo = QComboBox()
         self._scope_combo.addItem("Whole image", self.WHOLE_IMAGE)
         self._scope_combo.addItem("Active area ROI only", self.ACTIVE_AREA_ROI)
+        if has_active_area_roi:
+            idx = self._scope_combo.findData(self.ACTIVE_AREA_ROI)
+            if idx >= 0:
+                self._scope_combo.setCurrentIndex(idx)
         form.addRow("Scope:", self._scope_combo)
         root.addLayout(form)
 
@@ -147,13 +154,15 @@ class ImageArithmeticDialog(QDialog):
         row = QHBoxLayout(page)
         row.setContentsMargins(0, 0, 0, 0)
         self._constant_spin = QDoubleSpinBox()
-        self._constant_spin.setDecimals(8)
+        self._constant_spin.setDecimals(3)
         self._constant_spin.setRange(-1.0e12, 1.0e12)
         self._constant_spin.setSingleStep(1.0)
         self._constant_spin.setValue(0.0)
+        self._constant_spin.setFixedWidth(140)
         self._constant_label = QLabel("")
-        row.addWidget(self._constant_spin, 1)
+        row.addWidget(self._constant_spin)
         row.addWidget(self._constant_label)
+        row.addStretch(1)
         return page
 
     def _image_page(self, current_entry_index: int, current_plane_idx: int) -> QWidget:
@@ -195,13 +204,15 @@ class ImageArithmeticDialog(QDialog):
         amp_row = QHBoxLayout()
         amp_row.setContentsMargins(0, 0, 0, 0)
         self._amplitude_spin = QDoubleSpinBox()
-        self._amplitude_spin.setDecimals(8)
+        self._amplitude_spin.setDecimals(3)
         self._amplitude_spin.setRange(0.0, 1.0e12)
         self._amplitude_spin.setSingleStep(1.0)
         self._amplitude_spin.setValue(1.0)
+        self._amplitude_spin.setFixedWidth(140)
         self._amplitude_label = QLabel(self._display_unit)
-        amp_row.addWidget(self._amplitude_spin, 1)
+        amp_row.addWidget(self._amplitude_spin)
         amp_row.addWidget(self._amplitude_label)
+        amp_row.addStretch(1)
         form.addRow("Amplitude:", amp_row)
 
         self._period_spin = QSpinBox()
