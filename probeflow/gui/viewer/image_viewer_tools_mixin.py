@@ -26,6 +26,48 @@ from probeflow.gui.viewer.tool_launch import (
 
 
 class ImageViewerToolsMixin:
+    def _clear_lattice_grid_overlay(self, *, close_dock: bool = True) -> bool:
+        """Remove the real-space lattice grid overlay and optionally close its dock."""
+        removed = False
+        item = getattr(self, "_lattice_grid_item", None)
+        if item is not None:
+            removed = True
+            try:
+                scene = item.scene()
+            except RuntimeError:
+                scene = None
+            if scene is not None:
+                try:
+                    scene.removeItem(item)
+                except RuntimeError:
+                    pass
+            self._lattice_grid_item = None
+
+        dock = getattr(self, "_lattice_grid_dock", None)
+        if dock is not None:
+            if close_dock:
+                try:
+                    dock.blockSignals(True)
+                    dock.close()
+                except RuntimeError:
+                    pass
+                finally:
+                    try:
+                        dock.blockSignals(False)
+                    except RuntimeError:
+                        pass
+            self._lattice_grid_dock = None
+
+        if hasattr(self, "_sync_viewer_menu_actions"):
+            self._sync_viewer_menu_actions()
+        return removed
+
+    def _on_clear_lattice_grid(self) -> None:
+        if self._clear_lattice_grid_overlay(close_dock=True):
+            self._status_lbl.setText("Cleared lattice grid overlay.")
+        else:
+            self._status_lbl.setText("No lattice grid overlay to clear.")
+
     def _on_open_lattice_grid(self):
         arr = self._display_arr if self._display_arr is not None else self._raw_arr
         context = lattice_grid_launch_context(arr, scan_range_m=self._scan_range_m)
@@ -33,6 +75,8 @@ class ImageViewerToolsMixin:
             self._status_lbl.setText(str(context.status_message))
             return
         from probeflow.gui.lattice_grid import open_real_space_tool
+
+        self._clear_lattice_grid_overlay(close_dock=True)
 
         def _get_image():
             return self._display_arr if self._display_arr is not None else self._raw_arr
@@ -68,14 +112,16 @@ class ImageViewerToolsMixin:
         )
         dock.setMinimumWidth(220)
         self._viewer_main.addDockWidget(Qt.RightDockWidgetArea, dock)
+        self._lattice_grid_dock = dock
         dock.show()
         dock.raise_()
 
         def _on_dock_closed():
-            if self._zoom_lbl.scene() and item.scene():
-                self._zoom_lbl.scene().removeItem(item)
+            if getattr(self, "_lattice_grid_dock", None) is dock:
+                self._clear_lattice_grid_overlay(close_dock=False)
 
         dock.visibilityChanged.connect(lambda v: _on_dock_closed() if not v else None)
+        self._sync_viewer_menu_actions()
 
     def _on_open_feature_finder(self):
         arr = self._display_arr if self._display_arr is not None else self._raw_arr

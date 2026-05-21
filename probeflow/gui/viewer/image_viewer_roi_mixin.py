@@ -155,6 +155,8 @@ class ImageViewerRoiMixin:
             scene = self._zoom_lbl.scene()
             self._angle_overlay.remove_from_scene(scene)
             self._angle_overlay = None
+        if hasattr(self, "_clear_lattice_grid_overlay"):
+            self._clear_lattice_grid_overlay(close_dock=True)
         if hasattr(self, "_status_lbl"):
             self._status_lbl.setText("Cleared ROIs and overlays.")
 

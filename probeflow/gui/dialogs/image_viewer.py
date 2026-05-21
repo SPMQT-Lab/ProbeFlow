@@ -489,10 +489,12 @@ class ImageViewerDialog(
         self._set_zero_plane_btn.setToolTip("Click 3 points on the image to define a zero-height plane.")
         self._set_zero_plane_btn.toggled.connect(self._on_set_zero_plane_mode_toggled)
         zero_col.addWidget(self._set_zero_plane_btn)
-        self._set_zero_clear_btn = QPushButton("Clear")
+        self._set_zero_clear_btn = QPushButton("Hide Points")
         self._set_zero_clear_btn.setFont(QFont("Helvetica", 8))
         self._set_zero_clear_btn.setFixedHeight(22)
-        self._set_zero_clear_btn.setToolTip("Clear all zero-plane reference points.")
+        self._set_zero_clear_btn.setToolTip(
+            "Hide zero-plane reference point markers; processing is unchanged."
+        )
         self._set_zero_clear_btn.clicked.connect(self._on_clear_set_zero)
         zero_col.addWidget(self._set_zero_clear_btn)
         zero_col.addStretch()
@@ -1236,6 +1238,11 @@ class ImageViewerDialog(
             self._on_open_lattice_grid,
         )
         measurements_menu.addAction(lattice_grid_action)
+        clear_lattice_grid_action = self._viewer_action(
+            "measure.clear_lattice_grid",
+            self._on_clear_lattice_grid,
+        )
+        measurements_menu.addAction(clear_lattice_grid_action)
         measurements_menu.addSeparator()
         show_measurements_action = self._viewer_action(
             "measure.show_table",

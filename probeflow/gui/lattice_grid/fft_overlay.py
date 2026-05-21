@@ -55,7 +55,9 @@ class FFTLatticeOverlay:
         self._drag_handle: int = _HANDLE_NONE
         self._drag_start_q: Optional[tuple[float, float]] = None
         self._drag_grid_start: Optional[LatticeGrid] = None
+        self._last_drag_display_xy: Optional[tuple[float, float]] = None
         self._on_change_cb = None
+        self._on_drag_state_cb = None
 
         self._cid_press   = canvas.mpl_connect("button_press_event",   self._on_press)
         self._cid_release = canvas.mpl_connect("button_release_event", self._on_release)
@@ -82,7 +84,14 @@ class FFTLatticeOverlay:
     def set_on_change(self, cb) -> None:
         self._on_change_cb = cb
 
+    def set_drag_state_callback(self, cb) -> None:
+        self._on_drag_state_cb = cb
+
+    def is_dragging(self) -> bool:
+        return self._dragging
+
     def disconnect(self) -> None:
+        self._set_dragging(False)
         for cid in (self._cid_press, self._cid_release, self._cid_motion):
             try:
                 self._canvas.mpl_disconnect(cid)
@@ -130,10 +139,28 @@ class FFTLatticeOverlay:
                 pass
         return _HANDLE_NONE
 
+    def hit_test_event(self, event) -> bool:
+        if event.inaxes is not self._ax or self._grid is None:
+            return False
+        return self._hit_handle_display(event.x, event.y) != _HANDLE_NONE
+
+    def _set_dragging(self, dragging: bool) -> None:
+        dragging = bool(dragging)
+        if self._dragging == dragging:
+            return
+        self._dragging = dragging
+        if self._on_drag_state_cb is not None:
+            self._on_drag_state_cb(dragging)
+
     # ── matplotlib events ─────────────────────────────────────────────────────
 
     def _on_press(self, event) -> None:
-        if event.inaxes is not self._ax or self._grid is None:
+        if (
+            event.inaxes is not self._ax
+            or self._grid is None
+            or event.xdata is None
+            or event.ydata is None
+        ):
             return
         hid = self._hit_handle_display(event.x, event.y)
         if hid == _HANDLE_NONE:
@@ -141,20 +168,30 @@ class FFTLatticeOverlay:
         self._drag_handle = hid
         self._drag_start_q = (event.xdata, event.ydata)
         self._drag_grid_start = self._grid
-        self._dragging = True
+        self._last_drag_display_xy = (float(event.x), float(event.y))
+        self._set_dragging(True)
 
     def _on_release(self, event) -> None:
-        self._dragging = False
+        self._set_dragging(False)
         self._drag_handle = _HANDLE_NONE
         self._drag_start_q = None
         self._drag_grid_start = None
+        self._last_drag_display_xy = None
 
     def _on_motion(self, event) -> None:
         if (not self._dragging
                 or event.inaxes is not self._ax
+                or event.xdata is None
+                or event.ydata is None
                 or self._drag_start_q is None
                 or self._drag_grid_start is None):
             return
+        if self._last_drag_display_xy is not None:
+            dx_display = float(event.x) - self._last_drag_display_xy[0]
+            dy_display = float(event.y) - self._last_drag_display_xy[1]
+            if math.hypot(dx_display, dy_display) < 1.5:
+                return
+        self._last_drag_display_xy = (float(event.x), float(event.y))
 
         dqx = event.xdata - self._drag_start_q[0]
         dqy = event.ydata - self._drag_start_q[1]

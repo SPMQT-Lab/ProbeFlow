@@ -111,6 +111,8 @@ class ImageViewerToolbarMixin:
                 key = viewer_command(command_id).enabled_state_key
                 if key in measurement_states:
                     action.setEnabled(measurement_states[key])
+                elif key == "lattice_grid":
+                    action.setEnabled(getattr(self, "_lattice_grid_item", None) is not None)
                 elif key == "undo":
                     action.setEnabled(self._proc_undo_ctrl.can_undo)
                 elif key == "redo":

@@ -140,6 +140,6 @@ class SetZeroPlaneController:
         self._markers_hidden = True
         self._zoom_lbl.set_zero_markers([])
         return (
-            "Zero reference markers hidden. "
+            "Zero-plane reference points hidden. "
             "Processing is unchanged; use Reset to original to undo leveling."
         )

@@ -7,6 +7,7 @@ from matplotlib.figure import Figure
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
+    QApplication,
     QComboBox, QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel,
     QPushButton, QTabWidget, QVBoxLayout, QWidget,
 )
@@ -44,6 +45,7 @@ class FFTViewerDialog(QDialog):
         self._window_mode = "hann"
         self._dc_mode = "keep"
         self._pan_anchor: tuple | None = None
+        self._fft_lattice_drag_active: bool = False
         self._disp_range: tuple = (0.0, 1.0)
         self._vmin_frac: float = 0.0
         self._vmax_frac: float = 1.0
@@ -452,22 +454,82 @@ class FFTViewerDialog(QDialog):
         yb, yt = self._fft_ylim
         xc = cx if cx is not None else (xl + xr) / 2
         yc = cy if cy is not None else (yb + yt) / 2
-        self._fft_xlim = (xc + (xl - xc) * factor, xc + (xr - xc) * factor)
-        self._fft_ylim = (yc + (yb - yc) * factor, yc + (yt - yc) * factor)
+        min_x, min_y = self._minimum_fft_spans()
+        self._fft_xlim = self._interval_with_min_span(
+            xc + (xl - xc) * factor,
+            xc + (xr - xc) * factor,
+            min_x,
+        )
+        self._fft_ylim = self._interval_with_min_span(
+            yc + (yb - yc) * factor,
+            yc + (yt - yc) * factor,
+            min_y,
+        )
         self._ax_fft.set_xlim(*self._fft_xlim)
         self._ax_fft.set_ylim(*self._fft_ylim)
         self._canvas_fft.draw_idle()
 
+    def _minimum_fft_spans(self) -> tuple[float, float]:
+        """Return zoom-span floors so trackpad bursts cannot collapse the FFT view."""
+        Ny, Nx = self._arr.shape[:2]
+        full_x = abs(float(self._qx[-1]) - float(self._qx[0]))
+        full_y = abs(float(self._qy[-1]) - float(self._qy[0]))
+        return (
+            max(full_x * 1e-4, full_x * 4.0 / max(1, Nx)),
+            max(full_y * 1e-4, full_y * 4.0 / max(1, Ny)),
+        )
+
+    @staticmethod
+    def _interval_with_min_span(a: float, b: float, minimum: float) -> tuple[float, float]:
+        span = b - a
+        if abs(span) >= minimum:
+            return (a, b)
+        centre = (a + b) * 0.5
+        sign = 1.0 if span >= 0 else -1.0
+        half = minimum * 0.5
+        return (centre - sign * half, centre + sign * half)
+
+    @staticmethod
+    def _scroll_has_zoom_modifier(event) -> bool:
+        key = str(getattr(event, "key", "") or "").lower()
+        if any(token in key for token in ("ctrl", "control", "cmd", "command", "meta", "super")):
+            return True
+        modifiers = QApplication.keyboardModifiers()
+        return bool(modifiers & (Qt.ControlModifier | Qt.MetaModifier))
+
+    def _fft_lattice_overlay_wants_event(self, event) -> bool:
+        overlay = getattr(self, "_fft_lattice_overlay", None)
+        return bool(
+            overlay is not None
+            and hasattr(overlay, "hit_test_event")
+            and overlay.hit_test_event(event)
+        )
+
+    def _on_fft_lattice_drag_state_changed(self, dragging: bool) -> None:
+        self._fft_lattice_drag_active = bool(dragging)
+        if dragging:
+            self._pan_anchor = None
+
     # ── canvas events ──────────────────────────────────────────────────────────
 
     def _on_scroll(self, event):
-        if event.inaxes is not self._ax_fft:
+        if (
+            event.inaxes is not self._ax_fft
+            or self._fft_lattice_drag_active
+            or not self._scroll_has_zoom_modifier(event)
+        ):
             return
-        factor = 0.65 if event.step > 0 else 1.0 / 0.65
+        factor = 0.88 if event.step > 0 else 1.0 / 0.88
         self._zoom_by(factor, event.xdata, event.ydata)
 
     def _on_press(self, event):
-        if event.inaxes is self._ax_fft and event.button == 1:
+        if (
+            event.inaxes is self._ax_fft
+            and event.button == 1
+            and event.xdata is not None
+            and event.ydata is not None
+            and not self._fft_lattice_overlay_wants_event(event)
+        ):
             self._pan_anchor = (
                 event.xdata, event.ydata,
                 self._fft_xlim, self._fft_ylim,
@@ -477,7 +539,12 @@ class FFTViewerDialog(QDialog):
         self._pan_anchor = None
 
     def _on_motion(self, event):
+        if self._fft_lattice_drag_active:
+            self._pan_anchor = None
+            return
         if self._pan_anchor is not None and event.inaxes is self._ax_fft:
+            if event.xdata is None or event.ydata is None:
+                return
             x0, y0, xlim0, ylim0 = self._pan_anchor
             dx = x0 - event.xdata
             dy = y0 - event.ydata
@@ -703,6 +770,8 @@ class FFTViewerDialog(QDialog):
             (Ny, Nx), parent=self,
         )
         self._fft_lattice_overlay = overlay
+        if hasattr(overlay, "set_drag_state_callback"):
+            overlay.set_drag_state_callback(self._on_fft_lattice_drag_state_changed)
         dock = QDockWidget("Reciprocal Grid", self)
         dock.setWidget(panel)
         dock.setFloating(True)

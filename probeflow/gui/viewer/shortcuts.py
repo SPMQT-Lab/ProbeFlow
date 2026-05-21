@@ -58,6 +58,7 @@ VIEWER_COMMANDS: tuple[ViewerCommand, ...] = (
     ViewerCommand("measure.pair_correlation", "Pair correlation...", "Measurements", status_tip="Open pair correlation analysis.", aliases=("g(r)", "rdf", "radial distribution")),
     ViewerCommand("measure.feature_lattice", "Feature-to-lattice comparison...", "Measurements", status_tip="Compare detected features to a lattice.", aliases=("lattice", "features")),
     ViewerCommand("measure.lattice_grid", "Lattice/Grid tool...", "Measurements", status_tip="Open the lattice/grid analysis tool.", aliases=("grid", "lattice")),
+    ViewerCommand("measure.clear_lattice_grid", "Clear lattice grid", "Measurements", status_tip="Remove the active lattice grid overlay from the image.", enabled_state_key="lattice_grid", aliases=("grid", "lattice", "overlay", "clear")),
     ViewerCommand("measure.show_table", "Show measurements", "Measurements", status_tip="Show the measurements dock.", aliases=("measurement table", "results")),
     ViewerCommand("measure.show_panel", "Measurement table (Measure tab)", "Measurements", status_tip="Show the Measure sidebar tab.", aliases=("measure tab", "results")),
     ViewerCommand("export.save_png", "Save PNG copy", "Export", ("Ctrl+S",), "Save a PNG copy of the current view.", aliases=("image", "snapshot")),
