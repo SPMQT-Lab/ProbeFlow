@@ -266,12 +266,16 @@ def read_all_sxm_planes(
     plane_bytes = Ny * Nx * 4
     planes: List[np.ndarray] = []
     n_planes = (len(raw) - offset) // plane_bytes
-    expected_planes = len(sxm_data_info(hdr))
+    # Compute the expected plane count by expanding "both"-direction rows to 2 planes each.
+    _rows = sxm_data_info(hdr)
+    expected_planes = sum(
+        2 if r.get("direction", "") == "both" else 1 for r in _rows
+    )
     if expected_planes > 0 and n_planes < expected_planes:
         import warnings
         warnings.warn(
             f"{Path(sxm_path).name}: SXM payload contains {n_planes} complete "
-            f"plane(s) but DATA_INFO header lists {expected_planes}. "
+            f"plane(s) but DATA_INFO header indicates {expected_planes}. "
             f"The file may have been incompletely written. "
             f"Missing planes: {expected_planes - n_planes}.",
             UserWarning,
