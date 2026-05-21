@@ -68,6 +68,14 @@ VIEWER_COMMANDS: tuple[ViewerCommand, ...] = (
     ViewerCommand("help.shortcuts", "Image viewer shortcuts", "Help", status_tip="Show image-viewer shortcut help.", aliases=("keyboard", "keys")),
     ViewerCommand("help.definitions", "Definitions", "Help", status_tip="Show processing definitions and equations.", aliases=("reference", "math", "algorithms")),
     ViewerCommand("help.about", "About ProbeFlow", "Help", status_tip="Show ProbeFlow version and project information.", aliases=("version",)),
+    ViewerCommand(
+        "window.cycle_windows",
+        "Cycle Windows",
+        "Window",
+        ("Ctrl+`",),
+        "Focus the next tool window owned by this viewer.",
+        aliases=("windows", "next window", "cycle"),
+    ),
 )
 
 VIEWER_COMMAND_BY_ID = {command.command_id: command for command in VIEWER_COMMANDS}

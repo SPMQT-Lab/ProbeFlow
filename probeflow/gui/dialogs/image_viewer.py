@@ -1289,6 +1289,15 @@ class ImageViewerDialog(
         window_menu.aboutToShow.connect(lambda: populate_window_menu(window_menu, self))
         populate_window_menu(window_menu, self)
 
+        # Persistent shortcut for cycling windows (Cmd+` on macOS, Ctrl+` elsewhere).
+        # Registered as a QShortcut on self so it fires even when a floating tool
+        # window (e.g. FFT viewer) has keyboard focus, not just the main window.
+        from probeflow.gui.viewer.window_menu import cycle_viewer_windows
+        from PySide6.QtGui import QShortcut
+        _cycle_shortcut = QShortcut(QKeySequence("Ctrl+`"), self)
+        _cycle_shortcut.setContext(Qt.WindowShortcut)
+        _cycle_shortcut.activated.connect(lambda: cycle_viewer_windows(self))
+
         help_menu = menu_bar.addMenu("Help")
         command_finder_action = self._viewer_action(
             "viewer.command_finder",

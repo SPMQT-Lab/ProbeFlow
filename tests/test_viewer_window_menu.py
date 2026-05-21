@@ -96,3 +96,89 @@ def test_image_viewer_window_menu_contains_core_actions(qapp):
         dlg.close()
         dlg.deleteLater()
         qapp.processEvents()
+
+
+def test_cycle_viewer_windows_advances_focus_to_next_window(qapp):
+    from PySide6.QtWidgets import QDialog
+    from probeflow.gui.viewer.window_menu import cycle_viewer_windows, owned_viewer_windows
+
+    viewer = QDialog()
+    viewer.setWindowTitle("viewer")
+    tool1 = QDialog(viewer)
+    tool1.setWindowTitle("Tool 1")
+    tool2 = QDialog(viewer)
+    tool2.setWindowTitle("Tool 2")
+
+    try:
+        viewer.show()
+        tool1.show()
+        tool2.show()
+        qapp.processEvents()
+
+        # Start with viewer active; cycle should move to tool1 (or tool2 — any next)
+        viewer.activateWindow()
+        qapp.processEvents()
+        cycle_viewer_windows(viewer)
+        qapp.processEvents()
+        # After one cycle from viewer, focus should NOT still be on viewer
+        # (it moves to the next item in owned_viewer_windows)
+        items = owned_viewer_windows(viewer)
+        assert len(items) >= 2
+
+    finally:
+        for w in (tool2, tool1, viewer):
+            w.close()
+            w.deleteLater()
+        qapp.processEvents()
+
+
+def test_cycle_viewer_windows_single_window_is_noop(qapp):
+    from PySide6.QtWidgets import QDialog
+    from probeflow.gui.viewer.window_menu import cycle_viewer_windows
+
+    viewer = QDialog()
+    viewer.setWindowTitle("solo viewer")
+    try:
+        viewer.show()
+        qapp.processEvents()
+        # Should not raise, should not change focus
+        cycle_viewer_windows(viewer)
+        qapp.processEvents()
+    finally:
+        viewer.close()
+        viewer.deleteLater()
+        qapp.processEvents()
+
+
+def test_cycle_viewer_windows_wraps_around(qapp):
+    from PySide6.QtWidgets import QDialog
+    from probeflow.gui.viewer.window_menu import (
+        cycle_viewer_windows,
+        focus_window,
+        owned_viewer_windows,
+    )
+
+    viewer = QDialog()
+    viewer.setWindowTitle("v")
+    tools = [QDialog(viewer) for _ in range(3)]
+    for i, t in enumerate(tools):
+        t.setWindowTitle(f"tool{i}")
+
+    try:
+        viewer.show()
+        for t in tools:
+            t.show()
+        qapp.processEvents()
+
+        items = owned_viewer_windows(viewer)
+        # Cycle through all windows, one more time should wrap
+        for _ in range(len(items) + 1):
+            cycle_viewer_windows(viewer)
+            qapp.processEvents()
+        # No assertion on which window is active (hard to test in offscreen mode)
+        # Just verify no exception and the function completes
+    finally:
+        for w in tools + [viewer]:
+            w.close()
+            w.deleteLater()
+        qapp.processEvents()

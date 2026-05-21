@@ -6,6 +6,7 @@ import math
 from dataclasses import dataclass
 
 from PySide6.QtCore import QRect
+from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -226,10 +227,33 @@ def cascade_viewer_windows(viewer: QWidget) -> None:
             continue
 
 
+def cycle_viewer_windows(viewer: QWidget) -> None:
+    """Raise the next visible owned window in the cycle order.
+
+    On each call, focus moves to the next entry after the currently active
+    window in the ``owned_viewer_windows`` list (wrapping around).  If no
+    owned window is currently active, focus moves to the first one.
+    """
+    items = owned_viewer_windows(viewer)
+    if len(items) <= 1:
+        return
+    widgets = [item.widget for item in items]
+    active = QApplication.activeWindow()
+    try:
+        current_idx = next(i for i, w in enumerate(widgets) if w is active)
+    except StopIteration:
+        current_idx = -1
+    next_idx = (current_idx + 1) % len(widgets)
+    focus_window(widgets[next_idx])
+
+
 def populate_window_menu(menu: QMenu, viewer: QWidget) -> None:
     """Rebuild the image-viewer Window menu."""
     menu.clear()
 
+    cycle_action = menu.addAction("Cycle Windows", lambda: cycle_viewer_windows(viewer))
+    cycle_action.setShortcut(QKeySequence("Ctrl+`"))
+    menu.addSeparator()
     menu.addAction("Bring All to Front", lambda: bring_all_to_front(viewer))
     menu.addAction("Minimize This Viewer", viewer.showMinimized)
     menu.addAction("Minimize Tool Windows", lambda: minimize_tool_windows(viewer))
