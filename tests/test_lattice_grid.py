@@ -14,6 +14,7 @@ from probeflow.analysis.lattice_grid import (
     LatticeGridDisplay,
     RealSpaceCalibration,
     ReciprocalCalibration,
+    _fmt_angle_deg,
     format_real_space_measurements,
     format_reciprocal_measurements,
 )
@@ -552,6 +553,29 @@ class TestEdgeCases:
     def test_show_handles_default(self):
         g = LatticeGrid.make_square(0, 0, 50)
         assert g.show_handles is True
+
+
+# ── _fmt_angle_deg tests ──────────────────────────────────────────────────────
+
+class TestFmtAngleDeg:
+    @pytest.mark.parametrize(
+        "value,expected",
+        [
+            (0.0, "0°"),
+            (90.0, "90°"),          # trailing zeros stripped
+            (90.1, "90.1°"),
+            (123.456, "123.46°"),   # rounded to 2 dp
+            (-45.0, "-45°"),
+            (-0.004, "0°"),         # rounds to -0.00 → "-0" → caught → "0"
+            (-0.5, "-0.5°"),        # real negative, not caught
+            (1e-10, "0°"),          # tiny positive rounds to 0.00 → "0"
+            (360.0, "360°"),
+            (1.0, "1°"),
+            (1.50, "1.5°"),         # one trailing zero stripped
+        ],
+    )
+    def test_format(self, value, expected):
+        assert _fmt_angle_deg(value) == expected
 
 
 # ── LatticeGridDisplay tests ──────────────────────────────────────────────────

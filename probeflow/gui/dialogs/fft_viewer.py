@@ -471,7 +471,13 @@ class FFTViewerDialog(QDialog):
         self._canvas_fft.draw_idle()
 
     def _minimum_fft_spans(self) -> tuple[float, float]:
-        """Return zoom-span floors so trackpad bursts cannot collapse the FFT view."""
+        """Return zoom-span floors so trackpad bursts cannot collapse the FFT view.
+
+        Two floors are taken and the larger is used:
+          • 1e-4 × full span  — absolute safety floor (prevents floating-point collapse)
+          • 4 px / N × full span — keeps at least 4 reciprocal-lattice pixels visible
+            so the user always sees meaningful structure rather than a single point.
+        """
         Ny, Nx = self._arr.shape[:2]
         full_x = abs(float(self._qx[-1]) - float(self._qx[0]))
         full_y = abs(float(self._qy[-1]) - float(self._qy[0]))
@@ -520,6 +526,8 @@ class FFTViewerDialog(QDialog):
             or not self._scroll_has_zoom_modifier(event)
         ):
             return
+        # 0.88 per notch ≈ 12 % zoom step — smoother than the previous 0.65 (35 %)
+        # and closer to native macOS trackpad zoom feel.
         factor = 0.88 if event.step > 0 else 1.0 / 0.88
         self._zoom_by(factor, event.xdata, event.ydata)
 
