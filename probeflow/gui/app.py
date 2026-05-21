@@ -62,6 +62,12 @@ from probeflow.gui.config import (
     load_config,
     save_config,
 )
+from probeflow.gui.desktop_layout import (
+    apply_screen_fraction_geometry,
+    b64_to_qbytearray,
+    qbytearray_to_b64,
+    restore_geometry_or_default,
+)
 from probeflow.gui.styling import (
     THEMES,
     _build_qss,
@@ -103,6 +109,7 @@ class ProbeFlowWindow(QMainWindow):
         self.setWindowTitle("ProbeFlow")
         self.setMinimumSize(1100, 720)
         self.resize(1480, 800)
+        self._show_maximized_on_start = False
 
         self._cfg      = load_config()
         self._dark     = self._cfg.get("dark_mode", True)
@@ -119,6 +126,7 @@ class ProbeFlowWindow(QMainWindow):
 
         self._build_ui()
         self._apply_theme()
+        self._restore_desktop_layout()
 
         # If launched with --open-survey, jump straight into Survey mode with
         # the manifest pre-loaded. Wire the panel's log_message into status bar.
@@ -331,6 +339,10 @@ class ProbeFlowWindow(QMainWindow):
         view_menu = menu_bar.addMenu("View")
         _mode_action(view_menu, "Browse", "browse", "Ctrl+1")
         view_menu.addSeparator()
+        reset_layout_action = QAction("Reset window layout", self)
+        reset_layout_action.triggered.connect(self._reset_window_layout)
+        view_menu.addAction(reset_layout_action)
+        view_menu.addSeparator()
         theme_menu = view_menu.addMenu("Theme")
         for label, dark in (("Dark mode", True), ("Light mode", False)):
             action = QAction(label, self)
@@ -442,6 +454,80 @@ class ProbeFlowWindow(QMainWindow):
             self.LEFT_SIDEBAR_DEFAULT_W + center_default,
             self.RIGHT_INSPECTOR_DEFAULT_W,
         ])
+
+    def _apply_default_metadata_table_columns(self) -> None:
+        table = getattr(getattr(self, "_browse_info", None), "meta_table", None)
+        if table is None:
+            return
+        header = table.horizontalHeader()
+        header.setStretchLastSection(False)
+        header.setMinimumSectionSize(72)
+        header.setSectionResizeMode(0, QHeaderView.Interactive)
+        header.setSectionResizeMode(1, QHeaderView.Stretch)
+        table.setColumnWidth(0, 132)
+
+    def _restore_metadata_table_columns(self, widths: list[int] | None) -> None:
+        if not widths:
+            self._apply_default_metadata_table_columns()
+            return
+        table = getattr(getattr(self, "_browse_info", None), "meta_table", None)
+        if table is None:
+            return
+        self._apply_default_metadata_table_columns()
+        for col, width in enumerate(widths):
+            if col < table.columnCount():
+                table.setColumnWidth(col, max(72, int(width)))
+
+    def _restore_desktop_layout(self) -> None:
+        layout = self._cfg.get("layout", {}).get("main_window", {})
+        restore_geometry_or_default(self, layout.get("geometry"), 0.88)
+        state = layout.get("state")
+        if state:
+            try:
+                self.restoreState(b64_to_qbytearray(state))
+            except Exception:
+                pass
+
+        main_sizes = layout.get("splitter_sizes")
+        if main_sizes and len(main_sizes) == self._splitter.count():
+            self._splitter.setSizes([max(1, int(x)) for x in main_sizes])
+        else:
+            self._apply_default_splitter_sizes()
+
+        browse_sizes = layout.get("browse_splitter_sizes")
+        if browse_sizes and len(browse_sizes) == self._browse_splitter.count():
+            self._browse_splitter.setSizes([max(1, int(x)) for x in browse_sizes])
+
+        self._restore_metadata_table_columns(layout.get("metadata_table_column_widths"))
+        self._show_maximized_on_start = bool(layout.get("was_maximized"))
+
+    def _save_desktop_layout_into(self, cfg: dict) -> None:
+        layout_root = cfg.setdefault("layout", {})
+        layout = layout_root.setdefault("main_window", {})
+        layout["geometry"] = qbytearray_to_b64(self.saveGeometry())
+        layout["state"] = qbytearray_to_b64(self.saveState())
+        layout["was_maximized"] = self.isMaximized()
+        layout["splitter_sizes"] = self._splitter.sizes()
+        layout["browse_splitter_sizes"] = self._browse_splitter.sizes()
+
+        table = getattr(getattr(self, "_browse_info", None), "meta_table", None)
+        if table is not None:
+            layout["metadata_table_column_widths"] = [
+                table.columnWidth(i) for i in range(table.columnCount())
+            ]
+
+    def _reset_window_layout(self) -> None:
+        cfg = load_config()
+        if isinstance(cfg.get("layout"), dict):
+            cfg["layout"].pop("main_window", None)
+            cfg["layout"].pop("image_viewer", None)
+        save_config(cfg)
+        self._cfg = cfg
+        apply_screen_fraction_geometry(self, 0.88)
+        self._apply_default_splitter_sizes()
+        self._apply_default_metadata_table_columns()
+        self._show_maximized_on_start = False
+        self._status_bar.showMessage("Window layout reset.")
 
     def _menu_open_folder(self) -> None:
         self._switch_mode("browse")
@@ -1192,7 +1278,8 @@ class ProbeFlowWindow(QMainWindow):
 
     # ── Close ──────────────────────────────────────────────────────────────────
     def closeEvent(self, event):
-        save_config({
+        cfg = load_config()
+        cfg.update({
             "dark_mode":     self._dark,
             "input_dir":     self._conv_panel.input_entry.text(),
             "output_dir":    self._conv_panel.output_entry.text(),
@@ -1206,6 +1293,8 @@ class ProbeFlowWindow(QMainWindow):
             "gui_font_size":  self._gui_font_size,
             "thumbnail_size": self._browse_tools.size_cb.currentText().lower(),
         })
+        self._save_desktop_layout_into(cfg)
+        save_config(cfg)
         super().closeEvent(event)
 
 
@@ -1214,7 +1303,10 @@ def main(*, open_survey: "Optional[Path]" = None) -> None:
     app    = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("ProbeFlow")
     window = ProbeFlowWindow(open_survey=open_survey)
-    window.show()
+    if getattr(window, "_show_maximized_on_start", False):
+        window.showMaximized()
+    else:
+        window.show()
     sys.exit(app.exec())
 
 

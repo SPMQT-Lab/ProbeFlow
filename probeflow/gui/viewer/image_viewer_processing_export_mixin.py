@@ -7,6 +7,7 @@ from pathlib import Path
 
 from PySide6.QtWidgets import QFileDialog
 
+from probeflow.gui.config import load_config, save_config
 from probeflow.gui.roi_context import active_area_roi_context
 from probeflow.gui.viewer import (
     export_line_profile,
@@ -363,6 +364,12 @@ class ImageViewerProcessingExportMixin:
             self._status_lbl.setText(msg)
 
     def closeEvent(self, event):
+        try:
+            cfg = load_config()
+            self._save_viewer_desktop_layout_into(cfg)
+            save_config(cfg)
+        except Exception:
+            pass
         # Invalidate the in-flight worker token so any pending loaded() signal
         # is dropped rather than delivered to widgets that are being torn down.
         self._token = object()

@@ -43,6 +43,12 @@ from probeflow.gui.config import (
     load_config,
     save_config,
 )
+from probeflow.gui.desktop_layout import (
+    apply_screen_fraction_geometry,
+    b64_to_qbytearray,
+    qbytearray_to_b64,
+    restore_geometry_or_default,
+)
 from probeflow.gui.styling import THEMES, _build_qss, _sep
 from probeflow.gui.utils import _open_url, _format_scan_conditions
 from probeflow.gui.models import PLANE_NAMES, SxmFile
@@ -140,8 +146,9 @@ class ImageViewerDialog(
                  initial_plane_idx: int = 0):
         super().__init__(parent)
         self.setWindowTitle(entry.stem)
-        self.setMinimumSize(960, 680)
-        self.resize(1260, 800)
+        self.setMinimumSize(1100, 720)
+        self.resize(1400, 860)
+        self._show_maximized_on_start = False
 
         self._entries    = entries
         self._colormap   = colormap
@@ -192,6 +199,7 @@ class ImageViewerDialog(
         self._deferred = DeferredPlaneAction()
 
         self._build()
+        self._restore_viewer_desktop_layout()
         self._drs.rangeChanged.connect(self._refresh_display_range)
         self._processing_panel.set_state(self._processing)
         self._set_advanced_processing_state(self._processing)
@@ -216,12 +224,14 @@ class ImageViewerDialog(
         root.addWidget(self._conditions_lbl)
 
         # main splitter: image | right panel
-        splitter = QSplitter(Qt.Horizontal)
+        self._viewer_splitter = QSplitter(Qt.Horizontal)
+        splitter = self._viewer_splitter
         splitter.setChildrenCollapsible(False)
+        splitter.setHandleWidth(5)
 
         # ── Left: scrollable zoom image ────────────────────────────────────────
         left = QWidget()
-        left.setMinimumWidth(500)
+        left.setMinimumWidth(600)
         left_lay = QVBoxLayout(left)
         left_lay.setContentsMargins(0, 0, 0, 0)
         left_lay.setSpacing(4)
@@ -345,7 +355,7 @@ class ImageViewerDialog(
         # ── Right: task-focused sidebar ───────────────────────────────────────
         right = QWidget()
         right.setMinimumWidth(380)
-        right.setMaximumWidth(420)
+        right.setMaximumWidth(460)
         right_lay = QVBoxLayout(right)
         right_lay.setContentsMargins(8, 4, 8, 4)
         right_lay.setSpacing(6)
@@ -815,7 +825,7 @@ class ImageViewerDialog(
         export_lay.addStretch(1)
 
         splitter.addWidget(right)
-        splitter.setSizes([720, 380])
+        splitter.setSizes([900, 400])
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 0)
         splitter.setCollapsible(1, False)
@@ -965,6 +975,10 @@ class ImageViewerDialog(
         native_action = QAction("View at 1:1", self)
         native_action.triggered.connect(self._zoom_lbl.reset_zoom)
         view_menu.addAction(native_action)
+        view_menu.addSeparator()
+        reset_layout_action = QAction("Reset viewer layout", self)
+        reset_layout_action.triggered.connect(self._reset_viewer_window_layout)
+        view_menu.addAction(reset_layout_action)
         view_menu.addSeparator()
         display_panel_action = QAction("Histogram / Contrast", self)
         display_panel_action.triggered.connect(lambda: self._show_sidebar_tab("display"))
@@ -1208,6 +1222,71 @@ class ImageViewerDialog(
         help_menu.insertSeparator(github_action)
 
         self._sync_viewer_menu_actions()
+
+    def _restore_viewer_desktop_layout(self) -> None:
+        if not hasattr(self, "_viewer_splitter"):
+            return
+        cfg = load_config()
+        layout = cfg.get("layout", {}).get("image_viewer", {})
+        restore_geometry_or_default(self, layout.get("geometry"), 0.90)
+        state = layout.get("state")
+        if state and hasattr(self, "_viewer_main"):
+            try:
+                self._viewer_main.restoreState(b64_to_qbytearray(state))
+            except Exception:
+                pass
+
+        sizes = layout.get("splitter_sizes")
+        if sizes and len(sizes) == self._viewer_splitter.count():
+            self._viewer_splitter.setSizes([max(1, int(x)) for x in sizes])
+        else:
+            self._viewer_splitter.setSizes([900, 400])
+
+        tab_key = layout.get("sidebar_tab")
+        if tab_key and hasattr(self, "_sidebar_tabs"):
+            idx = self._sidebar_tab_indices.get(tab_key)
+            if idx is not None:
+                self._sidebar_tabs.setCurrentIndex(idx)
+
+        zoom_mode = layout.get("zoom_mode", "fit")
+        if zoom_mode in {"fit", "one_to_one", "manual"} and hasattr(self, "_zoom_lbl"):
+            self._zoom_lbl._view_scale_mode = zoom_mode
+
+        self._show_maximized_on_start = bool(layout.get("was_maximized"))
+        if self._show_maximized_on_start:
+            self.setWindowState(self.windowState() | Qt.WindowMaximized)
+
+    def _save_viewer_desktop_layout_into(self, cfg: dict) -> None:
+        if not hasattr(self, "_viewer_splitter"):
+            return
+        layout_root = cfg.setdefault("layout", {})
+        layout = layout_root.setdefault("image_viewer", {})
+        layout["geometry"] = qbytearray_to_b64(self.saveGeometry())
+        if hasattr(self, "_viewer_main"):
+            layout["state"] = qbytearray_to_b64(self._viewer_main.saveState())
+        layout["was_maximized"] = self.isMaximized()
+        layout["splitter_sizes"] = self._viewer_splitter.sizes()
+        layout["zoom_mode"] = getattr(getattr(self, "_zoom_lbl", None), "_view_scale_mode", "fit")
+
+        if hasattr(self, "_sidebar_tabs") and hasattr(self, "_sidebar_tab_indices"):
+            current = self._sidebar_tabs.currentIndex()
+            for key, idx in self._sidebar_tab_indices.items():
+                if idx == current:
+                    layout["sidebar_tab"] = key
+                    break
+
+    def _reset_viewer_window_layout(self) -> None:
+        cfg = load_config()
+        if isinstance(cfg.get("layout"), dict):
+            cfg["layout"].pop("image_viewer", None)
+        save_config(cfg)
+        apply_screen_fraction_geometry(self, 0.90)
+        self._viewer_splitter.setSizes([900, 400])
+        self._sidebar_tabs.setCurrentIndex(self._sidebar_tab_indices.get("display", 0))
+        self._zoom_lbl._view_scale_mode = "fit"
+        self._zoom_lbl.fit_to_view()
+        self._show_maximized_on_start = False
+        self._status_lbl.setText("Image viewer layout reset.")
 
     def _add_combo_menu(
         self,
