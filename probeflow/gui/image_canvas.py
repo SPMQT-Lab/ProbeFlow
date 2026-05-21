@@ -184,6 +184,14 @@ class ImageCanvas(QGraphicsView):
 
         self._image_roi_set = None
         self._roi_items: dict[str, QGraphicsItemGroup] = {}
+        # Strong Python refs to PointROIItem siblings stored outside their group.
+        # Because PointROIItem uses ItemIgnoresTransformations it cannot be added
+        # as a child of the QGraphicsItemGroup; instead it is added to the scene
+        # as a sibling and a raw C++ pointer is stored in the group via
+        # group.setData(1, point).  Without a live Python wrapper the C++ object
+        # can be freed while the QVariant still holds its pointer → SIGSEGV when
+        # data(1) is later retrieved.  Keeping refs here prevents that.
+        self._point_items: dict[str, object] = {}
 
         # ── Phase 4b drawing state ────────────────────────────────────────────
         self._tool: str = "pan"
@@ -454,6 +462,7 @@ class ImageCanvas(QGraphicsView):
                 self.scene().removeItem(point)
             self.scene().removeItem(item)
         self._roi_items.clear()
+        self._point_items.clear()
         self._hover_roi_id = None
         self._last_hover_message = None
         if self._image_roi_set is None:
@@ -468,6 +477,7 @@ class ImageCanvas(QGraphicsView):
         point = item.data(1)
         if point is not None:
             self.scene().addItem(point)
+            self._point_items[roi.id] = point  # keep strong Python ref
         self._roi_items[roi.id] = item
 
     def add_roi_item(self, roi) -> None:
@@ -482,6 +492,7 @@ class ImageCanvas(QGraphicsView):
 
     def remove_roi_item(self, roi_id: str) -> None:
         item = self._roi_items.pop(roi_id, None)
+        self._point_items.pop(roi_id, None)  # release strong ref
         if item is not None:
             point = item.data(1)
             if point is not None:

@@ -1640,9 +1640,26 @@ class ImageViewerDialog(
     def _on_preview_bad_lines(self) -> None:
         if self._bad_line_preview_ctrl is None:
             return
+        # Always navigate to the Processing tab so the user can see and
+        # configure the bad-line settings (method, polarity, threshold…).
+        self._show_sidebar_tab("processing")
+        if hasattr(self, "_sidebar_tabs") and hasattr(self, "_processing_panel"):
+            idx = self._sidebar_tab_indices.get("processing")
+            if idx is not None:
+                scroll = self._sidebar_tabs.widget(idx)
+                if hasattr(scroll, "ensureWidgetVisible"):
+                    scroll.ensureWidgetVisible(
+                        self._processing_panel._bad_lines_combo
+                    )
         msg = self._bad_line_preview_ctrl.run()
-        if msg and hasattr(self, "_status_lbl"):
-            self._status_lbl.setText(msg)
+        if hasattr(self, "_status_lbl"):
+            if msg:
+                self._status_lbl.setText(msg)
+            elif self._processing_panel.bad_line_method() is None:
+                self._status_lbl.setText(
+                    "Bad line correction: select a method and polarity in the "
+                    "Processing panel, then click 'Preview detection'."
+                )
 
     def _clear_bad_line_preview(self, summary: str = "Preview: not run") -> None:
         if self._bad_line_preview_ctrl is not None:
