@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -9,6 +10,7 @@ import pytest
 
 from probeflow.io.converters.createc_dat_to_sxm import convert_dat_to_sxm
 from probeflow.io.sxm_io import (
+    _cushion_tail_lens,
     parse_sxm_header,
     read_all_sxm_planes,
     read_sxm_plane,
@@ -110,6 +112,50 @@ class TestReadPlanes:
         bad.write_bytes(b":NANONIS_VERSION:\n2\n:SCANIT_END:\n")
         with pytest.raises(ValueError, match="SCAN_PIXELS"):
             read_sxm_plane(bad, plane_idx=0)
+
+
+def test_read_all_sxm_planes_warns_on_truncated_payload(tmp_path):
+    """A payload shorter than DATA_INFO promises must emit a UserWarning.
+
+    Constructs a minimal SXM whose DATA_INFO header lists two channels but
+    whose binary payload only contains one plane's worth of bytes. The reader
+    must warn the caller rather than silently returning a truncated planes
+    list.
+    """
+    post_len, pre_len = _cushion_tail_lens()
+    header = (
+        b":NANONIS_VERSION:\n2\n"
+        b":SCAN_PIXELS:\n4 4\n"
+        b":SCAN_RANGE:\n1.0E-9 1.0E-9\n"
+        b":SCAN_DIR:\ndown\n"
+        b":DATA_INFO:\n"
+        b"\tChannel\tName\tUnit\tDirection\tCalibration\tOffset\n"
+        b"\t14\tZ\tm\tforward\t1.0E-9\t0.0\n"
+        b"\t0\tCurrent\tA\tforward\t1.0E-9\t0.0\n"
+        b":SCANIT_END:\n"
+    )
+    cushion = b"\x00" * (post_len + pre_len)
+    # DATA_INFO promises 2 planes; ship only 1 (4*4*4 = 64 bytes).
+    payload_one_plane = np.ones((4, 4), dtype=">f4").tobytes()
+
+    truncated = tmp_path / "truncated.sxm"
+    truncated.write_bytes(header + cushion + payload_one_plane)
+
+    # Sanity-check the construction before asserting the warning behaviour.
+    hdr = parse_sxm_header(truncated)
+    assert len(sxm_data_info(hdr)) == 2
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        hdr_out, planes = read_all_sxm_planes(truncated)
+
+    user_warnings = [w for w in caught if issubclass(w.category, UserWarning)]
+    assert user_warnings, "expected a UserWarning for truncated SXM payload"
+    msg = str(user_warnings[0].message)
+    assert "incompletely written" in msg
+    assert "truncated.sxm" in msg
+    assert len(planes) == 1
+    assert len(planes) < len(sxm_data_info(hdr_out))
 
 
 class TestRoundTrip:
