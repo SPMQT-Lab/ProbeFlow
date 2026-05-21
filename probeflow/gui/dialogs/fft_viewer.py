@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import weakref
+
 import numpy as np
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
@@ -780,7 +782,17 @@ class FFTViewerDialog(QDialog):
         )
         self._fft_lattice_overlay = overlay
         if hasattr(overlay, "set_drag_state_callback"):
-            overlay.set_drag_state_callback(self._on_fft_lattice_drag_state_changed)
+            # Use WeakMethod so the overlay does not prevent this dialog from being
+            # garbage-collected after it is closed. The overlay's callback wrapper
+            # must handle the case where the weak reference has expired (returns None).
+            _cb_ref = weakref.WeakMethod(self._on_fft_lattice_drag_state_changed)
+
+            def _drag_state_cb(dragging: bool, _ref: weakref.ref = _cb_ref) -> None:
+                cb = _ref()
+                if cb is not None:
+                    cb(dragging)
+
+            overlay.set_drag_state_callback(_drag_state_cb)
         dock = QDockWidget("Reciprocal Grid", self)
         dock.setWidget(panel)
         dock.setFloating(True)
