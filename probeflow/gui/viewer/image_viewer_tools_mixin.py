@@ -272,6 +272,7 @@ class ImageViewerToolsMixin:
             parent=self,
         )
         dlg.show()
+        self._status_lbl.setText("FFT viewer opened.")
 
     def _on_open_feature_lattice(self) -> None:
         item = getattr(self, "_lattice_grid_item", None)

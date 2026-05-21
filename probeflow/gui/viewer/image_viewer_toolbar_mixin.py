@@ -25,6 +25,12 @@ class ImageViewerToolbarMixin:
         dlg.raise_()
         dlg.activateWindow()
 
+    def _show_image_viewer_shortcuts(self) -> None:
+        from probeflow.gui.viewer.onboarding import ImageViewerShortcutsDialog
+
+        dlg = ImageViewerShortcutsDialog(self)
+        dlg.exec()
+
     def _sync_viewer_menu_actions(self) -> None:
         if hasattr(self, "_viewer_processing_actions"):
             for key, value in self._viewer_processing_actions.items():
@@ -85,10 +91,30 @@ class ImageViewerToolbarMixin:
 
         if hasattr(self, "_quick_toolbar"):
             is_line = bool(self._active_line_roi_id())
-            self._quick_toolbar.set_action_enabled("line_periodicity", is_line)
-            self._quick_toolbar.set_action_enabled("line_profile", is_line)
-            self._quick_toolbar.set_action_enabled("mask_selection", is_area)
-            self._quick_toolbar.set_action_enabled("invert_selection", is_area)
+            self._quick_toolbar.set_action_enabled(
+                "line_periodicity",
+                is_line,
+                enabled_tip="Estimate periodicity from the active line ROI.",
+                disabled_tip="Draw or select a line ROI to estimate periodicity.",
+            )
+            self._quick_toolbar.set_action_enabled(
+                "line_profile",
+                is_line,
+                enabled_tip="Show a line profile for the active line ROI.",
+                disabled_tip="Draw or select a line ROI to show a line profile.",
+            )
+            self._quick_toolbar.set_action_enabled(
+                "mask_selection",
+                is_area,
+                enabled_tip="Use the active area ROI as a processing mask.",
+                disabled_tip="Draw or select an area ROI to enable mask-based processing.",
+            )
+            self._quick_toolbar.set_action_enabled(
+                "invert_selection",
+                is_area,
+                enabled_tip="Invert the active area ROI.",
+                disabled_tip="Draw or select an area ROI to invert the selection.",
+            )
 
     def _set_selection_tool(self, kind: str) -> None:
         """Compat shim: delegates to _set_drawing_tool, mapping 'none' → 'pan'."""

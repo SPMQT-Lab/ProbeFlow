@@ -112,11 +112,25 @@ class ImageQuickToolbar(QWidget):
             btn.setChecked(k == key)
             btn.blockSignals(False)
 
-    def set_action_enabled(self, key: str, enabled: bool) -> None:
+    def set_action_enabled(
+        self,
+        key: str,
+        enabled: bool,
+        *,
+        enabled_tip: str | None = None,
+        disabled_tip: str | None = None,
+    ) -> None:
         """Enable or disable an action button by its key."""
         btn = self._action_btns.get(key)
-        if btn is not None:
-            btn.setEnabled(enabled)
+        if btn is None:
+            return
+
+        btn.setEnabled(enabled)
+
+        if enabled and enabled_tip:
+            btn.setToolTip(enabled_tip)
+        elif not enabled and disabled_tip:
+            btn.setToolTip(disabled_tip)
 
     # ── build ─────────────────────────────────────────────────────────────────
 

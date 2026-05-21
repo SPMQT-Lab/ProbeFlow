@@ -86,12 +86,13 @@ def _build_line(roi: "ROI") -> QGraphicsLineItem:
 
 def _make_endpoint_handle(x: float, y: float) -> QGraphicsEllipseItem:
     """Fixed-screen-size filled circle for dragging a line ROI endpoint."""
-    h = QGraphicsEllipseItem(-5, -5, 10, 10)
+    h = QGraphicsEllipseItem(-6, -6, 12, 12)
     h.setPos(QPointF(x, y))
-    h.setPen(_PEN_HANDLE)
-    h.setBrush(_BRUSH_HANDLE)
+    h.setPen(QPen(QColor("#ffffff"), 1.5))
+    h.setBrush(QBrush(QColor("#22D3EE")))
     h.setFlag(QGraphicsItem.ItemIgnoresTransformations, True)
-    h.setZValue(12)
+    h.setZValue(14)
+    h.setToolTip("Drag to edit line endpoint")
     return h
 
 
@@ -137,6 +138,16 @@ def _make_label(roi: "ROI", shape_item: QGraphicsItem) -> QGraphicsTextItem:
     return label
 
 
+def _tooltip_for_roi(roi: "ROI") -> str:
+    if roi.kind == "line":
+        return "Line ROI: click to select, drag active line or endpoints, right-click for profile/actions."
+    if roi.kind in {"rectangle", "ellipse", "polygon", "freehand", "multipolygon"}:
+        return "Area ROI: click to select, drag active ROI, right-click for mask/measure/actions."
+    if roi.kind == "point":
+        return "Point ROI: click to select, right-click for point actions."
+    return "ROI: click to select, right-click for actions."
+
+
 # ── Style helpers ─────────────────────────────────────────────────────────────
 
 def _apply_style(shape_item: QGraphicsItem, active: bool) -> None:
@@ -161,6 +172,18 @@ def _apply_style(shape_item: QGraphicsItem, active: bool) -> None:
     elif isinstance(shape_item, QGraphicsPathItem):
         shape_item.setPen(pen)
         shape_item.setBrush(brush)
+
+
+def _update_label_style(label: QGraphicsTextItem, active: bool, hover: bool) -> None:
+    font = label.font()
+    font.setBold(active)
+    label.setFont(font)
+    if active:
+        label.setDefaultTextColor(QColor("#22D3EE"))
+    elif hover:
+        label.setDefaultTextColor(QColor("#f9e2af"))
+    else:
+        label.setDefaultTextColor(_LABEL_COLOR)
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -190,10 +213,16 @@ def make_roi_item(roi: "ROI", active: bool = False) -> QGraphicsItemGroup:
 
     label = _make_label(roi, shape)
     label.setZValue(11)
+    _update_label_style(label, active, hover=False)
+
+    tip = _tooltip_for_roi(roi)
+    shape.setToolTip(tip)
+    label.setToolTip(tip)
 
     group = QGraphicsItemGroup()
     group.setData(0, roi.id)
     group.setZValue(10)
+    group.setToolTip(tip)
 
     if isinstance(shape, PointROIItem):
         # PointROIItem manages its own scene pos; don't add to group directly
@@ -202,6 +231,7 @@ def make_roi_item(roi: "ROI", active: bool = False) -> QGraphicsItemGroup:
         # Keep shape outside the group so ItemIgnoresTransformations works.
         # We attach it as a sibling and link via group data.
         group.setData(1, shape)
+        shape.setToolTip(tip)
     else:
         group.addToGroup(shape)
         group.addToGroup(label)
@@ -235,6 +265,9 @@ def update_roi_item_style(item: QGraphicsItemGroup, active: bool,
     point_item = item.data(1)
     if point_item is not None and isinstance(point_item, PointROIItem):
         point_item.set_active(active or hover)
+        for child in item.childItems():
+            if isinstance(child, QGraphicsTextItem):
+                _update_label_style(child, active, hover)
         return
 
     h1, h2 = item.data(2), item.data(3)
@@ -242,6 +275,7 @@ def update_roi_item_style(item: QGraphicsItemGroup, active: bool,
 
     for child in item.childItems():
         if isinstance(child, QGraphicsTextItem):
+            _update_label_style(child, active, hover)
             continue
         if child is h1 or child is h2:
             continue

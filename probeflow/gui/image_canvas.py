@@ -51,6 +51,7 @@ class ImageCanvas(QGraphicsView):
     pixmap_resized            = Signal(int)
     context_menu_requested    = Signal(object)
     pixel_hovered             = Signal(int, int, object)
+    object_hovered            = Signal(str, str)      # (kind, message)
 
     # Phase 4b signals
     roi_created               = Signal(object)        # new ROI object
@@ -209,6 +210,7 @@ class ImageCanvas(QGraphicsView):
 
         # Hover state
         self._hover_roi_id: Optional[str] = None
+        self._last_hover_message: tuple[str, str] | None = None
 
     # ── public image API ─────────────────────────────────────────────────────
 
@@ -453,6 +455,7 @@ class ImageCanvas(QGraphicsView):
             self.scene().removeItem(item)
         self._roi_items.clear()
         self._hover_roi_id = None
+        self._last_hover_message = None
         if self._image_roi_set is None:
             return
         active_id = self._image_roi_set.active_roi_id
@@ -515,6 +518,7 @@ class ImageCanvas(QGraphicsView):
             self._cancel_drawing()
             self._tool = kind
             self._selection_tool = kind
+            self._last_hover_message = None
             self.setCursor(self._cursor_for_tool(kind))
             self.tool_changed.emit(kind)
 
@@ -527,6 +531,7 @@ class ImageCanvas(QGraphicsView):
             self._cancel_drawing()
             self._tool = "pan"
             self._selection_tool = "pan"
+            self._last_hover_message = None
             self.setCursor(Qt.ArrowCursor)
             self.tool_changed.emit("pan")
 
@@ -745,6 +750,7 @@ class ImageCanvas(QGraphicsView):
         self._cancel_drawing()
         self._tool = "pan"
         self._selection_tool = "pan"
+        self._last_hover_message = None
         self.setCursor(Qt.ArrowCursor)
         self.tool_changed.emit("pan")
         self.roi_created.emit(roi)
@@ -760,6 +766,7 @@ class ImageCanvas(QGraphicsView):
             # Too few points — cancel silently
             self._tool = "pan"
             self._selection_tool = "pan"
+            self._last_hover_message = None
             self.setCursor(Qt.ArrowCursor)
             self.tool_changed.emit("pan")
 
@@ -787,6 +794,79 @@ class ImageCanvas(QGraphicsView):
         # Apply hover highlight (if not the active ROI)
         if roi_id and roi_id in self._roi_items and roi_id != active_id:
             update_roi_item_style(self._roi_items[roi_id], active=False, hover=True)
+
+    def _hover_message_at(self, view_pos: QPoint) -> tuple[str, str]:
+        roi_id = self._roi_at_pos(view_pos)
+        if roi_id and self._image_roi_set:
+            roi = self._image_roi_set.get(roi_id)
+            if roi is not None:
+                if roi.kind == "line":
+                    return (
+                        "roi",
+                        "Line ROI: click to select, drag active line or endpoints, right-click for profile/actions.",
+                    )
+                if roi.kind in {"rectangle", "ellipse", "polygon", "freehand", "multipolygon"}:
+                    return (
+                        "roi",
+                        "Area ROI: click to select, drag active ROI, right-click for mask/measure/actions.",
+                    )
+                if roi.kind == "point":
+                    return (
+                        "roi",
+                        "Point ROI: click to select, right-click for point actions.",
+                    )
+                return ("roi", "ROI: click to select, right-click for actions.")
+
+        if self._show_markers and self._marker_items:
+            for item in self._marker_items:
+                sp = self.mapFromScene(item.pos())
+                if abs(sp.x() - view_pos.x()) <= 10 and abs(sp.y() - view_pos.y()) <= 10:
+                    return ("marker", "Spectroscopy marker: click to open linked spectrum.")
+
+        return ("image", "Image: drag to pan, right-click for image actions, Ctrl+scroll to zoom.")
+
+    def _emit_hover_message(self, view_pos: QPoint) -> None:
+        message = self._hover_message_at(view_pos)
+        if message == self._last_hover_message:
+            return
+        self._last_hover_message = message
+        self.object_hovered.emit(*message)
+
+    def _active_line_endpoint_hovered(self, view_pos: QPoint) -> bool:
+        active_id = self._image_roi_set.active_roi_id if self._image_roi_set else None
+        if not active_id or not self._image_roi_set:
+            return False
+        roi = self._image_roi_set.get(active_id)
+        if roi is None or roi.kind != "line":
+            return False
+        g = roi.geometry
+        for ex, ey in ((g["x1"], g["y1"]), (g["x2"], g["y2"])):
+            vp = self.mapFromScene(QPointF(float(ex), float(ey)))
+            if abs(vp.x() - view_pos.x()) <= 12 and abs(vp.y() - view_pos.y()) <= 12:
+                return True
+        return False
+
+    def _update_cursor_for_hover(self, view_pos: QPoint) -> None:
+        if self._tool != "pan":
+            self.setCursor(self._cursor_for_tool(self._tool))
+            return
+
+        if self._ep_roi_id is not None or self._move_roi_id is not None:
+            return
+
+        if self._active_line_endpoint_hovered(view_pos):
+            self.setCursor(Qt.CrossCursor)
+            return
+
+        roi_id = self._roi_at_pos(view_pos)
+        active_id = self._image_roi_set.active_roi_id if self._image_roi_set else None
+
+        if roi_id is None:
+            self.setCursor(Qt.ArrowCursor)
+        elif roi_id == active_id:
+            self.setCursor(Qt.SizeAllCursor)
+        else:
+            self.setCursor(Qt.PointingHandCursor)
 
     # ── mouse events ─────────────────────────────────────────────────────────
 
@@ -1005,6 +1085,10 @@ class ImageCanvas(QGraphicsView):
         # ── hover highlight (pan mode, no drag) ───────────────────────────────
         if self._tool == "pan" and not (event.buttons() & Qt.LeftButton):
             self._update_hover(event.pos())
+            self._update_cursor_for_hover(event.pos())
+
+        if self._tool == "pan":
+            self._emit_hover_message(event.pos())
 
         # ── pixel coordinate readout ──────────────────────────────────────────
         raw_pos = self.mapToScene(event.pos())
@@ -1161,6 +1245,7 @@ class ImageCanvas(QGraphicsView):
             else:
                 self._tool = "pan"
                 self._selection_tool = "pan"
+                self._last_hover_message = None
                 self.setCursor(Qt.ArrowCursor)
                 self.tool_changed.emit("pan")
             event.accept()

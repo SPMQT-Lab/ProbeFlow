@@ -57,10 +57,12 @@ class ImageViewerDisplayMixin:
         self._clip_low  = 1.0
         self._clip_high = 99.0
         self._drs.reset()
+        self._status_lbl.setText("Auto contrast applied.")
 
     def _on_reset_display(self):
         """Reset display range to default percentile state."""
         self._drs.reset()
+        self._status_lbl.setText("Display range reset.")
 
     # ── Per-image colormap ────────────────────────────────────────────────────
     def _on_viewer_colormap_changed(self, label: str) -> None:

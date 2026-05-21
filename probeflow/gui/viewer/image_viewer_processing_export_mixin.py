@@ -5,8 +5,7 @@ from __future__ import annotations
 import copy
 from pathlib import Path
 
-from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QFileDialog, QMenu
+from PySide6.QtWidgets import QFileDialog
 
 from probeflow.gui.roi_context import active_area_roi_context
 from probeflow.gui.viewer import (
@@ -301,41 +300,9 @@ class ImageViewerProcessingExportMixin:
         self.accept()
 
     def _on_image_context_menu(self, pos):
-        menu = QMenu(self)
-        a_feat = QAction("→ Feature Counting", self)
-        a_feat.setToolTip("Send processed image to Feature Counting tab")
-        a_feat.triggered.connect(self._on_send_to_features)
-        menu.addAction(a_feat)
-        a_tv = QAction("→ TV Denoising", self)
-        a_tv.setToolTip("Send processed image to TV Denoising tab")
-        a_tv.triggered.connect(self._on_send_to_tv)
-        menu.addAction(a_tv)
-        menu.addSeparator()
-        from PySide6.QtWidgets import QMenu as _QMenu
-        transform_menu = _QMenu("Transform", self)
-        for label, op in [
-            ("Flip Horizontal", "flip_horizontal"),
-            ("Flip Vertical",   "flip_vertical"),
-            ("Rotate 90° CW",   "rotate_90_cw"),
-            ("Rotate 180°",     "rotate_180"),
-            ("Rotate 270° CW",  "rotate_270_cw"),
-        ]:
-            act = transform_menu.addAction(label)
-            act.triggered.connect(
-                (lambda _op=op: lambda: self._on_geometric_op(_op))()
-            )
-        arb_act = transform_menu.addAction("Rotate Arbitrary…")
-        arb_act.triggered.connect(self._on_rotate_arbitrary)
-        menu.addMenu(transform_menu)
-        menu.addSeparator()
-        a_png = QAction("⬇ Save PNG copy…", self)
-        a_png.triggered.connect(self._on_save_png)
-        menu.addAction(a_png)
-        prof = self._line_profile_panel.profile_data()
-        if prof is not None:
-            a_csv = QAction("Export line profile as CSV…", self)
-            a_csv.triggered.connect(self._on_export_line_profile_csv)
-            menu.addAction(a_csv)
+        from probeflow.gui.viewer.context_menus import build_blank_image_context_menu
+
+        menu = build_blank_image_context_menu(self)
         menu.exec(pos)
 
     def _on_geometric_op(self, op_name: str) -> None:

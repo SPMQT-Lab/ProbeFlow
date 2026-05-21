@@ -89,11 +89,15 @@ class ImageViewerRoiMixin:
             self._image_roi_set, roi,
             self._on_image_roi_set_changed, self._set_drawing_tool,
         )
+        if hasattr(self, "_status_lbl"):
+            self._status_lbl.setText(f"Created {roi.kind} ROI '{roi.name}'.")
 
     def _on_canvas_roi_move(self, roi_id: str, dx: int, dy: int) -> None:
         roi_canvas_moved(
             self._image_roi_set, roi_id, dx, dy, self._on_image_roi_set_changed,
         )
+        if hasattr(self, "_status_lbl"):
+            self._status_lbl.setText(f"Moved ROI by {dx} px, {dy} px.")
 
     def _on_canvas_tool_changed(self, kind: str) -> None:
         """Canvas emitted tool_changed (e.g. after Escape or drawing completion)."""
@@ -105,68 +109,45 @@ class ImageViewerRoiMixin:
             self._status_lbl.setText(_TOOL_HINTS.get(kind, ""))
         self._sync_viewer_menu_actions()
 
+    def _on_canvas_object_hovered(self, kind: str, message: str) -> None:
+        if not hasattr(self, "_status_lbl"):
+            return
+
+        # Drawing tools keep their mode hint; hover hints are for pan-mode discovery.
+        if self._zoom_lbl.tool() != "pan":
+            return
+
+        self._status_lbl.setText(message)
+
     def _on_roi_canvas_context_menu(self, roi_id: str, global_pos) -> None:
         """Right-click on a ROI in the canvas — show a small ROI action menu."""
-        from PySide6.QtWidgets import QMenu
-        roi_set = self._image_roi_set
-        roi = roi_set.get(roi_id) if roi_set else None
-        if roi is None:
-            return
-        is_area = roi.kind in AREA_ROI_KINDS
-        is_line = roi.kind == "line"
-        menu = QMenu(self)
-        act_active = menu.addAction("Set Active")
-        act_active.triggered.connect(lambda: self._set_active_image_roi(roi_id))
-        act_rename = menu.addAction("Rename…")
-        act_rename.triggered.connect(lambda: self._rename_image_roi(roi_id))
-        act_delete = menu.addAction("Delete")
-        act_delete.triggered.connect(lambda: self._delete_image_roi(roi_id))
-        act_invert = menu.addAction("Invert")
-        act_invert.setEnabled(is_area)
-        act_invert.triggered.connect(lambda: self._invert_image_roi(roi_id))
-        menu.addSeparator()
-        act_stm_bg = menu.addAction("STM Background fit from ROI...")
-        act_stm_bg.setEnabled(is_area)
-        act_stm_bg.triggered.connect(lambda: self._open_stm_background_for_roi(roi_id))
-        act_fft = menu.addAction("FFT this region")
-        act_fft.setEnabled(is_area)
-        act_fft.triggered.connect(lambda: self._on_roi_fft(roi_id))
-        act_hist = menu.addAction("Histogram of this region")
-        act_hist.setEnabled(is_area)
-        act_hist.triggered.connect(lambda: self._on_roi_histogram(roi_id))
-        act_stats = menu.addAction("Add ROI statistics to measurements")
-        act_stats.setEnabled(is_area)
-        act_stats.triggered.connect(
-            lambda: self._image_measurements.add_roi_stats_measurement(roi_id)
-        )
-        act_maxima = menu.addAction("Detect maxima in this region")
-        act_maxima.setEnabled(is_area)
-        act_maxima.triggered.connect(
-            lambda: self._image_measurements.detect_feature_maxima_for_roi(roi_id)
-        )
-        act_profile = menu.addAction("Line profile")
-        act_profile.setEnabled(is_line)
-        act_profile.triggered.connect(lambda: self._on_roi_line_profile(roi_id))
-        act_profile_measure = menu.addAction("Add line profile measurement")
-        act_profile_measure.setEnabled(is_line)
-        act_profile_measure.triggered.connect(
-            lambda: self._image_measurements.add_line_profile_measurement_for_roi(roi_id)
-        )
+        from probeflow.gui.viewer.context_menus import build_roi_context_menu
+
+        menu = build_roi_context_menu(self, roi_id)
         menu.exec(global_pos)
 
     # ── ROI helper actions ────────────────────────────────────────────────────
 
     def _set_active_image_roi(self, roi_id: str) -> None:
         activate_roi(self._image_roi_set, roi_id, self._on_image_roi_set_changed)
+        roi = self._image_roi_set.get(roi_id) if self._image_roi_set else None
+        if roi is not None and hasattr(self, "_status_lbl"):
+            self._status_lbl.setText(f"Active ROI set to '{roi.name}'.")
 
     def _rename_image_roi(self, roi_id: str) -> None:
         rename_roi(self._image_roi_set, roi_id, self._on_image_roi_set_changed, parent=self)
 
     def _delete_image_roi(self, roi_id: str) -> None:
+        roi = self._image_roi_set.get(roi_id) if self._image_roi_set else None
         delete_roi(self._image_roi_set, roi_id, self._on_image_roi_set_changed)
+        if roi is not None and hasattr(self, "_status_lbl"):
+            self._status_lbl.setText(f"Deleted ROI '{roi.name}'.")
 
     def _delete_active_image_roi(self) -> None:
+        roi = self._active_image_roi()
         delete_active_roi(self._image_roi_set, self._on_image_roi_set_changed)
+        if roi is not None and hasattr(self, "_status_lbl"):
+            self._status_lbl.setText(f"Deleted ROI '{roi.name}'.")
 
     def _clear_all_image_marks(self) -> None:
         delete_all_rois(self._image_roi_set, self._on_image_roi_set_changed)
@@ -174,6 +155,8 @@ class ImageViewerRoiMixin:
             scene = self._zoom_lbl.scene()
             self._angle_overlay.remove_from_scene(scene)
             self._angle_overlay = None
+        if hasattr(self, "_status_lbl"):
+            self._status_lbl.setText("Cleared ROIs and overlays.")
 
     def _to_dock_result(self, legacy_r, measurement_id: str):
         """Convert a legacy MeasurementResult to the newer dock format."""
@@ -196,10 +179,13 @@ class ImageViewerRoiMixin:
         self._measurement_dock.raise_()
 
     def _invert_image_roi(self, roi_id: str) -> None:
+        roi = self._image_roi_set.get(roi_id) if self._image_roi_set else None
         invert_roi(
             self._image_roi_set, roi_id,
             self._current_array_shape(), self._on_image_roi_set_changed,
         )
+        if roi is not None and hasattr(self, "_status_lbl"):
+            self._status_lbl.setText(f"Inverted ROI '{roi.name}'.")
 
     def _invert_active_image_roi(self) -> None:
         had_area = (
@@ -226,12 +212,16 @@ class ImageViewerRoiMixin:
         if roi is None or self._display_arr is None:
             return
         show_roi_fft(roi, self._display_arr, parent=self)
+        if hasattr(self, "_status_lbl"):
+            self._status_lbl.setText(f"FFT opened for ROI '{roi.name}'.")
 
     def _on_roi_histogram(self, roi_id: str) -> None:
         roi = self._image_roi_set.get(roi_id) if self._image_roi_set else None
         if roi is None or self._display_arr is None:
             return
         show_roi_histogram(roi, self._display_arr, self._channel_unit, parent=self)
+        if hasattr(self, "_status_lbl"):
+            self._status_lbl.setText(f"Histogram opened for ROI '{roi.name}'.")
 
     def _on_roi_line_profile(self, roi_id: str) -> None:
         roi = self._image_roi_set.get(roi_id) if self._image_roi_set else None
@@ -245,6 +235,8 @@ class ImageViewerRoiMixin:
             self._line_profile_panel,
             self._t,
         )
+        if hasattr(self, "_status_lbl"):
+            self._status_lbl.setText(f"Line profile shown for ROI '{roi.name}'.")
 
     def _on_line_roi_preview(
         self, roi_id: str, x1: float, y1: float, x2: float, y2: float,
@@ -283,23 +275,35 @@ class ImageViewerRoiMixin:
             self._image_roi_set, roi_id, width,
             self._on_image_roi_set_changed,
         )
+        if hasattr(self, "_status_lbl"):
+            self._status_lbl.setText(f"Line ROI width set to {width} px.")
 
     def _on_canvas_roi_activate(self, roi_id: str) -> None:
         if self._image_roi_set is None:
             return
         self._image_roi_set.set_active(roi_id)
         self._on_image_roi_set_changed()
+        roi = self._image_roi_set.get(roi_id)
+        if roi is not None and hasattr(self, "_status_lbl"):
+            self._status_lbl.setText(f"Active ROI set to '{roi.name}'.")
 
     def _on_canvas_roi_delete(self, roi_id: str) -> None:
         if self._image_roi_set is None:
             return
+        roi = self._image_roi_set.get(roi_id)
         self._image_roi_set.remove(roi_id)
         self._on_image_roi_set_changed()
+        if roi is not None and hasattr(self, "_status_lbl"):
+            self._status_lbl.setText(f"Deleted ROI '{roi.name}'.")
 
     def _on_canvas_roi_copy(self, roi_id: str) -> None:
         roi = self._image_roi_set.get(roi_id) if self._image_roi_set else None
         if roi is not None:
             self._copy_roi_buffer = roi
+            if hasattr(self, "_status_lbl"):
+                self._status_lbl.setText(
+                    "ROI copied. Press Ctrl+V to paste a shifted copy."
+                )
 
     def _on_canvas_roi_paste(self) -> None:
         roi = self._copy_roi_buffer
@@ -315,6 +319,94 @@ class ImageViewerRoiMixin:
         self._image_roi_set.add(pasted)
         self._image_roi_set.set_active(pasted.id)
         self._on_image_roi_set_changed()
+        if hasattr(self, "_status_lbl"):
+            self._status_lbl.setText(f"Pasted ROI copy '{pasted.name}'.")
+
+    def _duplicate_image_roi(self, roi_id: str) -> None:
+        roi = self._image_roi_set.get(roi_id) if self._image_roi_set else None
+        if roi is None:
+            return
+
+        from probeflow.core.roi import ROI as _ROI, translate as _translate
+
+        offset_roi = _translate(roi, 10.0, 10.0)
+        duplicate = _ROI.new(
+            offset_roi.kind,
+            offset_roi.geometry,
+            name=f"{roi.name}_copy",
+        )
+        self._image_roi_set.add(duplicate)
+        self._image_roi_set.set_active(duplicate.id)
+        self._on_image_roi_set_changed()
+
+        if hasattr(self, "_status_lbl"):
+            self._status_lbl.setText(f"Duplicated ROI '{roi.name}'.")
+
+    def _set_roi_filter_scope(self, roi_id: str) -> None:
+        roi = self._image_roi_set.get(roi_id) if self._image_roi_set else None
+        if roi is None or roi.kind not in AREA_ROI_KINDS:
+            return
+        self._image_roi_set.set_active(roi_id)
+        self._scope_cb.setCurrentText("ROI filters only")
+        self._show_sidebar_tab("processing")
+        self._on_image_roi_set_changed()
+        if hasattr(self, "_status_lbl"):
+            self._status_lbl.setText(
+                f"ROI filter scope set to '{roi.name}'. Local filters will apply inside this ROI."
+            )
+
+    def _copy_point_roi_coordinates(self, roi_id: str) -> None:
+        roi = self._image_roi_set.get(roi_id) if self._image_roi_set else None
+        if roi is None or roi.kind != "point":
+            return
+
+        from PySide6.QtWidgets import QApplication
+
+        x = float(roi.geometry["x"])
+        y = float(roi.geometry["y"])
+        text = f"{x:.6g}, {y:.6g}"
+        QApplication.clipboard().setText(text)
+
+        if hasattr(self, "_status_lbl"):
+            self._status_lbl.setText(f"Copied point coordinates: {text}")
+
+    def _find_periodicity_for_roi(self, roi_id: str) -> None:
+        if self._image_roi_set is None:
+            return
+        roi = self._image_roi_set.get(roi_id)
+        if roi is None or roi.kind != "line":
+            return
+        self._image_roi_set.set_active(roi_id)
+        self._on_image_roi_set_changed()
+        self._image_measurements.find_periodicity_for_active_line_roi()
+
+    def _set_line_roi_width_dialog(self, roi_id: str) -> None:
+        roi = self._image_roi_set.get(roi_id) if self._image_roi_set else None
+        if roi is None or roi.kind != "line":
+            return
+
+        from PySide6.QtWidgets import QInputDialog
+
+        current = int(roi.geometry.get("width", 1))
+        width, ok = QInputDialog.getInt(
+            self,
+            "Set line width",
+            "Line width (pixels):",
+            current,
+            1,
+            99,
+            1,
+        )
+        if not ok:
+            return
+        roi_line_set_width(
+            self._image_roi_set,
+            roi_id,
+            width,
+            self._on_image_roi_set_changed,
+        )
+        if hasattr(self, "_status_lbl"):
+            self._status_lbl.setText(f"Line ROI width set to {width} px.")
 
     def _on_map_spectra_here(self):
         """Open the per-image spec→this-image mapping dialog."""

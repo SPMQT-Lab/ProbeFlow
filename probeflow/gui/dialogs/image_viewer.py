@@ -303,6 +303,11 @@ class ImageViewerDialog(
         zoom_hint.setFont(QFont("Helvetica", 8))
         toolbar.addWidget(zoom_hint)
         toolbar.addStretch()
+        help_btn = QPushButton("?")
+        help_btn.setFixedSize(24, 24)
+        help_btn.setToolTip("Show image viewer shortcuts")
+        help_btn.clicked.connect(self._show_image_viewer_shortcuts)
+        toolbar.addWidget(help_btn)
         left_lay.addLayout(toolbar)
 
         from probeflow.gui.image_quick_toolbar import ImageQuickToolbar
@@ -681,6 +686,7 @@ class ImageViewerDialog(
         self._zoom_lbl.pixmap_resized.connect(self._on_pixmap_resized)
         self._zoom_lbl.context_menu_requested.connect(self._on_image_context_menu)
         self._zoom_lbl.pixel_hovered.connect(self._on_pixel_hovered)
+        self._zoom_lbl.object_hovered.connect(self._on_canvas_object_hovered)
         self._zoom_lbl.roi_created.connect(self._on_canvas_roi_created)
         self._zoom_lbl.roi_move_requested.connect(self._on_canvas_roi_move)
         self._zoom_lbl.roi_line_preview.connect(self._on_line_roi_preview)
@@ -799,6 +805,9 @@ class ImageViewerDialog(
         self._status_lbl = QLabel("")
         self._status_lbl.setFont(QFont("Helvetica", 8))
         self._status_lbl.setWordWrap(True)
+        self._status_lbl.setText(
+            "Tip: click ROIs to select them. Right-click the image or an ROI for actions."
+        )
         right_lay.addWidget(self._status_lbl)
 
         display_lay.addStretch(1)
@@ -1183,6 +1192,10 @@ class ImageViewerDialog(
         export_menu.addAction(save_provenance_action)
 
         help_menu = menu_bar.addMenu("Help")
+        shortcuts_action = QAction("Image viewer shortcuts", self)
+        shortcuts_action.triggered.connect(self._show_image_viewer_shortcuts)
+        help_menu.addAction(shortcuts_action)
+        help_menu.addSeparator()
         github_action = QAction("GitHub", self)
         github_action.triggered.connect(lambda: _open_url(GITHUB_URL))
         help_menu.addAction(github_action)
