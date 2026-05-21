@@ -38,8 +38,11 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
         ),
         equations=(
             "MADN(v) = 1.4826 * median(|v - median(v)|)\n"
-            "b_i[j] = median of nearby valid rows at column j\n"
+            "b_i[j] = per-column median over nearby finite row samples\n"
             "r_i[j] = z_i[j] - b_i[j]\n\n"
+            "segment convention:\n"
+            "  S = [j0, j1) spans columns k where j0 <= k < j1\n"
+            "  reject S when length(S) < min_segment_length_px\n\n"
             "step mode:\n"
             "  d_i[j] = r_i[j+1] - r_i[j]\n"
             "  cutoff = threshold_mad * MADN(d)\n"
@@ -50,6 +53,8 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "  bright: r_i[j] - median(r_i) > cutoff\n"
             "  dark:   r_i[j] - median(r_i) < -cutoff\n\n"
             "repair:\n"
+            "  skip connected bad-row groups wider than max_adjacent_bad_lines\n"
+            "  above/below neighbours must be finite on S and not marked bad on S\n"
             "  z'_i,S = 0.5 * (z_above,S + z_below,S) when both neighbours are valid\n"
             "  z'_i,S = nearest valid neighbour segment when only one side is valid",
         ),
@@ -90,7 +95,14 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
     ),
     _DefinitionEntry(
         title="Simple background subtraction",
-        params=("order = 1..4", "fit ROI", "apply ROI", "exclude ROI", "step tolerance"),
+        params=(
+            "order = 1..4",
+            "fit ROI",
+            "apply ROI",
+            "exclude ROI",
+            "step_tolerance",
+            "step_threshold_deg",
+        ),
         summary=(
             "Fits a two-dimensional polynomial background on selected finite "
             "pixels, then subtracts the fitted surface from the whole image or "
@@ -99,6 +111,9 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
         equations=(
             "normalised coordinates: x, y in [-1, 1]\n"
             "B(x, y) = sum c_pq * x^p * y^q, for p + q <= order\n"
+            "optional step-tolerant fit mask:\n"
+            "  slope = sqrt((dz/dx / pixel_size_x_m)^2 + (dz/dy / pixel_size_y_m)^2)\n"
+            "  keep fit pixel only when slope < tan(step_threshold_deg)\n"
             "least squares on fit pixels: min_c sum_fit (z(x,y) - B(x,y))^2\n"
             "z'(x, y) = z(x, y) - B(x, y)",
         ),
@@ -107,6 +122,8 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "B(x,y) = c00 + c10*x + c01*y.",
             "Fit ROI and exclude ROI affect only the pixels used to estimate the "
             "background. Apply ROI controls which pixels are modified.",
+            "Step tolerance excludes high-slope pixels from the fit only when enough "
+            "pixels remain to solve the requested polynomial.",
         ),
         cautions=(
             "A polynomial fit extrapolates outside the fit region. If the fit ROI is "
@@ -146,6 +163,7 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "  piezo_creep_x2: B_i = a + b*y_i + c*log(|y_i - d| + eps) + e*y_i^2\n"
             "  piezo_creep_x3: B_i = a + b*y_i + c*log(|y_i - d| + eps) + e*y_i^3\n"
             "  sqrt_creep:     B_i = a + b*y_i + c*sqrt(|y_i - d|)\n\n"
+            "eps is a small numerical floor for logarithm evaluation.\n"
             "background_i,j = B_i + L_i(x_j) when x prefit is enabled\n"
             "z'_i,j = z_i,j - background_i,j + reference(background)",
         ),
@@ -155,8 +173,10 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "The optional jump threshold removes large discontinuities in the profile "
             "before fitting. Preserve level adds back the median or mean of the fitted "
             "background so the corrected image keeps a familiar height reference.",
-            "For piezo and sqrt creep models, d is constrained before the scan start "
-            "so the singularity stays off the measured image.",
+            "For logarithmic creep models, d is constrained before the scan start so "
+            "the log singularity stays off the measured image; eps is only numerical "
+            "protection. The sqrt model uses the same off-scan anchor convention to "
+            "keep its derivative cusp outside the measured rows.",
         ),
         cautions=(
             "Line-by-line mode is aggressive because each row gets its own background "
@@ -225,6 +245,9 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "This is a full forward-filter-inverse operation. The soft border is "
             "compensated after the inverse transform so the image interior stays on the "
             "original level.",
+            "This compensation is the key difference from the simpler Fourier radial "
+            "filter, where the Hann or Hamming window is not divided out after inverse "
+            "transform.",
         ),
         cautions=(
             "Very small cutoffs or large border fractions can over-smooth the image and "
@@ -251,12 +274,16 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "z' = real(ifft2(ifftshift(H*F))) + m",
         ),
         details=(
-            "Low-pass keeps broad structure and suppresses high-frequency detail. "
-            "High-pass suppresses low-frequency structure but adds the original "
-            "finite-pixel mean back to keep the output on a comparable height level.",
+            "The finite-pixel mean is subtracted before the FFT in both modes, then "
+            "added back after the inverse FFT so the output stays on the original "
+            "height reference. Low-pass keeps broad structure; high-pass keeps fine "
+            "spatial detail.",
         ),
         cautions=(
             "Hard circular cutoffs can create ringing, especially when no window is used.",
+            "Unlike FFT soft-border filtering, the Hann or Hamming taper is not "
+            "compensated after the inverse transform, so border amplitudes can be "
+            "attenuated.",
         ),
     ),
     _DefinitionEntry(
@@ -300,6 +327,8 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
         details=(
             "NaN and inf pixels are filled with the finite mean for the derivative "
             "calculation, then restored to NaN in the output.",
+            "With the implemented DoG sign, bright compact features are positive when "
+            "sigma2 is broader than sigma.",
         ),
         cautions=(
             "Second-derivative filters are noise-sensitive. Use LoG or DoG when raw "
@@ -317,7 +346,9 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "for output pixel (y, x):\n"
             "  src_y = y / scale_y\n"
             "  src_x = x - shear_x * y / max(Ny - 1, 1)\n"
-            "  z'(y, x) = bilinear_sample(z, src_y, src_x)",
+            "  z'(y, x) = bilinear_sample(z, src_y, src_x)\n\n"
+            "shear_x is the total horizontal shift in pixels accumulated from\n"
+            "y=0 to y=Ny-1; scale_y is a dimensionless vertical scale ratio.",
         ),
         details=(
             "Positive shear_x means the accumulated horizontal correction grows across "

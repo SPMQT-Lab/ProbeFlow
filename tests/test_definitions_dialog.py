@@ -32,3 +32,7 @@ def test_definitions_reference_has_equations_and_light_theme_contrast():
     assert "color: #111827" in html
     assert "#cdd6f4" not in lowered
     assert "#a6adc8" not in lowered
+    assert "S = [j0, j1)" in html
+    assert "slope &lt; tan(step_threshold_deg)" in html
+    assert "mean is subtracted before the FFT in both modes" in html
+    assert "derivative cusp" in html
