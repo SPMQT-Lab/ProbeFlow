@@ -189,7 +189,36 @@ def _update_label_style(label: QGraphicsTextItem, active: bool, hover: bool) -> 
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def make_roi_item(roi: "ROI", active: bool = False) -> QGraphicsItemGroup:
-    """Build a QGraphicsItemGroup containing the shape item + name label."""
+    """Build a QGraphicsItemGroup containing the shape item + name label.
+
+    PySide6 lifetime invariant for setData() with QGraphicsItem values
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    ``QGraphicsItem.setData(key, item)`` stores only a raw C++ pointer
+    inside a QVariant.  PySide6 does NOT hold a Python reference through
+    QVariant storage.  If the Python wrapper for *item* reaches refcount 0
+    (e.g. because the local variable goes out of scope when this function
+    returns), the wrapper is freed, and — if Python owned the C++ object —
+    the C++ object is deleted.  Any later call to ``.data(key)`` then passes
+    a dangling pointer to ``QGraphicsItem_PTR_CppToPython_QGraphicsItem``
+    → SIGSEGV.
+
+    To keep each stored item alive, one of the following must hold:
+
+    1. **Python reference on the group wrapper** — set an attribute such as
+       ``group._foo_ref = item`` before the local variable leaves scope.
+       PySide6 wrapper objects have a ``__dict__`` so arbitrary attributes
+       are allowed.  The ref is released automatically when the group
+       wrapper is GC'd.  Used for: key 1 (PointROIItem, not in scene yet
+       when setData is called).
+
+    2. **C++ parent ownership via setParentItem()** — calling
+       ``item.setParentItem(group)`` *before* ``setData`` transfers C++
+       ownership to the parent.  If the Python wrapper is subsequently
+       freed its C++ object is NOT deleted (the parent owns it); the stored
+       pointer therefore remains valid for the lifetime of the parent.
+       Used for: keys 2 & 3 (endpoint handles).  We also store explicit
+       Python refs on the group for consistency and defence-in-depth.
+    """
     kind = roi.kind
 
     if kind == "rectangle":
@@ -257,12 +286,16 @@ def make_roi_item(roi: "ROI", active: bool = False) -> QGraphicsItemGroup:
                     break
         h1 = _make_endpoint_handle(float(g["x1"]), float(g["y1"]))
         h2 = _make_endpoint_handle(float(g["x2"]), float(g["y2"]))
-        h1.setParentItem(group)
+        h1.setParentItem(group)  # transfers C++ ownership to parent (invariant 2)
         h2.setParentItem(group)
         h1.setVisible(active)
         h2.setVisible(active)
         group.setData(2, h1)
         group.setData(3, h2)
+        # Explicit Python refs for consistency with the PointROI pattern and
+        # defence-in-depth — see docstring invariant note above.
+        group._h1_endpoint_ref = h1
+        group._h2_endpoint_ref = h2
 
     return group
 

@@ -184,13 +184,19 @@ class ImageCanvas(QGraphicsView):
 
         self._image_roi_set = None
         self._roi_items: dict[str, QGraphicsItemGroup] = {}
-        # Strong Python refs to PointROIItem siblings stored outside their group.
-        # Because PointROIItem uses ItemIgnoresTransformations it cannot be added
-        # as a child of the QGraphicsItemGroup; instead it is added to the scene
-        # as a sibling and a raw C++ pointer is stored in the group via
-        # group.setData(1, point).  Without a live Python wrapper the C++ object
-        # can be freed while the QVariant still holds its pointer → SIGSEGV when
-        # data(1) is later retrieved.  Keeping refs here prevents that.
+        # ── PySide6 QVariant lifetime invariant ──────────────────────────────
+        # ``QGraphicsItem.setData(key, item)`` stores only a raw C++ pointer in
+        # a QVariant; PySide6 does NOT hold a Python reference through it.  If
+        # the Python wrapper reaches refcount 0 while the pointer is still live,
+        # the C++ object is freed → dangling pointer → SIGSEGV on next data()
+        # call.  Two strategies are used in make_roi_item (see its docstring):
+        #
+        #   1. Python ref on the group wrapper  (group._point_roi_item_ref, etc.)
+        #   2. C++ parent ownership via setParentItem() before setData()
+        #
+        # _point_items is a second layer of protection for PointROIItem (key 1):
+        # it keeps a Python wrapper alive at the canvas level, independent of the
+        # group wrapper, for the entire time the ROI is displayed.
         self._point_items: dict[str, object] = {}
 
         # ── Phase 4b drawing state ────────────────────────────────────────────
