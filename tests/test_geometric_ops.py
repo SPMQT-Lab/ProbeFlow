@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import warnings
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -17,6 +18,7 @@ from probeflow.processing.image import (
 from probeflow.processing.state import (
     ProcessingState,
     ProcessingStep,
+    apply_geometric_op_to_scan,
     apply_processing_state,
 )
 
@@ -302,3 +304,56 @@ class TestGuiAdapterIntegration:
         ops = [s.op for s in state.steps]
         assert "align_rows" in ops
         assert "flip_horizontal" in ops
+
+
+# ── apply_geometric_op_to_scan: scan_range_m swap ─────────────────────────────
+
+def _make_asymmetric_scan(width_m=100e-9, height_m=60e-9, Ny=6, Nx=10):
+    """Build a minimal asymmetric Scan for scan_range_m swap tests."""
+    from probeflow.core.scan_model import Scan
+    plane = np.zeros((Ny, Nx), dtype=np.float64)
+    return Scan(
+        planes=[plane],
+        plane_names=["Z forward"],
+        plane_units=["m"],
+        plane_synthetic=[False],
+        header={},
+        scan_range_m=(width_m, height_m),
+        source_path=Path("/tmp/test.sxm"),
+        source_format="sxm",
+    )
+
+
+class TestApplyGeometricOpToScanRangeSwap:
+    """Verify scan_range_m is swapped on 90°/270° rotations but not flips/180°."""
+
+    def test_rot90_cw_swaps_scan_range(self):
+        scan = _make_asymmetric_scan(width_m=100e-9, height_m=60e-9)
+        scan, _ = apply_geometric_op_to_scan(scan, "rot90_cw")
+        assert scan.scan_range_m == (60e-9, 100e-9)
+
+    def test_rot270_cw_swaps_scan_range(self):
+        scan = _make_asymmetric_scan(width_m=100e-9, height_m=60e-9)
+        scan, _ = apply_geometric_op_to_scan(scan, "rot270_cw")
+        assert scan.scan_range_m == (60e-9, 100e-9)
+
+    def test_rot180_does_not_swap_scan_range(self):
+        scan = _make_asymmetric_scan(width_m=100e-9, height_m=60e-9)
+        scan, _ = apply_geometric_op_to_scan(scan, "rot180")
+        assert scan.scan_range_m == (100e-9, 60e-9)
+
+    def test_flip_horizontal_does_not_swap_scan_range(self):
+        scan = _make_asymmetric_scan(width_m=100e-9, height_m=60e-9)
+        scan, _ = apply_geometric_op_to_scan(scan, "flip_horizontal")
+        assert scan.scan_range_m == (100e-9, 60e-9)
+
+    def test_flip_vertical_does_not_swap_scan_range(self):
+        scan = _make_asymmetric_scan(width_m=100e-9, height_m=60e-9)
+        scan, _ = apply_geometric_op_to_scan(scan, "flip_vertical")
+        assert scan.scan_range_m == (100e-9, 60e-9)
+
+    def test_two_rot90_cw_restores_scan_range(self):
+        scan = _make_asymmetric_scan(width_m=100e-9, height_m=60e-9)
+        scan, _ = apply_geometric_op_to_scan(scan, "rot90_cw")
+        scan, _ = apply_geometric_op_to_scan(scan, "rot90_cw")
+        assert scan.scan_range_m == (100e-9, 60e-9)

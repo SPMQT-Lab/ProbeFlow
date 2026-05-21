@@ -66,6 +66,7 @@ def _masks():
 def _scan():
     scan = MagicMock()
     scan.planes = [np.arange(12.0).reshape(3, 4), np.ones((3, 4))]
+    scan.scan_range_m = (4e-9, 3e-9)
     return scan
 
 

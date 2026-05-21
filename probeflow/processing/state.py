@@ -784,6 +784,13 @@ def apply_geometric_op_to_scan(
         else:
             raise ValueError(f"apply_geometric_op_to_scan: unknown operation {operation!r}")
 
+    # Swap scan_range_m for operations that transpose width and height.
+    # 90° and 270° rotations exchange the physical X and Y extents;
+    # flips and 180° rotation leave the aspect ratio unchanged.
+    if operation in ("rot90_cw", "rot270_cw", "rotate_90_cw", "rotate_270_cw"):
+        w, h = scan.scan_range_m
+        scan.scan_range_m = (h, w)
+
     if roi_set is not None:
         invalidated = roi_set.transform_all(operation, params, image_shape)
         if operation in _LOSSLESS and invalidated:
