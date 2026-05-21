@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QHBoxLayout,
     QLabel,
+    QSpinBox,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -69,6 +70,7 @@ class ImageArithmeticDialog(QDialog):
         self._operand_type_combo = QComboBox()
         self._operand_type_combo.addItem("Constant", "constant")
         self._operand_type_combo.addItem("Image", "image")
+        self._operand_type_combo.addItem("Generated pattern", "generated")
         form.addRow("Operand:", self._operand_type_combo)
 
         self._operation_combo = QComboBox()
@@ -83,6 +85,7 @@ class ImageArithmeticDialog(QDialog):
         self._operand_stack = QStackedWidget()
         self._operand_stack.addWidget(self._constant_page())
         self._operand_stack.addWidget(self._image_page(current_entry_index, current_plane_idx))
+        self._operand_stack.addWidget(self._generated_page())
         root.addWidget(self._operand_stack)
 
         self._status_label = QLabel("")
@@ -101,6 +104,10 @@ class ImageArithmeticDialog(QDialog):
         self._constant_spin.valueChanged.connect(self._refresh_ui)
         self._entry_combo.currentIndexChanged.connect(self._on_source_entry_changed)
         self._plane_combo.currentIndexChanged.connect(self._on_source_plane_changed)
+        self._pattern_combo.currentIndexChanged.connect(self._refresh_ui)
+        self._amplitude_spin.valueChanged.connect(self._refresh_ui)
+        self._period_spin.valueChanged.connect(self._refresh_ui)
+        self._seed_spin.valueChanged.connect(self._refresh_ui)
 
         self._refresh_ui()
 
@@ -136,6 +143,45 @@ class ImageArithmeticDialog(QDialog):
         self._plane_combo = QComboBox()
         self._pending_plane_idx = max(0, int(current_plane_idx))
         form.addRow("Channel:", self._plane_combo)
+        return page
+
+    def _generated_page(self) -> QWidget:
+        page = QWidget()
+        form = QFormLayout(page)
+        form.setContentsMargins(0, 0, 0, 0)
+
+        self._pattern_combo = QComboBox()
+        for label, value in (
+            ("Checkerboard", "checkerboard"),
+            ("Ramp X", "ramp_x"),
+            ("Ramp Y", "ramp_y"),
+            ("Speckle noise", "speckle"),
+            ("Impulse grid", "impulse_grid"),
+        ):
+            self._pattern_combo.addItem(label, value)
+        form.addRow("Pattern:", self._pattern_combo)
+
+        amp_row = QHBoxLayout()
+        amp_row.setContentsMargins(0, 0, 0, 0)
+        self._amplitude_spin = QDoubleSpinBox()
+        self._amplitude_spin.setDecimals(8)
+        self._amplitude_spin.setRange(0.0, 1.0e12)
+        self._amplitude_spin.setSingleStep(1.0)
+        self._amplitude_spin.setValue(1.0)
+        self._amplitude_label = QLabel(self._display_unit)
+        amp_row.addWidget(self._amplitude_spin, 1)
+        amp_row.addWidget(self._amplitude_label)
+        form.addRow("Amplitude:", amp_row)
+
+        self._period_spin = QSpinBox()
+        self._period_spin.setRange(1, 100000)
+        self._period_spin.setValue(16)
+        form.addRow("Period / spacing px:", self._period_spin)
+
+        self._seed_spin = QSpinBox()
+        self._seed_spin.setRange(0, 2_147_483_647)
+        self._seed_spin.setValue(1)
+        form.addRow("Noise seed:", self._seed_spin)
         return page
 
     def _set_status(self, message: str, *, warning: bool = False, error: bool = False) -> None:
@@ -185,7 +231,11 @@ class ImageArithmeticDialog(QDialog):
     def _refresh_ui(self) -> None:
         self._refresh_operation_choices()
         operand_type = self._operand_type()
-        self._operand_stack.setCurrentIndex(0 if operand_type == "constant" else 1)
+        self._operand_stack.setCurrentIndex({
+            "constant": 0,
+            "image": 1,
+            "generated": 2,
+        }.get(operand_type, 0))
         op = self._operation()
         if operand_type == "constant":
             if op in {"add", "subtract"}:
@@ -193,8 +243,10 @@ class ImageArithmeticDialog(QDialog):
             else:
                 self._constant_label.setText("factor")
             self._refresh_constant_status()
-        else:
+        elif operand_type == "image":
             self._refresh_source_controls()
+        else:
+            self._refresh_generated_status()
 
     def _refresh_constant_status(self) -> None:
         if self._operation() == "divide" and float(self._constant_spin.value()) == 0.0:
@@ -208,6 +260,17 @@ class ImageArithmeticDialog(QDialog):
             )
         else:
             self._set_status("Factor is dimensionless.")
+
+    def _refresh_generated_status(self) -> None:
+        pattern = str(self._pattern_combo.currentData() or "checkerboard")
+        self._amplitude_label.setText(self._display_unit)
+        self._period_spin.setEnabled(pattern in {"checkerboard", "impulse_grid"})
+        self._seed_spin.setEnabled(pattern == "speckle")
+        self._apply_button.setEnabled(True)
+        self._set_status(
+            "Generated patterns are virtual operands and will be replayed from "
+            "processing history."
+        )
 
     def _selected_entry_index(self) -> int | None:
         if self._entry_combo.count() == 0:
@@ -351,6 +414,23 @@ class ImageArithmeticDialog(QDialog):
             "plane_label": self._plane_combo.currentText(),
         }
 
+    def _generated_params(self) -> dict[str, Any]:
+        pattern = str(self._pattern_combo.currentData() or "checkerboard")
+        display_amplitude = float(self._amplitude_spin.value())
+        params: dict[str, Any] = {
+            "operation": self._operation(),
+            "operand_type": "generated",
+            "pattern": pattern,
+            "amplitude_si": display_amplitude / self._display_scale,
+            "display_amplitude": display_amplitude,
+            "display_unit": self._display_unit,
+        }
+        if pattern in {"checkerboard", "impulse_grid"}:
+            params["period_px"] = int(self._period_spin.value())
+        if pattern == "speckle":
+            params["seed"] = int(self._seed_spin.value())
+        return params
+
     def operation_spec(self) -> dict[str, Any] | None:
         return self._accepted_spec
 
@@ -362,10 +442,13 @@ class ImageArithmeticDialog(QDialog):
         if not self._apply_button.isEnabled():
             return
         try:
-            params = (
-                self._constant_params()
-                if self._operand_type() == "constant" else self._image_params()
-            )
+            operand_type = self._operand_type()
+            if operand_type == "constant":
+                params = self._constant_params()
+            elif operand_type == "image":
+                params = self._image_params()
+            else:
+                params = self._generated_params()
         except ValueError as exc:
             self._set_status(str(exc), error=True)
             return

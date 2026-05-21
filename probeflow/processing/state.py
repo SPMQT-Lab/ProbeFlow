@@ -609,10 +609,17 @@ def apply_processing_state(
             )
         elif step.op == "arithmetic":
             operand_type = str(p.get("operand_type", "constant"))
-            operand_image = (
-                _load_arithmetic_operand_image(p)
-                if operand_type == "image" else None
-            )
+            operand_image = None
+            if operand_type == "image":
+                operand_image = _load_arithmetic_operand_image(p)
+            elif operand_type == "generated":
+                operand_image = _proc.generate_arithmetic_pattern(
+                    a.shape,
+                    str(p.get("pattern", "checkerboard")),
+                    float(p.get("amplitude_si", 0.0)),
+                    period_px=int(p.get("period_px", 16)),
+                    seed=int(p.get("seed", 1)),
+                )
             a = _proc.apply_arithmetic(
                 a,
                 operation=str(p.get("operation", "add")),

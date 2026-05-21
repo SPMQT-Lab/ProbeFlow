@@ -25,5 +25,8 @@ def test_command_finder_filters_and_ranks_high_level_commands():
     arithmetic = filter_viewer_commands(commands, "image math")
     assert arithmetic
     assert arithmetic[0].command_id == "processing.image_operations"
+    checkerboard = filter_viewer_commands(commands, "checkerboard")
+    assert checkerboard
+    assert checkerboard[0].command_id == "processing.image_operations"
 
     assert filter_viewer_commands(commands, "threshold") == []

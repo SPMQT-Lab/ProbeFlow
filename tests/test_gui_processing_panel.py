@@ -274,7 +274,43 @@ def test_image_arithmetic_dialog_builds_constant_spec(qapp):
     dlg.deleteLater()
 
 
-def test_viewer_image_arithmetic_appends_roi_scoped_step(qapp, monkeypatch):
+def test_image_arithmetic_dialog_builds_generated_pattern_spec(qapp):
+    from probeflow.gui import SxmFile
+    from probeflow.gui.dialogs.image_arithmetic import ImageArithmeticDialog
+
+    entry = SxmFile(path=Path("/tmp/example.sxm"), stem="example", Nx=8, Ny=8)
+    dlg = ImageArithmeticDialog(
+        [entry],
+        current_entry_index=0,
+        current_plane_idx=0,
+        current_shape=(8, 8),
+        current_scan_range_m=(10e-9, 10e-9),
+        display_scale=1e9,
+        display_unit="nm",
+    )
+
+    dlg._operand_type_combo.setCurrentIndex(
+        dlg._operand_type_combo.findData("generated")
+    )
+    dlg._pattern_combo.setCurrentIndex(dlg._pattern_combo.findData("impulse_grid"))
+    dlg._amplitude_spin.setValue(5.0)
+    dlg._period_spin.setValue(4)
+    dlg.accept()
+    spec = dlg.operation_spec()
+
+    assert spec["op"] == "arithmetic"
+    assert spec["params"]["operation"] == "add"
+    assert spec["params"]["operand_type"] == "generated"
+    assert spec["params"]["pattern"] == "impulse_grid"
+    assert spec["params"]["amplitude_si"] == pytest.approx(5e-9)
+    assert spec["params"]["display_amplitude"] == pytest.approx(5.0)
+    assert spec["params"]["display_unit"] == "nm"
+    assert spec["params"]["period_px"] == 4
+
+    dlg.deleteLater()
+
+
+def test_viewer_generated_arithmetic_appends_roi_scoped_step(qapp, monkeypatch):
     from PySide6.QtWidgets import QDialog
     from probeflow.core.roi import ROI, ROISet
     from probeflow.gui import ImageViewerDialog, SxmFile, THEMES
@@ -294,8 +330,10 @@ def test_viewer_image_arithmetic_appends_roi_scoped_step(qapp, monkeypatch):
                 "op": "arithmetic",
                 "params": {
                     "operation": "add",
-                    "operand_type": "constant",
-                    "value_si": 1.0,
+                    "operand_type": "generated",
+                    "pattern": "checkerboard",
+                    "amplitude_si": 1.0,
+                    "period_px": 2,
                 },
             }
 
@@ -325,7 +363,9 @@ def test_viewer_image_arithmetic_appends_roi_scoped_step(qapp, monkeypatch):
     op_spec = dlg._processing["arithmetic_ops"][0]
     assert op_spec["op"] == "arithmetic"
     assert op_spec["roi_id"] == roi.id
-    assert op_spec["params"]["value_si"] == 1.0
+    assert op_spec["params"]["operand_type"] == "generated"
+    assert op_spec["params"]["pattern"] == "checkerboard"
+    assert op_spec["params"]["amplitude_si"] == 1.0
 
     dlg.close()
     dlg.deleteLater()

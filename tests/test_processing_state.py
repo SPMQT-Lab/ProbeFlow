@@ -13,6 +13,7 @@ from probeflow.processing.gui_adapter import (
     apply_processing_state_to_scan,
     processing_state_from_gui,
 )
+from probeflow.processing.arithmetic import generate_arithmetic_pattern
 from probeflow.processing.state import (
     ProcessingState,
     ProcessingStep,
@@ -155,6 +156,79 @@ def test_arithmetic_image_shape_mismatch_raises(monkeypatch):
         apply_processing_state(np.ones((2, 2)), state)
 
 
+def test_generated_arithmetic_checkerboard_pattern_values():
+    pattern = generate_arithmetic_pattern(
+        (4, 4),
+        "checkerboard",
+        2.0,
+        period_px=2,
+    )
+
+    np.testing.assert_allclose(pattern, np.array([
+        [2.0, 2.0, -2.0, -2.0],
+        [2.0, 2.0, -2.0, -2.0],
+        [-2.0, -2.0, 2.0, 2.0],
+        [-2.0, -2.0, 2.0, 2.0],
+    ]))
+
+
+def test_generated_arithmetic_ramp_endpoints():
+    ramp_x = generate_arithmetic_pattern((2, 3), "ramp_x", 1.0)
+    ramp_y = generate_arithmetic_pattern((3, 2), "ramp_y", 1.0)
+
+    np.testing.assert_allclose(ramp_x, np.array([
+        [-1.0, 0.0, 1.0],
+        [-1.0, 0.0, 1.0],
+    ]))
+    np.testing.assert_allclose(ramp_y, np.array([
+        [-1.0, -1.0],
+        [0.0, 0.0],
+        [1.0, 1.0],
+    ]))
+
+
+def test_generated_arithmetic_speckle_is_seeded():
+    first = generate_arithmetic_pattern((6, 6), "speckle", 0.25, seed=7)
+    second = generate_arithmetic_pattern((6, 6), "speckle", 0.25, seed=7)
+    third = generate_arithmetic_pattern((6, 6), "speckle", 0.25, seed=8)
+
+    np.testing.assert_allclose(first, second)
+    assert not np.allclose(first, third)
+
+
+def test_generated_arithmetic_add_and_subtract_through_processing_state():
+    arr = np.ones((3, 3), dtype=float)
+    add_state = ProcessingState(steps=[
+        ProcessingStep("arithmetic", {
+            "operation": "add",
+            "operand_type": "generated",
+            "pattern": "impulse_grid",
+            "amplitude_si": 4.0,
+            "period_px": 2,
+        }),
+    ])
+    subtract_state = ProcessingState(steps=[
+        ProcessingStep("arithmetic", {
+            "operation": "subtract",
+            "operand_type": "generated",
+            "pattern": "impulse_grid",
+            "amplitude_si": 4.0,
+            "period_px": 2,
+        }),
+    ])
+
+    np.testing.assert_allclose(apply_processing_state(arr, add_state), np.array([
+        [5.0, 1.0, 5.0],
+        [1.0, 1.0, 1.0],
+        [5.0, 1.0, 5.0],
+    ]))
+    np.testing.assert_allclose(apply_processing_state(arr, subtract_state), np.array([
+        [-3.0, 1.0, -3.0],
+        [1.0, 1.0, 1.0],
+        [-3.0, 1.0, -3.0],
+    ]))
+
+
 def test_roi_scoped_arithmetic_leaves_outside_pixels_unchanged():
     roi_set, roi = _rect_roi_set()
     arr = np.zeros((16, 16), dtype=float)
@@ -176,6 +250,32 @@ def test_roi_scoped_arithmetic_leaves_outside_pixels_unchanged():
     mask = roi.to_mask(arr.shape)
 
     assert np.all(result[mask] == 5.0)
+    assert np.all(result[~mask] == 0.0)
+
+
+def test_roi_scoped_generated_arithmetic_leaves_outside_pixels_unchanged():
+    roi_set, roi = _rect_roi_set()
+    arr = np.zeros((16, 16), dtype=float)
+    state = ProcessingState(steps=[
+        ProcessingStep("roi", {
+            "roi_id": roi.id,
+            "step": {
+                "op": "arithmetic",
+                "params": {
+                    "operation": "add",
+                    "operand_type": "generated",
+                    "pattern": "ramp_x",
+                    "amplitude_si": 3.0,
+                },
+            },
+        }),
+    ])
+
+    result = apply_processing_state(arr, state, roi_set=roi_set)
+    mask = roi.to_mask(arr.shape)
+    expected = generate_arithmetic_pattern(arr.shape, "ramp_x", 3.0)
+
+    np.testing.assert_allclose(result[mask], expected[mask])
     assert np.all(result[~mask] == 0.0)
 
 
