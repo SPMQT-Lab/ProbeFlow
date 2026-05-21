@@ -430,6 +430,17 @@ class TestFormatRealSpace:
         d = format_real_space_measurements(g, cal)
         assert d["angle"].startswith("63")
 
+    def test_angle_format_does_not_use_scientific_notation(self):
+        g = LatticeGrid(
+            kind="rectangular",
+            space="real",
+            origin_px=(0, 0),
+            a_px=(10.0, 0.0),
+            b_px=(-5.0, 8.660254037844386),
+        )
+        d = format_real_space_measurements(g, self.cal)
+        assert d["angle"] == "120°"
+
     def test_unit_in_output(self):
         g = LatticeGrid.make_square(0, 0, 50)
         d = format_real_space_measurements(g, self.cal)
@@ -489,6 +500,17 @@ class TestFormatReciprocal:
         )
         d = format_reciprocal_measurements(g, cal)
         assert d["angle"].startswith("63")
+
+    def test_angle_format_does_not_use_scientific_notation(self):
+        g = LatticeGrid(
+            kind="rectangular",
+            space="reciprocal",
+            origin_px=(50, 50),
+            a_px=(10.0, 0.0),
+            b_px=(-5.0, 8.660254037844386),
+        )
+        d = format_reciprocal_measurements(g, self.cal)
+        assert d["angle"] == "120°"
 
 
 # ── edge cases ────────────────────────────────────────────────────────────────

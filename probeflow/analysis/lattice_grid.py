@@ -401,6 +401,14 @@ def _fmt(value_m: float, unit: str, decimals: int = 3) -> str:
     return f"{value_m:.{decimals}g} {unit}"
 
 
+def _fmt_angle_deg(angle: float) -> str:
+    """Format a bounded degree value without switching to scientific notation."""
+    text = f"{angle:.2f}".rstrip("0").rstrip(".")
+    if text == "-0":
+        text = "0"
+    return f"{text}°"
+
+
 def _angle_between_vectors_deg(a: Vec2, b: Vec2) -> float:
     ax, ay = a
     bx, by = b
@@ -463,7 +471,7 @@ def format_real_space_measurements(
         "b_px":       f"({bx:.2f}, {by:.2f}) px",
         "a_length":   f"{la_m * scale:.4g} {unit}",
         "b_length":   f"{lb_m * scale:.4g} {unit}",
-        "angle":      f"{angle:.2g}°",
+        "angle":      _fmt_angle_deg(angle),
         "area":       f"{area_m2 * area_scale:.4g} {area_unit}",
     }
 
@@ -505,6 +513,6 @@ def format_reciprocal_measurements(
         "g2_vec":      f"({qbx:.3g}, {qby:.3g}) nm⁻¹",
         "g1":          f"{g1:.4g} nm⁻¹  (d = {_period_str(g1)})",
         "g2":          f"{g2:.4g} nm⁻¹  (d = {_period_str(g2)})",
-        "angle":       f"{angle:.2g}°",
+        "angle":       _fmt_angle_deg(angle),
         "area_q":      f"{area_q:.4g} nm⁻²",
     }
