@@ -22,7 +22,7 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import (
     QAction, QActionGroup, QCursor, QFont, QKeySequence,
-    QPixmap, QShortcut,
+    QPixmap,
 )
 from PySide6.QtWidgets import (
     QAbstractItemView, QButtonGroup, QCheckBox, QComboBox,
@@ -106,6 +106,7 @@ from probeflow.gui.viewer.tool_launch import (
     lattice_grid_launch_context,
     pair_correlation_launch_context,
 )
+from probeflow.gui.viewer.shortcuts import viewer_command
 from probeflow.core.scan_loader import load_scan
 from probeflow.gui.viewer.scan_load import load_scan_for_viewer, ViewerScanData
 from probeflow.gui.viewer.processed_export import (
@@ -570,13 +571,6 @@ class ImageViewerDialog(
         )
         self._update_undo_redo_buttons()
 
-        QShortcut(QKeySequence("Ctrl+Z"), self,
-                  activated=self._on_undo_processing)
-        QShortcut(QKeySequence("Ctrl+Y"), self,
-                  activated=self._on_redo_processing)
-        QShortcut(QKeySequence("Ctrl+Shift+Z"), self,
-                  activated=self._on_redo_processing)
-
         processing_lay.addWidget(_sep())
 
         # ── Save PNG — always visible ─────────────────────────────────────────
@@ -950,12 +944,40 @@ class ImageViewerDialog(
             lambda: self._display_arr if self._display_arr is not None else self._raw_arr,
         )
 
+    def _configure_viewer_action(self, action: QAction, command_id: str) -> QAction:
+        command = viewer_command(command_id)
+        action.setText(command.label)
+        if command.shortcuts:
+            action.setShortcuts([QKeySequence(s) for s in command.shortcuts])
+        if command.status_tip:
+            action.setStatusTip(command.status_tip)
+            action.setToolTip(command.status_tip)
+        self._viewer_command_actions[command_id] = action
+        return action
+
+    def _viewer_action(
+        self,
+        command_id: str,
+        handler=None,
+        *,
+        register: dict[str, QAction] | None = None,
+    ) -> QAction:
+        action = self._configure_viewer_action(QAction(self), command_id)
+        if handler is not None:
+            action.triggered.connect(handler)
+        command = viewer_command(command_id)
+        if register is not None:
+            key = command.enabled_state_key or command.command_id
+            register[key] = action
+        return action
+
     def _build_viewer_menu_bar(self) -> None:
         menu_bar = self._viewer_main.menuBar()
         self._viewer_processing_actions: dict[str, QAction | dict[str, QAction]] = {}
         self._viewer_roi_tool_actions: dict[str, QAction] = {}
         self._viewer_roi_actions: dict[str, QAction] = {}
         self._viewer_measurement_actions: dict[str, QAction] = {}
+        self._viewer_command_actions: dict[str, QAction] = {}
 
         file_menu = menu_bar.addMenu("File")
         close_action = QAction("Close", self)
@@ -964,59 +986,73 @@ class ImageViewerDialog(
         file_menu.addAction(close_action)
 
         view_menu = menu_bar.addMenu("View")
-        auto_contrast_action = QAction("Auto contrast", self)
-        auto_contrast_action.triggered.connect(self._on_auto_clip)
+        auto_contrast_action = self._viewer_action(
+            "view.auto_contrast",
+            self._on_auto_clip,
+        )
         view_menu.addAction(auto_contrast_action)
         reset_contrast_action = QAction("Reset contrast", self)
         reset_contrast_action.triggered.connect(self._on_reset_display)
         view_menu.addAction(reset_contrast_action)
         view_menu.addSeparator()
-        fit_action = QAction("Fit image to window", self)
-        fit_action.triggered.connect(self._zoom_lbl.fit_to_view)
+        fit_action = self._viewer_action("view.fit", self._zoom_lbl.fit_to_view)
         view_menu.addAction(fit_action)
-        native_action = QAction("View at 1:1", self)
-        native_action.triggered.connect(self._zoom_lbl.reset_zoom)
+        native_action = self._viewer_action("view.one_to_one", self._zoom_lbl.reset_zoom)
         view_menu.addAction(native_action)
         view_menu.addSeparator()
         reset_layout_action = QAction("Reset viewer layout", self)
         reset_layout_action.triggered.connect(self._reset_viewer_window_layout)
         view_menu.addAction(reset_layout_action)
         view_menu.addSeparator()
-        display_panel_action = QAction("Histogram / Contrast", self)
-        display_panel_action.triggered.connect(lambda: self._show_sidebar_tab("display"))
+        display_panel_action = self._viewer_action(
+            "panel.view",
+            lambda: self._show_sidebar_tab("display"),
+        )
         view_menu.addAction(display_panel_action)
-        processing_panel_action = QAction("Processing panel", self)
-        processing_panel_action.triggered.connect(lambda: self._show_sidebar_tab("processing"))
+        processing_panel_action = self._viewer_action(
+            "panel.process",
+            lambda: self._show_sidebar_tab("processing"),
+        )
         view_menu.addAction(processing_panel_action)
-        roi_panel_action = QAction("ROI panel", self)
-        roi_panel_action.triggered.connect(lambda: self._show_sidebar_tab("roi"))
+        roi_panel_action = self._viewer_action(
+            "panel.roi",
+            lambda: self._show_sidebar_tab("roi"),
+        )
         view_menu.addAction(roi_panel_action)
-        measurements_panel_action = QAction("Measurements panel", self)
-        measurements_panel_action.triggered.connect(
-            lambda: self._show_sidebar_tab("measurements")
+        measurements_panel_action = self._viewer_action(
+            "panel.measure",
+            lambda: self._show_sidebar_tab("measurements"),
         )
         view_menu.addAction(measurements_panel_action)
-        export_panel_action = QAction("Export panel", self)
-        export_panel_action.triggered.connect(lambda: self._show_sidebar_tab("export"))
+        export_panel_action = self._viewer_action(
+            "panel.export",
+            lambda: self._show_sidebar_tab("export"),
+        )
         view_menu.addAction(export_panel_action)
         view_menu.addSeparator()
         for label, dock in (
-            ("ROI Manager", self._roi_dock),
-            ("Measurements", self._measurement_dock),
+            ("dock.roi_manager", self._roi_dock),
+            ("dock.measurements", self._measurement_dock),
         ):
             action = dock.toggleViewAction()
-            action.setText(label)
+            self._configure_viewer_action(action, label)
             view_menu.addAction(action)
 
         processing_menu = menu_bar.addMenu("Processing")
-        plane_action = QAction("Plane/background subtraction…", self)
-        plane_action.triggered.connect(self._on_simple_background)
+        plane_action = self._viewer_action(
+            "processing.plane_background",
+            self._on_simple_background,
+        )
         processing_menu.addAction(plane_action)
-        stm_bg_top_action = QAction("STM scan-line background…", self)
-        stm_bg_top_action.triggered.connect(self._on_open_stm_background)
+        stm_bg_top_action = self._viewer_action(
+            "processing.stm_background",
+            self._on_open_stm_background,
+        )
         processing_menu.addAction(stm_bg_top_action)
-        bad_lines_top_action = QAction("Bad scan-line correction…", self)
-        bad_lines_top_action.triggered.connect(self._on_preview_bad_lines)
+        bad_lines_top_action = self._viewer_action(
+            "processing.bad_lines",
+            self._on_preview_bad_lines,
+        )
         processing_menu.addAction(bad_lines_top_action)
         processing_menu.addSeparator()
         self._add_combo_menu(
@@ -1052,21 +1088,27 @@ class ImageViewerDialog(
         processing_menu.addAction(clear_zero_action)
         processing_menu.addSeparator()
 
-        apply_action = QAction("Apply processing", self)
-        apply_action.triggered.connect(self._on_apply_processing)
+        apply_action = self._viewer_action(
+            "processing.apply",
+            self._on_apply_processing,
+        )
         processing_menu.addAction(apply_action)
-        undo_action = QAction("Undo", self)
-        undo_action.setShortcut(QKeySequence.Undo)
-        undo_action.triggered.connect(self._on_undo_processing)
-        self._viewer_processing_actions["undo"] = undo_action
+        undo_action = self._viewer_action(
+            "processing.undo",
+            self._on_undo_processing,
+            register=self._viewer_processing_actions,
+        )
         processing_menu.addAction(undo_action)
-        redo_action = QAction("Redo", self)
-        redo_action.setShortcut(QKeySequence.Redo)
-        redo_action.triggered.connect(self._on_redo_processing)
-        self._viewer_processing_actions["redo"] = redo_action
+        redo_action = self._viewer_action(
+            "processing.redo",
+            self._on_redo_processing,
+            register=self._viewer_processing_actions,
+        )
         processing_menu.addAction(redo_action)
-        reset_action = QAction("Reset processing", self)
-        reset_action.triggered.connect(self._on_reset_processing)
+        reset_action = self._viewer_action(
+            "processing.reset",
+            self._on_reset_processing,
+        )
         processing_menu.addAction(reset_action)
 
         roi_menu = menu_bar.addMenu("ROI")
@@ -1119,14 +1161,14 @@ class ImageViewerDialog(
         # These should remain hidden or disabled until implemented in the ROI backend.
 
         measurements_menu = menu_bar.addMenu("Measurements")
-        ruler_action = QAction("Ruler / distance…", self)
-        ruler_action.triggered.connect(self._on_measure_distance)
+        ruler_action = self._viewer_action("measure.distance", self._on_measure_distance)
         measurements_menu.addAction(ruler_action)
-        angle_action = QAction("Angle measurement…", self)
-        angle_action.triggered.connect(self._on_measure_angle)
+        angle_action = self._viewer_action("measure.angle", self._on_measure_angle)
         measurements_menu.addAction(angle_action)
-        roi_stats_new_action = QAction("ROI statistics…", self)
-        roi_stats_new_action.triggered.connect(self._on_measure_roi_stats)
+        roi_stats_new_action = self._viewer_action(
+            "measure.roi_stats",
+            self._on_measure_roi_stats,
+        )
         measurements_menu.addAction(roi_stats_new_action)
         measurements_menu.addSeparator()
         add_roi_stats_action = QAction("Add active ROI statistics", self)
@@ -1141,17 +1183,17 @@ class ImageViewerDialog(
         )
         self._viewer_measurement_actions["step_height"] = add_step_height_action
         measurements_menu.addAction(add_step_height_action)
-        add_line_profile_action = QAction("Add current line profile", self)
-        add_line_profile_action.triggered.connect(
-            self._image_measurements.add_current_line_profile_measurement
+        add_line_profile_action = self._viewer_action(
+            "measure.line_profile",
+            self._image_measurements.add_current_line_profile_measurement,
+            register=self._viewer_measurement_actions,
         )
-        self._viewer_measurement_actions["line_profile"] = add_line_profile_action
         measurements_menu.addAction(add_line_profile_action)
-        find_periodicity_action = QAction("Find periodicity from line profile…", self)
-        find_periodicity_action.triggered.connect(
-            self._image_measurements.find_periodicity_for_active_line_roi
+        find_periodicity_action = self._viewer_action(
+            "measure.line_periodicity",
+            self._image_measurements.find_periodicity_for_active_line_roi,
+            register=self._viewer_measurement_actions,
         )
-        self._viewer_measurement_actions["line_periodicity"] = find_periodicity_action
         measurements_menu.addAction(find_periodicity_action)
         detect_maxima_action = QAction("Detect maxima in active ROI", self)
         detect_maxima_action.triggered.connect(
@@ -1189,19 +1231,21 @@ class ImageViewerDialog(
         measurements_menu.addAction(show_measure_tab_action)
 
         fft_menu = menu_bar.addMenu("FFT")
-        open_fft_action = QAction("Open FFT viewer…", self)
-        open_fft_action.triggered.connect(self._on_open_fft_viewer)
+        open_fft_action = self._viewer_action("fft.open", self._on_open_fft_viewer)
         fft_menu.addAction(open_fft_action)
-        periodic_filter_action = QAction("Periodic filter…", self)
-        periodic_filter_action.triggered.connect(self._on_periodic_filter)
+        periodic_filter_action = self._viewer_action(
+            "fft.periodic_filter",
+            self._on_periodic_filter,
+        )
         fft_menu.addAction(periodic_filter_action)
 
         export_menu = menu_bar.addMenu("Export")
-        save_png_action = QAction("Save PNG copy", self)
-        save_png_action.triggered.connect(self._on_save_png)
+        save_png_action = self._viewer_action("export.save_png", self._on_save_png)
         export_menu.addAction(save_png_action)
-        save_processed_action = QAction("Save processed image", self)
-        save_processed_action.triggered.connect(self._on_save_processed_image)
+        save_processed_action = self._viewer_action(
+            "export.save_processed",
+            self._on_save_processed_image,
+        )
         export_menu.addAction(save_processed_action)
         save_provenance_action = QAction("Save provenance", self)
         save_provenance_action.triggered.connect(self._on_save_provenance)
