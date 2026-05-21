@@ -22,4 +22,8 @@ def test_command_finder_filters_and_ranks_high_level_commands():
     assert periodic
     assert periodic[0].command_id == "fft.periodic_filter"
 
+    arithmetic = filter_viewer_commands(commands, "image math")
+    assert arithmetic
+    assert arithmetic[0].command_id == "processing.image_operations"
+
     assert filter_viewer_commands(commands, "threshold") == []

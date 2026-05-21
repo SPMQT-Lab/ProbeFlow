@@ -148,6 +148,63 @@ class ImageViewerToolsMixin:
         self._feature_finder_dlg = dlg
         dlg.show()
 
+    def _on_open_image_operations(self) -> None:
+        arr = self._display_arr if self._display_arr is not None else self._raw_arr
+        if arr is None:
+            self._status_lbl.setText("No image loaded.")
+            return
+
+        from probeflow.gui.dialogs.image_arithmetic import ImageArithmeticDialog
+
+        scale, unit_label, _axis_label = self._channel_unit()
+        dlg = ImageArithmeticDialog(
+            self._entries,
+            current_entry_index=self._idx,
+            current_plane_idx=self._ch_cb.currentIndex(),
+            current_shape=arr.shape,
+            current_scan_range_m=self._scan_range_m,
+            display_scale=scale,
+            display_unit=unit_label,
+            parent=self,
+        )
+        if dlg.exec() != QDialog.Accepted:
+            return
+        spec = dlg.operation_spec()
+        if not spec:
+            return
+
+        scope = dlg.scope()
+        op_spec = {
+            "op": "arithmetic",
+            "params": dict(spec.get("params", {})),
+        }
+        if scope == ImageArithmeticDialog.ACTIVE_AREA_ROI:
+            active_roi = self._active_image_roi()
+            active_area_roi_id = active_area_roi_context(self._image_roi_set).roi_id
+            if active_roi is not None and active_area_roi_id is None:
+                self._status_lbl.setText(
+                    f"Active {active_roi.kind} ROI is not valid for image arithmetic; "
+                    "select an area ROI or use Whole image."
+                )
+                return
+            if active_area_roi_id is None:
+                self._status_lbl.setText(
+                    "Select an active area ROI before using ROI-scoped image arithmetic."
+                )
+                return
+            op_spec["roi_id"] = active_area_roi_id
+
+        self._push_proc_undo_snapshot()
+        ops = list(self._processing.get("arithmetic_ops") or [])
+        ops.append(op_spec)
+        self._processing["arithmetic_ops"] = ops
+        self._clear_bad_line_preview()
+        self._refresh_processing_display()
+        op = str(op_spec["params"].get("operation", "add")).replace("_", " ")
+        operand = str(op_spec["params"].get("operand_type", "constant"))
+        target = "active ROI" if "roi_id" in op_spec else "whole image"
+        self._status_lbl.setText(f"Applied image arithmetic: {op} {operand} ({target}).")
+
     def _on_measure_distance(self) -> None:
         """Measure length/angle of the active line ROI → new panel."""
         roi_id = self._active_line_roi_id()

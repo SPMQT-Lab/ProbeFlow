@@ -20,7 +20,10 @@ from probeflow.gui.viewer.processed_export import (
     save_provenance_json,
 )
 from probeflow.processing.gui_adapter import processing_state_from_gui
-from probeflow.processing.state import assert_roi_references_resolved
+from probeflow.processing.state import (
+    apply_processing_state,
+    assert_roi_references_resolved,
+)
 from probeflow.provenance import build_export_record, display_lines
 
 
@@ -59,6 +62,7 @@ class ImageViewerProcessingExportMixin:
                 "periodic_notches",
                 "periodic_notch_radius",
                 "geometric_ops",
+                "arithmetic_ops",
                 "stm_background",
                 "plane_bg",
             )
@@ -130,19 +134,7 @@ class ImageViewerProcessingExportMixin:
 
     def _on_save_png(self):
         entry = self._entries[self._idx]
-        if getattr(self, "_processing_roi_error", ""):
-            self._status_lbl.setText(
-                f"Cannot export while processing has stale ROI references. {self._processing_roi_error}"
-            )
-            return
-        if getattr(self, "_processing_error", ""):
-            self._status_lbl.setText(f"Export blocked: {self._processing_error}")
-            return
-        try:
-            ps = processing_state_from_gui(self._processing or {})
-            assert_roi_references_resolved(ps, self._image_roi_set)
-        except ValueError as _roi_err:
-            self._status_lbl.setText(f"Export blocked: {_roi_err}")
+        if not self._assert_exportable_processing():
             return
         out_path, _ = QFileDialog.getSaveFileName(
             self, "Save PNG", str(Path.home() / f"{entry.stem}_viewer.png"),
@@ -167,6 +159,26 @@ class ImageViewerProcessingExportMixin:
             self._mark_history_export(out_path, export_parameters={"export_kind": "viewer_png"})
         self._status_lbl.setText(msg)
 
+    def _processing_state_has_image_arithmetic_operand(self, state) -> bool:
+        for step in state.steps:
+            if (
+                step.op == "arithmetic"
+                and step.params.get("operand_type") == "image"
+            ):
+                return True
+            if step.op == "roi":
+                nested = step.params.get("step")
+                if not isinstance(nested, dict):
+                    continue
+                params = nested.get("params", {})
+                if (
+                    nested.get("op") == "arithmetic"
+                    and isinstance(params, dict)
+                    and params.get("operand_type") == "image"
+                ):
+                    return True
+        return False
+
     def _assert_exportable_processing(self) -> bool:
         if getattr(self, "_processing_roi_error", ""):
             self._status_lbl.setText(
@@ -182,6 +194,15 @@ class ImageViewerProcessingExportMixin:
         except ValueError as _roi_err:
             self._status_lbl.setText(f"Export blocked: {_roi_err}")
             return False
+        if (
+            self._raw_arr is not None
+            and self._processing_state_has_image_arithmetic_operand(ps)
+        ):
+            try:
+                apply_processing_state(self._raw_arr, ps, self._image_roi_set)
+            except Exception as exc:
+                self._status_lbl.setText(f"Export blocked: Processing failed: {exc}")
+                return False
         return True
 
     def _current_display_settings(self) -> dict:

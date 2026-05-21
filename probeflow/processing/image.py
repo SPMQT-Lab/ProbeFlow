@@ -8,3 +8,4 @@ from probeflow.processing.analysis import *       # noqa: F401,F403
 from probeflow.processing.png_export import *     # noqa: F401,F403
 from probeflow.processing.tv import *             # noqa: F401,F403
 from probeflow.processing.geometry import *       # noqa: F401,F403
+from probeflow.processing.arithmetic import *     # noqa: F401,F403

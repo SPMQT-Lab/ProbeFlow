@@ -49,6 +49,9 @@ _MINIMAL_PARAMS: dict[str, dict] = {
     "affine_lattice_correction": {
         "matrix": [[1.0, 0.0], [0.0, 1.0]], "expand_canvas": False,
     },
+    "arithmetic": {
+        "operation": "add", "operand_type": "constant", "value_si": 0.0,
+    },
     "set_zero_point": {"x_px": 2, "y_px": 2, "patch": 1},
     "set_zero_plane": {"points_px": [[0, 0], [7, 0], [0, 7]], "patch": 1},
     "roi": {

@@ -40,6 +40,7 @@ VIEWER_COMMANDS: tuple[ViewerCommand, ...] = (
     ViewerCommand("processing.plane_background", "Plane/background subtraction...", "Processing", ("Ctrl+Shift+B",), "Run simple plane/background subtraction.", aliases=("plane", "background", "level")),
     ViewerCommand("processing.stm_background", "STM scan-line background...", "Processing", ("Ctrl+Alt+B",), "Open STM scan-line background subtraction.", aliases=("stm", "scanline", "line background")),
     ViewerCommand("processing.bad_lines", "Bad scan-line correction...", "Processing", ("Ctrl+Shift+L",), "Open bad scan-line correction.", aliases=("bad lines", "stripes", "line correction")),
+    ViewerCommand("processing.image_operations", "Image Operations...", "Processing", status_tip="Open image arithmetic operations.", aliases=("arithmetic", "calculator", "image math", "add", "subtract")),
     ViewerCommand("processing.zero_plane", "Zero plane", "Processing", status_tip="Set a zero reference plane from an ROI.", enabled_state_key="zero_plane", aliases=("zero", "reference")),
     ViewerCommand("processing.clear_zero", "Clear zero plane", "Processing", status_tip="Clear the current zero reference plane.", aliases=("zero", "reference")),
     ViewerCommand("processing.undo", "Undo", "Processing", ("Ctrl+Z",), "Restore the previous processing state.", "undo", aliases=("history",)),

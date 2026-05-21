@@ -50,6 +50,7 @@ def test_command_finder_shortcut_and_visible_commands_are_high_level():
 
     finder_ids = {command.command_id for command in viewer_finder_commands()}
     assert "processing.stm_background" in finder_ids
+    assert "processing.image_operations" in finder_ids
     assert "fft.periodic_filter" in finder_ids
     assert "measure.clear_lattice_grid" in finder_ids
     assert "help.definitions" in finder_ids

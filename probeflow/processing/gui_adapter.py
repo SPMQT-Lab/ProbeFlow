@@ -38,6 +38,7 @@ NUMERIC_PROC_KEYS: tuple[str, ...] = (
     "processing_roi_id",
     "roi_id",
     "geometric_ops",
+    "arithmetic_ops",
 )
 
 
@@ -284,6 +285,30 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
             _append_step(ProcessingStep("rotate_arbitrary", {
                 "angle_degrees": float(op_params.get("angle_degrees", 0.0)),
                 "order": int(op_params.get("order", 1)),
+            }))
+
+    for op_spec in gui_state.get("arithmetic_ops") or []:
+        try:
+            if isinstance(op_spec, dict) and op_spec.get("op") == "roi":
+                roi_params = dict(op_spec.get("params", {}))
+                nested = dict(roi_params.get("step", {}))
+                if nested.get("op") != "arithmetic":
+                    continue
+                params = dict(nested.get("params", {}))
+                roi_id_for_step = roi_params.get("roi_id")
+            else:
+                params = dict(op_spec.get("params", {}))
+                roi_id_for_step = op_spec.get("roi_id")
+        except (AttributeError, TypeError, ValueError):
+            continue
+
+        step = ProcessingStep("arithmetic", params)
+        if roi_id_for_step is None:
+            steps.append(step)
+        else:
+            steps.append(ProcessingStep("roi", {
+                "roi_id": str(roi_id_for_step),
+                "step": {"op": "arithmetic", "params": dict(params)},
             }))
 
     return ProcessingState(steps=steps)

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -42,6 +43,7 @@ _SUPPORTED_OPS: frozenset[str] = frozenset({
     "periodic_notch_filter",
     "linear_undistort",
     "affine_lattice_correction",
+    "arithmetic",
     "set_zero_point",
     "set_zero_plane",
     "roi",
@@ -59,6 +61,7 @@ _ROI_ELIGIBLE_OPS: frozenset[str] = frozenset({
     "edge_detect",
     "fourier_filter",
     "fft_soft_border",
+    "arithmetic",
 })
 
 
@@ -435,6 +438,33 @@ def _resolve_mask_roi_param(
     return roi.to_mask(image_shape)
 
 
+def _load_arithmetic_operand_image(params: "dict[str, Any]") -> np.ndarray:
+    """Load the raw plane referenced by an image-arithmetic step."""
+    source_path = params.get("source_path")
+    if not source_path:
+        raise ValueError("Image arithmetic step is missing source_path.")
+    try:
+        plane_idx = int(params.get("plane_idx", 0))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Image arithmetic step has an invalid plane_idx.") from exc
+
+    from probeflow.core.scan_loader import load_scan
+
+    try:
+        scan = load_scan(Path(str(source_path)))
+    except Exception as exc:
+        raise ValueError(
+            f"Could not load image arithmetic operand {source_path!r}: {exc}"
+        ) from exc
+
+    if plane_idx < 0 or plane_idx >= len(scan.planes):
+        raise ValueError(
+            f"Image arithmetic plane_idx={plane_idx} is out of range for "
+            f"{source_path!r} ({len(scan.planes)} plane(s))."
+        )
+    return np.asarray(scan.planes[plane_idx], dtype=np.float64)
+
+
 # ── Canonical apply function ──────────────────────────────────────────────────
 
 def apply_processing_state(
@@ -576,6 +606,20 @@ def apply_processing_state(
                 interpolation=str(p.get("interpolation", "bilinear")),
                 fill_mode=str(p.get("fill_mode", "nan")),
                 fill_value=float(p["fill_value"]) if p.get("fill_value") is not None else None,
+            )
+        elif step.op == "arithmetic":
+            operand_type = str(p.get("operand_type", "constant"))
+            operand_image = (
+                _load_arithmetic_operand_image(p)
+                if operand_type == "image" else None
+            )
+            a = _proc.apply_arithmetic(
+                a,
+                operation=str(p.get("operation", "add")),
+                operand_type=operand_type,
+                value_si=p.get("value_si"),
+                factor=p.get("factor"),
+                operand_image=operand_image,
             )
         elif step.op == "set_zero_point":
             a = _proc.set_zero_point(

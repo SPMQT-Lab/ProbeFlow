@@ -201,6 +201,7 @@ def test_viewer_align_rows_applies_immediately(qapp, monkeypatch):
 
     entry = SxmFile(path=Path("/tmp/example.sxm"), stem="example", Nx=8, Ny=8)
     dlg = ImageViewerDialog(entry, [entry], "gray", THEMES["dark"])
+    assert "processing.image_operations" in dlg._viewer_command_actions
 
     dlg._processing_panel._align_combo.setCurrentText("Mean")
 
@@ -241,6 +242,143 @@ def test_viewer_stm_background_apply_records_processing_state(qapp, monkeypatch)
     assert dlg._processing["stm_background"]["fit_roi_id"] == "roi-1"
     assert dlg._processing["stm_background"]["model"] == "poly2"
     assert dlg._processing["stm_background"]["applied_to"] == "whole_image"
+
+    dlg.close()
+    dlg.deleteLater()
+
+
+def test_image_arithmetic_dialog_builds_constant_spec(qapp):
+    from probeflow.gui import SxmFile
+    from probeflow.gui.dialogs.image_arithmetic import ImageArithmeticDialog
+
+    entry = SxmFile(path=Path("/tmp/example.sxm"), stem="example", Nx=8, Ny=8)
+    dlg = ImageArithmeticDialog(
+        [entry],
+        current_entry_index=0,
+        current_plane_idx=0,
+        current_shape=(8, 8),
+        current_scan_range_m=(10e-9, 10e-9),
+        display_scale=1e9,
+        display_unit="nm",
+    )
+
+    dlg._constant_spin.setValue(5.0)
+    dlg.accept()
+    spec = dlg.operation_spec()
+
+    assert spec["op"] == "arithmetic"
+    assert spec["params"]["operation"] == "add"
+    assert spec["params"]["operand_type"] == "constant"
+    assert spec["params"]["value_si"] == pytest.approx(5e-9)
+
+    dlg.deleteLater()
+
+
+def test_viewer_image_arithmetic_appends_roi_scoped_step(qapp, monkeypatch):
+    from PySide6.QtWidgets import QDialog
+    from probeflow.core.roi import ROI, ROISet
+    from probeflow.gui import ImageViewerDialog, SxmFile, THEMES
+
+    class FakeImageArithmeticDialog:
+        ACTIVE_AREA_ROI = "active_area_roi"
+
+        def __init__(self, *args, **kwargs):
+            self.args = args
+            self.kwargs = kwargs
+
+        def exec(self):
+            return QDialog.Accepted
+
+        def operation_spec(self):
+            return {
+                "op": "arithmetic",
+                "params": {
+                    "operation": "add",
+                    "operand_type": "constant",
+                    "value_si": 1.0,
+                },
+            }
+
+        def scope(self):
+            return self.ACTIVE_AREA_ROI
+
+    monkeypatch.setattr(ImageViewerDialog, "_load_current", lambda self: None)
+    monkeypatch.setattr(ImageViewerDialog, "_refresh_processing_display", lambda self: None)
+    monkeypatch.setattr(
+        "probeflow.gui.dialogs.image_arithmetic.ImageArithmeticDialog",
+        FakeImageArithmeticDialog,
+    )
+
+    entry = SxmFile(path=Path("/tmp/example.sxm"), stem="example", Nx=8, Ny=8)
+    dlg = ImageViewerDialog(entry, [entry], "gray", THEMES["dark"])
+    dlg._raw_arr = np.ones((8, 8), dtype=float)
+    dlg._display_arr = dlg._raw_arr
+    dlg._scan_range_m = (8e-9, 8e-9)
+    roi_set = ROISet(image_id="img1")
+    roi = ROI.new("rectangle", {"x": 2.0, "y": 2.0, "width": 3.0, "height": 3.0})
+    roi_set.add(roi)
+    roi_set.set_active(roi.id)
+    dlg._image_roi_set = roi_set
+
+    dlg._on_open_image_operations()
+
+    op_spec = dlg._processing["arithmetic_ops"][0]
+    assert op_spec["op"] == "arithmetic"
+    assert op_spec["roi_id"] == roi.id
+    assert op_spec["params"]["value_si"] == 1.0
+
+    dlg.close()
+    dlg.deleteLater()
+
+
+def test_viewer_image_arithmetic_rejects_non_area_roi_scope(qapp, monkeypatch):
+    from PySide6.QtWidgets import QDialog
+    from probeflow.core.roi import ROI, ROISet
+    from probeflow.gui import ImageViewerDialog, SxmFile, THEMES
+
+    class FakeImageArithmeticDialog:
+        ACTIVE_AREA_ROI = "active_area_roi"
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def exec(self):
+            return QDialog.Accepted
+
+        def operation_spec(self):
+            return {
+                "op": "arithmetic",
+                "params": {
+                    "operation": "add",
+                    "operand_type": "constant",
+                    "value_si": 1.0,
+                },
+            }
+
+        def scope(self):
+            return self.ACTIVE_AREA_ROI
+
+    monkeypatch.setattr(ImageViewerDialog, "_load_current", lambda self: None)
+    monkeypatch.setattr(ImageViewerDialog, "_refresh_processing_display", lambda self: None)
+    monkeypatch.setattr(
+        "probeflow.gui.dialogs.image_arithmetic.ImageArithmeticDialog",
+        FakeImageArithmeticDialog,
+    )
+
+    entry = SxmFile(path=Path("/tmp/example.sxm"), stem="example", Nx=8, Ny=8)
+    dlg = ImageViewerDialog(entry, [entry], "gray", THEMES["dark"])
+    dlg._raw_arr = np.ones((8, 8), dtype=float)
+    dlg._display_arr = dlg._raw_arr
+    roi_set = ROISet(image_id="img1")
+    roi = ROI.new("point", {"x": 2.0, "y": 2.0})
+    roi_set.add(roi)
+    roi_set.set_active(roi.id)
+    dlg._image_roi_set = roi_set
+
+    dlg._on_open_image_operations()
+
+    assert "arithmetic_ops" not in dlg._processing
+    assert "not valid for image arithmetic" in dlg._status_lbl.text()
 
     dlg.close()
     dlg.deleteLater()

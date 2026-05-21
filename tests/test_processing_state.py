@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -44,6 +45,21 @@ def _sample_image() -> np.ndarray:
     return rng.normal(loc=1e-9, scale=1e-10, size=(32, 32))
 
 
+def _scan_with_plane(plane: np.ndarray, *, path: str = "/tmp/source.sxm"):
+    from probeflow.core.scan_model import Scan
+
+    return Scan(
+        planes=[np.asarray(plane, dtype=np.float64)],
+        plane_names=["Z forward"],
+        plane_units=["m"],
+        plane_synthetic=[False],
+        header={},
+        scan_range_m=(1e-9, 1e-9),
+        source_path=Path(path),
+        source_format="sxm",
+    )
+
+
 def test_empty_state_is_new_float64_identity_without_mutating_input():
     arr = np.array([[1, 2], [3, 4]], dtype=np.int32)
     original = arr.copy()
@@ -55,6 +71,153 @@ def test_empty_state_is_new_float64_identity_without_mutating_input():
     assert result.shape == arr.shape
     np.testing.assert_array_equal(arr, original)
     np.testing.assert_allclose(result, original.astype(float))
+
+
+@pytest.mark.parametrize(
+    ("operation", "params", "expected"),
+    [
+        ("add", {"value_si": 1.5}, [[3.5, 5.5]]),
+        ("subtract", {"value_si": 1.5}, [[0.5, 2.5]]),
+        ("multiply", {"factor": 2.0}, [[4.0, 8.0]]),
+        ("divide", {"factor": 2.0}, [[1.0, 2.0]]),
+    ],
+)
+def test_arithmetic_constant_operations(operation, params, expected):
+    arr = np.array([[2.0, 4.0]])
+    state = ProcessingState(steps=[
+        ProcessingStep("arithmetic", {
+            "operation": operation,
+            "operand_type": "constant",
+            **params,
+        }),
+    ])
+
+    result = apply_processing_state(arr, state)
+
+    np.testing.assert_allclose(result, np.asarray(expected, dtype=float))
+
+
+def test_arithmetic_divide_by_zero_raises():
+    state = ProcessingState(steps=[
+        ProcessingStep("arithmetic", {
+            "operation": "divide",
+            "operand_type": "constant",
+            "factor": 0.0,
+        }),
+    ])
+
+    with pytest.raises(ValueError, match="divide by zero"):
+        apply_processing_state(np.ones((2, 2)), state)
+
+
+@pytest.mark.parametrize(
+    ("operation", "expected"),
+    [
+        ("add", [[11.0, 22.0], [33.0, 44.0]]),
+        ("subtract", [[-9.0, -18.0], [-27.0, -36.0]]),
+    ],
+)
+def test_arithmetic_image_add_subtract(monkeypatch, operation, expected):
+    operand = np.array([[10.0, 20.0], [30.0, 40.0]])
+    monkeypatch.setattr(
+        "probeflow.core.scan_loader.load_scan",
+        lambda _path: _scan_with_plane(operand),
+    )
+    state = ProcessingState(steps=[
+        ProcessingStep("arithmetic", {
+            "operation": operation,
+            "operand_type": "image",
+            "source_path": "/tmp/source.sxm",
+            "plane_idx": 0,
+        }),
+    ])
+
+    result = apply_processing_state(np.array([[1.0, 2.0], [3.0, 4.0]]), state)
+
+    np.testing.assert_allclose(result, np.asarray(expected, dtype=float))
+
+
+def test_arithmetic_image_shape_mismatch_raises(monkeypatch):
+    monkeypatch.setattr(
+        "probeflow.core.scan_loader.load_scan",
+        lambda _path: _scan_with_plane(np.ones((3, 3))),
+    )
+    state = ProcessingState(steps=[
+        ProcessingStep("arithmetic", {
+            "operation": "add",
+            "operand_type": "image",
+            "source_path": "/tmp/source.sxm",
+            "plane_idx": 0,
+        }),
+    ])
+
+    with pytest.raises(ValueError, match="operand shape"):
+        apply_processing_state(np.ones((2, 2)), state)
+
+
+def test_roi_scoped_arithmetic_leaves_outside_pixels_unchanged():
+    roi_set, roi = _rect_roi_set()
+    arr = np.zeros((16, 16), dtype=float)
+    state = ProcessingState(steps=[
+        ProcessingStep("roi", {
+            "roi_id": roi.id,
+            "step": {
+                "op": "arithmetic",
+                "params": {
+                    "operation": "add",
+                    "operand_type": "constant",
+                    "value_si": 5.0,
+                },
+            },
+        }),
+    ])
+
+    result = apply_processing_state(arr, state, roi_set=roi_set)
+    mask = roi.to_mask(arr.shape)
+
+    assert np.all(result[mask] == 5.0)
+    assert np.all(result[~mask] == 0.0)
+
+
+def test_arithmetic_state_serialization_and_gui_conversion():
+    state = ProcessingState(steps=[
+        ProcessingStep("arithmetic", {
+            "operation": "multiply",
+            "operand_type": "constant",
+            "factor": 2.0,
+        }),
+    ])
+    restored = ProcessingState.from_dict(state.to_dict())
+
+    assert restored.steps[0].op == "arithmetic"
+    assert restored.steps[0].params["factor"] == 2.0
+
+    gui_state = {
+        "arithmetic_ops": [
+            {
+                "op": "arithmetic",
+                "params": {
+                    "operation": "add",
+                    "operand_type": "constant",
+                    "value_si": 1.0,
+                },
+            },
+            {
+                "op": "arithmetic",
+                "roi_id": "roi-1",
+                "params": {
+                    "operation": "subtract",
+                    "operand_type": "constant",
+                    "value_si": 2.0,
+                },
+            },
+        ],
+    }
+    converted = processing_state_from_gui(gui_state)
+
+    assert [step.op for step in converted.steps] == ["arithmetic", "roi"]
+    assert converted.steps[1].params["roi_id"] == "roi-1"
+    assert converted.steps[1].params["step"]["op"] == "arithmetic"
 
 
 def test_serialisation_contract_preserves_steps_and_copies_nested_params():

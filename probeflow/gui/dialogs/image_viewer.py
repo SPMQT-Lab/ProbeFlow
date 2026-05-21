@@ -1061,6 +1061,11 @@ class ImageViewerDialog(
             self._on_preview_bad_lines,
         )
         processing_menu.addAction(bad_lines_top_action)
+        image_ops_action = self._viewer_action(
+            "processing.image_operations",
+            self._on_open_image_operations,
+        )
+        processing_menu.addAction(image_ops_action)
         processing_menu.addSeparator()
         self._add_combo_menu(
             processing_menu, "Align rows", self._processing_panel._align_combo,
