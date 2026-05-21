@@ -120,6 +120,7 @@ from probeflow.gui.viewer.image_viewer_processing_export_mixin import (
 from probeflow.gui.viewer.image_viewer_roi_mixin import ImageViewerRoiMixin
 from probeflow.gui.viewer.image_viewer_toolbar_mixin import ImageViewerToolbarMixin
 from probeflow.gui.viewer.image_viewer_tools_mixin import ImageViewerToolsMixin
+from probeflow.gui.viewer.window_menu import populate_window_menu
 
 # Dialogs imported from their specific submodule files to avoid circular imports
 # (this module lives inside probeflow.gui.dialogs).
@@ -1277,6 +1278,11 @@ class ImageViewerDialog(
             self._on_save_provenance,
         )
         export_menu.addAction(save_provenance_action)
+
+        window_menu = menu_bar.addMenu("Window")
+        self._viewer_window_menu = window_menu
+        window_menu.aboutToShow.connect(lambda: populate_window_menu(window_menu, self))
+        populate_window_menu(window_menu, self)
 
         help_menu = menu_bar.addMenu("Help")
         command_finder_action = self._viewer_action(

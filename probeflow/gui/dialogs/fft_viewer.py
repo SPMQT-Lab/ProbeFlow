@@ -53,6 +53,7 @@ class FFTViewerDialog(QDialog):
         self._vmin_line = None
         self._vmax_line = None
         self._fft_im = None
+        self._fft_lattice_dock = None
         self._fft_cmap = "gray"
         self._cmap_options = ["gray", "gray_r", "inferno", "hot", "viridis", "plasma", "turbo"]
 
@@ -776,4 +777,11 @@ class FFTViewerDialog(QDialog):
         dock.setWidget(panel)
         dock.setFloating(True)
         dock.setMinimumWidth(240)
+        self._fft_lattice_dock = dock
+
+        def _clear_dock_ref():
+            if getattr(self, "_fft_lattice_dock", None) is dock:
+                self._fft_lattice_dock = None
+
+        dock.destroyed.connect(_clear_dock_ref)
         dock.show()

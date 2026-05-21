@@ -15,6 +15,7 @@ GUI_TEST_MODULES = {
     "test_gui_index_integration.py",
     "test_gui_processing_panel.py",
     "test_gui_features.py",
+    "test_viewer_window_menu.py",
 }
 
 MIXED_QT_FIXTURE_MODULES = {
