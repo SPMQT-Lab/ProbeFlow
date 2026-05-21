@@ -843,6 +843,7 @@ class ImageViewerDialog(
         self._measurement_table = self._measurement_panel.table
         self._feature_detection_panel = self._measurement_panel.feature_panel
         self._measurement_dock = QDockWidget("Measurements", self._viewer_main)
+        self._measurement_dock.setObjectName("imageViewerMeasurementsDock")
         self._measurement_dock.setWidget(self._measurement_panel)
         self._measurement_dock.setFeatures(
             QDockWidget.DockWidgetClosable
@@ -890,6 +891,7 @@ class ImageViewerDialog(
             },
             parent=self._viewer_main,
         )
+        self._roi_dock.setObjectName("imageViewerRoiManagerDock")
 
         # ROI and measurements are powerful but task-specific, so they start
         # hidden and remain reachable from the sidebar and top menus.
@@ -1618,6 +1620,8 @@ class ImageViewerDialog(
                               arr=self._display_arr)
         self._reset_zoom_on_next_pixmap = bool(reset_zoom or self._reset_zoom_on_next_pixmap)
         loader.signals.loaded.connect(self._on_loaded)
+        loader.signals.failed.connect(self._on_viewer_pixmap_failed)
+        self._current_viewer_loader = loader
         self._pool.start(loader)
 
     def _channel_unit(self) -> tuple[float, str, str]:

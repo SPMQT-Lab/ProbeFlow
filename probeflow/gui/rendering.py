@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import io
+import logging
 import re as _re
 from pathlib import Path
 from typing import Optional
+
+_log = logging.getLogger(__name__)
 
 import numpy as np
 from PIL import Image
@@ -284,6 +287,7 @@ def render_scan_image(
                 img.thumbnail(size, Image.LANCZOS)
         return img
     except Exception:
+        _log.warning("render_scan_image failed", exc_info=True)
         return None
 
 

@@ -18,6 +18,16 @@ from pathlib import Path
 # Read at most this many bytes from the start of each file while sniffing.
 _SNIFF_BYTES = 8192
 
+# Only attempt content sniffing for files with these suffixes.
+# This prevents false positives on source/test files that happen to contain
+# scanner magic strings as Python literals (e.g. b":NANONIS_VERSION:").
+_SNIFF_SUFFIXES: frozenset[str] = frozenset({
+    ".sxm",   # Nanonis image
+    ".dat",   # Createc image or Nanonis spec
+    ".sm4",   # RHK SM4
+    ".vert",  # Createc spec
+})
+
 
 class FileType(Enum):
     CREATEC_IMAGE = "createc_image"
@@ -34,9 +44,16 @@ def sniff_file_type(path) -> FileType:
     Reads the first ~8 KB of the file and matches against known vendor
     signatures.  Never raises: a missing, unreadable, or unrecognised
     file returns :data:`FileType.UNKNOWN`.
+
+    As a fast pre-filter, files whose suffix is not in :data:`_SNIFF_SUFFIXES`
+    are rejected immediately without reading any bytes.  This prevents false
+    positives on source or test files that happen to contain scanner magic
+    strings as Python byte literals.
     """
     try:
         p = Path(path)
+        if p.suffix.lower() not in _SNIFF_SUFFIXES:
+            return FileType.UNKNOWN
         with p.open("rb") as fh:
             head = fh.read(_SNIFF_BYTES)
     except (OSError, ValueError):

@@ -140,6 +140,14 @@ class ImageViewerDisplayMixin:
         self._refresh_zero_markers()
         self._refresh_scale_bar()
 
+    @Slot(str, object)
+    def _on_viewer_pixmap_failed(self, message: str, token) -> None:
+        if token is not self._token:
+            return
+        self._zoom_lbl.setText("Image render failed")
+        if hasattr(self, "_status_lbl"):
+            self._status_lbl.setText(message)
+
     def _scan_extent_nm(self) -> tuple[float, float]:
         """Return (width_nm, height_nm) for the current scan, or (0,0)."""
         if self._scan_range_m is None:

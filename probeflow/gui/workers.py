@@ -14,6 +14,7 @@ from PySide6.QtGui import QPixmap
 
 from probeflow.gui.models import SxmFile, VertFile
 from probeflow.core.resources import FILE_CUSHIONS_DIR
+from probeflow.core.scan_loader import SUPPORTED_SUFFIXES as _SCAN_SUFFIXES
 from probeflow.gui.rendering import (
     THUMBNAIL_CHANNEL_DEFAULT,
     pil_to_pixmap,
@@ -99,6 +100,10 @@ class FolderThumbnailLoader(QRunnable):
     def run(self):
         pixmaps: list = []
         for path in self.sample_paths:
+            if path.suffix.lower() not in _SCAN_SUFFIXES:
+                _log.debug("FolderThumbnailLoader: skipping unsupported file %s", path)
+                pixmaps.append(None)
+                continue
             try:
                 scan = load_scan(path)
                 plane_idx = resolve_thumbnail_plane_index(
@@ -186,6 +191,7 @@ class ChannelLoader(QRunnable):
 # ── Worker: full-size viewer image ────────────────────────────────────────────
 class ViewerSignals(QObject):
     loaded = Signal(QPixmap, object)
+    failed = Signal(str, object)
 
 
 class ViewerLoader(QRunnable):
@@ -211,21 +217,26 @@ class ViewerLoader(QRunnable):
         self.arr        = arr
 
     def run(self):
-        img = render_scan_image(
-            scan_path=None if self.arr is not None else self.entry.path,
-            arr=self.arr,
-            plane_idx=self.plane_idx,
-            colormap=self.colormap,
-            clip_low=self.clip_low,
-            clip_high=self.clip_high,
-            size=self.size,
-            vmin=self.vmin,
-            vmax=self.vmax,
-            allow_upscale=False,
-            processing=None if self.arr is not None else (self.processing or None),
-        )
-        if img is not None:
-            self.signals.loaded.emit(pil_to_pixmap(img), self.token)
+        try:
+            img = render_scan_image(
+                scan_path=None if self.arr is not None else self.entry.path,
+                arr=self.arr,
+                plane_idx=self.plane_idx,
+                colormap=self.colormap,
+                clip_low=self.clip_low,
+                clip_high=self.clip_high,
+                size=self.size,
+                vmin=self.vmin,
+                vmax=self.vmax,
+                allow_upscale=False,
+                processing=None if self.arr is not None else (self.processing or None),
+            )
+            if img is not None:
+                self.signals.loaded.emit(pil_to_pixmap(img), self.token)
+            else:
+                self.signals.failed.emit("Image render returned no data.", self.token)
+        except Exception as exc:
+            self.signals.failed.emit(f"Image render failed: {exc}", self.token)
 
 
 # ── Worker: conversion ────────────────────────────────────────────────────────
