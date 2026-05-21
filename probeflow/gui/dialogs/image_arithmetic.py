@@ -78,7 +78,7 @@ class ImageArithmeticDialog(QDialog):
         self._current_scan_range_m = current_scan_range_m
         self._display_scale = float(display_scale) if display_scale else 1.0
         self._display_unit = str(display_unit or "SI")
-        self._scan_cache: dict[int, Any] = {}
+        self._scan_cache: dict[Path, Any] = {}
         self._accepted_spec: dict[str, Any] | None = None
         self._accepted_scope = self.WHOLE_IMAGE
 
@@ -319,24 +319,30 @@ class ImageArithmeticDialog(QDialog):
 
     def _request_scan_load(self, entry_index: int) -> None:
         """Start a background load for entry_index if not already cached or in-flight."""
-        if entry_index in self._scan_cache:
-            return  # already loaded or already loading
         entry = self._entries[entry_index]
         path = Path(entry.path)
-        self._scan_cache[entry_index] = self._LOADING  # mark in-flight
+        if path in self._scan_cache:
+            return  # already loaded or already loading
+        self._scan_cache[path] = self._LOADING  # mark in-flight
         worker = _ScanLoaderWorker(entry_index, path)
         worker.signals.finished.connect(self._on_scan_loaded)
         worker.signals.failed.connect(self._on_scan_failed)
         QThreadPool.globalInstance().start(worker)
 
     def _on_scan_loaded(self, entry_index: int, scan: Any) -> None:
-        self._scan_cache[entry_index] = scan
+        if entry_index < 0 or entry_index >= len(self._entries):
+            return
+        path = Path(self._entries[entry_index].path)
+        self._scan_cache[path] = scan
         # Only refresh if this is still the selected entry
         if self._selected_entry_index() == entry_index:
             self._refresh_source_controls()
 
     def _on_scan_failed(self, entry_index: int, error_msg: str) -> None:
-        self._scan_cache.pop(entry_index, None)  # remove in-flight marker
+        if entry_index < 0 or entry_index >= len(self._entries):
+            return
+        path = Path(self._entries[entry_index].path)
+        self._scan_cache.pop(path, None)  # remove in-flight marker
         if self._selected_entry_index() == entry_index:
             self._apply_button.setEnabled(False)
             self._set_status(f"Could not load source image: {error_msg}", error=True)
@@ -357,7 +363,8 @@ class ImageArithmeticDialog(QDialog):
             return
 
         # Check cache — may be loaded, in-flight, or missing
-        cached = self._scan_cache.get(entry_index)
+        path = Path(self._entries[entry_index].path)
+        cached = self._scan_cache.get(path)
         if cached is None:
             # Not yet requested — start async load
             self._request_scan_load(entry_index)
@@ -417,7 +424,8 @@ class ImageArithmeticDialog(QDialog):
         entry_index = self._selected_entry_index()
         if entry_index is None:
             return None
-        cached = self._scan_cache.get(entry_index)
+        path = Path(self._entries[entry_index].path)
+        cached = self._scan_cache.get(path)
         if cached is None or cached is self._LOADING:
             return None
         scan = cached

@@ -507,12 +507,11 @@ class FFTViewerDialog(QDialog):
         return bool(modifiers & (Qt.ControlModifier | Qt.MetaModifier))
 
     def _fft_lattice_overlay_wants_event(self, event) -> bool:
+        """Return True if the lattice overlay wants to handle this canvas event."""
         overlay = getattr(self, "_fft_lattice_overlay", None)
-        return bool(
-            overlay is not None
-            and hasattr(overlay, "hit_test_event")
-            and overlay.hit_test_event(event)
-        )
+        if overlay is None:
+            return False
+        return bool(overlay.hit_test_event(event))
 
     def _on_fft_lattice_drag_state_changed(self, dragging: bool) -> None:
         self._fft_lattice_drag_active = bool(dragging)
