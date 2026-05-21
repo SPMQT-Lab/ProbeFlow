@@ -5,11 +5,18 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QDialog, QLabel, QPushButton, QVBoxLayout
 
-from probeflow.gui.viewer.shortcuts import viewer_command
+from probeflow.gui.viewer.shortcuts import (
+    display_shortcuts_for_all_platforms,
+    viewer_command,
+)
 
 
 def _keys(command_id: str) -> str:
-    return " / ".join(viewer_command(command_id).shortcuts)
+    return display_shortcuts_for_all_platforms(viewer_command(command_id).shortcuts)
+
+
+def _shortcut(shortcut: str) -> str:
+    return display_shortcuts_for_all_platforms((shortcut,))
 
 
 class ImageViewerShortcutsDialog(QDialog):
@@ -25,11 +32,14 @@ class ImageViewerShortcutsDialog(QDialog):
         text = QLabel(
             "<b>Image navigation</b><br>"
             "Drag blank image: pan<br>"
-            "Ctrl+scroll: zoom<br>"
+            "⌘+scroll / Ctrl+scroll: zoom<br>"
+            f"{_keys('viewer.command_finder')}: command finder<br>"
             f"{_keys('view.fit')}: fit image<br>"
             f"{_keys('view.one_to_one')}: 1:1 view<br><br>"
             "<b>Panels and docks</b><br>"
-            f"{_keys('panel.view')} / {_keys('panel.process')} / {_keys('panel.measure')}: switch sidebar tabs<br>"
+            f"View: {_keys('panel.view')}; Process: {_keys('panel.process')}; "
+            f"ROI: {_keys('panel.roi')}; Measure: {_keys('panel.measure')}; "
+            f"Export: {_keys('panel.export')}: switch sidebar tabs<br>"
             f"{_keys('dock.roi_manager')}: ROI Manager dock<br>"
             f"{_keys('dock.measurements')}: Measurements dock<br><br>"
             "<b>Processing</b><br>"
@@ -44,7 +54,7 @@ class ImageViewerShortcutsDialog(QDialog):
             "Drag active ROI: move<br>"
             "Right-click ROI: object actions<br>"
             "Delete/Backspace: delete active ROI<br>"
-            "Ctrl+C / Ctrl+V: copy and paste ROI<br><br>"
+            f"Copy ROI: {_shortcut('Ctrl+C')}; paste ROI: {_shortcut('Ctrl+V')}<br><br>"
             "<b>Drawing tools</b><br>"
             "Rectangle/Ellipse/Line: drag to draw<br>"
             "Polygon: click vertices, double-click or Enter to finish<br>"

@@ -134,11 +134,13 @@ class ImageMeasurementController:
         is_line = roi is not None and roi.kind == "line"
         selected_ids = self.selected_roi_ids()
         selected_area_pair = len(selected_ids) == 2 and len(self._selected_area_rois()) == 2
+        has_line = is_line or self._active_line_roi_id() is not None
         return {
+            "distance": has_line,
             "roi_stats": is_area,
             "step_height": selected_area_pair,
-            "line_profile": is_line or self._active_line_roi_id() is not None,
-            "line_periodicity": is_line or self._active_line_roi_id() is not None,
+            "line_profile": has_line,
+            "line_periodicity": has_line,
             "feature_maxima": True,  # works on full image when no area ROI is active
             "copy_points": bool(self._feature_points),
             "export_points_csv": bool(self._feature_points),

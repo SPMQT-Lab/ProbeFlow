@@ -991,8 +991,10 @@ class ImageViewerDialog(
             self._on_auto_clip,
         )
         view_menu.addAction(auto_contrast_action)
-        reset_contrast_action = QAction("Reset contrast", self)
-        reset_contrast_action.triggered.connect(self._on_reset_display)
+        reset_contrast_action = self._viewer_action(
+            "view.reset_contrast",
+            self._on_reset_display,
+        )
         view_menu.addAction(reset_contrast_action)
         view_menu.addSeparator()
         fit_action = self._viewer_action("view.fit", self._zoom_lbl.fit_to_view)
@@ -1000,8 +1002,10 @@ class ImageViewerDialog(
         native_action = self._viewer_action("view.one_to_one", self._zoom_lbl.reset_zoom)
         view_menu.addAction(native_action)
         view_menu.addSeparator()
-        reset_layout_action = QAction("Reset viewer layout", self)
-        reset_layout_action.triggered.connect(self._reset_viewer_window_layout)
+        reset_layout_action = self._viewer_action(
+            "view.reset_layout",
+            self._reset_viewer_window_layout,
+        )
         view_menu.addAction(reset_layout_action)
         view_menu.addSeparator()
         display_panel_action = self._viewer_action(
@@ -1077,14 +1081,18 @@ class ImageViewerDialog(
         )
         processing_menu.addSeparator()
 
-        zero_action = QAction("Zero plane", self)
+        zero_action = self._viewer_action(
+            "processing.zero_plane",
+            self._set_zero_plane_btn.setChecked,
+            register=self._viewer_processing_actions,
+        )
         zero_action.setCheckable(True)
-        zero_action.triggered.connect(self._set_zero_plane_btn.setChecked)
         self._set_zero_plane_btn.toggled.connect(self._sync_viewer_menu_actions)
-        self._viewer_processing_actions["zero_plane"] = zero_action
         processing_menu.addAction(zero_action)
-        clear_zero_action = QAction("Clear zero plane", self)
-        clear_zero_action.triggered.connect(self._on_clear_set_zero)
+        clear_zero_action = self._viewer_action(
+            "processing.clear_zero",
+            self._on_clear_set_zero,
+        )
         processing_menu.addAction(clear_zero_action)
         processing_menu.addSeparator()
 
@@ -1171,17 +1179,17 @@ class ImageViewerDialog(
         )
         measurements_menu.addAction(roi_stats_new_action)
         measurements_menu.addSeparator()
-        add_roi_stats_action = QAction("Add active ROI statistics", self)
-        add_roi_stats_action.triggered.connect(
-            self._image_measurements.add_active_roi_stats_measurement
+        add_roi_stats_action = self._viewer_action(
+            "measure.add_roi_stats",
+            self._image_measurements.add_active_roi_stats_measurement,
+            register=self._viewer_measurement_actions,
         )
-        self._viewer_measurement_actions["roi_stats"] = add_roi_stats_action
         measurements_menu.addAction(add_roi_stats_action)
-        add_step_height_action = QAction("Add step height from selected ROIs", self)
-        add_step_height_action.triggered.connect(
-            self._image_measurements.add_selected_step_height_measurement
+        add_step_height_action = self._viewer_action(
+            "measure.step_height",
+            self._image_measurements.add_selected_step_height_measurement,
+            register=self._viewer_measurement_actions,
         )
-        self._viewer_measurement_actions["step_height"] = add_step_height_action
         measurements_menu.addAction(add_step_height_action)
         add_line_profile_action = self._viewer_action(
             "measure.line_profile",
@@ -1195,20 +1203,26 @@ class ImageViewerDialog(
             register=self._viewer_measurement_actions,
         )
         measurements_menu.addAction(find_periodicity_action)
-        detect_maxima_action = QAction("Detect maxima in active ROI", self)
-        detect_maxima_action.triggered.connect(
-            self._image_measurements.detect_feature_maxima_for_active_roi
+        detect_maxima_action = self._viewer_action(
+            "measure.feature_maxima",
+            self._image_measurements.detect_feature_maxima_for_active_roi,
+            register=self._viewer_measurement_actions,
         )
-        self._viewer_measurement_actions["feature_maxima"] = detect_maxima_action
         measurements_menu.addAction(detect_maxima_action)
-        feature_finder_action = QAction("Feature finder…", self)
-        feature_finder_action.triggered.connect(self._on_open_feature_finder)
+        feature_finder_action = self._viewer_action(
+            "measure.feature_finder",
+            self._on_open_feature_finder,
+        )
         measurements_menu.addAction(feature_finder_action)
-        pair_corr_action = QAction("Pair correlation…", self)
-        pair_corr_action.triggered.connect(self._on_open_pair_correlation)
+        pair_corr_action = self._viewer_action(
+            "measure.pair_correlation",
+            self._on_open_pair_correlation,
+        )
         measurements_menu.addAction(pair_corr_action)
-        feat_lat_action = QAction("Feature-to-lattice comparison…", self)
-        feat_lat_action.triggered.connect(self._on_open_feature_lattice)
+        feat_lat_action = self._viewer_action(
+            "measure.feature_lattice",
+            self._on_open_feature_lattice,
+        )
         measurements_menu.addAction(feat_lat_action)
         measurements_menu.addSeparator()
         self._image_measurements.add_detected_point_menu_actions(
@@ -1217,16 +1231,20 @@ class ImageViewerDialog(
             self._viewer_measurement_actions,
         )
         measurements_menu.addSeparator()
-        lattice_grid_action = QAction("Lattice/Grid tool…", self)
-        lattice_grid_action.triggered.connect(self._on_open_lattice_grid)
+        lattice_grid_action = self._viewer_action(
+            "measure.lattice_grid",
+            self._on_open_lattice_grid,
+        )
         measurements_menu.addAction(lattice_grid_action)
         measurements_menu.addSeparator()
-        show_measurements_action = QAction("Show measurements", self)
-        show_measurements_action.triggered.connect(self._show_measurements)
+        show_measurements_action = self._viewer_action(
+            "measure.show_table",
+            self._show_measurements,
+        )
         measurements_menu.addAction(show_measurements_action)
-        show_measure_tab_action = QAction("Measurement table (Measure tab)", self)
-        show_measure_tab_action.triggered.connect(
-            lambda: self._show_sidebar_tab("measurements")
+        show_measure_tab_action = self._viewer_action(
+            "measure.show_panel",
+            lambda: self._show_sidebar_tab("measurements"),
         )
         measurements_menu.addAction(show_measure_tab_action)
 
@@ -1247,23 +1265,33 @@ class ImageViewerDialog(
             self._on_save_processed_image,
         )
         export_menu.addAction(save_processed_action)
-        save_provenance_action = QAction("Save provenance", self)
-        save_provenance_action.triggered.connect(self._on_save_provenance)
+        save_provenance_action = self._viewer_action(
+            "export.save_provenance",
+            self._on_save_provenance,
+        )
         export_menu.addAction(save_provenance_action)
 
         help_menu = menu_bar.addMenu("Help")
-        shortcuts_action = QAction("Image viewer shortcuts", self)
-        shortcuts_action.triggered.connect(self._show_image_viewer_shortcuts)
+        command_finder_action = self._viewer_action(
+            "viewer.command_finder",
+            self._show_command_finder,
+        )
+        help_menu.addAction(command_finder_action)
+        shortcuts_action = self._viewer_action(
+            "help.shortcuts",
+            self._show_image_viewer_shortcuts,
+        )
         help_menu.addAction(shortcuts_action)
         help_menu.addSeparator()
         github_action = QAction("GitHub", self)
         github_action.triggered.connect(lambda: _open_url(GITHUB_URL))
         help_menu.addAction(github_action)
-        about_action = QAction("About ProbeFlow", self)
-        about_action.triggered.connect(self._show_viewer_about)
+        about_action = self._viewer_action("help.about", self._show_viewer_about)
         help_menu.addAction(about_action)
-        definitions_action = QAction("Definitions", self)
-        definitions_action.triggered.connect(self._show_viewer_definitions)
+        definitions_action = self._viewer_action(
+            "help.definitions",
+            self._show_viewer_definitions,
+        )
         help_menu.insertAction(github_action, definitions_action)
         help_menu.insertSeparator(github_action)
 

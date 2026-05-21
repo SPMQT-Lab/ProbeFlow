@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
-from probeflow.gui.viewer.shortcuts import VIEWER_COMMANDS, VIEWER_COMMAND_BY_ID
+from probeflow.gui.viewer.shortcuts import (
+    VIEWER_COMMANDS,
+    VIEWER_COMMAND_BY_ID,
+    display_shortcuts_for_all_platforms,
+    viewer_command,
+    viewer_finder_commands,
+)
 
 
 def _norm(shortcut: str) -> str:
@@ -36,3 +42,22 @@ def test_viewer_shortcut_registry_is_unique_and_avoids_roi_keys():
         *{str(i) for i in range(1, 10)},
     }
     assert not reserved_roi_keys.intersection(shortcuts)
+
+
+def test_command_finder_shortcut_and_visible_commands_are_high_level():
+    assert "Ctrl+K" in viewer_command("viewer.command_finder").shortcuts
+    assert not viewer_command("viewer.command_finder").finder_visible
+
+    finder_ids = {command.command_id for command in viewer_finder_commands()}
+    assert "processing.stm_background" in finder_ids
+    assert "fft.periodic_filter" in finder_ids
+    assert "help.definitions" in finder_ids
+    assert not any(command_id.startswith("roi.tool.") for command_id in finder_ids)
+    assert not any("threshold" in command_id for command_id in finder_ids)
+
+
+def test_shortcut_help_shows_mac_and_windows_forms():
+    assert display_shortcuts_for_all_platforms(("Ctrl+K",)) == "⌘K / Ctrl+K"
+    assert display_shortcuts_for_all_platforms(
+        ("Ctrl+Y", "Ctrl+Shift+Z")
+    ) == "⌘Y / Ctrl+Y; ⇧⌘Z / Ctrl+Shift+Z"

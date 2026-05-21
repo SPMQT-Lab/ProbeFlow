@@ -9,6 +9,7 @@ from probeflow.gui.roi_context import (
     active_line_roi_context,
     selected_or_active_area_roi_context,
 )
+from probeflow.gui.viewer.shortcuts import viewer_command
 
 
 class ImageViewerToolbarMixin:
@@ -30,6 +31,21 @@ class ImageViewerToolbarMixin:
 
         dlg = ImageViewerShortcutsDialog(self)
         dlg.exec()
+
+    def _show_command_finder(self) -> None:
+        from probeflow.gui.viewer.command_finder import CommandFinderDialog
+
+        self._sync_viewer_menu_actions()
+        dlg = getattr(self, "_command_finder_dialog", None)
+        if dlg is None:
+            dlg = CommandFinderDialog(self._viewer_command_actions, parent=self)
+            self._command_finder_dialog = dlg
+        else:
+            dlg.set_actions(self._viewer_command_actions)
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+        dlg.focus_search()
 
     def _sync_viewer_menu_actions(self) -> None:
         if hasattr(self, "_viewer_processing_actions"):
@@ -84,10 +100,21 @@ class ImageViewerToolbarMixin:
                 if key in ("invert", "mask"):
                     action.setEnabled(is_area)
 
+        measurement_states = {}
         if hasattr(self, "_viewer_measurement_actions"):
-            states = self._image_measurements.action_enabled_state()
+            measurement_states = self._image_measurements.action_enabled_state()
             for key, action in self._viewer_measurement_actions.items():
-                action.setEnabled(states.get(key, True))
+                action.setEnabled(measurement_states.get(key, True))
+
+        if hasattr(self, "_viewer_command_actions"):
+            for command_id, action in self._viewer_command_actions.items():
+                key = viewer_command(command_id).enabled_state_key
+                if key in measurement_states:
+                    action.setEnabled(measurement_states[key])
+                elif key == "undo":
+                    action.setEnabled(self._proc_undo_ctrl.can_undo)
+                elif key == "redo":
+                    action.setEnabled(self._proc_undo_ctrl.can_redo)
 
         if hasattr(self, "_quick_toolbar"):
             is_line = bool(self._active_line_roi_id())
