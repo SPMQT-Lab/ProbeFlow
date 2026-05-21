@@ -231,6 +231,14 @@ def make_roi_item(roi: "ROI", active: bool = False) -> QGraphicsItemGroup:
         # Keep shape outside the group so ItemIgnoresTransformations works.
         # We attach it as a sibling and link via group data.
         group.setData(1, shape)
+        # IMPORTANT: setData() stores only a raw C++ QGraphicsItem* in a
+        # QVariant — it does NOT hold a Python reference.  Without an explicit
+        # Python ref the PointROIItem wrapper (and its C++ object) would be
+        # garbage-collected the moment this function returns and 'shape' leaves
+        # scope, leaving a dangling pointer in the QVariant.  Storing the
+        # wrapper as a Python attribute on the group keeps it alive for as long
+        # as the group itself is alive.
+        group._point_roi_item_ref = shape
         shape.setToolTip(tip)
     else:
         group.addToGroup(shape)
