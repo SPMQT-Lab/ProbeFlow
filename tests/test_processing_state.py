@@ -1,10 +1,17 @@
-"""Tests for probeflow.processing.state and the GUI processing bridge."""
+"""Contract tests for processing-state serialization, GUI conversion, and apply."""
 
 from __future__ import annotations
+
+import json
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
 
+from probeflow.processing.gui_adapter import (
+    apply_processing_state_to_scan,
+    processing_state_from_gui,
+)
 from probeflow.processing.state import (
     ProcessingState,
     ProcessingStep,
@@ -13,317 +20,244 @@ from probeflow.processing.state import (
     missing_roi_references,
     roi_references_from_state,
 )
-from probeflow.processing.gui_adapter import processing_state_from_gui
 
 
-# ── Test A: empty state is identity ──────────────────────────────────────────
-
-class TestEmptyState:
-    def test_returns_array_equal_to_input(self):
-        arr = np.array([[1.0, 2.0], [3.0, 4.0]])
-        state = ProcessingState()
-        result = apply_processing_state(arr, state)
-        np.testing.assert_array_almost_equal(result, arr)
-
-    def test_does_not_mutate_input(self):
-        arr = np.array([[1.0, 2.0], [3.0, 4.0]])
-        original = arr.copy()
-        state = ProcessingState()
-        apply_processing_state(arr, state)
-        np.testing.assert_array_equal(arr, original)
-
-    def test_returns_new_array(self):
-        arr = np.array([[1.0, 2.0], [3.0, 4.0]])
-        state = ProcessingState()
-        result = apply_processing_state(arr, state)
-        # Must be a new object even for empty state (no aliasing)
-        assert result is not arr
-
-    def test_output_is_float64(self):
-        arr = np.array([[1, 2], [3, 4]], dtype=np.int32)
-        state = ProcessingState()
-        result = apply_processing_state(arr, state)
-        assert result.dtype == np.float64
-
-    def test_shape_preserved(self):
-        arr = np.ones((7, 13))
-        state = ProcessingState()
-        result = apply_processing_state(arr, state)
-        assert result.shape == (7, 13)
+def _ops(state: ProcessingState) -> list[str]:
+    return [step.op for step in state.steps]
 
 
-# ── Test B: serialisation round-trip ─────────────────────────────────────────
+def _rect_roi_set(*, name: str | None = None):
+    from probeflow.core.roi import ROI, ROISet
 
-class TestSerialisation:
-    def test_round_trip_preserves_op_names(self):
-        state = ProcessingState(steps=[
+    roi = ROI.new(
+        "rectangle",
+        {"x": 5.0, "y": 5.0, "width": 6.0, "height": 6.0},
+        name=name,
+    )
+    roi_set = ROISet(image_id="img")
+    roi_set.add(roi)
+    return roi_set, roi
+
+
+def _sample_image() -> np.ndarray:
+    rng = np.random.default_rng(42)
+    return rng.normal(loc=1e-9, scale=1e-10, size=(32, 32))
+
+
+def test_empty_state_is_new_float64_identity_without_mutating_input():
+    arr = np.array([[1, 2], [3, 4]], dtype=np.int32)
+    original = arr.copy()
+
+    result = apply_processing_state(arr, ProcessingState())
+
+    assert result is not arr
+    assert result.dtype == np.float64
+    assert result.shape == arr.shape
+    np.testing.assert_array_equal(arr, original)
+    np.testing.assert_allclose(result, original.astype(float))
+
+
+def test_serialisation_contract_preserves_steps_and_copies_nested_params():
+    state = ProcessingState(
+        steps=[
             ProcessingStep("remove_bad_lines", {"threshold_mad": 5.0}),
-            ProcessingStep("align_rows", {"method": "median"}),
-        ])
-        restored = ProcessingState.from_dict(state.to_dict())
-        assert [s.op for s in restored.steps] == ["remove_bad_lines", "align_rows"]
+            ProcessingStep("plane_bg", {"order": 2, "fit_roi": {"ref": "terrace"}}),
+            ProcessingStep("smooth", {"sigma_px": 1.5}),
+        ],
+    )
 
-    def test_round_trip_preserves_params(self):
-        state = ProcessingState(steps=[
-            ProcessingStep("plane_bg", {"order": 2}),
-            ProcessingStep("smooth",   {"sigma_px": 1.5}),
-        ])
-        restored = ProcessingState.from_dict(state.to_dict())
-        assert restored.steps[0].params["order"] == 2
-        assert abs(restored.steps[1].params["sigma_px"] - 1.5) < 1e-12
+    data = state.to_dict()
+    assert "steps" in data
+    assert "probeflow_version" in data
+    json.dumps(data)
+    data["steps"][1]["params"]["fit_roi"]["ref"] = "changed"
+    assert state.steps[1].params["fit_roi"]["ref"] == "terrace"
 
-    def test_to_dict_has_steps_key(self):
-        state = ProcessingState()
-        d = state.to_dict()
-        assert "steps" in d
-        assert isinstance(d["steps"], list)
-
-    def test_empty_state_round_trip(self):
-        state = ProcessingState()
-        restored = ProcessingState.from_dict(state.to_dict())
-        assert len(restored.steps) == 0
-
-    def test_from_dict_unknown_keys_ignored(self):
-        data = {"steps": [{"op": "align_rows", "params": {"method": "mean"}}],
-                "version": "1.0"}
-        state = ProcessingState.from_dict(data)
-        assert len(state.steps) == 1
-
-    def test_serialised_form_is_json_compatible(self):
-        import json
-        state = ProcessingState(steps=[
-            ProcessingStep("plane_bg", {"order": 1}),
-        ])
-        # Should not raise
-        json.dumps(state.to_dict())
-
-    def test_to_dict_deep_copies_nested_params(self):
-        state = ProcessingState(steps=[
-            ProcessingStep("plane_bg", {"fit_roi": {"ref": "terrace"}}),
-        ])
-
-        data = state.to_dict()
-        data["steps"][0]["params"]["fit_roi"]["ref"] = "changed"
-
-        assert state.steps[0].params == {"fit_roi": {"ref": "terrace"}}
-
-    def test_from_dict_deep_copies_nested_params(self):
-        data = {
-            "steps": [{
-                "op": "plane_bg",
-                "params": {"fit_roi": {"ref": "terrace"}},
-            }],
-        }
-
-        state = ProcessingState.from_dict(data)
-        data["steps"][0]["params"]["fit_roi"]["ref"] = "changed"
-
-        assert state.steps[0].params == {"fit_roi": {"ref": "terrace"}}
+    restored = ProcessingState.from_dict(
+        {"steps": data["steps"], "ignored_future_key": "ok"},
+    )
+    assert _ops(restored) == ["remove_bad_lines", "plane_bg", "smooth"]
+    assert restored.steps[1].params["fit_roi"]["ref"] == "changed"
+    data["steps"][1]["params"]["fit_roi"]["ref"] = "mutated-again"
+    assert restored.steps[1].params["fit_roi"]["ref"] == "changed"
+    assert ProcessingState.from_dict(ProcessingState().to_dict()).steps == []
 
 
-# ── Test B2: ROI reference validation ────────────────────────────────────────
+def test_roi_reference_collection_and_missing_reference_lookup():
+    roi_set, roi = _rect_roi_set(name="terrace")
+    state = ProcessingState(
+        steps=[
+            ProcessingStep(
+                "plane_bg",
+                {
+                    "fit_roi_id": roi.id,
+                    "exclude_roi_expr": {"combine": ["terrace", "missing-mask"]},
+                },
+            ),
+            ProcessingStep(
+                "roi",
+                {
+                    "roi_id": "missing-patch",
+                    "step": {"op": "smooth", "params": {"sigma_px": 1.0}},
+                },
+            ),
+        ],
+    )
 
-class TestRoiReferenceValidation:
-    def test_collects_plane_bg_and_roi_step_refs(self):
-        state = ProcessingState(steps=[
-            ProcessingStep("plane_bg", {
-                "fit_roi_id": "fit-id",
-                "exclude_roi_expr": {"combine": ["mask-a", "mask-b"]},
-            }),
-            ProcessingStep("roi", {
-                "roi_id": "patch-id",
-                "step": {"op": "smooth", "params": {"sigma_px": 1.0}},
-            }),
-        ])
-
-        refs = roi_references_from_state(state)
-
-        assert [r["value"] for r in refs] == [
-            "fit-id",
-            "mask-a",
-            "mask-b",
-            "patch-id",
-        ]
-
-    def test_missing_refs_accept_ids_or_names(self):
-        from probeflow.core.roi import ROI, ROISet
-
-        roi = ROI.new(
-            "rectangle",
-            {"x": 0.0, "y": 0.0, "width": 2.0, "height": 2.0},
-            name="terrace",
-        )
-        roi_set = ROISet(image_id="img")
-        roi_set.add(roi)
-        state = ProcessingState(steps=[
-            ProcessingStep("plane_bg", {"fit_roi_id": roi.id}),
-            ProcessingStep("plane_bg", {"exclude_roi_id": "terrace"}),
-            ProcessingStep("roi", {
-                "roi_id": "missing",
-                "step": {"op": "smooth", "params": {"sigma_px": 1.0}},
-            }),
-        ])
-
-        missing = missing_roi_references(state, roi_set)
-
-        assert len(missing) == 1
-        assert missing[0]["value"] == "missing"
-
-    def test_missing_refs_without_roi_set_returns_all_refs(self):
-        state = ProcessingState(steps=[
-            ProcessingStep("plane_bg", {"fit_roi_id": "fit-id"}),
-        ])
-
-        missing = missing_roi_references(state, None)
-
-        assert len(missing) == 1
-        assert missing[0]["value"] == "fit-id"
+    refs = roi_references_from_state(state)
+    assert [ref["value"] for ref in refs] == [
+        roi.id,
+        "terrace",
+        "missing-mask",
+        "missing-patch",
+    ]
+    assert [ref["value"] for ref in missing_roi_references(state, roi_set)] == [
+        "missing-mask",
+        "missing-patch",
+    ]
+    assert [ref["value"] for ref in missing_roi_references(state, None)] == [
+        roi.id,
+        "terrace",
+        "missing-mask",
+        "missing-patch",
+    ]
 
 
-# ── Test C: unknown operation raises ─────────────────────────────────────────
-
-class TestUnknownOperation:
-    def test_raises_value_error(self):
-        with pytest.raises(ValueError, match="magic_filter"):
-            ProcessingStep("magic_filter", {"strength": 9000})
-
-    def test_error_message_names_operation(self):
-        with pytest.raises(ValueError, match="nonexistent_op"):
-            ProcessingStep("nonexistent_op")
-
-    def test_valid_op_before_invalid_still_raises(self):
-        with pytest.raises(ValueError):
-            ProcessingStep("bad_op")
+def test_processing_step_rejects_unknown_operations_with_the_operation_name():
+    for op in ("magic_filter", "nonexistent_op", "bad_op"):
+        with pytest.raises(ValueError, match=op):
+            ProcessingStep(op)
 
 
-# ── Test D: GUI conversion excludes display-only keys ────────────────────────
-
-class TestGuiConversion:
-    FULL_GUI_STATE = {
-        # numeric processing
-        "remove_bad_lines": True,
-        "align_rows":       "median",
-        "smooth_sigma":     None,
-        "edge_method":      None,
-        "fft_mode":         None,
-        # display-only — must NOT appear in ProcessingState
-        "colormap":         "inferno",
-        "clip_low":         1.0,
-        "clip_high":        99.0,
-        "grain_threshold":  50.0,
-        "grain_above":      True,
+def test_gui_conversion_excludes_display_empty_and_false_values():
+    gui = {
+        "remove_bad_lines": False,
+        "align_rows": None,
+        "smooth_sigma": None,
+        "edge_method": None,
+        "fft_mode": None,
+        "colormap": "inferno",
+        "clip_low": 1.0,
+        "clip_high": 99.0,
+        "grain_threshold": 50.0,
+        "grain_above": True,
     }
 
-    def test_display_keys_absent_from_steps(self):
-        state = processing_state_from_gui(self.FULL_GUI_STATE)
-        op_names = {s.op for s in state.steps}
-        display_only = {"colormap", "clip_low", "clip_high",
-                        "grain_threshold", "grain_above"}
-        assert op_names.isdisjoint(display_only)
+    state = processing_state_from_gui(gui)
 
-    def test_numeric_ops_present(self):
-        gui = {
-            "remove_bad_lines": True,
-            "align_rows": "mean",
-            "smooth_sigma": 1.5,
-        }
-        state = processing_state_from_gui(gui)
-        op_names = [s.op for s in state.steps]
-        assert "remove_bad_lines" in op_names
-        assert "align_rows" in op_names
-        assert "smooth" in op_names
+    assert state.steps == []
 
-    def test_bad_scanline_threshold_and_method_captured(self):
-        state = processing_state_from_gui({
-            "remove_bad_lines": "step",
-            "remove_bad_lines_threshold": 7.5,
-            "remove_bad_lines_polarity": "dark",
-            "remove_bad_lines_min_segment_length_px": 8,
-            "remove_bad_lines_max_adjacent_bad_lines": 2,
-        })
 
-        assert len(state.steps) == 1
-        assert state.steps[0].op == "remove_bad_lines"
-        assert state.steps[0].params == {
-            "threshold_mad": 7.5,
-            "method": "step",
-            "polarity": "dark",
-            "min_segment_length_px": 8,
-            "max_adjacent_bad_lines": 2,
-        }
-
-    def test_false_bool_ops_excluded(self):
-        gui = {"remove_bad_lines": False}
-        state = processing_state_from_gui(gui)
-        assert len(state.steps) == 0
-
-    def test_none_value_ops_excluded(self):
-        gui = {"align_rows": None, "smooth_sigma": None,
-               "edge_method": None, "fft_mode": None}
-        state = processing_state_from_gui(gui)
-        assert len(state.steps) == 0
-
-    def test_edge_params_captured(self):
-        gui = {"edge_method": "laplacian", "edge_sigma": 2.0, "edge_sigma2": 3.0}
-        state = processing_state_from_gui(gui)
-        assert len(state.steps) == 1
-        step = state.steps[0]
-        assert step.op == "edge_detect"
-        assert abs(step.params["sigma"]  - 2.0) < 1e-12
-        assert abs(step.params["sigma2"] - 3.0) < 1e-12
-
-    def test_fft_params_captured(self):
-        gui = {"fft_mode": "low_pass", "fft_cutoff": 0.15, "fft_window": "hanning"}
-        state = processing_state_from_gui(gui)
-        assert len(state.steps) == 1
-        step = state.steps[0]
-        assert step.op == "fourier_filter"
-        assert abs(step.params["cutoff"] - 0.15) < 1e-12
-        assert step.params["window"] == "hanning"
-
-    def test_stm_background_captured(self):
-        state = processing_state_from_gui({
-            "stm_background": {
-                "fit_region": "active_roi",
-                "fit_roi_id": "terrace-1",
-                "line_statistic": "mean",
-                "model": "poly2",
-                "linear_x_first": True,
-                "blur_length": 6.0,
-                "jump_threshold": 2.5,
-            },
-        })
-        assert len(state.steps) == 1
-        assert state.steps[0].op == "stm_background"
-        assert state.steps[0].params == {
+def test_gui_conversion_emits_ordered_processing_steps_and_parameters():
+    gui = {
+        "remove_bad_lines": "step",
+        "remove_bad_lines_threshold": 7.5,
+        "remove_bad_lines_polarity": "dark",
+        "remove_bad_lines_min_segment_length_px": 8,
+        "remove_bad_lines_max_adjacent_bad_lines": 2,
+        "align_rows": "mean",
+        "smooth_sigma": 1.5,
+        "stm_background": {
             "fit_region": "active_roi",
+            "fit_roi_id": "terrace-1",
             "line_statistic": "mean",
             "model": "poly2",
             "linear_x_first": True,
-            "preserve_level": "median",
             "blur_length": 6.0,
             "jump_threshold": 2.5,
-            "fit_roi_id": "terrace-1",
-            "applied_to": "whole_image",
-        }
+        },
+    }
 
-    def test_roi_scope_wraps_active_roi_id(self):
-        state = processing_state_from_gui({
-            "processing_scope": "roi",
-            "processing_roi_id": "roi-123",
-            "smooth_sigma": 1.5,
-        })
-        assert len(state.steps) == 1
-        step = state.steps[0]
-        assert step.op == "roi"
-        assert step.params["roi_id"] == "roi-123"
-        assert step.params["step"] == {
-            "op": "smooth",
-            "params": {"sigma_px": 1.5},
-        }
+    state = processing_state_from_gui(gui)
 
-    def test_roi_scope_keeps_global_background_steps_global(self):
-        gui = {
+    assert _ops(state) == ["remove_bad_lines", "align_rows", "stm_background", "smooth"]
+    assert state.steps[0].params == {
+        "threshold_mad": 7.5,
+        "method": "step",
+        "polarity": "dark",
+        "min_segment_length_px": 8,
+        "max_adjacent_bad_lines": 2,
+    }
+    assert state.steps[1].params == {"method": "mean"}
+    assert state.steps[2].params == {
+        "fit_region": "active_roi",
+        "line_statistic": "mean",
+        "model": "poly2",
+        "linear_x_first": True,
+        "preserve_level": "median",
+        "blur_length": 6.0,
+        "jump_threshold": 2.5,
+        "fit_roi_id": "terrace-1",
+        "applied_to": "whole_image",
+    }
+    assert state.steps[3].params == {"sigma_px": 1.5}
+
+
+def test_gui_conversion_emits_fft_edge_frequency_and_geometry_steps():
+    cases = [
+        (
+            {"edge_method": "laplacian", "edge_sigma": 2.0, "edge_sigma2": 3.0},
+            "edge_detect",
+            {"method": "laplacian", "sigma": 2.0, "sigma2": 3.0},
+        ),
+        (
+            {"fft_mode": "low_pass", "fft_cutoff": 0.15, "fft_window": "hanning"},
+            "fourier_filter",
+            {"mode": "low_pass", "cutoff": 0.15, "window": "hanning"},
+        ),
+        ({"highpass_sigma": 12}, "gaussian_high_pass", {"sigma_px": 12.0}),
+        (
+            {"periodic_notches": [(8, 0), ("bad", 2), (0, -6)], "periodic_notch_radius": 4},
+            "periodic_notch_filter",
+            {"peaks": [(8, 0), (0, -6)], "radius_px": 4.0},
+        ),
+        (
+            {
+                "fft_soft_border": True,
+                "fft_soft_mode": "high_pass",
+                "fft_soft_cutoff": 0.20,
+                "fft_soft_border_frac": 0.05,
+            },
+            "fft_soft_border",
+            {"mode": "high_pass", "cutoff": 0.20, "border_frac": 0.05},
+        ),
+        (
+            {"linear_undistort": True, "undistort_shear_x": 1.5},
+            "linear_undistort",
+            {"shear_x": 1.5, "scale_y": 1.0},
+        ),
+    ]
+
+    for gui, expected_op, expected_params in cases:
+        state = processing_state_from_gui(gui)
+        assert _ops(state) == [expected_op]
+        assert state.steps[0].params == expected_params
+
+    assert processing_state_from_gui({"linear_undistort": True}).steps == []
+
+
+def test_gui_conversion_emits_zero_reference_steps_and_skips_bad_inputs():
+    point = processing_state_from_gui({"set_zero_xy": (10, 20), "set_zero_patch": 3})
+    plane = processing_state_from_gui(
+        {"set_zero_plane_points": [(0, 0), (9, 0), (0, 9)], "set_zero_patch": 0},
+    )
+
+    assert _ops(point) == ["set_zero_point"]
+    assert point.steps[0].params == {"x_px": 10, "y_px": 20, "patch": 3}
+    assert _ops(plane) == ["set_zero_plane"]
+    assert plane.steps[0].params == {
+        "points_px": [(0, 0), (9, 0), (0, 9)],
+        "patch": 0,
+    }
+    assert processing_state_from_gui({"set_zero_xy": "bad"}).steps == []
+    assert processing_state_from_gui(
+        {"set_zero_plane_points": [(0, 0), "bad", (0, 9)]},
+    ).steps == []
+
+
+def test_gui_conversion_roi_scope_wraps_local_steps_and_keeps_global_steps_global():
+    state = processing_state_from_gui(
+        {
             "processing_scope": "roi",
             "processing_roi_id": "roi-123",
             "align_rows": "median",
@@ -333,534 +267,335 @@ class TestGuiConversion:
                 "model": "linear",
             },
             "smooth_sigma": 1.0,
-        }
-        state = processing_state_from_gui(gui)
-        assert [s.op for s in state.steps] == [
-            "align_rows",
-            "stm_background",
-            "roi",
-        ]
-        assert state.steps[-1].params["step"]["op"] == "smooth"
-        assert state.steps[-1].params["roi_id"] == "roi-123"
-
-    def test_roi_scope_without_roi_id_skips_local_filter_instead_of_falling_back_global(self):
-        gui = {
-            "processing_scope": "roi",
-            "smooth_sigma": 1.0,
-        }
-        with pytest.warns(UserWarning, match="ROI-scoped processing"):
-            state = processing_state_from_gui(gui)
-        assert state.steps == []
-
-    def test_highpass_gui_state_captured(self):
-        state = processing_state_from_gui({"highpass_sigma": 12})
-        assert len(state.steps) == 1
-        assert state.steps[0].op == "gaussian_high_pass"
-        assert state.steps[0].params == {"sigma_px": 12.0}
-
-    def test_periodic_notches_gui_state_captured(self):
-        state = processing_state_from_gui({
-            "periodic_notches": [(8, 0), ("bad", 2), (0, -6)],
-            "periodic_notch_radius": 4,
-        })
-        assert len(state.steps) == 1
-        assert state.steps[0].op == "periodic_notch_filter"
-        assert state.steps[0].params == {
-            "peaks": [(8, 0), (0, -6)],
-            "radius_px": 4.0,
-        }
-
-    def test_roi_scope_wraps_soft_border_fft(self):
-        gui = {
-            "processing_scope": "roi",
-            "processing_roi_id": "roi-123",
             "fft_soft_border": True,
             "fft_soft_mode": "high_pass",
             "fft_soft_cutoff": 0.25,
+        },
+    )
+
+    assert _ops(state) == ["align_rows", "stm_background", "roi", "roi"]
+    local_steps = [step.params["step"] for step in state.steps if step.op == "roi"]
+    assert [step["op"] for step in local_steps] == ["smooth", "fft_soft_border"]
+    assert [step.params["roi_id"] for step in state.steps if step.op == "roi"] == [
+        "roi-123",
+        "roi-123",
+    ]
+
+    with pytest.warns(UserWarning, match="ROI-scoped processing"):
+        assert processing_state_from_gui({"processing_scope": "roi", "smooth_sigma": 1.0}).steps == []
+
+
+def test_gui_preview_export_and_scan_paths_share_processing_state_results():
+    from probeflow.gui import _apply_processing
+
+    arr = _sample_image()
+    gui = {"align_rows": "median", "smooth_sigma": 0.75}
+    state = processing_state_from_gui(gui)
+
+    np.testing.assert_array_almost_equal(
+        _apply_processing(arr, gui),
+        apply_processing_state(arr, state),
+    )
+    original = arr.copy()
+    _apply_processing(arr, {"remove_bad_lines": True, "align_rows": "median"})
+    apply_processing_state(arr, state)
+    np.testing.assert_array_equal(arr, original)
+
+    scan = MagicMock()
+    scan.planes = [arr.copy()]
+    scan.processing_history = []
+    apply_processing_state_to_scan(scan, gui, plane_idx=0)
+    np.testing.assert_array_almost_equal(scan.planes[0], apply_processing_state(arr, state))
+
+
+def test_core_processing_steps_preserve_shape_dtype_and_expected_effects():
+    rng = np.random.default_rng(1)
+    noise = rng.normal(size=(40, 40))
+    tilt = np.outer(np.ones(30), np.linspace(0, 1, 30))
+    constant = np.ones((20, 20)) * 5.0
+
+    aligned = apply_processing_state(
+        noise,
+        ProcessingState([ProcessingStep("align_rows", {"method": "median"})]),
+    )
+    smoothed = apply_processing_state(
+        noise,
+        ProcessingState([ProcessingStep("smooth", {"sigma_px": 2.0})]),
+    )
+    flattened = apply_processing_state(
+        tilt,
+        ProcessingState([ProcessingStep("plane_bg", {"order": 1})]),
+    )
+    apply_processing_state(
+        constant,
+        ProcessingState(
+            [
+                ProcessingStep("align_rows", {"method": "median"}),
+                ProcessingStep("plane_bg", {"order": 1}),
+            ],
+        ),
+    )
+
+    assert aligned.shape == noise.shape
+    assert aligned.dtype == np.float64
+    assert float(np.std(smoothed)) < float(np.std(noise))
+    assert float(np.std(flattened)) < 1e-10
+    np.testing.assert_array_equal(constant, np.ones((20, 20)) * 5.0)
+
+
+def test_processing_forwards_parameters_to_backend_operations(monkeypatch):
+    captured: dict[str, object] = {}
+
+    def fake_subtract_background(input_arr, **kwargs):
+        captured["plane_bg"] = kwargs
+        return input_arr + 7.0
+
+    def fake_apply_stm_background(arr, params=None, mask=None):
+        captured["stm_background"] = (params, mask)
+        return arr + 1.0
+
+    def fake_remove_bad_lines(
+        arr,
+        threshold_mad=5.0,
+        *,
+        method="mad",
+        polarity="bright",
+        min_segment_length_px=2,
+        max_adjacent_bad_lines=1,
+    ):
+        captured["remove_bad_lines"] = {
+            "threshold_mad": threshold_mad,
+            "method": method,
+            "polarity": polarity,
+            "min_segment_length_px": min_segment_length_px,
+            "max_adjacent_bad_lines": max_adjacent_bad_lines,
         }
-        state = processing_state_from_gui(gui)
-        assert len(state.steps) == 1
-        step = state.steps[0]
-        assert step.op == "roi"
-        assert step.params["roi_id"] == "roi-123"
-        assert step.params["step"]["op"] == "fft_soft_border"
-        assert step.params["step"]["params"]["mode"] == "high_pass"
+        return arr
 
-    def test_fft_soft_border_params_captured(self):
-        gui = {
-            "fft_soft_border":      True,
-            "fft_soft_mode":        "high_pass",
-            "fft_soft_cutoff":      0.20,
-            "fft_soft_border_frac": 0.05,
-        }
-        state = processing_state_from_gui(gui)
-        assert len(state.steps) == 1
-        step = state.steps[0]
-        assert step.op == "fft_soft_border"
-        assert step.params["mode"] == "high_pass"
-        assert abs(step.params["cutoff"]      - 0.20) < 1e-12
-        assert abs(step.params["border_frac"] - 0.05) < 1e-12
+    def fake_facet_level(arr, threshold_deg=3.0):
+        captured["facet_level"] = threshold_deg
+        return arr
 
-    def test_linear_undistort_emitted_only_if_nondefault(self):
-        # Both defaults → no step
-        state = processing_state_from_gui({"linear_undistort": True})
-        assert len(state.steps) == 0
-        # Non-default shear → step emitted
-        state = processing_state_from_gui({
-            "linear_undistort": True, "undistort_shear_x": 1.5,
-        })
-        assert len(state.steps) == 1
-        assert state.steps[0].op == "linear_undistort"
-        assert abs(state.steps[0].params["shear_x"] - 1.5) < 1e-12
+    monkeypatch.setattr("probeflow.processing.subtract_background", fake_subtract_background)
+    monkeypatch.setattr("probeflow.processing.apply_stm_background", fake_apply_stm_background)
+    monkeypatch.setattr("probeflow.processing.remove_bad_lines", fake_remove_bad_lines)
+    monkeypatch.setattr("probeflow.processing.facet_level", fake_facet_level)
 
-    def test_set_zero_point_params_captured(self):
-        gui = {"set_zero_xy": (10, 20), "set_zero_patch": 3}
-        state = processing_state_from_gui(gui)
-        assert len(state.steps) == 1
-        step = state.steps[0]
-        assert step.op == "set_zero_point"
-        assert step.params == {"x_px": 10, "y_px": 20, "patch": 3}
+    arr = np.ones((8, 8), dtype=float)
+    result = apply_processing_state(
+        arr,
+        ProcessingState(
+            [
+                ProcessingStep("plane_bg", {"order": 1, "step_tolerance": True}),
+                ProcessingStep(
+                    "stm_background",
+                    {
+                        "fit_region": "whole_image",
+                        "line_statistic": "mean",
+                        "model": "poly3",
+                        "linear_x_first": True,
+                        "blur_length": 7.0,
+                        "jump_threshold": 2.0,
+                        "preserve_level": "mean",
+                    },
+                ),
+                ProcessingStep(
+                    "remove_bad_lines",
+                    {
+                        "threshold_mad": 3.25,
+                        "polarity": "dark",
+                        "min_segment_length_px": 8,
+                        "max_adjacent_bad_lines": 2,
+                    },
+                ),
+                ProcessingStep("facet_level", {"threshold_deg": 5.5}),
+            ],
+        ),
+    )
 
-    def test_set_zero_point_bad_input_skipped(self):
-        # Malformed coordinate must not crash; just no step emitted.
-        state = processing_state_from_gui({"set_zero_xy": "not-a-tuple"})
-        assert len(state.steps) == 0
-
-    def test_set_zero_plane_params_captured(self):
-        gui = {"set_zero_plane_points": [(0, 0), (9, 0), (0, 9)], "set_zero_patch": 0}
-        state = processing_state_from_gui(gui)
-        assert len(state.steps) == 1
-        step = state.steps[0]
-        assert step.op == "set_zero_plane"
-        assert step.params == {
-            "points_px": [(0, 0), (9, 0), (0, 9)],
-            "patch": 0,
-        }
-
-    def test_set_zero_plane_requires_three_good_points(self):
-        state = processing_state_from_gui({
-            "set_zero_plane_points": [(0, 0), "bad", (0, 9)],
-        })
-        assert len(state.steps) == 0
-
-    def test_empty_gui_state(self):
-        state = processing_state_from_gui({})
-        assert len(state.steps) == 0
-
-    def test_order_preserved(self):
-        # The canonical GUI application order is fixed; test it is preserved.
-        gui = {
-            "remove_bad_lines": True,
-            "align_rows": "median",
-            "stm_background": {
-                "fit_region": "whole_image",
-                "line_statistic": "median",
-                "model": "linear",
-            },
-        }
-        state = processing_state_from_gui(gui)
-        ops = [s.op for s in state.steps]
-        assert ops == ["remove_bad_lines", "align_rows", "stm_background"]
+    assert result.shape == arr.shape
+    assert result.dtype == np.float64
+    assert captured["plane_bg"] == {
+        "order": 1,
+        "step_tolerance": True,
+        "fit_rect": None,
+        "fit_roi": None,
+        "exclude_roi": None,
+        "apply_roi": None,
+    }
+    params, mask = captured["stm_background"]
+    assert params.fit_region == "whole_image"
+    assert params.line_statistic == "mean"
+    assert params.model == "poly3"
+    assert params.linear_x_first is True
+    assert params.blur_length == 7.0
+    assert params.jump_threshold == 2.0
+    assert params.preserve_level == "mean"
+    assert mask is None
+    assert captured["remove_bad_lines"] == {
+        "threshold_mad": 3.25,
+        "method": "mad",
+        "polarity": "dark",
+        "min_segment_length_px": 8,
+        "max_adjacent_bad_lines": 2,
+    }
+    assert captured["facet_level"] == 5.5
 
 
-# ── Test E: GUI / export processing equivalence ───────────────────────────────
+def test_stm_and_fit_rect_backgrounds_run_on_expected_regions():
+    y = np.linspace(-1.0, 1.0, 20)
+    x = np.linspace(-1.0, 1.0, 20)
+    grid_x, grid_y = np.meshgrid(x, y)
+    arr = 2.0 * grid_x - 0.5 * grid_y + 7.0
+    arr[:, 12:] += 25.0
 
-class TestGuiExportEquivalence:
-    """Preview and export must produce the same processed array."""
+    fit_rect_result = apply_processing_state(
+        arr,
+        ProcessingState([ProcessingStep("plane_bg", {"order": 1, "fit_rect": (0, 0, 8, 19)})]),
+    )
+    assert float(np.nanstd(fit_rect_result[:, :9])) < 1e-10
+    assert abs(float(np.nanmedian(fit_rect_result[:, 12:])) - 25.0) < 1e-10
 
-    def _make_arr(self) -> np.ndarray:
-        rng = np.random.default_rng(42)
-        return rng.normal(loc=1e-9, scale=1e-10, size=(32, 32))
+    line_bg_source = np.ones((20, 20), dtype=float) + np.linspace(0.0, 1.0, 20)[:, None]
+    line_bg_result = apply_processing_state(
+        line_bg_source,
+        ProcessingState([ProcessingStep("stm_line_bg", {"mode": "step_tolerant"})]),
+    )
+    assert float(np.std(np.nanmedian(line_bg_result, axis=1))) < 1e-10
 
-    def test_same_result_from_state_and_gui_dict(self):
-        """apply_processing_state and the legacy _apply_processing give same output."""
-        from probeflow.gui import _apply_processing
-
-        arr = self._make_arr()
-        gui = {"align_rows": "median", "smooth_sigma": 0.75}
-
-        result_gui    = _apply_processing(arr, gui)
-        state         = processing_state_from_gui(gui)
-        result_state  = apply_processing_state(arr, state)
-
-        np.testing.assert_array_almost_equal(result_gui, result_state)
-
-    def test_raw_array_not_mutated_by_either_path(self):
-        from probeflow.gui import _apply_processing
-
-        arr = self._make_arr()
-        original = arr.copy()
-        gui = {"remove_bad_lines": True, "align_rows": "median"}
-
-        _apply_processing(arr, gui)
-        np.testing.assert_array_equal(arr, original)
-
-        apply_processing_state(arr, processing_state_from_gui(gui))
-        np.testing.assert_array_equal(arr, original)
-
-    def test_apply_processing_state_to_scan_uses_same_path(self):
-        """apply_processing_state_to_scan and apply_processing_state agree."""
-        from unittest.mock import MagicMock
-        from probeflow.processing.gui_adapter import apply_processing_state_to_scan
-
-        arr = self._make_arr()
-        gui = {"align_rows": "mean", "smooth_sigma": 0.75}
-
-        # Build a minimal mock Scan
-        scan = MagicMock()
-        scan.planes = [arr.copy()]
-        scan.processing_history = []
-
-        apply_processing_state_to_scan(scan, gui, plane_idx=0)
-        result_export = scan.planes[0]
-
-        result_direct = apply_processing_state(arr, processing_state_from_gui(gui))
-        np.testing.assert_array_almost_equal(result_export, result_direct)
+    yy, _xx = np.mgrid[:30, :20]
+    roi_source = 0.2 * yy + np.zeros((30, 20))
+    roi_source[:, 12:] += 10.0
+    roi_set, roi = _rect_roi_set()
+    roi.geometry = {"x": 0, "y": 0, "width": 8, "height": 30}
+    roi_bg_result = apply_processing_state(
+        roi_source,
+        ProcessingState(
+            [
+                ProcessingStep(
+                    "stm_background",
+                    {
+                        "fit_region": "active_roi",
+                        "fit_roi_id": roi.id,
+                        "line_statistic": "median",
+                        "model": "linear",
+                    },
+                ),
+            ],
+        ),
+        roi_set=roi_set,
+    )
+    assert float(np.nanstd(np.nanmedian(roi_bg_result[:, :8], axis=1))) < 1e-10
+    assert float(np.nanstd(np.nanmedian(roi_bg_result[:, 12:], axis=1))) < 1e-10
+    assert abs(
+        float(np.nanmedian(roi_bg_result[:, 12:]))
+        - float(np.nanmedian(roi_bg_result[:, :8]))
+        - 10.0
+    ) < 1e-10
 
 
-# ── Test F: apply_processing_state with known steps ──────────────────────────
+def test_optional_roi_application_and_roi_wrapped_processing_contract():
+    arr = np.arange(36, dtype=float).reshape(6, 6)
+    mask = np.zeros(arr.shape, dtype=bool)
+    mask[2:5, 1:4] = True
 
-class TestApplyKnownSteps:
-    def test_align_rows_median(self):
-        rng = np.random.default_rng(0)
-        arr = rng.normal(size=(20, 20))
-        state = ProcessingState(steps=[ProcessingStep("align_rows", {"method": "median"})])
-        result = apply_processing_state(arr, state)
-        assert result.shape == arr.shape
-        assert result.dtype == np.float64
+    masked = apply_operation_with_optional_roi(arr, lambda image: image + 100.0, mask)
+    global_result = apply_operation_with_optional_roi(arr, lambda image: image + 10.0, None)
 
-    def test_plane_bg_order1_removes_tilt(self):
-        x = np.linspace(0, 1, 30)
-        arr = np.outer(np.ones(30), x)  # pure linear tilt
-        state = ProcessingState(steps=[ProcessingStep("plane_bg", {"order": 1})])
-        result = apply_processing_state(arr, state)
-        # Residual after plane subtraction should be near-zero
-        assert float(np.std(result)) < 1e-10
+    np.testing.assert_array_equal(masked[~mask], arr[~mask])
+    np.testing.assert_array_equal(masked[mask], arr[mask] + 100.0)
+    np.testing.assert_array_equal(global_result, arr + 10.0)
 
-    def test_smooth_reduces_variance(self):
-        rng = np.random.default_rng(1)
-        arr = rng.normal(size=(40, 40))
-        state = ProcessingState(steps=[ProcessingStep("smooth", {"sigma_px": 2.0})])
-        result = apply_processing_state(arr, state)
-        assert float(np.std(result)) < float(np.std(arr))
-
-    def test_multi_step_does_not_mutate_intermediate(self):
-        arr = np.ones((20, 20)) * 5.0
-        state = ProcessingState(steps=[
-            ProcessingStep("align_rows", {"method": "median"}),
-            ProcessingStep("plane_bg", {"order": 1}),
-        ])
-        original = arr.copy()
-        apply_processing_state(arr, state)
-        np.testing.assert_array_equal(arr, original)
-
-    def test_plane_bg_forwards_step_tolerance(self, monkeypatch):
-        arr = np.ones((8, 8), dtype=float)
-        seen = {}
-
-        def fake_subtract_background(input_arr, **kwargs):
-            seen.update(kwargs)
-            return input_arr + 7.0
-
-        monkeypatch.setattr(
-            "probeflow.processing.subtract_background",
-            fake_subtract_background,
+    rng = np.random.default_rng(5)
+    roi_source = np.zeros((16, 16), dtype=float)
+    roi_source[5:11, 5:11] = rng.normal(size=(6, 6))
+    roi_set, roi = _rect_roi_set(name="terrace")
+    for roi_ref in (roi.id, "terrace"):
+        state = ProcessingState(
+            [
+                ProcessingStep(
+                    "roi",
+                    {
+                        "roi_id": roi_ref,
+                        "step": {"op": "smooth", "params": {"sigma_px": 1.0}},
+                    },
+                ),
+            ],
         )
-        state = ProcessingState(steps=[
-            ProcessingStep("plane_bg", {"order": 1, "step_tolerance": True}),
-        ])
-        result = apply_processing_state(arr, state)
-        assert result.shape == arr.shape
-        assert result.dtype == np.float64
-        assert seen["step_tolerance"] is True
-        assert seen["order"] == 1
-        np.testing.assert_array_equal(result, arr + 7.0)
-
-    def test_plane_bg_fit_rect_runs(self):
-        y = np.linspace(-1.0, 1.0, 20)
-        x = np.linspace(-1.0, 1.0, 20)
-        X, Y = np.meshgrid(x, y)
-        arr = 2.0 * X - 0.5 * Y + 7.0
-        arr[:, 12:] += 25.0
-        state = ProcessingState(steps=[
-            ProcessingStep("plane_bg", {"order": 1, "fit_rect": (0, 0, 8, 19)}),
-        ])
-        result = apply_processing_state(arr, state)
-        assert float(np.nanstd(result[:, :9])) < 1e-10
-        assert abs(float(np.nanmedian(result[:, 12:])) - 25.0) < 1e-10
-
-    def test_stm_line_bg_runs(self):
-        arr = np.ones((20, 20), dtype=float)
-        arr += np.linspace(0.0, 1.0, 20)[:, None]
-        state = ProcessingState(steps=[
-            ProcessingStep("stm_line_bg", {"mode": "step_tolerant"}),
-        ])
-        result = apply_processing_state(arr, state)
-        assert result.shape == arr.shape
-        assert float(np.std(np.nanmedian(result, axis=1))) < 1e-10
-
-    def test_stm_background_params_are_forwarded(self, monkeypatch):
-        captured = {}
-
-        def fake_apply_stm_background(arr, params=None, mask=None):
-            captured["params"] = params
-            captured["mask"] = mask
-            return arr + 1.0
-
-        monkeypatch.setattr(
-            "probeflow.processing.apply_stm_background",
-            fake_apply_stm_background,
-        )
-        state = ProcessingState(steps=[
-            ProcessingStep("stm_background", {
-                "fit_region": "whole_image",
-                "line_statistic": "mean",
-                "model": "poly3",
-                "linear_x_first": True,
-                "blur_length": 7.0,
-                "jump_threshold": 2.0,
-                "preserve_level": "mean",
-            }),
-        ])
-        result = apply_processing_state(np.ones((8, 8)), state)
-
-        assert np.all(result == 2.0)
-        assert captured["params"].fit_region == "whole_image"
-        assert captured["params"].line_statistic == "mean"
-        assert captured["params"].model == "poly3"
-        assert captured["params"].linear_x_first is True
-        assert captured["params"].blur_length == 7.0
-        assert captured["params"].jump_threshold == 2.0
-        assert captured["params"].preserve_level == "mean"
-        assert captured["mask"] is None
-
-    def test_stm_background_fit_roi_applies_to_full_image(self):
-        from probeflow.core.roi import ROI, ROISet
-
-        yy, _xx = np.mgrid[:30, :20]
-        arr = 0.2 * yy + np.zeros((30, 20))
-        arr[:, 12:] += 10.0
-        roi = ROI.new("rectangle", {"x": 0, "y": 0, "width": 8, "height": 30})
-        roi_set = ROISet(image_id="test")
-        roi_set.add(roi)
-        state = ProcessingState(steps=[
-            ProcessingStep("stm_background", {
-                "fit_region": "active_roi",
-                "fit_roi_id": roi.id,
-                "line_statistic": "median",
-                "model": "linear",
-            }),
-        ])
-
-        result = apply_processing_state(arr, state, roi_set=roi_set)
-
-        assert float(np.nanstd(np.nanmedian(result[:, :8], axis=1))) < 1e-10
-        assert float(np.nanstd(np.nanmedian(result[:, 12:], axis=1))) < 1e-10
-        assert abs(
-            float(np.nanmedian(result[:, 12:]))
-            - float(np.nanmedian(result[:, :8]))
-            - 10.0
-        ) < 1e-10
-
-    def test_remove_bad_lines_threshold_is_forwarded(self, monkeypatch):
-        captured = {}
-
-        def fake_remove_bad_lines(
-            arr,
-            threshold_mad=5.0,
-            *,
-            method="mad",
-            polarity="bright",
-            min_segment_length_px=2,
-            max_adjacent_bad_lines=1,
-        ):
-            captured["threshold_mad"] = threshold_mad
-            captured["method"] = method
-            captured["polarity"] = polarity
-            captured["min_segment_length_px"] = min_segment_length_px
-            captured["max_adjacent_bad_lines"] = max_adjacent_bad_lines
-            return arr
-
-        monkeypatch.setattr(
-            "probeflow.processing.remove_bad_lines",
-            fake_remove_bad_lines,
-        )
-        state = ProcessingState(steps=[
-            ProcessingStep("remove_bad_lines", {
-                "threshold_mad": 3.25,
-                "polarity": "dark",
-                "min_segment_length_px": 8,
-                "max_adjacent_bad_lines": 2,
-            }),
-        ])
-        apply_processing_state(np.ones((8, 8)), state)
-        assert captured["threshold_mad"] == 3.25
-        assert captured["method"] == "mad"
-        assert captured["polarity"] == "dark"
-        assert captured["min_segment_length_px"] == 8
-        assert captured["max_adjacent_bad_lines"] == 2
-
-    def test_facet_level_threshold_is_forwarded(self, monkeypatch):
-        captured = {}
-
-        def fake_facet_level(arr, threshold_deg=3.0):
-            captured["threshold_deg"] = threshold_deg
-            return arr
-
-        monkeypatch.setattr("probeflow.processing.facet_level", fake_facet_level)
-        state = ProcessingState(steps=[
-            ProcessingStep("facet_level", {"threshold_deg": 5.5}),
-        ])
-        apply_processing_state(np.ones((8, 8)), state)
-        assert captured["threshold_deg"] == 5.5
-
-    def test_apply_operation_with_optional_roi_leaves_outside_mask_unchanged(self):
-        arr = np.arange(36, dtype=float).reshape(6, 6)
-        mask = np.zeros(arr.shape, dtype=bool)
-        mask[2:5, 1:4] = True
-
-        result = apply_operation_with_optional_roi(
-            arr,
-            lambda image: image + 100.0,
-            mask,
-        )
-
-        np.testing.assert_array_equal(result[~mask], arr[~mask])
-        np.testing.assert_array_equal(result[mask], arr[mask] + 100.0)
-
-    def test_apply_operation_with_optional_roi_without_mask_applies_globally(self):
-        arr = np.arange(9, dtype=float).reshape(3, 3)
-
-        result = apply_operation_with_optional_roi(
-            arr,
-            lambda image: image + 10.0,
-            None,
-        )
-
-        np.testing.assert_array_equal(result, arr + 10.0)
-
-    def test_roi_smooth_by_roi_id_changes_only_active_roi(self):
-        from probeflow.core.roi import ROI, ROISet
-
-        rng = np.random.default_rng(5)
-        arr = np.zeros((16, 16), dtype=float)
-        arr[5:11, 5:11] = rng.normal(size=(6, 6))
-        roi_set = ROISet(image_id="img")
-        roi = ROI.new("rectangle", {"x": 5.0, "y": 5.0, "width": 6.0, "height": 6.0})
-        roi_set.add(roi)
-        state = ProcessingState(steps=[
-            ProcessingStep("roi", {
-                "roi_id": roi.id,
-                "step": {"op": "smooth", "params": {"sigma_px": 1.0}},
-            }),
-        ])
-
-        result = apply_processing_state(arr, state, roi_set=roi_set)
-
-        mask = roi.to_mask(arr.shape)
-        np.testing.assert_array_equal(result[~mask], arr[~mask])
-        assert not np.allclose(result[mask], arr[mask])
-
-    def test_roi_smooth_by_roi_name_matches_validation_lookup(self):
-        from probeflow.core.roi import ROI, ROISet
-
-        rng = np.random.default_rng(6)
-        arr = np.zeros((16, 16), dtype=float)
-        arr[5:11, 5:11] = rng.normal(size=(6, 6))
-        roi_set = ROISet(image_id="img")
-        roi = ROI.new(
-            "rectangle",
-            {"x": 5.0, "y": 5.0, "width": 6.0, "height": 6.0},
-            name="terrace",
-        )
-        roi_set.add(roi)
-        state = ProcessingState(steps=[
-            ProcessingStep("roi", {
-                "roi_id": "terrace",
-                "step": {"op": "smooth", "params": {"sigma_px": 1.0}},
-            }),
-        ])
-
         assert missing_roi_references(state, roi_set) == []
-        result = apply_processing_state(arr, state, roi_set=roi_set)
+        result = apply_processing_state(roi_source, state, roi_set=roi_set)
+        roi_mask = roi.to_mask(roi_source.shape)
+        np.testing.assert_array_equal(result[~roi_mask], roi_source[~roi_mask])
+        assert not np.allclose(result[roi_mask], roi_source[roi_mask])
 
-        mask = roi.to_mask(arr.shape)
-        np.testing.assert_array_equal(result[~mask], arr[~mask])
-        assert not np.allclose(result[mask], arr[mask])
+    nested_global = ProcessingState(
+        [
+            ProcessingStep(
+                "roi",
+                {
+                    "roi_id": roi.id,
+                    "step": {"op": "plane_bg", "params": {"order": 1}},
+                },
+            ),
+        ],
+    )
+    np.testing.assert_array_equal(
+        apply_processing_state(roi_source, nested_global, roi_set=roi_set),
+        roi_source,
+    )
 
-    def test_roi_wrapper_ignores_nonlocal_nested_operation(self):
-        x = np.linspace(0, 1, 12)
-        arr = np.outer(np.ones(12), x)
-        state = ProcessingState(steps=[
-            ProcessingStep("roi", {
-                "roi_id": "roi-1",
-                "step": {"op": "plane_bg", "params": {"order": 1}},
-            }),
-        ])
-        result = apply_processing_state(arr, state)
-        np.testing.assert_array_equal(result, arr)
 
-    def test_fft_soft_border_runs_and_preserves_shape(self):
-        rng = np.random.default_rng(2)
-        arr = rng.normal(size=(32, 32))
-        state = ProcessingState(steps=[ProcessingStep("fft_soft_border", {
-            "mode": "low_pass", "cutoff": 0.20, "border_frac": 0.10,
-        })])
-        result = apply_processing_state(arr, state)
-        assert result.shape == arr.shape
-        # Low-pass should reduce variance vs raw noise.
-        assert float(np.std(result)) < float(np.std(arr))
+def test_frequency_and_linear_geometry_processing_contract():
+    rng = np.random.default_rng(2)
+    noise = rng.normal(size=(32, 32))
+    soft = apply_processing_state(
+        noise,
+        ProcessingState(
+            [ProcessingStep("fft_soft_border", {"mode": "low_pass", "cutoff": 0.20, "border_frac": 0.10})],
+        ),
+    )
+    assert soft.shape == noise.shape
+    assert float(np.std(soft)) < float(np.std(noise))
 
-    def test_gaussian_high_pass_runs(self):
-        Y, X = np.mgrid[:32, :32]
-        arr = 10.0 + 0.1 * X + np.sin(2 * np.pi * X / 4.0)
-        state = ProcessingState(steps=[
-            ProcessingStep("gaussian_high_pass", {"sigma_px": 8.0}),
-        ])
-        result = apply_processing_state(arr, state)
-        assert result.shape == arr.shape
-        assert abs(float(np.mean(result))) < 0.5
+    yy, xx = np.mgrid[:32, :32]
+    highpass_source = 10.0 + 0.1 * xx + np.sin(2 * np.pi * xx / 4.0)
+    highpass = apply_processing_state(
+        highpass_source,
+        ProcessingState([ProcessingStep("gaussian_high_pass", {"sigma_px": 8.0})]),
+    )
+    assert highpass.shape == highpass_source.shape
+    assert abs(float(np.mean(highpass))) < 0.5
 
-    def test_periodic_notch_filter_runs(self):
-        Y, X = np.mgrid[:64, :64]
-        arr = np.sin(2 * np.pi * X / 8.0)
-        state = ProcessingState(steps=[
-            ProcessingStep("periodic_notch_filter", {
-                "peaks": [(8, 0)],
-                "radius_px": 2.0,
-            }),
-        ])
-        result = apply_processing_state(arr, state)
-        assert float(np.std(result)) < float(np.std(arr)) * 0.35
+    notch_source = np.sin(2 * np.pi * np.mgrid[:64, :64][1] / 8.0)
+    notch = apply_processing_state(
+        notch_source,
+        ProcessingState([ProcessingStep("periodic_notch_filter", {"peaks": [(8, 0)], "radius_px": 2.0})]),
+    )
+    assert float(np.std(notch)) < float(np.std(notch_source)) * 0.35
 
-    def test_linear_undistort_forwards_scale_y(self):
-        yy, _ = np.indices((20, 20), dtype=float)
-        arr = yy.copy()
-        state = ProcessingState(steps=[ProcessingStep("linear_undistort", {
-            "shear_x": 0.0, "scale_y": 2.0,
-        })])
-        result = apply_processing_state(arr, state)
-        assert result.shape == arr.shape
-        np.testing.assert_allclose(result, yy / 2.0, atol=1e-12)
+    yy, _xx = np.indices((20, 20), dtype=float)
+    undistorted = apply_processing_state(
+        yy,
+        ProcessingState([ProcessingStep("linear_undistort", {"shear_x": 0.0, "scale_y": 2.0})]),
+    )
+    np.testing.assert_allclose(undistorted, yy / 2.0, atol=1e-12)
 
-    def test_set_zero_point_anchors_pixel_to_zero(self):
-        arr = np.full((10, 10), 42.0)
-        state = ProcessingState(steps=[ProcessingStep("set_zero_point", {
-            "x_px": 4, "y_px": 5, "patch": 1,
-        })])
-        result = apply_processing_state(arr, state)
-        # Anchored pixel must now read zero (within fp tolerance).
-        assert abs(float(result[5, 4])) < 1e-12
-        # And every other pixel shifts by the same offset (-42.0).
-        np.testing.assert_array_almost_equal(result, arr - 42.0)
 
-    def test_set_zero_plane_removes_clicked_plane(self):
-        yy, xx = np.mgrid[:10, :10]
-        arr = 1.25 * xx - 0.5 * yy + 7.0
-        state = ProcessingState(steps=[ProcessingStep("set_zero_plane", {
-            "points_px": [(0, 0), (9, 0), (0, 9)],
-            "patch": 0,
-        })])
-        result = apply_processing_state(arr, state)
+def test_zero_reference_processing_contract():
+    arr = np.full((10, 10), 42.0)
+    point = apply_processing_state(
+        arr,
+        ProcessingState([ProcessingStep("set_zero_point", {"x_px": 4, "y_px": 5, "patch": 1})]),
+    )
+    assert abs(float(point[5, 4])) < 1e-12
+    np.testing.assert_array_almost_equal(point, arr - 42.0)
 
-        np.testing.assert_allclose(result, np.zeros_like(arr), atol=1e-12)
+    yy, xx = np.mgrid[:10, :10]
+    plane_source = 1.25 * xx - 0.5 * yy + 7.0
+    plane = apply_processing_state(
+        plane_source,
+        ProcessingState(
+            [ProcessingStep("set_zero_plane", {"points_px": [(0, 0), (9, 0), (0, 9)], "patch": 0})],
+        ),
+    )
+    np.testing.assert_allclose(plane, np.zeros_like(plane_source), atol=1e-12)

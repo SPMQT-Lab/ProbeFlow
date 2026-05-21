@@ -32,14 +32,13 @@ def sample_sxm(tmp_path, first_sample_dat, cushion_dir) -> Path:
 # ─── Dispatch ────────────────────────────────────────────────────────────────
 
 class TestLoadScanDispatch:
-    def test_sxm_suffix_dispatches(self, sample_sxm):
-        scan = load_scan(sample_sxm)
-        assert scan.source_format == "sxm"
-        assert scan.source_path == sample_sxm
-
-    def test_dat_suffix_dispatches(self, first_sample_dat):
-        scan = load_scan(first_sample_dat)
-        assert scan.source_format == "dat"
+    def test_sxm_and_dat_suffixes_dispatch_to_expected_source_formats(self, sample_sxm, first_sample_dat):
+        sxm = load_scan(sample_sxm)
+        dat = load_scan(first_sample_dat)
+        assert sxm.source_format == "sxm"
+        assert sxm.source_path == sample_sxm
+        assert dat.source_format == "dat"
+        assert dat.source_path == first_sample_dat
 
     def test_unknown_suffix_raises(self, tmp_path):
         p = tmp_path / "bad.txt"
@@ -51,38 +50,28 @@ class TestLoadScanDispatch:
 # ─── Common Scan contract ───────────────────────────────────────────────────
 
 class TestScanContract:
-    def test_sxm_produces_valid_scan(self, sample_sxm):
-        scan = load_scan(sample_sxm)
-        assert isinstance(scan, Scan)
-        assert scan.n_planes >= 1
-        Nx, Ny = scan.dims
-        assert Nx > 0 and Ny > 0
-        for plane in scan.planes:
-            assert plane.dtype == np.float64
-            assert plane.shape == (Ny, Nx)
+    def test_sxm_and_dat_loaders_return_float_planes_with_consistent_dimensions(
+        self,
+        sample_sxm,
+        first_sample_dat,
+    ):
+        for scan in (load_scan(sample_sxm), load_scan(first_sample_dat)):
+            assert isinstance(scan, Scan)
+            assert scan.n_planes >= 1
+            Nx, Ny = scan.dims
+            assert Nx > 0 and Ny > 0
+            for plane in scan.planes:
+                assert plane.dtype == np.float64
+                assert plane.shape == (Ny, Nx)
 
-    def test_dat_produces_valid_scan(self, first_sample_dat):
+    def test_dat_loader_preserves_physical_units_range_and_canonical_planes(self, first_sample_dat):
         scan = load_scan(first_sample_dat)
-        assert isinstance(scan, Scan)
-        assert scan.n_planes == 4  # always canonical 4 planes
-        Nx, Ny = scan.dims
-        assert Nx > 0 and Ny > 0
-        for plane in scan.planes:
-            assert plane.dtype == np.float64
-            assert plane.shape == (Ny, Nx)
-
-    def test_dat_units_are_physical(self, first_sample_dat):
-        scan = load_scan(first_sample_dat)
+        assert scan.n_planes == 4
         assert scan.plane_units == ["m", "m", "A", "A"]
-        # Z values should be on the nanometre/picometre scale.
         z_plane = scan.planes[0]
         finite = z_plane[np.isfinite(z_plane)]
         assert finite.size > 0
-        # Anything within ±1 mm is "physically plausible" for an STM scan.
         assert float(np.max(np.abs(finite))) < 1e-3
-
-    def test_dat_scan_range_positive(self, first_sample_dat):
-        scan = load_scan(first_sample_dat)
         w_m, h_m = scan.scan_range_m
         assert w_m > 0 and h_m > 0
 
@@ -155,17 +144,13 @@ class TestSaveSxm:
 # ─── save_png ────────────────────────────────────────────────────────────────
 
 class TestSavePng:
-    def test_sxm_sourced_png_writes(self, sample_sxm, tmp_path):
+    def test_sxm_and_dat_sourced_png_exports_write_png_magic(self, sample_sxm, first_sample_dat, tmp_path):
         scan = load_scan(sample_sxm)
-        out = tmp_path / "from_sxm.png"
-        scan.save_png(out, plane_idx=0, colormap="gray")
-        assert out.exists() and out.stat().st_size > 0
-
-    def test_dat_sourced_png_writes(self, first_sample_dat, tmp_path):
-        scan = load_scan(first_sample_dat)
-        out = tmp_path / "from_dat.png"
-        scan.save_png(out, plane_idx=0, colormap="gray")
-        assert out.exists() and out.stat().st_size > 0
+        dat_scan = load_scan(first_sample_dat)
+        for name, source in (("from_sxm.png", scan), ("from_dat.png", dat_scan)):
+            out = tmp_path / name
+            source.save_png(out, plane_idx=0, colormap="gray")
+            assert out.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
 
     def test_plane_idx_out_of_range_raises(self, first_sample_dat, tmp_path):
         scan = load_scan(first_sample_dat)
@@ -285,7 +270,7 @@ class TestBackwardOrientation:
     were mirrored, corr(fwd, fliplr(bwd)) would exceed corr(fwd, bwd).
     """
 
-    def test_createc_backward_not_mirrored(self):
+    def test_createc_backward_plane_is_correlated_and_not_mirrored(self):
         if not _CREATEC_4CH.exists():
             pytest.skip(f"missing fixture: {_CREATEC_4CH.name}")
         scan = load_scan(_CREATEC_4CH)
@@ -295,12 +280,6 @@ class TestBackwardOrientation:
             f"Z bwd appears mirrored: corr(fwd,bwd)={direct:.3f} "
             f"< corr(fwd,fliplr(bwd))={flipped:.3f}"
         )
-
-    def test_createc_backward_high_correlation(self):
-        if not _CREATEC_4CH.exists():
-            pytest.skip(f"missing fixture: {_CREATEC_4CH.name}")
-        scan = load_scan(_CREATEC_4CH)
-        direct, _ = _fwd_bwd_corrs(scan)
         assert direct > 0.85, (
             f"Z fwd/bwd correlation too low ({direct:.3f}); "
             "expected both to show the same surface"

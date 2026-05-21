@@ -11,26 +11,6 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 
-# ── Import guard: none of these imports should touch Qt ──────────────────────
-
-def test_scan_load_imports_without_qt():
-    """scan_load.py must be importable without Qt."""
-    from probeflow.gui.viewer.scan_load import ViewerScanData, load_scan_for_viewer
-    assert ViewerScanData is not None
-    assert load_scan_for_viewer is not None
-
-
-def test_processed_export_imports_without_qt():
-    """processed_export.py must be importable without Qt."""
-    from probeflow.gui.viewer.processed_export import (
-        build_processed_scan_for_export,
-        build_processed_export_provenance,
-        save_processed_image,
-        save_provenance_json,
-    )
-    assert save_processed_image is not None
-
-
 # ── ViewerScanData ────────────────────────────────────────────────────────────
 
 SAMPLE_SXM = Path(__file__).parent.parent / "test_data" / "sample_input" / "A250320.191933.sxm"

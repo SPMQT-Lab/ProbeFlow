@@ -12,12 +12,9 @@ SAMPLE_DIR = REPO_ROOT / "test_data" / "sample_input"
 CUSHION_DIR = REPO_ROOT / "probeflow" / "data" / "file_cushions"
 
 GUI_TEST_MODULES = {
-    "test_gui_smoke.py",
     "test_gui_index_integration.py",
     "test_gui_processing_panel.py",
     "test_gui_features.py",
-    "test_gui_widget_extraction.py",
-    "test_gui_dialog_extraction.py",
 }
 
 MIXED_QT_FIXTURE_MODULES = {

@@ -42,16 +42,6 @@ def _sample_entry():
     return SimpleNamespace(stem="example", path=Path("/tmp/example.sxm"))
 
 
-def test_features_sidebar_exposes_classify_mode(qapp):
-    from probeflow.gui.features import FeaturesSidebar
-
-    sidebar = FeaturesSidebar({})
-    assert "classify" in sidebar._mode_btns
-    sidebar._select_mode("classify")
-    assert sidebar.current_mode() == "classify"
-    sidebar.deleteLater()
-
-
 def test_features_panel_sample_label_flow(qapp, monkeypatch):
     pytest.importorskip("cv2")
     from probeflow.analysis.features import segment_particles

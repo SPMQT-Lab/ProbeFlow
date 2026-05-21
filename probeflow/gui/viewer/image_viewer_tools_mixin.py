@@ -1,0 +1,357 @@
+"""Analysis and tool-launch handlers for ImageViewerDialog."""
+
+from __future__ import annotations
+
+import numpy as np
+
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QDialog, QDockWidget
+
+from probeflow.gui.dialogs.fft_viewer import FFTViewerDialog
+from probeflow.gui.dialogs.periodic_filter import PeriodicFilterDialog
+from probeflow.gui.roi_context import (
+    active_area_roi_context,
+    area_roi_mask,
+    collect_point_source_records,
+    point_source_arrays_m,
+    point_source_arrays_px,
+    point_source_metadata,
+    selected_or_active_area_roi_context,
+)
+from probeflow.gui.viewer.tool_launch import (
+    feature_lattice_launch_context,
+    lattice_grid_launch_context,
+    pair_correlation_launch_context,
+)
+
+
+class ImageViewerToolsMixin:
+    def _on_open_lattice_grid(self):
+        arr = self._display_arr if self._display_arr is not None else self._raw_arr
+        context = lattice_grid_launch_context(arr, scan_range_m=self._scan_range_m)
+        if not context.ready:
+            self._status_lbl.setText(str(context.status_message))
+            return
+        from probeflow.gui.lattice_grid import open_real_space_tool
+
+        def _get_image():
+            return self._display_arr if self._display_arr is not None else self._raw_arr
+
+        def _preview_lattice_correction(corrected_arr) -> None:
+            self._display_arr = corrected_arr
+            self._refresh_viewer_pixmap(reset_zoom=False)
+
+        def _clear_lattice_correction_preview() -> None:
+            self._refresh_display_array(reset_zoom_if_shape_changed=False)
+            self._refresh_viewer_pixmap(reset_zoom=False)
+
+        def _apply_lattice_correction(op_name: str, op_params: dict) -> None:
+            ops = list(self._processing.get("geometric_ops") or [])
+            ops.append({"op": op_name, "params": op_params})
+            self._processing["geometric_ops"] = ops
+            self._refresh_processing_display()
+
+        item, panel = open_real_space_tool(
+            self._zoom_lbl, context.scan_range_m, context.image_shape, parent=self,
+            get_image_fn=_get_image,
+            apply_correction_fn=_apply_lattice_correction,
+            preview_image_fn=_preview_lattice_correction,
+            clear_preview_fn=_clear_lattice_correction_preview,
+        )
+        self._lattice_grid_item = item
+        dock = QDockWidget("Lattice Grid", self._viewer_main)
+        dock.setWidget(panel)
+        dock.setFeatures(
+            QDockWidget.DockWidgetClosable
+            | QDockWidget.DockWidgetMovable
+            | QDockWidget.DockWidgetFloatable
+        )
+        dock.setMinimumWidth(220)
+        self._viewer_main.addDockWidget(Qt.RightDockWidgetArea, dock)
+        dock.show()
+        dock.raise_()
+
+        def _on_dock_closed():
+            if self._zoom_lbl.scene() and item.scene():
+                self._zoom_lbl.scene().removeItem(item)
+
+        dock.visibilityChanged.connect(lambda v: _on_dock_closed() if not v else None)
+
+    def _on_open_feature_finder(self):
+        arr = self._display_arr if self._display_arr is not None else self._raw_arr
+        if arr is None:
+            self._status_lbl.setText("No image loaded.")
+            return
+        px_x_m, px_y_m = self._pixel_size_xy_m()
+        roi_mask = None
+        roi_ctx = selected_or_active_area_roi_context(
+            self._image_roi_set,
+            getattr(self, "_roi_dock", None),
+        )
+        if roi_ctx.roi is not None:
+            roi_mask = area_roi_mask(roi_ctx.roi, arr.shape[:2])
+        from probeflow.gui.dialogs.feature_finder import FeatureFinderDialog
+        dlg = FeatureFinderDialog(
+            arr,
+            pixel_size_x_m=px_x_m,
+            pixel_size_y_m=px_y_m,
+            roi_mask=roi_mask,
+            theme=self._t,
+            parent=self,
+        )
+        self._feature_finder_dlg = dlg
+        dlg.show()
+
+    def _on_measure_distance(self) -> None:
+        """Measure length/angle of the active line ROI → new panel."""
+        roi_id = self._active_line_roi_id()
+        if roi_id is None:
+            self._status_lbl.setText("Select a line ROI first.")
+            return
+        roi = self._image_roi_set.get(roi_id) if self._image_roi_set else None
+        if roi is None:
+            return
+        from probeflow.analysis.simple_measurements import measure_line_distance
+        px_x_m, px_y_m = self._pixel_size_xy_m()
+        mid = self._measurement_table.next_measurement_id()
+        _, ch_unit, _ = self._channel_unit()
+        result = measure_line_distance(
+            roi, px_x_m, px_y_m,
+            measurement_id=mid,
+            source=self._source_label(),
+            channel=ch_unit,
+        )
+        self._measurement_table.add_result(result)
+        self._measurement_dock.show()
+        self._measurement_dock.raise_()
+        self._status_lbl.setText(str(result.context.get("summary") or ""))
+
+    def _on_measure_angle(self) -> None:
+        """Switch to the 3-point angle tool; handles emitted from angle_points_ready."""
+        self._zoom_lbl.set_tool("angle")
+        self._status_lbl.setText("Click P1, P2 (vertex), P3 to measure angle")
+
+    def _on_angle_points_ready(self, p1, p2, p3) -> None:
+        """Create angle overlay and record result from the 3-point angle tool."""
+        from probeflow.gui.angle_overlay import AngleOverlayItem
+        scene = self._zoom_lbl.scene()
+        if self._angle_overlay is not None:
+            self._angle_overlay.remove_from_scene(scene)
+        self._angle_overlay = AngleOverlayItem(p1, p2, p3, scene)
+        deg = self._angle_overlay.angle_deg
+        from probeflow.measurements.models import MeasurementResult as R
+        mid = self._measurement_table.next_measurement_id()
+        result = R(
+            measurement_id=mid,
+            kind="angle",
+            source_label=self._source_label(),
+            source_path=self._source_label(),
+            channel=None,
+            x_unit="°",
+            y_unit=None,
+            z_unit=None,
+            values={"angle_deg": deg},
+            context={},
+            notes="",
+        )
+        self._measurement_table.add_result(result)
+        self._measurement_dock.show()
+        self._measurement_dock.raise_()
+        self._status_lbl.setText(f"Angle: {deg:.2f}°  (drag handles to adjust)")
+
+    def _on_measure_roi_stats(self) -> None:
+        """Compute statistics for the active area ROI → new panel."""
+        roi_set = self._image_roi_set
+        arr = self._display_arr if self._display_arr is not None else self._raw_arr
+        if arr is None:
+            self._status_lbl.setText("No image loaded.")
+            return
+        if roi_set is None:
+            self._status_lbl.setText("No ROIs loaded.")
+            return
+        roi_ctx = selected_or_active_area_roi_context(
+            roi_set,
+            getattr(self, "_roi_dock", None),
+        )
+        roi = roi_ctx.roi
+        if roi is None:
+            self._status_lbl.setText("Select an area ROI first.")
+            return
+        mask = area_roi_mask(roi, arr.shape[:2])
+        if mask is None:
+            self._status_lbl.setText("Could not create a non-empty ROI mask.")
+            return
+        scale, ch_unit, _ = self._channel_unit()
+        phys_arr = arr.astype(float) * float(scale)
+        from probeflow.analysis.roi_statistics import compute_roi_statistics
+        px_x_m, px_y_m = self._pixel_size_xy_m()
+        mid = self._measurement_table.next_measurement_id()
+        result = compute_roi_statistics(
+            phys_arr, mask,
+            pixel_size_x_m=px_x_m,
+            pixel_size_y_m=px_y_m,
+            z_unit=ch_unit,
+            measurement_id=mid,
+            source=self._source_label(),
+            channel=ch_unit,
+            roi_id=roi.id,
+            roi_name=roi.name,
+        )
+        self._measurement_table.add_result(result)
+        self._measurement_dock.show()
+        self._measurement_dock.raise_()
+        self._status_lbl.setText(str(result.context.get("summary") or ""))
+
+    def _source_label(self) -> str:
+        """Short label for the currently loaded file, for measurement provenance."""
+        try:
+            return self._entries[self._idx].stem
+        except (AttributeError, IndexError, TypeError):
+            return ""
+
+    def _point_source_records(self):
+        px_x, px_y = self._pixel_size_xy_m()
+        ff_dlg = getattr(self, "_feature_finder_dlg", None)
+        measure_ctrl = getattr(self, "_image_measurements", None)
+        dock = getattr(self, "_roi_dock", None)
+        sel_ids = list(dock.selected_roi_ids()) if dock and hasattr(dock, "selected_roi_ids") else []
+        return collect_point_source_records(
+            pixel_size_x_m=px_x,
+            pixel_size_y_m=px_y,
+            feature_finder_result=getattr(ff_dlg, "result", None),
+            measurement_points=getattr(measure_ctrl, "feature_points", []) or [],
+            measurement_metadata=getattr(measure_ctrl, "feature_metadata", {}) or {},
+            roi_set=self._image_roi_set,
+            selected_roi_ids=sel_ids,
+        )
+
+    def _collect_point_sources_m(self) -> dict[str, "np.ndarray"]:
+        """Collect available point sources as (N,2) arrays in metres."""
+        return point_source_arrays_m(self._point_source_records())
+
+    def _collect_point_sources_px(self) -> dict[str, "np.ndarray"]:
+        """Collect available point sources as (N,2) arrays in pixel coordinates."""
+        return point_source_arrays_px(self._point_source_records())
+
+    def _collect_point_source_metadata(self) -> dict[str, dict[str, object]]:
+        """Collect metadata for available point sources."""
+        return point_source_metadata(self._point_source_records())
+
+    def _on_open_pair_correlation(self) -> None:
+        arr = self._display_arr if self._display_arr is not None else self._raw_arr
+        px_x, px_y = self._pixel_size_xy_m()
+        context = pair_correlation_launch_context(
+            self._point_source_records(),
+            active_area_roi=self._active_image_roi(),
+            image_shape=arr.shape[:2] if arr is not None else None,
+            pixel_size_x_m=px_x,
+            pixel_size_y_m=px_y,
+        )
+        if not context.ready:
+            self._status_lbl.setText(str(context.status_message))
+            return
+        _, ch_unit, _ = self._channel_unit()
+        entries = getattr(self, "_entries", [])
+        entry = entries[self._idx] if entries else None
+        from probeflow.gui.dialogs.pair_correlation import PairCorrelationDialog
+
+        def _add(result):
+            self._add_dialog_measurement_result(result)
+
+        dlg = PairCorrelationDialog(
+            context.sources_m,
+            roi_area_m2=context.roi_area_m2,
+            pixel_size_x_m=context.pixel_size_x_m,
+            pixel_size_y_m=context.pixel_size_y_m,
+            source_label=self._source_label(),
+            source_path=str(entry.path) if entry is not None else None,
+            channel=ch_unit,
+            source_metadata=context.source_metadata,
+            on_add_result=_add,
+            theme=self._t,
+            parent=self,
+        )
+        dlg.show()
+
+    def _on_open_feature_lattice(self) -> None:
+        item = getattr(self, "_lattice_grid_item", None)
+        grid = item.grid() if item is not None else None
+        arr = self._display_arr if self._display_arr is not None else self._raw_arr
+        px_x, px_y = self._pixel_size_xy_m()
+        context = feature_lattice_launch_context(
+            self._point_source_records(),
+            lattice_grid=grid,
+            image_shape=arr.shape[:2] if arr is not None else None,
+            pixel_size_x_m=px_x,
+            pixel_size_y_m=px_y,
+        )
+        if not context.ready:
+            self._status_lbl.setText(str(context.status_message))
+            return
+        _, ch_unit, _ = self._channel_unit()
+        entries = getattr(self, "_entries", [])
+        entry = entries[self._idx] if entries else None
+        from probeflow.gui.dialogs.feature_lattice_dialog import FeatureLatticeDialog
+
+        def _add(result):
+            self._add_dialog_measurement_result(result)
+
+        dlg = FeatureLatticeDialog(
+            context.sources_px,
+            lattice_origin_px=context.lattice_origin_px,
+            a_px=context.a_px,
+            b_px=context.b_px,
+            pixel_size_x_m=context.pixel_size_x_m,
+            pixel_size_y_m=context.pixel_size_y_m,
+            image_shape=context.image_shape,
+            source_label=self._source_label(),
+            source_path=str(entry.path) if entry is not None else None,
+            channel=ch_unit,
+            source_metadata=context.source_metadata,
+            on_add_result=_add,
+            theme=self._t,
+            parent=self,
+        )
+        dlg.show()
+
+    def _on_open_fft_viewer(self):
+        arr = self._display_arr if self._display_arr is not None else self._raw_arr
+        if arr is None:
+            self._status_lbl.setText("No image loaded.")
+            return
+        dlg = FFTViewerDialog(
+            arr,
+            self._scan_range_m or (1e-9, 1e-9),
+            colormap=self._colormap,
+            theme=self._t,
+            channel_unit=self._channel_unit(),
+            parent=self,
+        )
+        dlg.show()
+
+    def _on_periodic_filter(self):
+        arr = self._display_arr if self._display_arr is not None else self._raw_arr
+        if arr is None:
+            self._status_lbl.setText("No image data available for FFT filtering.")
+            return
+        dlg = PeriodicFilterDialog(
+            arr,
+            peaks=self._processing.get("periodic_notches", []),
+            radius_px=float(self._processing.get("periodic_notch_radius", 3.0)),
+            scan_range_m=self._scan_range_m,
+            colormap=self._colormap,
+            theme=self._t,
+            parent=self,
+        )
+        if dlg.exec() != QDialog.Accepted:
+            return
+        peaks = dlg.selected_peaks()
+        if peaks:
+            self._processing["periodic_notches"] = peaks
+            self._processing["periodic_notch_radius"] = dlg.radius_px()
+            self._status_lbl.setText(f"Periodic FFT filter: {len(peaks)} peak(s) selected.")
+        else:
+            self._processing.pop("periodic_notches", None)
+            self._processing.pop("periodic_notch_radius", None)
+            self._status_lbl.setText("Periodic FFT filter cleared.")
+        self._refresh_processing_display()

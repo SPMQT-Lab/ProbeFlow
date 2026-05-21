@@ -26,51 +26,15 @@ class TestCreatecMetadataMatchesScan:
         (_CREATEC_STEP,    (330, 511)),
         (_CREATEC_TERRACE, (512, 511)),
     ])
-    def test_source_format(self, path, expected_shape):
+    def test_createc_metadata_matches_loaded_scan_and_known_post_fix_dimensions(self, path, expected_shape):
+        scan = load_scan(path)
         meta = read_scan_metadata(path)
         assert meta.source_format == "createc_dat"
-
-    @pytest.mark.parametrize("path,expected_shape", [
-        (_CREATEC_STEP,    (330, 511)),
-        (_CREATEC_TERRACE, (512, 511)),
-    ])
-    def test_item_type(self, path, expected_shape):
-        meta = read_scan_metadata(path)
         assert meta.item_type == "scan"
-
-    @pytest.mark.parametrize("path,expected_shape", [
-        (_CREATEC_STEP,    (330, 511)),
-        (_CREATEC_TERRACE, (512, 511)),
-    ])
-    def test_shape_matches_scan(self, path, expected_shape):
-        scan = load_scan(path)
-        meta = read_scan_metadata(path)
         assert meta.shape == scan.planes[0].shape
-
-    @pytest.mark.parametrize("path,expected_shape", [
-        (_CREATEC_STEP,    (330, 511)),
-        (_CREATEC_TERRACE, (512, 511)),
-    ])
-    def test_post_fix_dimensions(self, path, expected_shape):
-        meta = read_scan_metadata(path)
         assert meta.shape == expected_shape
-
-    @pytest.mark.parametrize("path", [_CREATEC_STEP, _CREATEC_TERRACE])
-    def test_plane_names_match_scan(self, path):
-        scan = load_scan(path)
-        meta = read_scan_metadata(path)
         assert meta.plane_names == tuple(scan.plane_names)
-
-    @pytest.mark.parametrize("path", [_CREATEC_STEP, _CREATEC_TERRACE])
-    def test_units_match_scan(self, path):
-        scan = load_scan(path)
-        meta = read_scan_metadata(path)
         assert meta.units == tuple(scan.plane_units)
-
-    @pytest.mark.parametrize("path", [_CREATEC_STEP, _CREATEC_TERRACE])
-    def test_experiment_metadata_matches_scan(self, path):
-        scan = load_scan(path)
-        meta = read_scan_metadata(path)
         assert meta.experiment_metadata == scan.experiment_metadata
 
     def test_modern_stm_fixture_infers_current_feedback(self):
@@ -83,46 +47,27 @@ class TestCreatecMetadataMatchesScan:
 
 class TestCreatecHeaderConsistency:
     @pytest.mark.parametrize("path", [_CREATEC_STEP, _CREATEC_TERRACE])
-    def test_width_matches_num_x(self, path):
+    def test_shape_matches_createc_num_x_and_num_y_headers(self, path):
         meta = read_scan_metadata(path)
         nx_hdr = int(float(meta.raw_header["Num.X"]))
-        assert meta.shape is not None
-        _, Nx = meta.shape
-        assert Nx == nx_hdr
-
-    @pytest.mark.parametrize("path", [_CREATEC_STEP, _CREATEC_TERRACE])
-    def test_height_matches_num_y(self, path):
-        meta = read_scan_metadata(path)
         ny_hdr = int(float(meta.raw_header["Num.Y"]))
         assert meta.shape is not None
         Ny, _ = meta.shape
+        _, Nx = meta.shape
+        assert Nx == nx_hdr
         assert Ny == ny_hdr
 
 
 # ── Test C: Nanonis metadata matches loaded scan ──────────────────────────────
 
 class TestNanonisMetadataMatchesScan:
-    def test_source_format(self):
+    def test_nanonis_metadata_matches_loaded_scan_contract(self):
+        scan = load_scan(_NANONIS_SXM)
         meta = read_scan_metadata(_NANONIS_SXM)
         assert meta.source_format == "nanonis_sxm"
-
-    def test_item_type(self):
-        meta = read_scan_metadata(_NANONIS_SXM)
         assert meta.item_type == "scan"
-
-    def test_shape_matches_scan(self):
-        scan = load_scan(_NANONIS_SXM)
-        meta = read_scan_metadata(_NANONIS_SXM)
         assert meta.shape == scan.planes[0].shape
-
-    def test_plane_names_match_scan(self):
-        scan = load_scan(_NANONIS_SXM)
-        meta = read_scan_metadata(_NANONIS_SXM)
         assert meta.plane_names == tuple(scan.plane_names)
-
-    def test_units_match_scan(self):
-        scan = load_scan(_NANONIS_SXM)
-        meta = read_scan_metadata(_NANONIS_SXM)
         assert meta.units == tuple(scan.plane_units)
 
 
@@ -152,26 +97,14 @@ class TestScanMetadataContract:
         with pytest.raises((AttributeError, TypeError)):
             meta.shape = (1, 1)  # type: ignore[misc]
 
-    def test_scan_range_is_positive(self):
+    def test_scan_metadata_scalar_and_header_contract(self):
         meta = read_scan_metadata(_CREATEC_STEP)
         assert meta.scan_range is not None
         w, h = meta.scan_range
         assert w > 0 and h > 0
-
-    def test_bias_is_float(self):
-        meta = read_scan_metadata(_CREATEC_STEP)
         assert isinstance(meta.bias, float)
-
-    def test_setpoint_is_float(self):
-        meta = read_scan_metadata(_CREATEC_STEP)
         assert isinstance(meta.setpoint, float)
-
-    def test_display_name_is_stem(self):
-        meta = read_scan_metadata(_CREATEC_STEP)
         assert meta.display_name == _CREATEC_STEP.stem
-
-    def test_raw_header_is_dict(self):
-        meta = read_scan_metadata(_CREATEC_STEP)
         assert isinstance(meta.raw_header, dict)
         assert len(meta.raw_header) > 0
 

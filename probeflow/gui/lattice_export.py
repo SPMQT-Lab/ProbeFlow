@@ -1,7 +1,7 @@
 """
 Export helpers for the lattice/grid overlay tool.
 
-Kept separate from lattice_grid_tool.py to avoid circular imports and to
+Kept separate from the lattice-grid panels to avoid circular imports and to
 make export logic independently testable.
 """
 
@@ -11,7 +11,7 @@ import os
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from probeflow.gui.lattice_grid_tool import LatticeGridItem
+    from probeflow.gui.lattice_grid import LatticeGridItem
 
 
 def export_grid(

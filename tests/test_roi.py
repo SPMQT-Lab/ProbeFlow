@@ -1,657 +1,375 @@
-"""Tests for probeflow.core.roi — ROI data model, masks, and transforms."""
+"""Contract tests for ROI data models, masks, transforms, and integration."""
+
 from __future__ import annotations
 
 import warnings
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
 
-from probeflow.core.roi import (
-    ROI,
-    ROISet,
-    combine_masks,
-    invert_mask,
-    translate,
-)
+from probeflow.core.roi import ROI, ROISet, combine_masks, invert_mask, translate
 
 
-# ── Fixtures ──────────────────────────────────────────────────────────────────
-
-SHAPE = (100, 100)   # (Ny, Nx)
+SHAPE = (100, 100)  # (Ny, Nx)
 
 
 def rect_roi(x=10, y=10, w=20, h=20):
-    return ROI.new("rectangle", {"x": float(x), "y": float(y),
-                                  "width": float(w), "height": float(h)})
+    return ROI.new(
+        "rectangle",
+        {"x": float(x), "y": float(y), "width": float(w), "height": float(h)},
+    )
 
 
 def ellipse_roi(cx=50, cy=50, rx=10, ry=10):
-    return ROI.new("ellipse", {"cx": float(cx), "cy": float(cy),
-                                "rx": float(rx), "ry": float(ry)})
+    return ROI.new(
+        "ellipse",
+        {"cx": float(cx), "cy": float(cy), "rx": float(rx), "ry": float(ry)},
+    )
 
 
 def polygon_roi():
-    return ROI.new("polygon", {"vertices": [[10.0, 10.0], [30.0, 10.0], [20.0, 30.0]]})
+    return ROI.new(
+        "polygon",
+        {"vertices": [[10.0, 10.0], [30.0, 10.0], [20.0, 30.0]]},
+    )
 
 
 def freehand_roi():
-    return ROI.new("freehand", {"vertices": [[1.0, 2.0], [3.0, 5.0], [8.0, 13.0]]})
+    return ROI.new(
+        "freehand",
+        {"vertices": [[1.0, 2.0], [3.0, 5.0], [8.0, 13.0]]},
+    )
 
 
 def line_roi():
     return ROI.new("line", {"x1": 5.0, "y1": 5.0, "x2": 15.0, "y2": 15.0})
 
 
-def point_roi(x=50, y=50):
-    return ROI.new("point", {"x": float(x), "y": float(y)})
+def point_roi(x=50, y=50, *, name=None, linked_file=None):
+    return ROI.new(
+        "point",
+        {"x": float(x), "y": float(y)},
+        name=name,
+        linked_file=linked_file,
+    )
 
 
-# ── ROI serialisation ─────────────────────────────────────────────────────────
+def _masks():
+    a = np.zeros((5, 5), dtype=bool)
+    a[0:3, 0:3] = True
+    b = np.zeros((5, 5), dtype=bool)
+    b[2:5, 2:5] = True
+    return a, b
 
-class TestROISerialisation:
-    def test_rectangle_round_trip(self):
-        roi = rect_roi()
-        d = roi.to_dict()
-        restored = ROI.from_dict(d)
+
+def _scan():
+    scan = MagicMock()
+    scan.planes = [np.arange(12.0).reshape(3, 4), np.ones((3, 4))]
+    return scan
+
+
+def test_roi_serialisation_round_trips_all_supported_shapes_and_links():
+    rois = [
+        rect_roi(),
+        ellipse_roi(),
+        polygon_roi(),
+        freehand_roi(),
+        line_roi(),
+        point_roi(5, 7, name="spectrum_003", linked_file="my_spec_003.dat"),
+        ROI.new(
+            "multipolygon",
+            {
+                "components": [
+                    {
+                        "exterior": [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
+                        "holes": [[[2.0, 2.0], [4.0, 2.0], [4.0, 4.0], [2.0, 4.0]]],
+                    },
+                ],
+            },
+            name="donut",
+        ),
+    ]
+
+    for roi in rois:
+        restored = ROI.from_dict(roi.to_dict())
         assert restored.id == roi.id
         assert restored.name == roi.name
         assert restored.kind == roi.kind
-        assert abs(restored.geometry["x"] - 10.0) < 1e-9
-        assert abs(restored.geometry["width"] - 20.0) < 1e-9
-
-    def test_ellipse_round_trip(self):
-        roi = ellipse_roi()
-        restored = ROI.from_dict(roi.to_dict())
-        assert restored.kind == "ellipse"
-        assert abs(restored.geometry["cx"] - 50.0) < 1e-9
-
-    def test_polygon_round_trip(self):
-        roi = polygon_roi()
-        restored = ROI.from_dict(roi.to_dict())
-        assert restored.kind == "polygon"
-        verts = restored.geometry["vertices"]
-        assert len(verts) == 3
-        assert abs(verts[0][0] - 10.0) < 1e-9
-
-    def test_line_round_trip(self):
-        roi = line_roi()
-        restored = ROI.from_dict(roi.to_dict())
-        assert restored.kind == "line"
-        assert abs(restored.geometry["x2"] - 15.0) < 1e-9
-
-    def test_point_round_trip(self):
-        roi = point_roi()
-        restored = ROI.from_dict(roi.to_dict())
-        assert restored.kind == "point"
-        assert abs(restored.geometry["x"] - 50.0) < 1e-9
-
-    def test_linked_file_preserved(self):
-        roi = ROI.new("point", {"x": 5.0, "y": 5.0}, linked_file="spec_001.dat")
-        restored = ROI.from_dict(roi.to_dict())
-        assert restored.linked_file == "spec_001.dat"
-
-    def test_linked_file_none_preserved(self):
-        roi = rect_roi()
-        restored = ROI.from_dict(roi.to_dict())
-        assert restored.linked_file is None
-
-    def test_multipolygon_round_trip(self):
-        roi = ROI.new("multipolygon", {
-            "components": [{
-                "exterior": [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
-                "holes": [[[2.0, 2.0], [4.0, 2.0], [4.0, 4.0], [2.0, 4.0]]],
-            }],
-        }, name="donut")
-        restored = ROI.from_dict(roi.to_dict())
-        assert restored.kind == "multipolygon"
-        assert restored.geometry["components"][0]["exterior"][2] == [10.0, 10.0]
-        assert restored.geometry["components"][0]["holes"][0][0] == [2.0, 2.0]
+        assert restored.geometry == roi.geometry
+        assert restored.linked_file == roi.linked_file
 
 
-# ── to_mask ───────────────────────────────────────────────────────────────────
+def test_roi_masks_cover_expected_pixels_for_supported_shapes():
+    rect = rect_roi(x=10, y=10, w=10, h=10).to_mask(SHAPE)
+    clipped_rect = rect_roi(x=90, y=90, w=20, h=20).to_mask(SHAPE)
+    ellipse = ellipse_roi(cx=50.5, cy=50.5, rx=5, ry=5).to_mask(SHAPE)
+    polygon = polygon_roi().to_mask(SHAPE)
+    line = line_roi().to_mask(SHAPE)
+    point = point_roi(x=30, y=40).to_mask(SHAPE)
+    out_of_bounds_point = point_roi(x=200, y=200).to_mask(SHAPE)
 
-class TestToMask:
-    def test_rectangle_pixel_count(self):
-        roi = rect_roi(x=10, y=10, w=10, h=10)
-        mask = roi.to_mask(SHAPE)
+    for mask in (rect, clipped_rect, ellipse, polygon, line, point, out_of_bounds_point):
         assert mask.shape == SHAPE
-        assert int(mask.sum()) == 100
-
-    def test_rectangle_clipped_to_boundary(self):
-        roi = rect_roi(x=90, y=90, w=20, h=20)  # extends outside 100×100
-        mask = roi.to_mask(SHAPE)
-        assert mask.sum() > 0
-        assert mask.sum() < 400  # clipped
-
-    def test_ellipse_approx_pixel_count(self):
-        roi = ellipse_roi(cx=50.5, cy=50.5, rx=5, ry=5)
-        mask = roi.to_mask(SHAPE)
-        # Area = pi*r^2 ≈ 78.5; accept 65-92
-        assert 65 <= int(mask.sum()) <= 92
-
-    def test_ellipse_full_circle(self):
-        roi = ellipse_roi(cx=50.5, cy=50.5, rx=5, ry=5)
-        mask = roi.to_mask(SHAPE)
-        assert mask.shape == SHAPE
-
-    def test_polygon_shape(self):
-        roi = polygon_roi()
-        mask = roi.to_mask(SHAPE)
-        assert mask.shape == SHAPE
-        assert mask.sum() > 0
-
-    def test_line_connects_endpoints(self):
-        roi = line_roi()
-        mask = roi.to_mask(SHAPE)
-        assert mask[5, 5]   # (y=5, x=5)
-        assert mask[15, 15]  # (y=15, x=15)
-
-    def test_point_single_pixel(self):
-        roi = point_roi(x=30, y=40)
-        mask = roi.to_mask(SHAPE)
-        assert int(mask.sum()) == 1
-        assert mask[40, 30]
-
-    def test_out_of_bounds_point(self):
-        roi = point_roi(x=200, y=200)
-        mask = roi.to_mask(SHAPE)
-        assert int(mask.sum()) == 0
+    assert int(rect.sum()) == 100
+    assert 0 < clipped_rect.sum() < 400
+    assert 65 <= int(ellipse.sum()) <= 92
+    assert polygon.sum() > 0
+    assert line[5, 5]
+    assert line[15, 15]
+    assert int(point.sum()) == 1
+    assert point[40, 30]
+    assert int(out_of_bounds_point.sum()) == 0
 
 
-# ── bounds / crop ─────────────────────────────────────────────────────────────
+def test_roi_bounds_and_crop_contract():
+    roi = rect_roi(x=10, y=20, w=5, h=8)
+    arr = np.zeros(SHAPE)
+    arr[20:28, 10:15] = 1.0
 
-class TestBoundsAndCrop:
-    def test_bounds_rectangle(self):
-        roi = rect_roi(x=10, y=20, w=5, h=8)
-        r0, r1, c0, c1 = roi.bounds(SHAPE)
-        assert r0 == 20
-        assert r1 == 27   # y=20 to y+h-1=27
-        assert c0 == 10
-        assert c1 == 14   # x=10 to x+w-1=14
-
-    def test_crop_returns_correct_subarray(self):
-        arr = np.zeros(SHAPE)
-        arr[20:28, 10:15] = 1.0
-        roi = rect_roi(x=10, y=20, w=5, h=8)
-        crop = roi.crop(arr)
-        assert crop.shape == (8, 5)
-        assert np.all(crop == 1.0)
+    assert roi.bounds(SHAPE) == (20, 27, 10, 14)
+    crop = roi.crop(arr)
+    assert crop.shape == (8, 5)
+    assert np.all(crop == 1.0)
 
 
-# ── Lossless transforms ───────────────────────────────────────────────────────
+def test_lossless_transforms_preserve_expected_coordinates_and_identity():
+    cases = [
+        ("flip_horizontal", rect_roi(x=10, y=10, w=20, h=20), (100, 100), {"x": 70.0, "y": 10.0, "width": 20.0}),
+        ("flip_vertical", rect_roi(x=10, y=10, w=20, h=20), (100, 100), {"y": 70.0, "height": 20.0}),
+        ("rot90_cw", rect_roi(x=10, y=5, w=30, h=20), (80, 100), {"x": 55.0, "y": 10.0, "width": 20.0, "height": 30.0}),
+        ("rot180", rect_roi(x=10, y=10, w=20, h=20), (100, 100), {"x": 70.0, "y": 70.0}),
+        ("rot270_cw", rect_roi(x=10, y=5, w=30, h=20), (80, 100), {"x": 5.0, "y": 60.0, "width": 20.0, "height": 30.0}),
+    ]
 
-class TestTransformLossless:
-    """Verify exact coordinate transforms for all lossless operations."""
+    for op, roi, shape, expected in cases:
+        transformed = roi.transform(op, {}, shape)
+        assert transformed is not None
+        assert transformed.id == roi.id
+        for key, value in expected.items():
+            assert transformed.geometry[key] == pytest.approx(value)
 
-    def _rect_coverage(self, roi, shape):
-        """Return the set of pixel columns covered by a rectangle ROI."""
-        g = roi.geometry
-        x = int(round(g["x"]))
-        w = int(round(g["width"]))
-        return set(range(x, x + w))
+    ellipse = ellipse_roi(cx=30, cy=20, rx=10, ry=5).transform("rot90_cw", {}, SHAPE)
+    assert ellipse is not None
+    assert ellipse.geometry["rx"] == pytest.approx(5.0)
+    assert ellipse.geometry["ry"] == pytest.approx(10.0)
 
-    def test_flip_horizontal_rectangle(self):
-        # 100×100 image, rect at x=10, w=20 → should land at x=70, w=20
-        roi = rect_roi(x=10, y=10, w=20, h=20)
-        t = roi.transform("flip_horizontal", {}, (100, 100))
-        assert t is not None
-        assert abs(t.geometry["x"] - 70.0) < 1e-9
-        assert abs(t.geometry["y"] - 10.0) < 1e-9
-        assert abs(t.geometry["width"] - 20.0) < 1e-9
+    polygon = polygon_roi().transform("rot90_cw", {}, SHAPE)
+    assert polygon is not None
+    assert len(polygon.geometry["vertices"]) == 3
 
-    def test_flip_vertical_rectangle(self):
-        roi = rect_roi(x=10, y=10, w=20, h=20)
-        t = roi.transform("flip_vertical", {}, (100, 100))
-        assert t is not None
-        assert abs(t.geometry["y"] - 70.0) < 1e-9
-        assert abs(t.geometry["height"] - 20.0) < 1e-9
+    point = point_roi(x=10, y=0).transform("flip_horizontal", {}, SHAPE)
+    assert point is not None
+    assert point.geometry["x"] == pytest.approx(89.0)
 
-    def test_rot90_cw_rectangle_swaps_dims(self):
-        # 80×100 image (Ny=80, Nx=100), rect at (x=10, y=5, w=30, h=20)
-        # After rot90_cw (image becomes 100×80):
-        # new_x = Ny-y-h = 80-5-20 = 55, new_y = x = 10, new_w=h=20, new_h=w=30
-        roi = rect_roi(x=10, y=5, w=30, h=20)
-        t = roi.transform("rot90_cw", {}, (80, 100))
-        assert t is not None
-        assert abs(t.geometry["x"] - 55.0) < 1e-9
-        assert abs(t.geometry["y"] - 10.0) < 1e-9
-        assert abs(t.geometry["width"] - 20.0) < 1e-9
-        assert abs(t.geometry["height"] - 30.0) < 1e-9
-
-    def test_rot180_rectangle(self):
-        # 100×100, rect at (x=10, y=10, w=20, h=20)
-        # After rot180: new_x=100-10-20=70, new_y=100-10-20=70, same dims
-        roi = rect_roi(x=10, y=10, w=20, h=20)
-        t = roi.transform("rot180", {}, (100, 100))
-        assert t is not None
-        assert abs(t.geometry["x"] - 70.0) < 1e-9
-        assert abs(t.geometry["y"] - 70.0) < 1e-9
-
-    def test_rot270_cw_rectangle(self):
-        # 80×100 image, rect at (x=10, y=5, w=30, h=20)
-        # After rot270_cw: new_x=y=5, new_y=Nx-x-w=100-10-30=60, new_w=h=20, new_h=w=30
-        roi = rect_roi(x=10, y=5, w=30, h=20)
-        t = roi.transform("rot270_cw", {}, (80, 100))
-        assert t is not None
-        assert abs(t.geometry["x"] - 5.0) < 1e-9
-        assert abs(t.geometry["y"] - 60.0) < 1e-9
-        assert abs(t.geometry["width"] - 20.0) < 1e-9
-        assert abs(t.geometry["height"] - 30.0) < 1e-9
-
-    def test_ellipse_rot90_swaps_radii(self):
-        roi = ellipse_roi(cx=30, cy=20, rx=10, ry=5)
-        t = roi.transform("rot90_cw", {}, (100, 100))
-        assert t is not None
-        # Radii swap for 90-degree rotations
-        assert abs(t.geometry["rx"] - 5.0) < 1e-9
-        assert abs(t.geometry["ry"] - 10.0) < 1e-9
-
-    def test_flip_preserves_roi_id(self):
-        roi = rect_roi()
-        t = roi.transform("flip_horizontal", {}, (100, 100))
-        assert t.id == roi.id
-
-    def test_polygon_vertices_transformed(self):
-        roi = polygon_roi()
-        t = roi.transform("rot90_cw", {}, (100, 100))
-        assert t is not None
-        assert len(t.geometry["vertices"]) == 3
-
-    def test_point_transformed(self):
-        roi = point_roi(x=10, y=0)
-        t = roi.transform("flip_horizontal", {}, (100, 100))
-        assert t is not None
-        # x=10 → new_x = 99-10 = 89
-        assert abs(t.geometry["x"] - 89.0) < 1e-9
-
-    def test_rotate_arbitrary_returns_none(self):
-        roi = rect_roi()
-        result = roi.transform("rotate_arbitrary", {}, (100, 100))
-        assert result is None
-
-    def test_unknown_op_raises(self):
-        roi = rect_roi()
-        with pytest.raises(ValueError):
-            roi.transform("shear", {}, (100, 100))
+    assert rect_roi().transform("rotate_arbitrary", {}, SHAPE) is None
+    with pytest.raises(ValueError):
+        rect_roi().transform("shear", {}, SHAPE)
 
 
-class TestTransformCrop:
-    def test_crop_shifts_coordinates(self):
-        roi = rect_roi(x=20, y=30, w=10, h=10)
-        t = roi.transform("crop", {"x0": 15, "y0": 25, "x1": 40, "y1": 50}, (100, 100))
-        assert t is not None
-        assert abs(t.geometry["x"] - 5.0) < 1e-9   # 20-15=5
-        assert abs(t.geometry["y"] - 5.0) < 1e-9   # 30-25=5
+def test_crop_transform_shifts_clips_and_drops_rois_as_expected():
+    shifted = rect_roi(x=20, y=30, w=10, h=10).transform(
+        "crop",
+        {"x0": 15, "y0": 25, "x1": 40, "y1": 50},
+        SHAPE,
+    )
+    clipped = rect_roi(x=20, y=20, w=20, h=20).transform(
+        "crop",
+        {"x0": 25, "y0": 25, "x1": 50, "y1": 50},
+        SHAPE,
+    )
 
-    def test_crop_drops_roi_outside(self):
-        roi = rect_roi(x=60, y=60, w=10, h=10)
-        t = roi.transform("crop", {"x0": 0, "y0": 0, "x1": 30, "y1": 30}, (100, 100))
-        assert t is None
-
-    def test_crop_clips_partial_overlap(self):
-        roi = rect_roi(x=20, y=20, w=20, h=20)
-        t = roi.transform("crop", {"x0": 25, "y0": 25, "x1": 50, "y1": 50}, (100, 100))
-        assert t is not None
-        assert t.geometry["width"] < 20.0   # clipped
-
-    def test_point_outside_crop_dropped(self):
-        roi = point_roi(x=80, y=80)
-        t = roi.transform("crop", {"x0": 0, "y0": 0, "x1": 50, "y1": 50}, (100, 100))
-        assert t is None
-
-
-# ── ROISet ────────────────────────────────────────────────────────────────────
-
-class TestROISet:
-    def test_add_and_get(self):
-        rs = ROISet(image_id="img1")
-        roi = rect_roi()
-        rs.add(roi)
-        assert rs.get(roi.id) is roi
-
-    def test_remove(self):
-        rs = ROISet(image_id="img1")
-        roi = rect_roi()
-        rs.add(roi)
-        rs.remove(roi.id)
-        assert rs.get(roi.id) is None
-
-    def test_remove_nonexistent_is_noop(self):
-        rs = ROISet(image_id="img1")
-        rs.remove("nonexistent")  # must not raise
-
-    def test_get_by_name(self):
-        rs = ROISet(image_id="img1")
-        roi = ROI.new("point", {"x": 1.0, "y": 1.0}, name="my_point")
-        rs.add(roi)
-        assert rs.get_by_name("my_point") is roi
-
-    def test_set_active(self):
-        rs = ROISet(image_id="img1")
-        roi = rect_roi()
-        rs.add(roi)
-        rs.set_active(roi.id)
-        assert rs.active_roi_id == roi.id
-
-    def test_set_active_none(self):
-        rs = ROISet(image_id="img1")
-        rs.set_active(None)
-        assert rs.active_roi_id is None
-
-    def test_set_active_unknown_raises(self):
-        rs = ROISet(image_id="img1")
-        with pytest.raises(ValueError):
-            rs.set_active("nonexistent")
-
-    def test_round_trip_serialisation(self):
-        rs = ROISet(image_id="img1")
-        rs.add(rect_roi())
-        rs.add(ellipse_roi())
-        rs.add(point_roi())
-        rs.set_active(rs.rois[0].id)
-        d = rs.to_dict()
-        restored = ROISet.from_dict(d)
-        assert len(restored.rois) == 3
-        assert restored.image_id == "img1"
-        assert restored.active_roi_id == rs.rois[0].id
-        assert restored.rois[0].kind == "rectangle"
-        assert restored.rois[1].kind == "ellipse"
-
-    def test_from_dict_bad_roi_raises(self):
-        d = {
-            "image_id": "img1",
-            "rois": [{"bad": "data"}],
-            "active_roi_id": None,
-        }
-        with pytest.raises(ValueError, match="Failed to reconstruct ROI"):
-            ROISet.from_dict(d)
+    assert shifted is not None
+    assert shifted.geometry["x"] == pytest.approx(5.0)
+    assert shifted.geometry["y"] == pytest.approx(5.0)
+    assert rect_roi(x=60, y=60, w=10, h=10).transform(
+        "crop",
+        {"x0": 0, "y0": 0, "x1": 30, "y1": 30},
+        SHAPE,
+    ) is None
+    assert clipped is not None
+    assert clipped.geometry["width"] < 20.0
+    assert point_roi(x=80, y=80).transform(
+        "crop",
+        {"x0": 0, "y0": 0, "x1": 50, "y1": 50},
+        SHAPE,
+    ) is None
 
 
-class TestROISetTransformAll:
-    def test_lossless_transforms_all_rois(self):
-        rs = ROISet(image_id="img1")
-        for _ in range(3):
-            rs.add(rect_roi())
-        invalidated = rs.transform_all("flip_horizontal", {}, (100, 100))
-        assert invalidated == []
-        assert len(rs.rois) == 3
+def test_roi_set_add_remove_lookup_active_and_serialisation_contract():
+    roi_set = ROISet(image_id="img1")
+    rect = rect_roi()
+    named = point_roi(x=1, y=1, name="my_point")
 
-    def test_rotate_arbitrary_invalidates_all(self):
-        rs = ROISet(image_id="img1")
-        rs.add(rect_roi())
-        rs.add(point_roi())
-        invalidated = rs.transform_all("rotate_arbitrary", {}, (100, 100))
-        assert len(invalidated) == 2
-        # ROIs still present (caller decides to remove)
-        assert len(rs.rois) == 2
+    roi_set.add(rect)
+    roi_set.add(named)
+    assert roi_set.get(rect.id) is rect
+    assert roi_set.get_by_name("my_point") is named
+    roi_set.set_active(rect.id)
+    assert roi_set.active_roi_id == rect.id
+    roi_set.remove(rect.id)
+    assert roi_set.active_roi_id is None
+    assert roi_set.get(named.id) is named
+    roi_set.remove("nonexistent")
+    roi_set.set_active(None)
+    assert roi_set.active_roi_id is None
 
-    def test_transforms_are_applied_to_rois(self):
-        rs = ROISet(image_id="img1")
-        roi = rect_roi(x=10, y=10, w=20, h=20)
-        rs.add(roi)
-        rs.transform_all("flip_horizontal", {}, (100, 100))
-        assert abs(rs.rois[0].geometry["x"] - 70.0) < 1e-9
+    with pytest.raises(ValueError):
+        roi_set.set_active("nonexistent")
+
+    roi_set.add(ellipse_roi())
+    roi_set.set_active(roi_set.rois[0].id)
+    restored = ROISet.from_dict(roi_set.to_dict())
+    assert restored.image_id == "img1"
+    assert restored.active_roi_id == roi_set.rois[0].id
+    assert [roi.kind for roi in restored.rois] == ["point", "ellipse"]
+
+    with pytest.raises(ValueError, match="Failed to reconstruct ROI"):
+        ROISet.from_dict({"image_id": "img1", "rois": [{"bad": "data"}], "active_roi_id": None})
 
 
-class TestROITranslate:
-    def test_line_translation_updates_both_endpoints(self):
-        roi = line_roi()
-        moved = translate(roi, 2.5, -1.5)
-        assert moved.geometry == {
-            "x1": 7.5, "y1": 3.5,
-            "x2": 17.5, "y2": 13.5,
-        }
+def test_roi_set_transform_all_updates_supported_rois_and_reports_invalidated_rois():
+    roi_set = ROISet(image_id="img1")
+    roi_set.add(rect_roi())
+    roi_set.add(rect_roi())
 
-    def test_rectangle_translation_shifts_origin(self):
-        moved = translate(rect_roi(x=10, y=20, w=30, h=40), -3.0, 4.0)
-        assert moved.geometry["x"] == pytest.approx(7.0)
-        assert moved.geometry["y"] == pytest.approx(24.0)
-        assert moved.geometry["width"] == pytest.approx(30.0)
-        assert moved.geometry["height"] == pytest.approx(40.0)
+    assert roi_set.transform_all("flip_horizontal", {}, SHAPE) == []
+    assert len(roi_set.rois) == 2
+    assert roi_set.rois[0].geometry["x"] == pytest.approx(70.0)
 
-    def test_ellipse_translation_shifts_center(self):
-        moved = translate(ellipse_roi(cx=12, cy=24, rx=5, ry=6), 10.0, -2.0)
-        assert moved.geometry["cx"] == pytest.approx(22.0)
-        assert moved.geometry["cy"] == pytest.approx(22.0)
-        assert moved.geometry["rx"] == pytest.approx(5.0)
-        assert moved.geometry["ry"] == pytest.approx(6.0)
+    roi_set.add(point_roi())
+    invalidated = roi_set.transform_all("rotate_arbitrary", {}, SHAPE)
+    assert len(invalidated) == 3
+    assert len(roi_set.rois) == 3
 
-    def test_polygon_translation_shifts_all_vertices(self):
-        moved = translate(polygon_roi(), 1.0, 2.0)
-        assert moved.geometry["vertices"] == [
-            [11.0, 12.0],
-            [31.0, 12.0],
-            [21.0, 32.0],
-        ]
 
-    def test_freehand_translation_shifts_all_vertices(self):
-        moved = translate(freehand_roi(), -1.0, 3.0)
-        assert moved.geometry["vertices"] == [
-            [0.0, 5.0],
-            [2.0, 8.0],
-            [7.0, 16.0],
-        ]
+def test_translate_contract_for_supported_shapes_and_identity_fields():
+    assert translate(line_roi(), 2.5, -1.5).geometry == {
+        "x1": 7.5,
+        "y1": 3.5,
+        "x2": 17.5,
+        "y2": 13.5,
+    }
+    rect = translate(rect_roi(x=10, y=20, w=30, h=40), -3.0, 4.0)
+    ellipse = translate(ellipse_roi(cx=12, cy=24, rx=5, ry=6), 10.0, -2.0)
+    polygon = translate(polygon_roi(), 1.0, 2.0)
+    freehand = translate(freehand_roi(), -1.0, 3.0)
+    point = translate(point_roi(x=4, y=9), 0.5, -2.5)
 
-    def test_point_translation_shifts_point(self):
-        moved = translate(point_roi(x=4, y=9), 0.5, -2.5)
-        assert moved.geometry["x"] == pytest.approx(4.5)
-        assert moved.geometry["y"] == pytest.approx(6.5)
+    assert rect.geometry == {"x": 7.0, "y": 24.0, "width": 30.0, "height": 40.0}
+    assert ellipse.geometry == {"cx": 22.0, "cy": 22.0, "rx": 5.0, "ry": 6.0}
+    assert polygon.geometry["vertices"] == [[11.0, 12.0], [31.0, 12.0], [21.0, 32.0]]
+    assert freehand.geometry["vertices"] == [[0.0, 5.0], [2.0, 8.0], [7.0, 16.0]]
+    assert point.geometry == {"x": 4.5, "y": 6.5}
 
-    def test_translation_preserves_roi_identity_fields(self):
-        roi = ROI.new(
-            "point",
-            {"x": 4.0, "y": 9.0},
-            name="probe_site",
-            linked_file="scan_001.sxm",
+    linked = point_roi(x=4, y=9, name="probe_site", linked_file="scan_001.sxm")
+    linked.coord_system = "physical"
+    moved = translate(linked, 1.0, 1.0)
+    assert moved.id == linked.id
+    assert moved.name == "probe_site"
+    assert moved.kind == "point"
+    assert moved.coord_system == "physical"
+    assert moved.linked_file == "scan_001.sxm"
+
+
+def test_mask_helper_contracts():
+    a, b = _masks()
+
+    assert combine_masks([a, b], "union").sum() == 17
+    intersection = combine_masks([a, b], "intersection")
+    assert intersection.sum() == 1
+    assert intersection[2, 2]
+    assert combine_masks([a, b], "difference").sum() == 8
+    assert combine_masks([a, b], "xor").sum() == 16
+    np.testing.assert_array_equal(combine_masks([a], "union"), a)
+
+    with pytest.raises(ValueError):
+        combine_masks([], "union")
+    with pytest.raises(ValueError):
+        combine_masks([a, b], "subtract")  # type: ignore[arg-type]
+
+    inverted = invert_mask(np.array([[True, False], [False, True]]))
+    np.testing.assert_array_equal(inverted, np.array([[False, True], [True, False]]))
+
+
+def test_apply_geometric_op_to_scan_updates_planes_and_roi_set():
+    from probeflow.processing.state import apply_geometric_op_to_scan
+
+    scan = _scan()
+    original = scan.planes[0].copy()
+    apply_geometric_op_to_scan(scan, "flip_horizontal")
+    np.testing.assert_array_equal(scan.planes[0], np.fliplr(original))
+
+    scan = _scan()
+    apply_geometric_op_to_scan(scan, "rot90_cw")
+    for plane in scan.planes:
+        assert plane.shape == (4, 3)
+
+    scan = _scan()
+    roi_set = ROISet(image_id="img1")
+    roi_set.add(rect_roi(x=0, y=0, w=2, h=2))
+    _, returned_roi_set = apply_geometric_op_to_scan(scan, "flip_horizontal", roi_set=roi_set)
+    assert returned_roi_set is roi_set
+    assert len(roi_set.rois) == 1
+
+    scan = _scan()
+    _, returned_none = apply_geometric_op_to_scan(scan, "flip_vertical")
+    assert returned_none is None
+
+
+def test_rotate_arbitrary_geometric_op_warns_and_removes_rois():
+    from probeflow.processing.state import apply_geometric_op_to_scan
+
+    scan = _scan()
+    roi_set = ROISet(image_id="img1")
+    active = rect_roi()
+    roi_set.add(active)
+    roi_set.add(point_roi())
+    roi_set.set_active(active.id)
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        apply_geometric_op_to_scan(
+            scan,
+            "rotate_arbitrary",
+            params={"angle_degrees": 30.0},
+            roi_set=roi_set,
         )
-        roi.coord_system = "physical"
-        moved = translate(roi, 1.0, 1.0)
-        assert moved.id == roi.id
-        assert moved.name == "probe_site"
-        assert moved.kind == "point"
-        assert moved.coord_system == "physical"
-        assert moved.linked_file == "scan_001.sxm"
 
-    def test_roi_set_active_roi_survives_translate_update(self):
-        rs = ROISet(image_id="img1")
-        roi = rect_roi()
-        rs.add(roi)
-        rs.set_active(roi.id)
-        moved = translate(roi, 5.0, 6.0)
-        rs.remove(roi.id)
-        rs.add(moved)
-        rs.set_active(moved.id)
-        assert rs.active_roi_id == roi.id
-        assert rs.get(roi.id).geometry["x"] == pytest.approx(15.0)
-
-    def test_removing_active_roi_clears_active_id(self):
-        rs = ROISet(image_id="img1")
-        roi = rect_roi()
-        other = point_roi()
-        rs.add(roi)
-        rs.add(other)
-        rs.set_active(roi.id)
-        rs.remove(roi.id)
-        # Current ROISet policy is conservative: deletion clears active selection
-        # instead of auto-selecting a neighbor.
-        assert rs.active_roi_id is None
-        assert rs.get(other.id) is other
+    assert len(roi_set.rois) == 0
+    assert roi_set.active_roi_id is None
+    assert any("rotate_arbitrary" in str(warning.message) for warning in caught)
 
 
-# ── Mask helpers ──────────────────────────────────────────────────────────────
+def test_spectrum_position_roi_contract():
+    roi = point_roi(
+        x=25,
+        y=30,
+        name="spectrum_scan001_001",
+        linked_file="scan001_001.dat",
+    )
 
-class TestCombineMasks:
-    def _masks(self):
-        a = np.zeros((5, 5), dtype=bool)
-        a[0:3, 0:3] = True   # top-left 3×3
-        b = np.zeros((5, 5), dtype=bool)
-        b[2:5, 2:5] = True   # bottom-right 3×3
-        return a, b
-
-    def test_union(self):
-        a, b = self._masks()
-        r = combine_masks([a, b], "union")
-        assert r.sum() == 9 + 9 - 1  # overlap is one pixel (2,2)
-
-    def test_intersection(self):
-        a, b = self._masks()
-        r = combine_masks([a, b], "intersection")
-        assert r.sum() == 1
-        assert r[2, 2]
-
-    def test_difference(self):
-        a, b = self._masks()
-        r = combine_masks([a, b], "difference")
-        assert r.sum() == 8  # a minus the overlap pixel
-
-    def test_xor(self):
-        a, b = self._masks()
-        r = combine_masks([a, b], "xor")
-        assert r.sum() == 16  # 8 + 8
-
-    def test_single_mask(self):
-        a, _ = self._masks()
-        r = combine_masks([a], "union")
-        np.testing.assert_array_equal(r, a)
-
-    def test_empty_raises(self):
-        with pytest.raises(ValueError):
-            combine_masks([], "union")
-
-    def test_unknown_mode_raises(self):
-        a, b = self._masks()
-        with pytest.raises(ValueError):
-            combine_masks([a, b], "subtract")  # type: ignore[arg-type]
+    assert roi.kind == "point"
+    assert roi.name == "spectrum_scan001_001"
+    assert roi.linked_file == "scan001_001.dat"
+    assert roi.to_mask(SHAPE)[30, 25]
+    assert ROI.from_dict(roi.to_dict()).linked_file == "scan001_001.dat"
 
 
-class TestInvertMask:
-    def test_invert(self):
-        m = np.array([[True, False], [False, True]])
-        inv = invert_mask(m)
-        assert inv[0, 0] is np.bool_(False)
-        assert inv[0, 1] is np.bool_(True)
+def test_roi_set_provenance_contract():
+    from probeflow.provenance.export import build_scan_export_provenance
 
+    scan = MagicMock()
+    scan.source_path = "/tmp/scan.sxm"
+    scan.source_format = "sxm"
+    scan.planes = [np.zeros((10, 10))]
+    scan.plane_names = ["Z-fwd"]
+    scan.plane_units = ["m"]
+    scan.scan_range_m = (1e-8, 1e-8)
+    scan.processing_history = []
 
-# ── apply_geometric_op_to_scan ────────────────────────────────────────────────
+    roi_set = ROISet(image_id="test_scan")
+    roi_set.add(rect_roi())
 
-class TestApplyGeometricOpToScan:
-    def _make_scan(self):
-        from unittest.mock import MagicMock
-        scan = MagicMock()
-        scan.planes = [np.arange(12.0).reshape(3, 4), np.ones((3, 4))]
-        return scan
-
-    def test_flip_horizontal_updates_planes(self):
-        from probeflow.processing.state import apply_geometric_op_to_scan
-        scan = self._make_scan()
-        original = scan.planes[0].copy()
-        apply_geometric_op_to_scan(scan, "flip_horizontal")
-        np.testing.assert_array_equal(scan.planes[0], np.fliplr(original))
-
-    def test_all_planes_processed(self):
-        from probeflow.processing.state import apply_geometric_op_to_scan
-        scan = self._make_scan()
-        apply_geometric_op_to_scan(scan, "rot90_cw")
-        for plane in scan.planes:
-            assert plane.shape == (4, 3)  # 3×4 → 4×3 after 90°CW
-
-    def test_roi_set_transformed(self):
-        from probeflow.processing.state import apply_geometric_op_to_scan
-        scan = self._make_scan()
-        rs = ROISet(image_id="img1")
-        roi = rect_roi(x=0, y=0, w=2, h=2)
-        rs.add(roi)
-        _, rs2 = apply_geometric_op_to_scan(scan, "flip_horizontal", roi_set=rs)
-        assert rs2 is rs
-        assert len(rs.rois) == 1
-
-    def test_rotate_arbitrary_warns_and_removes_rois(self):
-        from probeflow.processing.state import apply_geometric_op_to_scan
-        scan = self._make_scan()
-        rs = ROISet(image_id="img1")
-        active = rect_roi()
-        rs.add(active)
-        rs.add(point_roi())
-        rs.set_active(active.id)
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            apply_geometric_op_to_scan(scan, "rotate_arbitrary",
-                                       params={"angle_degrees": 30.0},
-                                       roi_set=rs)
-        assert len(rs.rois) == 0
-        assert rs.active_roi_id is None
-        assert any("rotate_arbitrary" in str(warning.message) for warning in w)
-
-    def test_no_roi_set_is_fine(self):
-        from probeflow.processing.state import apply_geometric_op_to_scan
-        scan = self._make_scan()
-        scan2, rs = apply_geometric_op_to_scan(scan, "flip_vertical")
-        assert rs is None
-
-
-# ── Spectrum position ROIs ────────────────────────────────────────────────────
-
-class TestSpectrumPositionROIs:
-    def test_point_roi_with_linked_file(self):
-        roi = ROI.new("point", {"x": 25.0, "y": 30.0},
-                       name="spectrum_scan001_001",
-                       linked_file="scan001_001.dat")
-        assert roi.kind == "point"
-        assert roi.name == "spectrum_scan001_001"
-        assert roi.linked_file == "scan001_001.dat"
-        mask = roi.to_mask((100, 100))
-        assert mask[30, 25]
-
-    def test_spec_roi_round_trips_with_linked_file(self):
-        roi = ROI.new("point", {"x": 5.0, "y": 7.0},
-                       name="spectrum_003",
-                       linked_file="my_spec_003.dat")
-        restored = ROI.from_dict(roi.to_dict())
-        assert restored.linked_file == "my_spec_003.dat"
-        assert restored.name == "spectrum_003"
-
-
-# ── Provenance integration ────────────────────────────────────────────────────
-
-class TestProvenanceIntegration:
-    def test_roi_set_in_provenance_dict(self):
-        from probeflow.provenance.export import build_scan_export_provenance
-        from unittest.mock import MagicMock
-        import numpy as np
-
-        scan = MagicMock()
-        scan.source_path = "/tmp/scan.sxm"
-        scan.source_format = "sxm"
-        scan.planes = [np.zeros((10, 10))]
-        scan.plane_names = ["Z-fwd"]
-        scan.plane_units = ["m"]
-        scan.scan_range_m = (1e-8, 1e-8)
-        scan.processing_history = []
-
-        rs = ROISet(image_id="test_scan")
-        rs.add(rect_roi())
-
-        prov = build_scan_export_provenance(scan, roi_set=rs)
-        d = prov.to_dict()
-        assert "rois" in d
-        assert d["rois"] is not None
-        assert "rois" in d["rois"]
-
-    def test_provenance_without_roi_set(self):
-        from probeflow.provenance.export import build_scan_export_provenance
-        from unittest.mock import MagicMock
-        import numpy as np
-
-        scan = MagicMock()
-        scan.source_path = "/tmp/scan.sxm"
-        scan.source_format = "sxm"
-        scan.planes = [np.zeros((10, 10))]
-        scan.plane_names = ["Z-fwd"]
-        scan.plane_units = ["m"]
-        scan.scan_range_m = (1e-8, 1e-8)
-        scan.processing_history = []
-
-        prov = build_scan_export_provenance(scan)
-        d = prov.to_dict()
-        assert "rois" in d
-        assert d["rois"] is None
+    assert build_scan_export_provenance(scan, roi_set=roi_set).to_dict()["rois"]["rois"]
+    assert build_scan_export_provenance(scan).to_dict()["rois"] is None

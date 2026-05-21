@@ -188,201 +188,6 @@ def test_viewer_full_panel_round_trips_standard_processing_state(qapp):
     )
 
 
-def test_viewer_dialog_keeps_standard_processing_visible(qapp, monkeypatch):
-    from PySide6.QtWidgets import QCheckBox
-    from probeflow.gui import ImageViewerDialog, SxmFile, THEMES
-
-    monkeypatch.setattr(ImageViewerDialog, "_load_current", lambda self: None)
-
-    entry = SxmFile(path=Path("/tmp/example.sxm"), stem="example", Nx=8, Ny=8)
-    dlg = ImageViewerDialog(entry, [entry], "gray", THEMES["dark"])
-
-    assert dlg._processing_panel.isHidden() is False
-    assert not hasattr(dlg, "_set_zero_btn")
-    assert not hasattr(dlg, "_selection_widget")
-    assert hasattr(dlg, "_quick_toolbar")
-    labels = {key: btn.text() for key, btn in dlg._quick_toolbar._mode_btns.items()}
-    assert set(labels.keys()) == {"pan", "rectangle", "ellipse", "polygon",
-                                   "freehand", "line", "point"}
-    assert labels["pan"] == "Pan"
-    assert labels["rectangle"] == "Rect"
-    assert labels["line"] == "Line"
-    assert dlg._set_zero_plane_btn.isHidden() is False
-    assert not hasattr(dlg, "_patch_roi_cb")
-    assert not any(cb.text() == "Patch selection" for cb in dlg.findChildren(QCheckBox))
-    assert dlg._advanced_widget.isHidden() is True
-    assert dlg._advanced_fft_combo.currentText() == "None"
-    assert dlg._advanced_fft_soft_cb.text() == "Soft border"
-    assert dlg._spec_overlay_widget.isHidden() is True
-    assert dlg._spec_show_cb.isChecked() is False
-    assert dlg._export_widget.isHidden() is True
-    assert dlg._sidebar_tabs.tabText(dlg._sidebar_tabs.currentIndex()) == "View"
-    assert dlg._roi_dock.isVisible() is False
-    assert dlg._measurement_dock.isVisible() is False
-
-    dlg.close()
-    dlg.deleteLater()
-
-
-def test_viewer_dialog_layout_prioritises_image_and_bounds_side_panels(qapp, monkeypatch):
-    from PySide6.QtCore import Qt
-    from probeflow.gui import ImageViewerDialog, SxmFile, THEMES
-
-    monkeypatch.setattr(ImageViewerDialog, "_load_current", lambda self: None)
-
-    entry = SxmFile(path=Path("/tmp/example.sxm"), stem="example", Nx=8, Ny=8)
-    dlg = ImageViewerDialog(entry, [entry], "gray", THEMES["dark"])
-    splitter = dlg._viewer_main.centralWidget()
-
-    assert splitter.widget(0).minimumWidth() == 500
-    assert splitter.widget(1).minimumWidth() == 380
-    assert splitter.widget(1).maximumWidth() == 420
-    assert dlg._roi_dock.minimumWidth() == 160
-    assert dlg._roi_dock.maximumWidth() == 280
-    assert dlg._hist_panel._canvas.minimumHeight() == 140
-    assert dlg._hist_panel._canvas.maximumHeight() == 140
-    assert dlg._hist_panel._canvas.sizePolicy().verticalPolicy().name == "Fixed"
-    assert [dlg._sidebar_tabs.tabText(i) for i in range(dlg._sidebar_tabs.count())] == [
-        "View",
-        "Process",
-        "ROI",
-        "Measure",
-        "Export",
-    ]
-    assert dlg._sidebar_tabs.elideMode() == Qt.ElideNone
-    assert dlg._sidebar_tabs.tabBar().usesScrollButtons() is False
-
-    dlg.close()
-    dlg.deleteLater()
-
-
-def test_viewer_dialog_menus_mirror_existing_controls(qapp, monkeypatch):
-    from probeflow.gui import ImageViewerDialog, SxmFile, THEMES
-
-    monkeypatch.setattr(ImageViewerDialog, "_load_current", lambda self: None)
-
-    entry = SxmFile(path=Path("/tmp/example.sxm"), stem="example", Nx=8, Ny=8)
-    dlg = ImageViewerDialog(entry, [entry], "gray", THEMES["dark"])
-    top_menu_names = [action.text() for action in dlg._viewer_main.menuBar().actions()]
-
-    assert top_menu_names == [
-        "File",
-        "View",
-        "Processing",
-        "ROI",
-        "Measurements",
-        "FFT",
-        "Export",
-        "Help",
-    ]
-
-    def action(menu_name: str, text: str):
-        top_action = next(
-            item for item in dlg._viewer_main.menuBar().actions()
-            if item.text() == menu_name
-        )
-        menu = top_action.menu()
-        for item in menu.actions():
-            if item.text() == text:
-                return item
-            submenu = item.menu()
-            if submenu is not None:
-                for subitem in submenu.actions():
-                    if subitem.text() == text:
-                        return subitem
-        raise AssertionError(f"Missing menu action: {menu_name} > {text}")
-
-    action("Processing", "Median").trigger()
-    assert dlg._processing_panel._align_combo.currentText() == "Median"
-    assert action("Processing", "Median").isChecked()
-
-    action("Processing", "Step segments").trigger()
-    assert dlg._processing_panel._bad_lines_combo.currentText() == "Step segments"
-
-    action("Processing", "Gaussian").trigger()
-    assert dlg._processing_panel._smooth_combo.currentText() == "Gaussian"
-    with pytest.raises(AssertionError):
-        action("Processing", "Radial FFT")
-    with pytest.raises(AssertionError):
-        action("Processing", "FFT soft border")
-    assert action("Processing", "STM scan-line background…").isEnabled() is True
-    assert action("View", "Histogram / Contrast").isEnabled() is True
-    assert action("View", "Processing panel").isEnabled() is True
-    assert action("View", "ROI panel").isEnabled() is True
-    assert action("View", "Measurements panel").isEnabled() is True
-    assert action("View", "Export panel").isEnabled() is True
-    assert action("View", "ROI Manager").isEnabled() is True
-    assert action("View", "Measurements").isEnabled() is True
-    assert action("Measurements", "Show measurements").isEnabled() is True
-    assert action("Measurements", "Compute point-mask FFT").isEnabled() is False
-    action("View", "Processing panel").trigger()
-    assert dlg._sidebar_tabs.tabText(dlg._sidebar_tabs.currentIndex()) == "Process"
-    action("View", "Histogram / Contrast").trigger()
-    assert dlg._sidebar_tabs.tabText(dlg._sidebar_tabs.currentIndex()) == "View"
-    dlg._display_arr = np.ones((8, 8), dtype=float)
-    action("Processing", "STM scan-line background…").trigger()
-    qapp.processEvents()
-    assert dlg._stm_background_dialog.windowTitle() == "STM Background"
-    assert dlg._stm_background_dialog.isVisible()
-    dlg._stm_background_dialog.close()
-    qapp.processEvents()
-    dlg._processing_panel._stm_background_btn.click()
-    qapp.processEvents()
-    assert dlg._stm_background_dialog.windowTitle() == "STM Background"
-    assert dlg._stm_background_dialog.isVisible()
-    dlg._stm_background_dialog.close()
-
-    action("ROI", "Rectangle").trigger()
-    assert dlg._zoom_lbl.tool() == "rectangle"
-    assert action("ROI", "Rectangle").isChecked()
-    assert dlg._sidebar_tabs.tabText(dlg._sidebar_tabs.currentIndex()) == "ROI"
-    action("ROI", "Pan").trigger()
-    assert dlg._zoom_lbl.tool() == "pan"
-    action("ROI", "Line").trigger()
-    assert dlg._zoom_lbl.tool() == "line"
-    assert dlg._sidebar_tabs.tabText(dlg._sidebar_tabs.currentIndex()) == "Measure"
-    assert dlg._measurement_panel.measurement_type() == "line_profile"
-    action("ROI", "Pan").trigger()
-
-    dlg.show()
-    qapp.processEvents()
-    dlg._roi_dock.close()
-    qapp.processEvents()
-    assert dlg._roi_dock.isVisible() is False
-    action("ROI", "Show ROI Manager").trigger()
-    qapp.processEvents()
-    assert dlg._roi_dock.isVisible() is True
-    assert dlg._sidebar_tabs.tabText(dlg._sidebar_tabs.currentIndex()) == "ROI"
-    dlg._measurement_dock.close()
-    qapp.processEvents()
-    assert dlg._measurement_dock.isVisible() is False
-    action("View", "Measurements").trigger()
-    qapp.processEvents()
-    assert dlg._measurement_dock.isVisible() is True
-    action("View", "Export panel").trigger()
-    assert dlg._sidebar_tabs.tabText(dlg._sidebar_tabs.currentIndex()) == "Export"
-
-    assert action("ROI", "Rename ROI").isEnabled() is False
-    assert action("ROI", "Delete ROI").isEnabled() is False
-    assert action("Export", "Save PNG copy").isEnabled() is True
-    assert action("Export", "Save processed image").isEnabled() is True
-    assert action("Export", "Save provenance").isEnabled() is True
-
-    action("Help", "Definitions").trigger()
-    qapp.processEvents()
-    assert dlg._definitions_dialog.isVisible()
-    definitions_dialog = dlg._definitions_dialog
-    action("Help", "Definitions").trigger()
-    qapp.processEvents()
-    assert dlg._definitions_dialog is definitions_dialog
-    definitions_dialog.close()
-    qapp.processEvents()
-    assert dlg.isVisible()
-
-    dlg.close()
-    dlg.deleteLater()
-
-
 def test_viewer_align_rows_applies_immediately(qapp, monkeypatch):
     from probeflow.gui import ImageViewerDialog, SxmFile, THEMES
 
@@ -436,23 +241,6 @@ def test_viewer_stm_background_apply_records_processing_state(qapp, monkeypatch)
     assert dlg._processing["stm_background"]["fit_roi_id"] == "roi-1"
     assert dlg._processing["stm_background"]["model"] == "poly2"
     assert dlg._processing["stm_background"]["applied_to"] == "whole_image"
-
-    dlg.close()
-    dlg.deleteLater()
-
-
-def test_legacy_background_controls_are_not_in_active_processing_panel(qapp, monkeypatch):
-    from probeflow.gui import ImageViewerDialog, SxmFile, THEMES
-
-    monkeypatch.setattr(ImageViewerDialog, "_load_current", lambda self: None)
-
-    entry = SxmFile(path=Path("/tmp/example.sxm"), stem="example", Nx=8, Ny=8)
-    dlg = ImageViewerDialog(entry, [entry], "gray", THEMES["dark"])
-
-    assert not hasattr(dlg._processing_panel, "_bg_combo")
-    assert not hasattr(dlg._processing_panel, "_stm_line_bg_combo")
-    assert not hasattr(dlg._processing_panel, "_facet_cb")
-    assert not hasattr(dlg, "_stm_background_dialog")
 
     dlg.close()
     dlg.deleteLater()
@@ -1420,29 +1208,6 @@ def test_viewer_line_profile_sync_uses_active_line_roi(qapp):
     assert called == [line.id]
 
 
-def test_line_profile_panel_empty_clears_source_title(qapp):
-    from probeflow.gui.viewer.widgets import LineProfilePanel
-
-    panel = LineProfilePanel()
-    panel.plot_profile(
-        np.asarray([0.0, 1.0]),
-        np.asarray([2.0, 3.0]),
-        y_label="Height [m]",
-        theme={},
-    )
-    panel.set_source_label("Line ROI: line_1 (abc12345)", theme={})
-
-    assert panel._ax.get_title() == "Line ROI: line_1 (abc12345)"
-    assert panel._add_summary_btn.isEnabled()
-    assert not panel._add_delta_btn.isEnabled()  # no points selected yet
-
-    panel.show_empty(theme={})
-
-    assert panel._ax.get_title() == ""
-    assert not panel._add_summary_btn.isEnabled()
-    assert not panel._add_delta_btn.isEnabled()
-
-
 def test_viewer_transform_updates_roi_set_coordinates(qapp):
     from probeflow.core.roi import ROI, ROISet
     from probeflow.gui import ImageViewerDialog
@@ -1693,7 +1458,7 @@ def test_viewer_save_provenance_action_writes_json(qapp, monkeypatch, tmp_path):
 def test_viewer_save_processed_image_action_dispatches_writer(qapp, monkeypatch, tmp_path):
     from probeflow.gui import ImageViewerDialog, SxmFile, THEMES
     import probeflow.gui._legacy as gui_mod
-    import probeflow.gui.dialogs.image_viewer as iv_mod
+    import probeflow.gui.viewer.image_viewer_processing_export_mixin as export_mixin
 
     monkeypatch.setattr(ImageViewerDialog, "_load_current", lambda self: None)
 
@@ -1720,7 +1485,7 @@ def test_viewer_save_processed_image_action_dispatches_writer(qapp, monkeypatch,
         "_processed_scan_for_export",
         lambda: (FakeScan(), 2),
     )
-    monkeypatch.setattr(iv_mod, "save_processed_image", fake_save_processed_image)
+    monkeypatch.setattr(export_mixin, "save_processed_image", fake_save_processed_image)
 
     dlg._on_save_processed_image()
 

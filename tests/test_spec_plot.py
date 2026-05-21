@@ -1,4 +1,4 @@
-"""Tests for probeflow.analysis.spec_plot helpers that don't need a Qt event loop."""
+"""Tests for spectroscopy plot helpers that do not need Qt."""
 
 from __future__ import annotations
 
@@ -7,143 +7,54 @@ import numpy as np
 from probeflow.analysis.spec_plot import choose_display_unit, spec_position_to_pixel
 
 
-class TestChooseDisplayUnit:
-    def test_metres_picks_sensible_unit_for_typical_stm(self):
-        # Typical STM topography: 1 nm ≈ 1e-9 m. Either Å (20) or nm (2)
-        # lands in the target range — we only require that some scaling is
-        # applied and the result is in the friendly window.
-        values = np.array([1e-9, 2e-9, 3e-9])
-        scale, unit = choose_display_unit("m", values)
-        assert unit in {"Å", "nm"}
+def test_choose_display_unit_scales_common_spectroscopy_domains():
+    exact_cases = [
+        ("m", np.array([5e-12, 10e-12, 15e-12]), "pm", None),
+        ("A", np.array([10e-12, 20e-12, 30e-12]), "pA", None),
+        ("A", np.array([1e-9, 2e-9, 3e-9]), "nA", None),
+        ("V", np.array([0.01, 0.02, 0.03]), "mV", None),
+        ("V", np.array([1.0, 2.0, 3.0]), "V", 1.0),
+        ("Hz", np.array([1e-9, 2e-9]), "Hz", 1.0),
+        ("", np.array([1.0, 2.0]), "", 1.0),
+    ]
+
+    for unit, values, expected_unit, expected_scale in exact_cases:
+        scale, chosen_unit = choose_display_unit(unit, values)
+        assert chosen_unit == expected_unit
+        if expected_scale is not None:
+            assert scale == expected_scale
+
+    for values in (np.array([1e-9, 2e-9, 3e-9]), np.array([30e-9, 50e-9, 70e-9])):
+        scale, chosen_unit = choose_display_unit("m", values)
+        assert chosen_unit in {"Å", "nm"}
         assert 0.1 <= np.median(np.abs(values)) * scale < 1000
 
-    def test_metres_picks_nm_for_bigger_topo(self):
-        # Median ≈ 50 nm: Å would give 500 (still < 1000) — tie-broken by
-        # preferring the smaller prefix. Verify it stays within the window.
-        values = np.array([30e-9, 50e-9, 70e-9])
-        scale, unit = choose_display_unit("m", values)
-        assert unit in {"Å", "nm"}
-        scaled = np.median(np.abs(values)) * scale
-        assert 0.1 <= scaled < 1000
 
-    def test_metres_picks_pm_for_small_heights(self):
-        values = np.array([5e-12, 10e-12, 15e-12])
-        scale, unit = choose_display_unit("m", values)
-        assert unit == "pm"
-
-    def test_amps_picks_pa_for_typical_tunnel_current(self):
-        values = np.array([10e-12, 20e-12, 30e-12])
-        scale, unit = choose_display_unit("A", values)
-        assert unit == "pA"
-
-    def test_amps_picks_na_for_bigger_current(self):
-        values = np.array([1e-9, 2e-9, 3e-9])
-        scale, unit = choose_display_unit("A", values)
-        assert unit == "nA"
-
-    def test_volts_picks_mv(self):
-        values = np.array([0.01, 0.02, 0.03])
-        scale, unit = choose_display_unit("V", values)
-        assert unit == "mV"
-
-    def test_volts_no_scale_for_volt_scale(self):
-        values = np.array([1.0, 2.0, 3.0])
-        scale, unit = choose_display_unit("V", values)
-        assert unit == "V"
-        assert scale == 1.0
-
-    def test_unknown_unit_no_scale(self):
-        values = np.array([1e-9, 2e-9])
-        scale, unit = choose_display_unit("Hz", values)
-        assert scale == 1.0
-        assert unit == "Hz"
-
-    def test_dimensionless_no_scale(self):
-        values = np.array([1.0, 2.0])
-        scale, unit = choose_display_unit("", values)
-        assert scale == 1.0
-        assert unit == ""
-
-    def test_all_zero_returns_domain_friendly_default(self):
-        values = np.zeros(10)
-        scale, unit = choose_display_unit("A", values)
-        assert scale == 1e12
-        assert unit == "pA"
-
-    def test_all_zero_metres_returns_nm(self):
-        values = np.zeros(10)
-        scale, unit = choose_display_unit("m", values)
-        assert scale == 1e9
-        assert unit == "nm"
-
-    def test_empty_returns_no_scale(self):
-        values = np.array([])
-        scale, unit = choose_display_unit("m", values)
-        assert scale == 1.0
-        assert unit == "m"
-
-    def test_none_returns_no_scale(self):
-        scale, unit = choose_display_unit("m", None)
-        assert scale == 1.0
-        assert unit == "m"
+def test_choose_display_unit_handles_zero_empty_and_none_without_misleading_scale():
+    assert choose_display_unit("A", np.zeros(10)) == (1e12, "pA")
+    assert choose_display_unit("m", np.zeros(10)) == (1e9, "nm")
+    assert choose_display_unit("m", np.array([])) == (1.0, "m")
+    assert choose_display_unit("m", None) == (1.0, "m")
 
 
-class TestSpecPositionToPixel:
-    W = H = 1e-7  # 100 nm scan
+def test_spec_position_to_pixel_maps_scan_edges_offsets_and_rotation():
+    width = height = 1e-7
+    cases = [
+        ((0.0, 0.0, (64, 64), (width, height), (0.0, 0.0), 0.0), (0.5, 0.5)),
+        ((-width / 2, height / 2, (64, 64), (width, height), (0.0, 0.0), 0.0), (0.0, 0.0)),
+        ((width / 2, -height / 2, (64, 64), (width, height), (0.0, 0.0), 0.0), (1.0, 1.0)),
+        ((100e-9, 50e-9, (64, 64), (width, height), (100e-9, 50e-9), 0.0), (0.5, 0.5)),
+        ((width / 4, 0.0, (64, 64), (width, height), (0.0, 0.0), 90.0), (0.5, 0.75)),
+        ((0.0, 0.0, (64, 64), (width, height)), (0.5, 0.5)),
+    ]
 
-    def test_centre_maps_to_half_half(self):
-        result = spec_position_to_pixel(
-            0.0, 0.0, (64, 64), (self.W, self.H), (0.0, 0.0), 0.0)
+    for args, expected in cases:
+        result = spec_position_to_pixel(*args)
         assert result is not None
-        assert abs(result[0] - 0.5) < 1e-9
-        assert abs(result[1] - 0.5) < 1e-9
+        np.testing.assert_allclose(result, expected, atol=1e-9)
 
-    def test_top_left_corner(self):
-        # World position at left edge and physically highest y maps to (0, 0)
-        result = spec_position_to_pixel(
-            -self.W / 2, self.H / 2, (64, 64), (self.W, self.H), (0.0, 0.0), 0.0)
-        assert result is not None
-        assert abs(result[0] - 0.0) < 1e-9
-        assert abs(result[1] - 0.0) < 1e-9
 
-    def test_bottom_right_corner(self):
-        result = spec_position_to_pixel(
-            self.W / 2, -self.H / 2, (64, 64), (self.W, self.H), (0.0, 0.0), 0.0)
-        assert result is not None
-        assert abs(result[0] - 1.0) < 1e-9
-        assert abs(result[1] - 1.0) < 1e-9
-
-    def test_position_outside_scan_returns_none(self):
-        result = spec_position_to_pixel(
-            1e-3, 0.0, (64, 64), (self.W, self.H), (0.0, 0.0), 0.0)
-        assert result is None
-
-    def test_nonzero_offset_shifts_centre(self):
-        ox, oy = 100e-9, 50e-9
-        result = spec_position_to_pixel(
-            ox, oy, (64, 64), (self.W, self.H), (ox, oy), 0.0)
-        assert result is not None
-        assert abs(result[0] - 0.5) < 1e-9
-        assert abs(result[1] - 0.5) < 1e-9
-
-    def test_nonzero_offset_excludes_world_origin(self):
-        ox, oy = 100e-9, 50e-9
-        result = spec_position_to_pixel(
-            0.0, 0.0, (64, 64), (self.W, self.H), (ox, oy), 0.0)
-        assert result is None
-
-    def test_90_degree_rotation(self):
-        # At 90°: cos=0, sin=1
-        # dx=W/4, dy=0 → dx_rot=0, dy_rot=-W/4
-        # → frac_x=0.5, frac_y_from_bottom=0.25 → frac_y=0.75
-        result = spec_position_to_pixel(
-            self.W / 4, 0.0, (64, 64), (self.W, self.H), (0.0, 0.0), 90.0)
-        assert result is not None
-        assert abs(result[0] - 0.5) < 1e-9
-        assert abs(result[1] - 0.75) < 1e-9
-
-    def test_default_offset_is_zero(self):
-        result = spec_position_to_pixel(0.0, 0.0, (64, 64), (self.W, self.H))
-        assert result is not None
-        assert abs(result[0] - 0.5) < 1e-9
-        assert abs(result[1] - 0.5) < 1e-9
+def test_spec_position_to_pixel_rejects_positions_outside_scan_frame():
+    width = height = 1e-7
+    assert spec_position_to_pixel(1e-3, 0.0, (64, 64), (width, height), (0.0, 0.0), 0.0) is None
+    assert spec_position_to_pixel(0.0, 0.0, (64, 64), (width, height), (100e-9, 50e-9), 0.0) is None

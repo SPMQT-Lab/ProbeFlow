@@ -692,7 +692,7 @@ class FFTViewerDialog(QDialog):
             self._fig_fft.savefig(path, dpi=150, bbox_inches="tight")
 
     def _on_open_fft_lattice(self):
-        from probeflow.gui.lattice_grid_tool import open_fft_tool
+        from probeflow.gui.lattice_grid import open_fft_tool
         from PySide6.QtWidgets import QDockWidget
         if self._qx is None or self._qy is None:
             return
