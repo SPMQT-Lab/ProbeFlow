@@ -7,7 +7,7 @@ from typing import Any
 
 import numpy as np
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -25,11 +25,36 @@ from PySide6.QtWidgets import (
 from probeflow.core.scan_loader import load_scan
 
 
+class _ScanLoaderSignals(QObject):
+    """Signals for ScanLoaderWorker (must be a QObject subclass)."""
+    finished = Signal(int, object)   # (entry_index, scan_or_None)
+    failed   = Signal(int, str)      # (entry_index, error_message)
+
+
+class _ScanLoaderWorker(QRunnable):
+    """Load a scan file off the GUI thread."""
+
+    def __init__(self, entry_index: int, path: Path) -> None:
+        super().__init__()
+        self.setAutoDelete(True)
+        self._entry_index = entry_index
+        self._path = path
+        self.signals = _ScanLoaderSignals()
+
+    def run(self) -> None:
+        try:
+            scan = load_scan(self._path)
+            self.signals.finished.emit(self._entry_index, scan)
+        except Exception as exc:
+            self.signals.failed.emit(self._entry_index, str(exc))
+
+
 class ImageArithmeticDialog(QDialog):
     """Collect a first-pass image arithmetic operation specification."""
 
     WHOLE_IMAGE = "whole_image"
     ACTIVE_AREA_ROI = "active_area_roi"
+    _LOADING = object()  # sentinel: scan load is in progress
 
     def __init__(
         self,
@@ -110,6 +135,12 @@ class ImageArithmeticDialog(QDialog):
         self._seed_spin.valueChanged.connect(self._refresh_ui)
 
         self._refresh_ui()
+
+        # Pre-warm the cache for the currently selected entry so the plane combo
+        # is populated quickly when the user first switches to the "image" operand.
+        if self._entries:
+            current_entry_idx = max(0, min(int(current_entry_index), len(self._entries) - 1))
+            self._request_scan_load(current_entry_idx)
 
     def _constant_page(self) -> QWidget:
         page = QWidget()
@@ -286,11 +317,29 @@ class ImageArithmeticDialog(QDialog):
             return None
         return self._entries[idx]
 
-    def _load_source_scan(self, entry_index: int) -> Any:
-        if entry_index not in self._scan_cache:
-            entry = self._entries[entry_index]
-            self._scan_cache[entry_index] = load_scan(Path(entry.path))
-        return self._scan_cache[entry_index]
+    def _request_scan_load(self, entry_index: int) -> None:
+        """Start a background load for entry_index if not already cached or in-flight."""
+        if entry_index in self._scan_cache:
+            return  # already loaded or already loading
+        entry = self._entries[entry_index]
+        path = Path(entry.path)
+        self._scan_cache[entry_index] = self._LOADING  # mark in-flight
+        worker = _ScanLoaderWorker(entry_index, path)
+        worker.signals.finished.connect(self._on_scan_loaded)
+        worker.signals.failed.connect(self._on_scan_failed)
+        QThreadPool.globalInstance().start(worker)
+
+    def _on_scan_loaded(self, entry_index: int, scan: Any) -> None:
+        self._scan_cache[entry_index] = scan
+        # Only refresh if this is still the selected entry
+        if self._selected_entry_index() == entry_index:
+            self._refresh_source_controls()
+
+    def _on_scan_failed(self, entry_index: int, error_msg: str) -> None:
+        self._scan_cache.pop(entry_index, None)  # remove in-flight marker
+        if self._selected_entry_index() == entry_index:
+            self._apply_button.setEnabled(False)
+            self._set_status(f"Could not load source image: {error_msg}", error=True)
 
     def _on_source_entry_changed(self) -> None:
         self._pending_plane_idx = 0
@@ -307,13 +356,20 @@ class ImageArithmeticDialog(QDialog):
             self._set_status("No source images are available in this viewer.", error=True)
             return
 
-        try:
-            scan = self._load_source_scan(entry_index)
-        except Exception as exc:
+        # Check cache — may be loaded, in-flight, or missing
+        cached = self._scan_cache.get(entry_index)
+        if cached is None:
+            # Not yet requested — start async load
+            self._request_scan_load(entry_index)
             self._apply_button.setEnabled(False)
-            self._plane_combo.clear()
-            self._set_status(f"Could not load source image: {exc}", error=True)
+            self._set_status("Loading source image…")
             return
+        if cached is self._LOADING:
+            # Already loading — show spinner message and wait
+            self._apply_button.setEnabled(False)
+            self._set_status("Loading source image…")
+            return
+        scan = cached
 
         names = list(scan.plane_names) if scan.plane_names else [
             f"Channel {i + 1}" for i in range(len(scan.planes))
@@ -361,10 +417,10 @@ class ImageArithmeticDialog(QDialog):
         entry_index = self._selected_entry_index()
         if entry_index is None:
             return None
-        try:
-            scan = self._load_source_scan(entry_index)
-        except Exception:
+        cached = self._scan_cache.get(entry_index)
+        if cached is None or cached is self._LOADING:
             return None
+        scan = cached
         plane_idx = int(self._plane_combo.currentData() or 0)
         if plane_idx < 0 or plane_idx >= len(scan.planes):
             return None
