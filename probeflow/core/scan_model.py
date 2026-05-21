@@ -47,7 +47,8 @@ class Scan:
     header
         The raw vendor header dict.
     scan_range_m
-        Physical ``(width_m, height_m)``.
+        Physical ``(total_width_m, total_height_m)`` — the complete scan range in metres.
+        Pixel-to-metre conversion: ``pixel_size = scan_range_m / image_shape``.
     source_path
         Absolute path to the file we loaded from.
     source_format

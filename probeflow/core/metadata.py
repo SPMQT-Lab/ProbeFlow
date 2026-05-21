@@ -39,7 +39,7 @@ class ScanMetadata:
     shape: tuple[int, int] | None = None        # (Ny, Nx)
     plane_names: tuple[str, ...] = ()
     units: tuple[str, ...] = ()                 # parallel to plane_names
-    scan_range: tuple[float, float] | None = None  # (width_m, height_m)
+    scan_range: tuple[float, float] | None = None  # (total_width_m, total_height_m) in metres
     bias: float | None = None                   # V
     setpoint: float | None = None               # A (tunnel current setpoint)
     comment: str | None = None

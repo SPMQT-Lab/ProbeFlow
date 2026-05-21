@@ -309,8 +309,10 @@ class LatticeGridDisplay:
 class RealSpaceCalibration:
     """
     Pixel → physical unit conversion for a real-space image.
-
-    px_size_x, px_size_y: metres per pixel (from scan_range_m / image shape).
+    
+    All conversions assume linear pixel-to-physical mapping:
+    - px_size_x, px_size_y are derived from scan_range_m and image dimensions
+    - scan_range_m is the total scan range (metres), not per-pixel spacing
     """
 
     px_size_x: float   # m / px
@@ -357,8 +359,27 @@ class ReciprocalCalibration:
     """
     FFT pixel → reciprocal-space conversion.
 
-    qx_axis, qy_axis: 1-D arrays of q values in nm⁻¹ (shape [Nx] and [Ny]).
-    centre_px: (cx_px, cy_px) position of DC/zero in FFT array indices.
+    All conversions assume a **uniformly spaced** q-axis in reciprocal space,
+    typically generated from np.fft.fftfreq(). The q-axis origin (DC component)
+    is assumed to be at the centre of the FFT array after fftshift.
+
+    Parameters
+    ----------
+    qx_axis, qy_axis : 1-D arrays
+        Reciprocal-space frequencies in nm⁻¹ (shape [Nx] and [Ny]).
+        Must be uniformly spaced for vec_px_to_q() to work correctly.
+    image_width, image_height : int
+        Dimensions of the FFT array (pixels).
+
+    Notes
+    -----
+    The class internally computes the q-axis spacing as::
+
+        dq = (q_max - q_min) / (N - 1)
+
+    This assumes linear spacing. For non-uniform q-axes, results will be incorrect.
+    Consider adding a factory method ``from_fftfreq()`` with validation if
+    q-axes are sourced from other origins.
     """
 
     qx_axis: np.ndarray   # nm⁻¹, length Nx

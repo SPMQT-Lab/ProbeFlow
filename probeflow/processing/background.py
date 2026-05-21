@@ -590,6 +590,9 @@ def subtract_background(
     # ── Step-tolerance masking ────────────────────────────────────────────────
     if step_tolerance and Ny >= 3 and Nx >= 3:
         gy, gx = np.gradient(np.where(np.isfinite(arr), arr, _finite_median(arr)))
+        # Clamp pixel sizes to 1e-30 m/px as a guard against division by zero or NaN.
+        # If pixel_size is 0 or NaN, the clamp ensures the code doesn't crash; the
+        # resulting unphysical slope is then rejected by the threshold comparison.
         psx = max(float(pixel_size_x_m), 1e-30)
         psy = max(float(pixel_size_y_m), 1e-30)
         slope_mag = np.sqrt((gx / psx) ** 2 + (gy / psy) ** 2).ravel()

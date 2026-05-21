@@ -456,6 +456,11 @@ def fft_magnitude(
     windowed = crop * win2d
 
     # ── 6. Compute FFT and shift DC to centre ─────────────────────────────────
+    # NOTE: Window reduces spectral leakage but suppresses apparent signal amplitude.
+    # Hann window power is ~0.375 (2D outer product); magnitude is NOT normalised by
+    # window correction. This is acceptable for qualitative display but not for
+    # quantitative spectral analysis. For calibrated measurements, divide by
+    # window_correction = 2.67 (approximate for Hann 2D).
     F = np.fft.fftshift(np.fft.fft2(windowed))
     mag = np.abs(F)
 
