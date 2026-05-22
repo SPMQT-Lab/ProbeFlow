@@ -6,6 +6,6 @@
 uses ``probeflow.io.file_type``.
 """
 
-from probeflow.core.file_type import FileType, sniff_file_type  # noqa: F401
+from probeflow.core.file_type import FileType, is_rhk_sm4, sniff_file_type  # noqa: F401
 
-__all__ = ["FileType", "sniff_file_type"]
+__all__ = ["FileType", "is_rhk_sm4", "sniff_file_type"]

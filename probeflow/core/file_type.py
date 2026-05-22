@@ -38,6 +38,21 @@ class FileType(Enum):
     UNKNOWN = "unknown"
 
 
+# RHK SM4: "STiMage 005." encoded as UTF-16-LE, starting at byte offset 2.
+_SM4_MAGIC = bytes([
+    0x53, 0x00, 0x54, 0x00, 0x69, 0x00, 0x4D, 0x00,
+    0x61, 0x00, 0x67, 0x00, 0x65, 0x00, 0x20, 0x00,
+    0x30, 0x00, 0x30, 0x00, 0x35, 0x00, 0x2E, 0x00,
+])
+_SM4_MAGIC_OFFSET = 2
+
+
+def is_rhk_sm4(head: bytes) -> bool:
+    """Return ``True`` when *head* contains the RHK SM4 magic at byte offset 2."""
+    end = _SM4_MAGIC_OFFSET + len(_SM4_MAGIC)
+    return len(head) >= end and head[_SM4_MAGIC_OFFSET:end] == _SM4_MAGIC
+
+
 def sniff_file_type(path) -> FileType:
     """Identify a file by its content signature, not its suffix.
 
@@ -61,9 +76,6 @@ def sniff_file_type(path) -> FileType:
 
     if not head:
         return FileType.UNKNOWN
-
-    # RHK SM4: UTF-16-ish "STiMage 005." magic starts at byte offset 2.
-    from probeflow.io.readers.rhk_sm4 import is_rhk_sm4
 
     if is_rhk_sm4(head):
         return FileType.RHK_SM4_IMAGE

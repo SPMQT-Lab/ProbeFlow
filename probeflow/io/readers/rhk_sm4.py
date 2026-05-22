@@ -139,25 +139,12 @@ class RHKSM4File:
     parser_notes: list[str]
 
 
-def is_rhk_sm4(path_or_bytes) -> bool:
-    """Return ``True`` when bytes contain the RHK SM4 magic at offset 2."""
-    if isinstance(path_or_bytes, (bytes, bytearray, memoryview)):
-        data = bytes(path_or_bytes)
-    else:
-        try:
-            with Path(path_or_bytes).open("rb") as fh:
-                data = fh.read(MAGIC_OFFSET + len(SM4_MAGIC))
-        except (OSError, ValueError):
-            return False
-    end = MAGIC_OFFSET + len(SM4_MAGIC)
-    return len(data) >= end and data[MAGIC_OFFSET:end] == SM4_MAGIC
-
-
 def read_rhk_sm4(path) -> RHKSM4File:
     """Parse an RHK SM4 container and decode supported image pages."""
     path = Path(path)
     data = path.read_bytes()
-    if not is_rhk_sm4(data):
+    _magic_end = MAGIC_OFFSET + len(SM4_MAGIC)
+    if not (len(data) >= _magic_end and data[MAGIC_OFFSET:_magic_end] == SM4_MAGIC):
         raise ValueError(f"{path}: not an RHK SM4 file")
 
     # File header starts at MAGIC_OFFSET + MAGIC_TOTAL_SIZE = 2 + 36 = 38.

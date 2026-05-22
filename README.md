@@ -9,9 +9,9 @@ SPM data. It helps you browse folders of scans and spectra, apply routine image
 corrections, draw ROIs, make common measurements, and export figures or data
 with enough context to understand how they were produced.
 
-It currently focuses on Createc and Nanonis workflows:
+It currently supports Createc, Nanonis, and RHK workflows:
 
-- Open Createc `.dat` and Nanonis `.sxm` scan images.
+- Open Createc `.dat`, Nanonis `.sxm`, and RHK `.sm4` scan images.
 - Open Createc `.VERT` and Nanonis spectroscopy `.dat` traces.
 - Convert Createc `.dat` scans to Nanonis-compatible `.sxm`.
 - Process scans with row alignment, bad-line correction, background
@@ -44,7 +44,7 @@ probeflow gui
 
 Typical first GUI workflow:
 
-1. Open a folder containing `.dat`, `.sxm`, or spectroscopy files.
+1. Open a folder containing `.dat`, `.sxm`, `.sm4`, or spectroscopy files.
 2. Select a scan or spectrum from the browser.
 3. Adjust display contrast and colormap.
 4. Draw an ROI or line profile if needed.
@@ -99,6 +99,7 @@ installed with ProbeFlow by default.
 | Input | Createc `.VERT` | Point spectroscopy |
 | Input | Nanonis `.sxm` | STM/SPM image scan |
 | Input | Nanonis `.dat` | Point spectroscopy |
+| Input | RHK `.sm4` | STM/SPM image scan |
 | Output | `.sxm` | Converted or processed scan data |
 | Output | `.png`, `.pdf` | Figure/image export |
 | Output | `.csv`, `.json` | Numerical data, metadata, or provenance |

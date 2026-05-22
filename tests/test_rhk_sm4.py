@@ -12,7 +12,7 @@ from probeflow.core.indexing import index_folder
 from probeflow.core.scan_loader import load_scan
 from probeflow.gui.models import scan_image_folder
 from probeflow.gui.rendering import render_scan_image
-from probeflow.io.file_type import FileType, sniff_file_type
+from probeflow.core.file_type import FileType, is_rhk_sm4, sniff_file_type
 from probeflow.io.readers.rhk_sm4 import (
     GUID_SIZE,
     MAGIC_OFFSET,
@@ -25,7 +25,6 @@ from probeflow.io.readers.rhk_sm4 import (
     RHK_OBJECT_PAGE_INDEX_ARRAY,
     RHK_OBJECT_STRING_DATA,
     SM4_MAGIC,
-    is_rhk_sm4,
     parse_object_table,
     parse_page_header,
     read_rhk_sm4,
