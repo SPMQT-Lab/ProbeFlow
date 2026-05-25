@@ -954,7 +954,14 @@ class FFTViewerDialog(QDialog):
         # proper top-level OS window: it has well-defined Z-order, appears in
         # the Window menu via findChildren(QDialog), and lives in a separate
         # OS window so it cannot intercept mouse events on the FFT canvas.
+        #
+        # Qt.Window overrides the default Qt.Dialog flag. The Qt.Dialog type
+        # tells macOS to create an NSPanel at a higher window level; that panel
+        # level blocks menu-bar interaction in parent windows and greys out menu
+        # actions. Qt.Window creates a regular NSWindow at the normal level so
+        # it participates in ordinary window stacking without blocking menus.
         dlg = QDialog(self)
+        dlg.setWindowFlags(Qt.Window)
         dlg.setWindowTitle("Reciprocal Grid")
         dlg_layout = QVBoxLayout(dlg)
         dlg_layout.setContentsMargins(0, 0, 0, 0)
