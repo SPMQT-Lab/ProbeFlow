@@ -684,21 +684,22 @@ class LatticeGridPanel(QWidget):
             self._apply_btn.setEnabled(self._apply_correction_fn is not None)
 
             preserve = self._preserve_orientation_cb.isChecked()
-            applied = result.stretch_matrix if preserve else result.matrix
             rot_label = (
-                f"  rigid rot = {result.polar_rotation_deg:.3f}°  (removed)"
+                f"  rigid rot:  {result.polar_rotation_deg:.3f}°  (removed)"
                 if preserve
-                else f"  rigid rot = {result.polar_rotation_deg:.3f}°  (applied)"
+                else f"  rigid rot:  {result.polar_rotation_deg:.3f}°  (applied)"
             )
+            # x_scale and y_scale are the diagonal stretch factors from the
+            # QR decomposition.  They tell the user: multiply the current scan
+            # width by x_scale to get the corrected width (and same for height).
+            y_scale = result.x_scale * result.y_over_x
             lines = [
-                f"  x scale = {result.x_scale:.5f}",
-                f"  y/x    = {result.y_over_x:.5f}",
-                f"  shear  = {result.shear:.5f}",
-                rot_label,
-                "  applied matrix =",
-                f"  [{applied[0,0]:+.5f}  {applied[0,1]:+.5f}]",
-                f"  [{applied[1,0]:+.5f}  {applied[1,1]:+.5f}]",
+                f"  X:  ×{result.x_scale:.5f}",
+                f"  Y:  ×{y_scale:.5f}",
             ]
+            if abs(result.shear) > 1e-4:
+                lines.append(f"  shear:  {result.shear:.5f}")
+            lines.append(rot_label)
             self._correction_lbl.setText("\n".join(lines))
         except Exception as exc:
             self._correction = None
