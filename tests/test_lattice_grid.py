@@ -9,6 +9,8 @@ import tempfile
 import numpy as np
 import pytest
 
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
 from probeflow.analysis.lattice_grid import (
     LatticeGrid,
     LatticeGridDisplay,
@@ -21,6 +23,20 @@ from probeflow.analysis.lattice_grid import (
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
+
+@pytest.fixture
+def qapp():
+    try:
+        from PySide6.QtWidgets import QApplication
+    except Exception as exc:
+        pytest.skip(f"PySide6 unavailable: {exc}")
+    app = QApplication.instance()
+    if app is not None:
+        return app
+    try:
+        return QApplication([])
+    except Exception as exc:
+        pytest.skip(f"QApplication unavailable: {exc}")
 
 def _angle(vx, vy):
     return math.degrees(math.atan2(vy, vx))
@@ -463,7 +479,8 @@ class TestFormatReciprocal:
         g = LatticeGrid.make_square(128, 128, 20, space="reciprocal")
         d = format_reciprocal_measurements(g, self.cal)
         for key in ("kind", "space", "origin_px", "origin_q",
-                    "g1_vec", "g2_vec", "g1", "g2", "angle", "area_q"):
+                    "g1_vec", "g2_vec", "g1", "g2", "angle", "area_q",
+                    "direct_a", "direct_b", "direct_angle"):
             assert key in d, f"Missing key: {key}"
 
     def test_g_values_contain_nm_inv(self):
@@ -476,7 +493,7 @@ class TestFormatReciprocal:
         g = LatticeGrid.make_square(128, 128, 20, space="reciprocal")
         d = format_reciprocal_measurements(g, self.cal)
         # Should show d = value in parentheses
-        assert "d =" in d["g1"]
+        assert "plane d =" in d["g1"]
 
     def test_angle_square(self):
         g = LatticeGrid.make_square(128, 128, 20, space="reciprocal")
@@ -512,6 +529,116 @@ class TestFormatReciprocal:
         )
         d = format_reciprocal_measurements(g, self.cal)
         assert d["angle"] == "120°"
+
+    def test_direct_lattice_from_square_reciprocal_basis(self):
+        qx = np.linspace(-1.0, 1.0, 101)
+        qy = np.linspace(-1.0, 1.0, 101)
+        cal = ReciprocalCalibration(
+            qx_axis=qx,
+            qy_axis=qy,
+            image_width=101,
+            image_height=101,
+        )
+        g = LatticeGrid(
+            kind="square",
+            space="reciprocal",
+            origin_px=(50, 50),
+            a_px=(25.0, 0.0),   # 0.5 nm^-1
+            b_px=(0.0, 25.0),   # 0.5 nm^-1
+        )
+        d = format_reciprocal_measurements(g, cal)
+        assert "2 nm" in d["direct_a"]
+        assert "2 nm" in d["direct_b"]
+        assert d["direct_angle"] == "direct angle = 90°"
+
+    def test_direct_lattice_from_hex_reciprocal_basis(self):
+        qx = np.linspace(-1.0, 1.0, 101)
+        qy = np.linspace(-1.0, 1.0, 101)
+        cal = ReciprocalCalibration(
+            qx_axis=qx,
+            qy_axis=qy,
+            image_width=101,
+            image_height=101,
+        )
+        size_px = 25.0  # 0.5 nm^-1
+        g = LatticeGrid.make_hexagonal(50, 50, size_px, space="reciprocal")
+        d = format_reciprocal_measurements(g, cal)
+        assert "direct |a|" in d["direct_a"]
+        assert "direct |b|" in d["direct_b"]
+        assert d["direct_angle"] == "direct angle = 120°"
+
+
+class _FakeGridItem:
+    def __init__(self, grid):
+        self._grid = grid
+        self.cells = 12
+        self._line_width_px = 1.5
+
+    def grid(self):
+        return self._grid
+
+    def set_grid(self, grid):
+        self._grid = grid
+
+    def set_line_width(self, value):
+        self._line_width_px = value
+
+    def setVisible(self, _visible):
+        pass
+
+
+class _FakeController:
+    def set_active(self, _active):
+        pass
+
+    def set_locked(self, _locked):
+        pass
+
+    def set_ab_equal(self, _checked):
+        pass
+
+
+def test_ideal_lattice_presets_control_enabled_fields(qapp):
+    from probeflow.gui.lattice_grid.real_space_panel import LatticeGridPanel
+
+    grid = LatticeGrid.make_rectangular(50, 50, 20, 30)
+    cal = RealSpaceCalibration.from_scan_range((10e-9, 10e-9), 100, 100)
+    panel = LatticeGridPanel(_FakeGridItem(grid), _FakeController(), cal, 100, 100)
+    try:
+        assert panel._ideal_preset_combo.currentText() == "Match grid"
+        assert not panel._ideal_a_spin.isEnabled()
+        assert not panel._ideal_b_spin.isEnabled()
+        assert not panel._ideal_angle_spin.isEnabled()
+
+        panel._ideal_preset_combo.setCurrentText("Square")
+        qapp.processEvents()
+        assert panel._ideal_a_spin.isEnabled()
+        assert not panel._ideal_b_spin.isEnabled()
+        assert not panel._ideal_angle_spin.isEnabled()
+        assert panel._ideal_b_spin.value() == pytest.approx(panel._ideal_a_spin.value())
+        assert panel._ideal_angle_spin.value() == pytest.approx(90.0)
+
+        panel._ideal_preset_combo.setCurrentText("Rectangular")
+        qapp.processEvents()
+        assert panel._ideal_a_spin.isEnabled()
+        assert panel._ideal_b_spin.isEnabled()
+        assert not panel._ideal_angle_spin.isEnabled()
+        assert panel._ideal_angle_spin.value() == pytest.approx(90.0)
+
+        panel._ideal_preset_combo.setCurrentText("Hexagonal")
+        qapp.processEvents()
+        assert panel._ideal_b_spin.value() == pytest.approx(panel._ideal_a_spin.value())
+        assert panel._ideal_angle_spin.value() == pytest.approx(60.0)
+
+        panel._ideal_preset_combo.setCurrentText("Custom")
+        qapp.processEvents()
+        assert panel._ideal_a_spin.isEnabled()
+        assert panel._ideal_b_spin.isEnabled()
+        assert panel._ideal_angle_spin.isEnabled()
+    finally:
+        panel.close()
+        panel.deleteLater()
+        qapp.processEvents()
 
 
 # ── edge cases ────────────────────────────────────────────────────────────────

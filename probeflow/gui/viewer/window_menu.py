@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import weakref
 from dataclasses import dataclass
 
 from PySide6.QtCore import QRect
@@ -52,6 +53,15 @@ def _is_owned_by_viewer(widget: QWidget, viewer: QWidget) -> bool:
     return False
 
 
+def _tool_window_owned_by_viewer(widget: QWidget, viewer: QWidget) -> bool:
+    owner = getattr(widget, "_probeflow_tool_owner", None)
+    if isinstance(owner, weakref.ReferenceType):
+        owner = owner()
+    if not isinstance(owner, QWidget):
+        return False
+    return owner is viewer or _is_owned_by_viewer(owner, viewer)
+
+
 def _is_candidate_tool_window(widget: QWidget, viewer: QWidget) -> bool:
     if widget is viewer:
         return True
@@ -63,8 +73,12 @@ def _is_candidate_tool_window(widget: QWidget, viewer: QWidget) -> bool:
         # Allow windows explicitly tagged as ProbeFlow tool panels.  These use
         # parent=None so that macOS treats them as ordinary independent windows
         # (no elevated NSPanel level, no menu-bar blocking), which means they
-        # are not in the Qt parent chain of any viewer.
-        return bool(getattr(widget, "_probeflow_tool_window", False))
+        # are not in the Qt parent chain of any viewer.  The owner marker keeps
+        # panels scoped to the viewer that created them.
+        return (
+            bool(getattr(widget, "_probeflow_tool_window", False))
+            and _tool_window_owned_by_viewer(widget, viewer)
+        )
     return isinstance(widget, QDialog | QDockWidget)
 
 

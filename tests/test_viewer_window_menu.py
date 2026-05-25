@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import weakref
 from pathlib import Path
 
 import pytest
@@ -60,6 +61,41 @@ def test_owned_viewer_windows_discovers_owned_dialogs_and_floating_docks(qapp):
         assert "Other" not in labels
     finally:
         for widget in (dock, dock_host, fft, viewer, unrelated):
+            widget.close()
+            widget.deleteLater()
+        qapp.processEvents()
+
+
+def test_owned_viewer_windows_scopes_parentless_tool_panels_to_owner(qapp):
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QDialog, QWidget
+
+    from probeflow.gui.viewer.window_menu import owned_viewer_windows
+
+    viewer_a = QDialog()
+    viewer_a.setWindowTitle("scan-a")
+    viewer_b = QDialog()
+    viewer_b.setWindowTitle("scan-b")
+    fft_a = QDialog(viewer_a)
+    fft_a.setWindowTitle("FFT Viewer")
+    panel = QWidget(None, Qt.Window)
+    panel.setWindowTitle("Reciprocal Grid")
+    panel._probeflow_tool_window = True
+    panel._probeflow_tool_owner = weakref.ref(fft_a)
+
+    try:
+        viewer_a.show()
+        viewer_b.show()
+        fft_a.show()
+        panel.show()
+        qapp.processEvents()
+
+        labels_a = {item.label for item in owned_viewer_windows(viewer_a)}
+        labels_b = {item.label for item in owned_viewer_windows(viewer_b)}
+        assert "Reciprocal Grid" in labels_a
+        assert "Reciprocal Grid" not in labels_b
+    finally:
+        for widget in (panel, fft_a, viewer_b, viewer_a):
             widget.close()
             widget.deleteLater()
         qapp.processEvents()

@@ -293,6 +293,20 @@ class LatticeGridPanel(QWidget):
         ideal_lay.setContentsMargins(6, 6, 6, 4)
         _ideal_spin = _make_spin_row(ideal_lay)
 
+        preset_row = QHBoxLayout()
+        preset_lbl = QLabel("Preset:")
+        preset_lbl.setFont(QFont("Helvetica", 9))
+        preset_lbl.setMinimumWidth(68)
+        self._ideal_preset_combo = QComboBox()
+        self._ideal_preset_combo.setFont(QFont("Helvetica", 9))
+        self._ideal_preset_combo.setFixedHeight(22)
+        self._ideal_preset_combo.addItems([
+            "Match grid", "Square", "Rectangular", "Hexagonal", "Custom",
+        ])
+        preset_row.addWidget(preset_lbl)
+        preset_row.addWidget(self._ideal_preset_combo, 1)
+        ideal_lay.addLayout(preset_row)
+
         self._ideal_a_spin = _ideal_spin(
             f"|a| ({self._unit_label}):", 0.001, a_max * 2, 0.01, 3, self._unit_label,
         )
@@ -302,6 +316,7 @@ class LatticeGridPanel(QWidget):
         self._ideal_ab_cb = QCheckBox("ideal a = b")
         self._ideal_ab_cb.setFont(QFont("Helvetica", 9))
         self._ideal_ab_cb.setChecked(False)
+        self._ideal_ab_cb.setVisible(False)
         ideal_lay.addWidget(self._ideal_ab_cb)
 
         self._ideal_angle_spin = _ideal_spin("Angle:", 1.0, 179.0, 0.1, 2, "°")
@@ -309,6 +324,7 @@ class LatticeGridPanel(QWidget):
 
         dist_lay.addWidget(ideal_grp)
 
+        self._ideal_preset_combo.currentIndexChanged.connect(self._on_ideal_preset_changed)
         self._ideal_a_spin.valueChanged.connect(self._on_ideal_a_changed)
         self._ideal_b_spin.valueChanged.connect(self._on_ideal_b_changed)
         self._ideal_ab_cb.toggled.connect(self._on_ideal_ab_changed)
@@ -342,8 +358,10 @@ class LatticeGridPanel(QWidget):
         dist_lay.addStretch(1)
 
         # ── correction options ────────────────────────────────────────────────
-        opts_grp = QGroupBox("Correction options")
+        opts_grp = QGroupBox("Advanced correction options")
         opts_grp.setFont(QFont("Helvetica", 9))
+        opts_grp.setCheckable(True)
+        opts_grp.setChecked(False)
         opts_lay = QVBoxLayout(opts_grp)
         opts_lay.setSpacing(3)
         opts_lay.setContentsMargins(6, 6, 6, 4)
@@ -454,6 +472,8 @@ class LatticeGridPanel(QWidget):
             self._b_spin.setEnabled(kind == "rectangular" or not locked)
             # angle_ab editable only in tunable mode
             self._angle_ab_spin.setEnabled(not locked)
+
+            self._sync_ideal_preset_from_grid()
 
         finally:
             self._updating_controls = False
@@ -590,10 +610,68 @@ class LatticeGridPanel(QWidget):
                 self._item.set_grid(replace(g, b_px=(bx * la / lb, by * la / lb)))
         self.sync_from_model()
 
+    def _measured_lattice_values(self) -> tuple[float, float, float]:
+        grid = self._item.grid()
+        a_len_u = self._cal.vector_length_m(grid.a_px) / self._unit_scale
+        b_len_u = self._cal.vector_length_m(grid.b_px) / self._unit_scale
+        angle = self._cal.vector_angle_deg(grid.a_px, grid.b_px)
+        return a_len_u, b_len_u, angle
+
+    def _set_ideal_values(self, a_value: float, b_value: float, angle: float) -> None:
+        self._ideal_a_spin.setValue(max(self._ideal_a_spin.minimum(), a_value))
+        self._ideal_b_spin.setValue(max(self._ideal_b_spin.minimum(), b_value))
+        self._ideal_angle_spin.setValue(min(179.0, max(1.0, angle)))
+
+    def _sync_ideal_preset_from_grid(self, *, initialize: bool = False) -> None:
+        preset = self._ideal_preset_combo.currentText()
+        a_val, b_val, angle = self._measured_lattice_values()
+        if preset == "Match grid":
+            self._set_ideal_values(a_val, b_val, angle)
+        elif initialize and preset == "Square":
+            side = 0.5 * (a_val + b_val)
+            self._set_ideal_values(side, side, 90.0)
+        elif initialize and preset == "Rectangular":
+            self._set_ideal_values(a_val, b_val, 90.0)
+        elif initialize and preset == "Hexagonal":
+            side = 0.5 * (a_val + b_val)
+            self._set_ideal_values(side, side, 60.0)
+        self._refresh_ideal_control_state()
+
+    def _refresh_ideal_control_state(self) -> None:
+        preset = self._ideal_preset_combo.currentText()
+        custom = preset == "Custom"
+        match_grid = preset == "Match grid"
+        equal_lengths = preset in {"Square", "Hexagonal"}
+        fixed_angle = preset in {"Square", "Rectangular", "Hexagonal", "Match grid"}
+        self._ideal_a_spin.setEnabled(not match_grid)
+        self._ideal_b_spin.setEnabled(custom or preset == "Rectangular")
+        self._ideal_angle_spin.setEnabled(custom)
+        self._ideal_ab_cb.setVisible(custom)
+        self._ideal_ab_cb.setEnabled(custom)
+        if equal_lengths and not self._updating_controls:
+            self._ideal_b_spin.setValue(self._ideal_a_spin.value())
+        if fixed_angle and preset != "Match grid" and not self._updating_controls:
+            angle = 60.0 if preset == "Hexagonal" else 90.0
+            self._ideal_angle_spin.setValue(angle)
+
+    def _on_ideal_preset_changed(self, _idx: int) -> None:
+        if self._updating_controls:
+            return
+        self._updating_controls = True
+        try:
+            self._sync_ideal_preset_from_grid(initialize=True)
+        finally:
+            self._updating_controls = False
+        self._clear_preview_if_active()
+        self._refresh_correction_label()
+
     def _on_ideal_a_changed(self, value: float) -> None:
         if self._updating_controls:
             return
-        if self._ideal_ab_cb.isChecked():
+        if (
+            self._ideal_ab_cb.isChecked()
+            or self._ideal_preset_combo.currentText() in {"Square", "Hexagonal"}
+        ):
             self._updating_controls = True
             try:
                 self._ideal_b_spin.setValue(value)
@@ -625,6 +703,8 @@ class LatticeGridPanel(QWidget):
         self._refresh_correction_label()
 
     def _on_ideal_angle_changed(self, _value: float) -> None:
+        if self._updating_controls:
+            return
         self._clear_preview_if_active()
         self._refresh_correction_label()
 
@@ -632,6 +712,15 @@ class LatticeGridPanel(QWidget):
         """Compute and display the measured-vs-ideal affine correction."""
         grid = self._item.grid()
         try:
+            if (
+                not self._updating_controls
+                and self._ideal_preset_combo.currentText() == "Match grid"
+            ):
+                self._updating_controls = True
+                try:
+                    self._sync_ideal_preset_from_grid()
+                finally:
+                    self._updating_controls = False
             ideal_a_m = self._ideal_a_spin.value() * self._unit_scale
             ideal_b_m = self._ideal_b_spin.value() * self._unit_scale
             ideal_angle = self._ideal_angle_spin.value()

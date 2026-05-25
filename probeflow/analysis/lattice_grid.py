@@ -518,12 +518,35 @@ def format_reciprocal_measurements(
             return f"{d_nm:.3g} nm"
         return f"{d_nm * 10:.3g} Å"
 
+    def _length_str(length_nm: float) -> str:
+        if not np.isfinite(length_nm):
+            return "—"
+        if length_nm >= 1.0:
+            return f"{length_nm:.4g} nm"
+        return f"{length_nm * 10.0:.4g} Å"
+
     angle = _angle_between_vectors_deg(qvec_a, qvec_b)
     qax, qay = qvec_a
     qbx, qby = qvec_b
     area_q = abs(qax * qby - qay * qbx)
 
     qox, qoy = cal.px_to_q(ox, oy)
+
+    direct_a = "direct a = —"
+    direct_b = "direct b = —"
+    direct_angle = "direct angle = —"
+    try:
+        # Reciprocal vectors use cycles/nm.  The direct basis A is defined by
+        # Gᵀ A = I, so no 2π factor appears here.
+        G = np.array([[qax, qbx], [qay, qby]], dtype=float)
+        A = np.linalg.inv(G.T)
+        a_nm = (float(A[0, 0]), float(A[1, 0]))
+        b_nm = (float(A[0, 1]), float(A[1, 1]))
+        direct_a = f"direct |a| = {_length_str(math.hypot(*a_nm))}"
+        direct_b = f"direct |b| = {_length_str(math.hypot(*b_nm))}"
+        direct_angle = f"direct angle = {_fmt_angle_deg(_angle_between_vectors_deg(a_nm, b_nm))}"
+    except Exception:
+        pass
 
     return {
         "kind":        grid.kind,
@@ -532,8 +555,11 @@ def format_reciprocal_measurements(
         "origin_q":    f"({qox:.3g}, {qoy:.3g}) nm⁻¹",
         "g1_vec":      f"({qax:.3g}, {qay:.3g}) nm⁻¹",
         "g2_vec":      f"({qbx:.3g}, {qby:.3g}) nm⁻¹",
-        "g1":          f"{g1:.4g} nm⁻¹  (d = {_period_str(g1)})",
-        "g2":          f"{g2:.4g} nm⁻¹  (d = {_period_str(g2)})",
+        "g1":          f"{g1:.4g} nm⁻¹  (plane d = {_period_str(g1)})",
+        "g2":          f"{g2:.4g} nm⁻¹  (plane d = {_period_str(g2)})",
         "angle":       _fmt_angle_deg(angle),
         "area_q":      f"{area_q:.4g} nm⁻²",
+        "direct_a":    direct_a,
+        "direct_b":    direct_b,
+        "direct_angle": direct_angle,
     }

@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFileDialog, QFrame,
     QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit, QPushButton,
-    QScrollArea, QTabWidget, QVBoxLayout, QWidget,
+    QScrollArea, QSpinBox, QTabWidget, QVBoxLayout, QWidget,
 )
 
 
@@ -277,13 +277,19 @@ class FFTViewerDialog(QDialog):
         a_row.addStretch(1)
         lat_lay.addLayout(a_row)
 
-        order2_row = QHBoxLayout()
-        self._bragg_order2_cb = QCheckBox("Show 2nd-order ring")
-        self._bragg_order2_cb.setFont(QFont("Helvetica", 9))
-        self._bragg_order2_cb.toggled.connect(self._on_bragg_changed)
-        order2_row.addWidget(self._bragg_order2_cb)
-        order2_row.addStretch(1)
-        lat_lay.addLayout(order2_row)
+        shells_row = QHBoxLayout()
+        shells_lbl = QLabel("Max shells:")
+        shells_lbl.setFont(QFont("Helvetica", 9))
+        shells_row.addWidget(shells_lbl)
+        self._bragg_max_shells_spin = QSpinBox()
+        self._bragg_max_shells_spin.setRange(1, 12)
+        self._bragg_max_shells_spin.setValue(5)
+        self._bragg_max_shells_spin.setFont(QFont("Helvetica", 9))
+        self._bragg_max_shells_spin.setFixedHeight(24)
+        self._bragg_max_shells_spin.valueChanged.connect(self._on_bragg_changed)
+        shells_row.addWidget(self._bragg_max_shells_spin)
+        shells_row.addStretch(1)
+        lat_lay.addLayout(shells_row)
 
         self._bragg_radius_lbl = QLabel("Radius: —")
         self._bragg_radius_lbl.setFont(QFont("Courier", 9))
@@ -296,6 +302,10 @@ class FFTViewerDialog(QDialog):
         lat_lay.addWidget(sep)
 
         det_row = QHBoxLayout()
+        self._bragg_pick_cb = QCheckBox("Pick peaks")
+        self._bragg_pick_cb.setFont(QFont("Helvetica", 9))
+        self._bragg_pick_cb.toggled.connect(self._update_calib_ui)
+        det_row.addWidget(self._bragg_pick_cb)
         self._bragg_detect_btn = QPushButton("Detect peaks")
         self._bragg_detect_btn.setFont(QFont("Helvetica", 9))
         self._bragg_detect_btn.setFixedHeight(24)
@@ -312,7 +322,15 @@ class FFTViewerDialog(QDialog):
         det_row.addStretch(1)
         lat_lay.addLayout(det_row)
 
-        self._bragg_picks_lbl = QLabel("Picks: 0  (click FFT to add/remove)")
+        snap_row = QHBoxLayout()
+        self._bragg_snap_cb = QCheckBox("Snap picks to compact peak")
+        self._bragg_snap_cb.setFont(QFont("Helvetica", 9))
+        self._bragg_snap_cb.setChecked(True)
+        snap_row.addWidget(self._bragg_snap_cb)
+        snap_row.addStretch(1)
+        lat_lay.addLayout(snap_row)
+
+        self._bragg_picks_lbl = QLabel("Picks: 0  (enable Pick peaks to edit)")
         self._bragg_picks_lbl.setFont(QFont("Helvetica", 9))
         lat_lay.addWidget(self._bragg_picks_lbl)
 
@@ -1004,6 +1022,7 @@ class FFTViewerDialog(QDialog):
         dlg.setWindowTitle("Reciprocal Grid")
         dlg.setAttribute(Qt.WA_DeleteOnClose)
         dlg._probeflow_tool_window = True   # recognised by window_menu.py
+        dlg._probeflow_tool_owner = weakref.ref(self)
         dlg_layout = QVBoxLayout(dlg)
         dlg_layout.setContentsMargins(0, 0, 0, 0)
         dlg_layout.setSpacing(0)
@@ -1027,10 +1046,15 @@ class FFTViewerDialog(QDialog):
 
         self.finished.connect(_close_lattice_panel)
 
-        def _clear_dock_ref():
+        def _clear_dock_ref(_obj=None, _overlay=overlay):
             if getattr(self, "_fft_lattice_dock", None) is dlg:
                 self._fft_lattice_dock = None
-            # Panel closed manually — keep overlay artists but disable Clear.
+            if getattr(self, "_fft_lattice_overlay", None) is _overlay:
+                try:
+                    _overlay.clear()
+                except RuntimeError:
+                    pass
+                self._fft_lattice_overlay = None
             if getattr(self, "_clear_grid_btn", None) is not None:
                 self._clear_grid_btn.setEnabled(False)
 
@@ -1066,58 +1090,52 @@ class FFTViewerDialog(QDialog):
             self._draw_calib_pick_artists()
             return
 
-        # ── scan metadata ────────────────────────────────────────────────────
-        Ny, Nx = self._arr.shape
-        try:
-            w_m = float(self._scan_range_m[0])
-            h_m = float(self._scan_range_m[1])
-        except Exception:
-            return
-
-        is_nonsquare = abs(w_m - h_m) / max(w_m, h_m, 1e-30) > 0.01
-        scan_m = (w_m * h_m) ** 0.5   # geometric mean for non-square scans
-        n_px = max(Nx, Ny)
-
         # ── user inputs ──────────────────────────────────────────────────────
         symmetry = "square" if self._bragg_sym_combo.currentIndex() == 0 else "hex"
         a_val = self._bragg_a_spin.value()
         unit = self._bragg_unit_combo.currentText()
         a_m = a_val * 1e-10 if unit == "Å" else a_val * 1e-9
 
-        # ── compute radii in nm⁻¹ ────────────────────────────────────────────
-        from probeflow.processing.filters import predicted_bragg_radius
+        # ── compute low-index shell radii in nm⁻¹ ────────────────────────────
+        from probeflow.processing.filters import bragg_shells, first_bragg_q
         try:
-            r_px_1 = predicted_bragg_radius(a_m, symmetry, scan_m, n_px, order=1)
+            q1 = first_bragg_q(a_m, symmetry) * 1e-9
         except ValueError:
             self._bragg_radius_lbl.setText("Radius: invalid input")
             return
 
-        # Convert FFT pixel units → nm⁻¹:  q = r_pixels / (scan_m * 1e9)
-        q1 = r_px_1 / (scan_m * 1e9)
-
-        # ── draw first-order ring ─────────────────────────────────────────────
-        theta = np.linspace(0.0, 2.0 * np.pi, 360)
-        art1, = self._ax_fft.plot(
-            q1 * np.cos(theta), q1 * np.sin(theta),
-            color="#f38ba8", lw=1.2, linestyle="--", alpha=0.9, zorder=7,
+        q_nyquist = 0.95 * min(
+            float(np.nanmax(np.abs(self._qx))),
+            float(np.nanmax(np.abs(self._qy))),
         )
-        self._bragg_artists.append(art1)
-
-        label_lines = [f"1st:  {q1:.4f} nm⁻¹  (d = {1.0/q1*10:.3f} Å)"]
-
-        # ── optional second-order ring ────────────────────────────────────────
-        if self._bragg_order2_cb.isChecked():
-            r_px_2 = predicted_bragg_radius(a_m, symmetry, scan_m, n_px, order=2)
-            q2 = r_px_2 / (scan_m * 1e9)
-            art2, = self._ax_fft.plot(
-                q2 * np.cos(theta), q2 * np.sin(theta),
-                color="#fab387", lw=1.0, linestyle=":", alpha=0.8, zorder=7,
+        max_factor = q_nyquist / q1 if q1 > 0 else None
+        shells = bragg_shells(
+            symmetry,
+            max_shells=self._bragg_max_shells_spin.value(),
+            max_factor=max_factor,
+        )
+        theta = np.linspace(0.0, 2.0 * np.pi, 360)
+        colours = ["#f38ba8", "#fab387", "#f9e2af", "#a6e3a1", "#89b4fa", "#cba6f7"]
+        styles = ["--", ":", "-.", (0, (5, 2, 1, 2))]
+        label_lines: list[str] = []
+        for idx, shell in enumerate(shells, start=1):
+            q_shell = q1 * shell.factor
+            art, = self._ax_fft.plot(
+                q_shell * np.cos(theta), q_shell * np.sin(theta),
+                color=colours[(idx - 1) % len(colours)],
+                lw=1.2 if idx == 1 else 0.95,
+                linestyle=styles[(idx - 1) % len(styles)],
+                alpha=0.9 if idx == 1 else 0.75,
+                zorder=7,
             )
-            self._bragg_artists.append(art2)
-            label_lines.append(f"2nd:  {q2:.4f} nm⁻¹  (d = {1.0/q2*10:.3f} Å)")
-
-        if is_nonsquare:
-            label_lines.append("(non-square scan: geom. mean)")
+            self._bragg_artists.append(art)
+            d_angstrom = 1.0 / q_shell * 10.0 if q_shell > 0 else float("inf")
+            label_lines.append(
+                f"{idx}: {shell.label}  q={q_shell:.4f} nm⁻¹  "
+                f"(plane d={d_angstrom:.3g} Å)"
+            )
+        if not shells:
+            label_lines.append("No shells within FFT q-range")
 
         self._bragg_radius_lbl.setText("\n".join(label_lines))
         self._draw_calib_pick_artists()
@@ -1127,7 +1145,11 @@ class FFTViewerDialog(QDialog):
     def _bragg_pick_mode_active(self) -> bool:
         """True when clicks on the FFT canvas should add/remove calibration picks."""
         cb = getattr(self, "_bragg_enable_cb", None)
-        return bool(cb is not None and cb.isChecked())
+        pick_cb = getattr(self, "_bragg_pick_cb", None)
+        return bool(
+            cb is not None and cb.isChecked()
+            and pick_cb is not None and pick_cb.isChecked()
+        )
 
     def _draw_calib_pick_artists(self) -> None:
         """Draw calibration pick dots on the FFT axes (always, if any picks exist)."""
@@ -1139,12 +1161,11 @@ class FFTViewerDialog(QDialog):
             )
             self._bragg_artists.append(art)
 
-    def _update_calib_ui(self) -> None:
+    def _update_calib_ui(self, *_args) -> None:
         """Refresh the picks label and the compute-button enabled state."""
         n = len(self._calib_picks)
-        self._bragg_picks_lbl.setText(
-            f"Picks: {n}  (click FFT to add/remove)"
-        )
+        mode = "click FFT to add/remove" if self._bragg_pick_mode_active() else "enable Pick peaks to edit"
+        self._bragg_picks_lbl.setText(f"Picks: {n}  ({mode})")
         self._bragg_compute_btn.setEnabled(n >= 3)
         self._bragg_compute_btn.setToolTip(
             "Fit ellipse and compute piezo correction"
@@ -1168,6 +1189,17 @@ class FFTViewerDialog(QDialog):
                 self._on_bragg_changed()
                 return
 
+        if getattr(self, "_bragg_snap_cb", None) is not None and self._bragg_snap_cb.isChecked():
+            try:
+                from probeflow.processing.filters import snap_to_compact_peak_q
+                snapped = snap_to_compact_peak_q(
+                    self._fft_mag, self._qx, self._qy, qx_click, qy_click,
+                )
+                if snapped is not None:
+                    qx_click, qy_click = snapped
+            except Exception:
+                pass
+
         # No existing pick nearby — add a new one
         self._calib_picks.append((qx_click, qy_click))
         self._update_calib_ui()
@@ -1176,20 +1208,11 @@ class FFTViewerDialog(QDialog):
     def _detect_bragg_peaks(self) -> None:
         """Auto-detect first-order Bragg peaks and store them as calibration picks."""
         from probeflow.processing.filters import (
-            find_bragg_peaks_in_annulus,
-            predicted_bragg_radius,
+            find_bragg_peaks_in_q_annulus,
+            first_bragg_q,
         )
-        if self._fft_mag is None or self._qx is None:
+        if self._fft_mag is None or self._qx is None or self._qy is None:
             return
-
-        Ny, Nx = self._arr.shape
-        try:
-            w_m = float(self._scan_range_m[0])
-            h_m = float(self._scan_range_m[1])
-        except Exception:
-            return
-        scan_m = (w_m * h_m) ** 0.5
-        n_px = max(Nx, Ny)
 
         symmetry = "square" if self._bragg_sym_combo.currentIndex() == 0 else "hex"
         a_val = self._bragg_a_spin.value()
@@ -1197,27 +1220,26 @@ class FFTViewerDialog(QDialog):
         a_m = a_val * 1e-10 if unit == "Å" else a_val * 1e-9
 
         try:
-            r_predicted_px = predicted_bragg_radius(a_m, symmetry, scan_m, n_px, order=1)
+            q_predicted = first_bragg_q(a_m, symmetry) * 1e-9
         except ValueError:
             return
 
         expected = 4 if symmetry == "square" else 6
-        peaks_px = find_bragg_peaks_in_annulus(
-            self._fft_mag, r_predicted_px, expected_count=expected,
+        peaks_q = find_bragg_peaks_in_q_annulus(
+            self._fft_mag, self._qx, self._qy, q_predicted, expected_count=expected,
         )
 
-        if peaks_px.size == 0:
+        if peaks_q.size == 0:
             self._bragg_picks_lbl.setText("Peaks: none found in annulus")
             return
 
-        # Convert (x_px, y_px) offsets from centre → nm⁻¹
-        scan_w_nm = w_m * 1e9
-        scan_h_nm = h_m * 1e9
-        self._calib_picks = [
-            (x_px / scan_w_nm, y_px / scan_h_nm)
-            for x_px, y_px in peaks_px
-        ]
+        self._calib_picks = [(float(qx), float(qy)) for qx, qy in peaks_q]
         self._update_calib_ui()
+        if len(self._calib_picks) < expected:
+            self._bragg_picks_lbl.setText(
+                f"Picks: {len(self._calib_picks)}  "
+                "(some sectors skipped; add missing picks manually)"
+            )
         self._on_bragg_changed()
 
     def _clear_bragg_picks(self) -> None:
@@ -1229,21 +1251,11 @@ class FFTViewerDialog(QDialog):
         """Fit an axis-aligned ellipse to the picks and report piezo corrections."""
         from probeflow.processing.filters import (
             fit_axis_aligned_ellipse,
+            first_bragg_q,
             piezo_correction,
-            predicted_bragg_radius,
         )
         if len(self._calib_picks) < 3:
             return
-
-        # ── gather scan metadata ─────────────────────────────────────────────
-        Ny, Nx = self._arr.shape
-        try:
-            w_m = float(self._scan_range_m[0])
-            h_m = float(self._scan_range_m[1])
-        except Exception:
-            self._bragg_results_txt.setPlainText("Error: scan metadata unavailable")
-            return
-        scan_m = (w_m * h_m) ** 0.5
 
         symmetry = "square" if self._bragg_sym_combo.currentIndex() == 0 else "hex"
         a_val = self._bragg_a_spin.value()
@@ -1251,11 +1263,10 @@ class FFTViewerDialog(QDialog):
         a_m = a_val * 1e-10 if unit == "Å" else a_val * 1e-9
 
         try:
-            r_px_1 = predicted_bragg_radius(a_m, symmetry, scan_m, max(Nx, Ny), order=1)
+            r_predicted_nm = first_bragg_q(a_m, symmetry) * 1e-9
         except ValueError as exc:
             self._bragg_results_txt.setPlainText(f"Error: {exc}")
             return
-        r_predicted_nm = r_px_1 / (scan_m * 1e9)
 
         # ── parse piezo values, tracking user precision ──────────────────────
         cx_str = self._bragg_cx_edit.text().strip()

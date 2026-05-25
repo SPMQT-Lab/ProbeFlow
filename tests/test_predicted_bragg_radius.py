@@ -6,10 +6,34 @@ import math
 
 import pytest
 
-from probeflow.processing.filters import predicted_bragg_radius
+from probeflow.processing.filters import bragg_shells, predicted_bragg_radius
 
 
 # ── known-value checks ─────────────────────────────────────────────────────────
+
+class TestBraggShells:
+    def test_square_first_shell_factors(self):
+        shells = bragg_shells("square", max_shells=4)
+        assert [s.label for s in shells] == ["(10)", "(11)", "(20)", "(21)"]
+        assert [s.factor for s in shells] == pytest.approx(
+            [1.0, math.sqrt(2.0), 2.0, math.sqrt(5.0)]
+        )
+
+    def test_hex_first_shell_factors(self):
+        shells = bragg_shells("hex", max_shells=4)
+        assert [s.label for s in shells] == ["(10)", "(11)", "(20)", "(21)"]
+        assert [s.factor for s in shells] == pytest.approx(
+            [1.0, math.sqrt(3.0), 2.0, math.sqrt(7.0)]
+        )
+
+    def test_max_factor_limits_shells(self):
+        shells = bragg_shells("square", max_shells=12, max_factor=2.0)
+        assert [s.label for s in shells] == ["(10)", "(11)", "(20)"]
+
+    def test_max_shells_caps_shells(self):
+        shells = bragg_shells("hex", max_shells=2)
+        assert len(shells) == 2
+        assert [s.label for s in shells] == ["(10)", "(11)"]
 
 class TestKnownValues:
     def test_square_order1_basic(self):

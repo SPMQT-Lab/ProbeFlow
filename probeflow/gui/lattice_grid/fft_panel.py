@@ -216,7 +216,15 @@ class FFTLatticePanel(QWidget):
             return
         try:
             d = format_reciprocal_measurements(grid, self._cal)
-            lines = [d["g1"], d["g2"], f"angle = {d['angle']}", f"area = {d['area_q']}"]
+            lines = [
+                d["g1"],
+                d["g2"],
+                f"angle = {d['angle']}",
+                f"area = {d['area_q']}",
+                d["direct_a"],
+                d["direct_b"],
+                d["direct_angle"],
+            ]
         except Exception as exc:
             lines = [f"(error: {exc})"]
         self._meas_lbl.setText("\n".join(lines))

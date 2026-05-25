@@ -42,6 +42,69 @@ class _MockScrollEvent:
         self.key = key
 
 
+class _MockFftClick:
+    def __init__(self, ax, xdata=0.1, ydata=0.0):
+        self.inaxes = ax
+        self.button = 1
+        self.xdata = xdata
+        self.ydata = ydata
+
+
+def test_fft_lattice_panel_close_clears_overlay(qapp):
+    import numpy as np
+    from PySide6.QtCore import QCoreApplication
+
+    dlg = FFTViewerDialog(np.ones((16, 16)), (1e-9, 1e-9))
+    try:
+        dlg.show()
+        qapp.processEvents()
+        dlg._on_open_fft_lattice()
+        qapp.processEvents()
+
+        overlay = dlg._fft_lattice_overlay
+        panel = dlg._fft_lattice_dock
+        assert overlay is not None
+        assert panel is not None
+        assert dlg._clear_grid_btn.isEnabled()
+
+        panel.close()
+        qapp.processEvents()
+        QCoreApplication.sendPostedEvents(None, 0)
+        qapp.processEvents()
+
+        assert dlg._fft_lattice_overlay is None
+        assert dlg._fft_lattice_dock is None
+        assert not dlg._clear_grid_btn.isEnabled()
+    finally:
+        dlg.close()
+        dlg.deleteLater()
+        qapp.processEvents()
+
+
+def test_predicted_lattice_clicks_do_not_pick_unless_pick_mode_enabled(qapp):
+    import numpy as np
+
+    dlg = FFTViewerDialog(np.ones((16, 16)), (1e-9, 1e-9))
+    try:
+        dlg.show()
+        qapp.processEvents()
+        dlg._bragg_enable_cb.setChecked(True)
+        dlg._bragg_snap_cb.setChecked(False)
+        qapp.processEvents()
+
+        event = _MockFftClick(dlg._ax_fft, xdata=0.1, ydata=0.0)
+        dlg._on_press(event)
+        assert dlg._calib_picks == []
+
+        dlg._bragg_pick_cb.setChecked(True)
+        dlg._on_press(event)
+        assert len(dlg._calib_picks) == 1
+    finally:
+        dlg.close()
+        dlg.deleteLater()
+        qapp.processEvents()
+
+
 # ── _interval_with_min_span ──────────────────────────────────────────────────
 
 class TestIntervalWithMinSpan:

@@ -11,6 +11,7 @@ import pytest
 
 from probeflow.processing.filters import (
     find_bragg_peaks_in_annulus,
+    find_bragg_peaks_in_q_annulus,
     fit_axis_aligned_ellipse,
     piezo_correction,
 )
@@ -26,6 +27,19 @@ def _make_synthetic_fft(N: int, peaks_xy: list[tuple[float, float]], sigma: floa
     yy, xx = np.mgrid[:N, :N]
     for px, py in peaks_xy:
         mag += np.exp(-((xx - (cx + px)) ** 2 + (yy - (cy + py)) ** 2) / (2 * sigma ** 2))
+    return mag
+
+
+def _make_synthetic_fft_q(
+    qx: np.ndarray,
+    qy: np.ndarray,
+    peaks_q: list[tuple[float, float]],
+    sigma_q: float = 0.015,
+) -> np.ndarray:
+    qxx, qyy = np.meshgrid(qx, qy)
+    mag = np.zeros((qy.size, qx.size), dtype=np.float64)
+    for px, py in peaks_q:
+        mag += np.exp(-((qxx - px) ** 2 + (qyy - py) ** 2) / (2 * sigma_q ** 2))
     return mag
 
 
@@ -98,6 +112,68 @@ class TestFindBraggPeaksInAnnulus:
     def test_non_2d_input_raises(self):
         with pytest.raises(ValueError):
             find_bragg_peaks_in_annulus(np.ones(64), r_predicted_px=10.0)
+
+
+class TestFindBraggPeaksInQAnnulus:
+    def test_hex_six_peaks_at_known_q_radius(self):
+        qx = np.linspace(-1.0, 1.0, 257)
+        qy = np.linspace(-1.0, 1.0, 257)
+        q = 0.35
+        expected = _hex_peaks(q)
+        fft_mag = _make_synthetic_fft_q(qx, qy, expected)
+        peaks = find_bragg_peaks_in_q_annulus(fft_mag, qx, qy, q, expected_count=6)
+        assert len(peaks) == 6
+        for px, py in peaks:
+            assert min(math.hypot(px - ex, py - ey) for ex, ey in expected) < 0.02
+
+    def test_square_four_peaks_at_known_q_radius(self):
+        qx = np.linspace(-1.0, 1.0, 257)
+        qy = np.linspace(-1.0, 1.0, 257)
+        q = 0.30
+        expected = _square_peaks(q)
+        fft_mag = _make_synthetic_fft_q(qx, qy, expected)
+        peaks = find_bragg_peaks_in_q_annulus(fft_mag, qx, qy, q, expected_count=4)
+        assert len(peaks) == 4
+        for px, py in peaks:
+            assert min(math.hypot(px - ex, py - ey) for ex, ey in expected) < 0.02
+
+    def test_vertical_origin_line_is_not_selected_as_peaks(self):
+        qx = np.linspace(-1.0, 1.0, 257)
+        qy = np.linspace(-1.0, 1.0, 257)
+        q = 0.35
+        expected = _hex_peaks(q)
+        qxx, _qyy = np.meshgrid(qx, qy)
+        fft_mag = _make_synthetic_fft_q(qx, qy, expected)
+        fft_mag += 3.0 * np.exp(-(qxx ** 2) / (2 * 0.004 ** 2))
+
+        peaks = find_bragg_peaks_in_q_annulus(fft_mag, qx, qy, q, expected_count=6)
+
+        assert len(peaks) == 6
+        assert not any(abs(px) < 0.02 and abs(abs(py) - q) < 0.04 for px, py in peaks)
+
+    def test_contaminated_true_sector_returns_fewer_not_false_line_peaks(self):
+        qx = np.linspace(-1.0, 1.0, 257)
+        qy = np.linspace(-1.0, 1.0, 257)
+        q = 0.30
+        qxx, _qyy = np.meshgrid(qx, qy)
+        fft_mag = _make_synthetic_fft_q(qx, qy, _square_peaks(q))
+        fft_mag += 3.0 * np.exp(-(qxx ** 2) / (2 * 0.004 ** 2))
+
+        peaks = find_bragg_peaks_in_q_annulus(fft_mag, qx, qy, q, expected_count=4)
+
+        assert 0 < len(peaks) < 4
+        assert not any(abs(px) < 0.02 for px, _py in peaks)
+
+    def test_non_square_q_axes_detect_physical_circle(self):
+        qx = np.linspace(-1.0, 1.0, 257)
+        qy = np.linspace(-2.0, 2.0, 257)
+        q = 0.45
+        expected = _hex_peaks(q)
+        fft_mag = _make_synthetic_fft_q(qx, qy, expected, sigma_q=0.018)
+        peaks = find_bragg_peaks_in_q_annulus(fft_mag, qx, qy, q, expected_count=6)
+        assert len(peaks) == 6
+        for px, py in peaks:
+            assert math.hypot(px, py) == pytest.approx(q, abs=0.03)
 
 
 # ── fit_axis_aligned_ellipse ───────────────────────────────────────────────────
