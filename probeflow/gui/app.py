@@ -123,6 +123,11 @@ class ProbeFlowWindow(QMainWindow):
         # image based on coordinate guesses alone). Keys are spec stems,
         # values are image stems within the currently loaded folder.
         self._spec_image_map: dict[str, str] = {}
+        # Non-modal viewer dialogs are shown with show() rather than exec() so
+        # that the browse window remains interactive while scans are open.  We
+        # keep explicit Python references here so the dialogs are not
+        # garbage-collected while open (show() does not block like exec()).
+        self._open_viewers: list = []
 
         self._build_ui()
         self._apply_theme()
@@ -1146,9 +1151,9 @@ class ProbeFlowWindow(QMainWindow):
 
     def _open_viewer(self, entry):
         t = THEMES["dark" if self._dark else "light"]
-        if isinstance(entry, VertFile):
+        is_spec = isinstance(entry, VertFile)
+        if is_spec:
             dlg = SpecViewerDialog(entry, t, self)
-            dlg.exec()
         else:
             cmap_key, clip, proc = self._grid.get_card_state(entry.stem)
             sxm_entries = [e for e in self._grid.get_entries() if isinstance(e, SxmFile)]
@@ -1158,10 +1163,21 @@ class ProbeFlowWindow(QMainWindow):
                                     processing=proc,
                                     spec_image_map=self._spec_image_map,
                                     initial_plane_idx=initial_plane_idx)
-            dlg.exec()
-            # Handle "Send to …" actions requested from inside the viewer.
-            if dlg._deferred.is_pending():
-                self._load_from_viewer(dlg, dlg._deferred.action)
+        # Use show() instead of exec() so the dialog is non-modal: the browse
+        # window stays interactive, and all child windows (FFT viewer, Reciprocal
+        # Grid panel, etc.) get normal macOS window controls (minimize, resize).
+        # Keep a Python reference so the dialog is not garbage-collected while open.
+        self._open_viewers.append(dlg)
+        def _on_closed(_result, d=dlg, spec=is_spec):
+            try:
+                self._open_viewers.remove(d)
+            except ValueError:
+                pass
+            # Handle "Send to …" actions requested from inside the image viewer.
+            if not spec and d._deferred.is_pending():
+                self._load_from_viewer(d, d._deferred.action)
+        dlg.finished.connect(_on_closed)
+        dlg.show()
 
     def _load_from_viewer(self, dlg, action: str):
         """Load the processed array from a closed ImageViewerDialog into Features or TV."""
