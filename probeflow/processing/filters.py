@@ -474,3 +474,73 @@ def fft_magnitude(
     qy = np.fft.fftshift(np.fft.fftfreq(Ny, d=dy_nm))
 
     return mag.astype(np.float64), qx, qy
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 17.  predicted_bragg_radius  — predicted Bragg peak radius for lattice overlay
+# ═════════════════════════════════════════════════════════════════════════════
+
+def predicted_bragg_radius(
+    a_real: float,
+    symmetry: str,
+    scan_size_m: float,
+    n_pixels: int,
+    order: int = 1,
+) -> float:
+    """Return the predicted Bragg peak radius in FFT pixel units, measured
+    from the DC bin at the centre.
+
+    The function is unit-agnostic above metres: ``a_real`` and ``scan_size_m``
+    must be in the **same** length unit (typically metres). The GUI layer is
+    responsible for converting user-facing units (Å, nm) before calling this.
+
+    Parameters
+    ----------
+    a_real
+        Real-space lattice constant. For a hexagonal lattice this is the
+        nearest-neighbour distance. Must be positive.
+    symmetry
+        ``"square"`` or ``"hex"`` (hexagonal/triangular).
+    scan_size_m
+        Physical scan size in the same unit as ``a_real``. Assumes a square
+        scan; for non-square scans the caller should pass the geometric mean.
+    n_pixels
+        Image side in pixels (assumes a square image). Present in the
+        signature for interface completeness; not used in the current formulas.
+    order
+        Bragg order: 1 for first-order peaks, 2 for second-order.
+
+    Returns
+    -------
+    float
+        Radius in FFT pixel units from the DC bin at the image centre.
+
+    Raises
+    ------
+    ValueError
+        On any invalid input.
+
+    Notes
+    -----
+    Square lattice, order 1:  r = scan_size_m / a_real
+    Square lattice, order 2:  r = scan_size_m / a_real * sqrt(2)   (diagonal)
+    Hex lattice, order 1:     r = 2 * scan_size_m / (a_real * sqrt(3))
+    Hex lattice, order 2:     r = 2 * scan_size_m / a_real          (= order_1 * sqrt(3))
+    """
+    if a_real <= 0:
+        raise ValueError(f"a_real must be > 0, got {a_real!r}")
+    if symmetry not in {"square", "hex"}:
+        raise ValueError(f"symmetry must be 'square' or 'hex', got {symmetry!r}")
+    if scan_size_m <= 0:
+        raise ValueError(f"scan_size_m must be > 0, got {scan_size_m!r}")
+    if n_pixels <= 0:
+        raise ValueError(f"n_pixels must be > 0, got {n_pixels!r}")
+    if order not in {1, 2}:
+        raise ValueError(f"order must be 1 or 2, got {order!r}")
+
+    if symmetry == "square":
+        r = scan_size_m / a_real * (1.0 if order == 1 else math.sqrt(2.0))
+    else:  # hex
+        r = (2.0 * scan_size_m / (a_real * math.sqrt(3.0))
+             * (1.0 if order == 1 else math.sqrt(3.0)))
+    return r

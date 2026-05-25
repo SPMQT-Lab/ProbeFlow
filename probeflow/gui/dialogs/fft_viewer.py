@@ -10,8 +10,8 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QApplication,
-    QComboBox, QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel,
-    QPushButton, QTabWidget, QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFileDialog, QFrame,
+    QHBoxLayout, QLabel, QPushButton, QTabWidget, QVBoxLayout, QWidget,
 )
 
 
@@ -58,6 +58,7 @@ class FFTViewerDialog(QDialog):
         self._fft_lattice_dock = None
         self._fft_cmap = "gray"
         self._cmap_options = ["gray", "gray_r", "inferno", "hot", "viridis", "plasma", "turbo"]
+        self._bragg_artists: list = []
 
         self._build()
         self._recompute_fft()
@@ -209,6 +210,69 @@ class FFTViewerDialog(QDialog):
         rad_lay.addWidget(self._radial_canvas)
 
         self._tab_widget.addTab(radial_tab, "Radial profile")
+
+        # ── Predicted Lattice tab ─────────────────────────────────────────────
+        lat_tab = QWidget()
+        lat_lay = QVBoxLayout(lat_tab)
+        lat_lay.setSpacing(4)
+        lat_lay.setContentsMargins(6, 6, 6, 4)
+
+        enable_row = QHBoxLayout()
+        self._bragg_enable_cb = QCheckBox("Show predicted Bragg ring")
+        self._bragg_enable_cb.setFont(QFont("Helvetica", 9))
+        self._bragg_enable_cb.toggled.connect(self._on_bragg_changed)
+        enable_row.addWidget(self._bragg_enable_cb)
+        enable_row.addStretch(1)
+        lat_lay.addLayout(enable_row)
+
+        sym_row = QHBoxLayout()
+        sym_lbl = QLabel("Symmetry:")
+        sym_lbl.setFont(QFont("Helvetica", 9))
+        sym_row.addWidget(sym_lbl)
+        self._bragg_sym_combo = QComboBox()
+        self._bragg_sym_combo.addItems(["Square", "Hexagonal"])
+        self._bragg_sym_combo.setFont(QFont("Helvetica", 9))
+        self._bragg_sym_combo.setFixedHeight(24)
+        self._bragg_sym_combo.currentIndexChanged.connect(self._on_bragg_changed)
+        sym_row.addWidget(self._bragg_sym_combo)
+        sym_row.addStretch(1)
+        lat_lay.addLayout(sym_row)
+
+        a_row = QHBoxLayout()
+        a_lbl = QLabel("Lattice a:")
+        a_lbl.setFont(QFont("Helvetica", 9))
+        a_row.addWidget(a_lbl)
+        self._bragg_a_spin = QDoubleSpinBox()
+        self._bragg_a_spin.setRange(0.001, 999.0)
+        self._bragg_a_spin.setValue(2.46)
+        self._bragg_a_spin.setDecimals(3)
+        self._bragg_a_spin.setFont(QFont("Helvetica", 9))
+        self._bragg_a_spin.setFixedHeight(24)
+        self._bragg_a_spin.valueChanged.connect(self._on_bragg_changed)
+        a_row.addWidget(self._bragg_a_spin)
+        self._bragg_unit_combo = QComboBox()
+        self._bragg_unit_combo.addItems(["Å", "nm"])
+        self._bragg_unit_combo.setFont(QFont("Helvetica", 9))
+        self._bragg_unit_combo.setFixedHeight(24)
+        self._bragg_unit_combo.currentIndexChanged.connect(self._on_bragg_changed)
+        a_row.addWidget(self._bragg_unit_combo)
+        a_row.addStretch(1)
+        lat_lay.addLayout(a_row)
+
+        order2_row = QHBoxLayout()
+        self._bragg_order2_cb = QCheckBox("Show 2nd-order ring")
+        self._bragg_order2_cb.setFont(QFont("Helvetica", 9))
+        self._bragg_order2_cb.toggled.connect(self._on_bragg_changed)
+        order2_row.addWidget(self._bragg_order2_cb)
+        order2_row.addStretch(1)
+        lat_lay.addLayout(order2_row)
+
+        self._bragg_radius_lbl = QLabel("Radius: —")
+        self._bragg_radius_lbl.setFont(QFont("Courier", 9))
+        lat_lay.addWidget(self._bragg_radius_lbl)
+
+        lat_lay.addStretch(1)
+        self._tab_widget.addTab(lat_tab, "Predicted Lattice")
 
         # wrap tab_widget in a row with spacers so its width tracks the FFT axes area
         self._tab_left_spacer = QWidget()
@@ -417,6 +481,8 @@ class FFTViewerDialog(QDialog):
             spine.set_color(fg)
         ax.axhline(0, color=fg, lw=0.4, alpha=0.35)
         ax.axvline(0, color=fg, lw=0.4, alpha=0.35)
+        self._bragg_artists = []
+        self._draw_bragg_overlay()
         self._update_histogram(disp)
         self._update_radial_profile(disp)
         self._canvas_fft.draw_idle()
@@ -804,3 +870,85 @@ class FFTViewerDialog(QDialog):
 
         dock.destroyed.connect(_clear_dock_ref)
         dock.show()
+
+    # ── Bragg ring overlay ─────────────────────────────────────────────────────
+
+    def _on_bragg_changed(self):
+        """Fast-path update: remove old ring artists, draw new ones, redraw."""
+        for art in self._bragg_artists:
+            try:
+                art.remove()
+            except ValueError:
+                pass
+        self._bragg_artists = []
+        self._draw_bragg_overlay()
+        self._canvas_fft.draw_idle()
+
+    def _draw_bragg_overlay(self):
+        """Add predicted Bragg ring circle(s) to the FFT axes if enabled.
+
+        Called both from ``_on_bragg_changed`` (fast path) and at the end of
+        ``_redraw_fft_panel`` (after ``ax.cla()`` wipes the canvas).
+        """
+        if not getattr(self, "_bragg_enable_cb", None):
+            return
+        if not self._bragg_enable_cb.isChecked():
+            self._bragg_radius_lbl.setText("Radius: —")
+            return
+        if self._qx is None or self._qy is None:
+            return
+
+        # ── scan metadata ────────────────────────────────────────────────────
+        Ny, Nx = self._arr.shape
+        try:
+            w_m = float(self._scan_range_m[0])
+            h_m = float(self._scan_range_m[1])
+        except Exception:
+            return
+
+        is_nonsquare = abs(w_m - h_m) / max(w_m, h_m, 1e-30) > 0.01
+        scan_m = (w_m * h_m) ** 0.5   # geometric mean for non-square scans
+        n_px = max(Nx, Ny)
+
+        # ── user inputs ──────────────────────────────────────────────────────
+        symmetry = "square" if self._bragg_sym_combo.currentIndex() == 0 else "hex"
+        a_val = self._bragg_a_spin.value()
+        unit = self._bragg_unit_combo.currentText()
+        a_m = a_val * 1e-10 if unit == "Å" else a_val * 1e-9
+
+        # ── compute radii in nm⁻¹ ────────────────────────────────────────────
+        from probeflow.processing.filters import predicted_bragg_radius
+        try:
+            r_px_1 = predicted_bragg_radius(a_m, symmetry, scan_m, n_px, order=1)
+        except ValueError:
+            self._bragg_radius_lbl.setText("Radius: invalid input")
+            return
+
+        # Convert FFT pixel units → nm⁻¹:  q = r_pixels / (scan_m * 1e9)
+        q1 = r_px_1 / (scan_m * 1e9)
+
+        # ── draw first-order ring ─────────────────────────────────────────────
+        theta = np.linspace(0.0, 2.0 * np.pi, 360)
+        art1, = self._ax_fft.plot(
+            q1 * np.cos(theta), q1 * np.sin(theta),
+            color="#f38ba8", lw=1.2, linestyle="--", alpha=0.9, zorder=7,
+        )
+        self._bragg_artists.append(art1)
+
+        label_lines = [f"1st:  {q1:.4f} nm⁻¹  (d = {1.0/q1*10:.3f} Å)"]
+
+        # ── optional second-order ring ────────────────────────────────────────
+        if self._bragg_order2_cb.isChecked():
+            r_px_2 = predicted_bragg_radius(a_m, symmetry, scan_m, n_px, order=2)
+            q2 = r_px_2 / (scan_m * 1e9)
+            art2, = self._ax_fft.plot(
+                q2 * np.cos(theta), q2 * np.sin(theta),
+                color="#fab387", lw=1.0, linestyle=":", alpha=0.8, zorder=7,
+            )
+            self._bragg_artists.append(art2)
+            label_lines.append(f"2nd:  {q2:.4f} nm⁻¹  (d = {1.0/q2*10:.3f} Å)")
+
+        if is_nonsquare:
+            label_lines.append("(non-square scan: geom. mean)")
+
+        self._bragg_radius_lbl.setText("\n".join(label_lines))
