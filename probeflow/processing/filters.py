@@ -9,6 +9,7 @@ import numpy as np
 from scipy.ndimage import (
     gaussian_filter,
     laplace as _nd_laplace,
+    maximum_filter,
 )
 
 from ._image_utils import (
@@ -544,3 +545,229 @@ def predicted_bragg_radius(
         r = (2.0 * scan_size_m / (a_real * math.sqrt(3.0))
              * (1.0 if order == 1 else math.sqrt(3.0)))
     return r
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 18.  find_bragg_peaks_in_annulus  — auto-detect Bragg peaks in FFT
+# ═════════════════════════════════════════════════════════════════════════════
+
+def find_bragg_peaks_in_annulus(
+    fft_magnitude: np.ndarray,
+    r_predicted_px: float,
+    width_frac: float = 0.20,
+    expected_count: int = 6,
+    min_separation_frac: float = 0.30,
+) -> np.ndarray:
+    """Find local-maximum peaks inside an annulus around a predicted Bragg radius.
+
+    Parameters
+    ----------
+    fft_magnitude
+        2-D FFT magnitude array with DC at the centre (after fftshift). Not
+        log-scaled; the raw ``|F|`` values are expected.
+    r_predicted_px
+        Predicted Bragg peak radius in pixel units, measured from the array
+        centre.
+    width_frac
+        Half-width of the search annulus as a fraction of ``r_predicted_px``.
+        The annulus spans ``r_predicted_px * (1 - width_frac)`` to
+        ``r_predicted_px * (1 + width_frac)``.
+    expected_count
+        How many peaks to try to return.  Typically 4 (square) or 6 (hex).
+    min_separation_frac
+        Minimum angular separation between kept peaks, expressed as a fraction
+        of ``2π / expected_count``.  Prevents returning two picks from the
+        same broadened peak.
+
+    Returns
+    -------
+    np.ndarray, shape (M, 2)
+        (x, y) pixel offsets from the array centre, ordered brightest-first.
+        ``M ≤ expected_count``.  Returns an empty array of shape ``(0, 2)``
+        if no local maxima are found.
+    """
+    mag = np.asarray(fft_magnitude, dtype=np.float64)
+    if mag.ndim != 2:
+        raise ValueError("fft_magnitude must be a 2-D array")
+    if r_predicted_px <= 0:
+        return np.empty((0, 2), dtype=np.float64)
+
+    Ny, Nx = mag.shape
+    cy, cx = Ny / 2.0, Nx / 2.0
+
+    yy, xx = np.ogrid[:Ny, :Nx]
+    r = np.sqrt((xx - cx) ** 2 + (yy - cy) ** 2)
+
+    r_in  = max(0.0, r_predicted_px * (1.0 - width_frac))
+    r_out = r_predicted_px * (1.0 + width_frac)
+    annulus_mask = (r >= r_in) & (r <= r_out)
+
+    # Suppress local noise: footprint ~ half the annulus thickness
+    footprint_size = max(3, int(r_predicted_px * width_frac))
+    local_max_img = maximum_filter(mag, size=footprint_size)
+    candidate_mask = annulus_mask & (mag == local_max_img)
+
+    cys, cxs = np.where(candidate_mask)
+    if cys.size == 0:
+        return np.empty((0, 2), dtype=np.float64)
+
+    # Sort candidates by magnitude (brightest first)
+    vals = mag[cys, cxs]
+    order = np.argsort(vals)[::-1]
+    cys = cys[order]
+    cxs = cxs[order]
+
+    # Angular separation filter
+    min_angle = min_separation_frac * (2.0 * math.pi / max(1, expected_count))
+    kept_angles: list[float] = []
+    results: list[tuple[float, float]] = []
+
+    for iy, ix in zip(cys, cxs):
+        angle = math.atan2(float(iy) - cy, float(ix) - cx)
+        ok = True
+        for prev in kept_angles:
+            diff = abs(angle - prev)
+            if diff > math.pi:
+                diff = 2.0 * math.pi - diff
+            if diff < min_angle:
+                ok = False
+                break
+        if ok:
+            results.append((float(ix) - cx, float(iy) - cy))
+            kept_angles.append(angle)
+            if len(results) >= expected_count:
+                break
+
+    if not results:
+        return np.empty((0, 2), dtype=np.float64)
+    return np.array(results, dtype=np.float64)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 19.  fit_axis_aligned_ellipse  — least-squares ellipse from Bragg picks
+# ═════════════════════════════════════════════════════════════════════════════
+
+def fit_axis_aligned_ellipse(
+    points: np.ndarray,
+) -> tuple[float, float, float]:
+    """Fit an axis-aligned ellipse (x/r_x)² + (y/r_y)² = 1 to the given points.
+
+    Uses linear least squares on the substituted variables ``u = 1/r_x²`` and
+    ``v = 1/r_y²``, so the design matrix is ``[x², y²]`` and the right-hand
+    side is the constant vector ``1``.
+
+    Parameters
+    ----------
+    points
+        Array of shape ``(M, 2)`` containing ``(x, y)`` coordinates measured
+        from the ellipse centre.  Must contain at least three points.
+
+    Returns
+    -------
+    r_x : float
+        Fitted semi-axis along x, in the same units as the input coordinates.
+    r_y : float
+        Fitted semi-axis along y.
+    rms_residual : float
+        RMS distance (in input units) between each point and its closest point
+        on the fitted ellipse, computed radially along the direction of each
+        point from the origin.
+
+    Raises
+    ------
+    ValueError
+        If fewer than three points are supplied, or if the fit is degenerate
+        (one of the estimated ``1/r²`` values is ≤ 0).
+    """
+    pts = np.asarray(points, dtype=np.float64)
+    if pts.ndim != 2 or pts.shape[1] != 2:
+        raise ValueError(
+            f"points must have shape (M, 2), got {pts.shape}"
+        )
+    M = pts.shape[0]
+    if M < 3:
+        raise ValueError(f"Need at least 3 points to fit an ellipse, got {M}")
+
+    x = pts[:, 0]
+    y = pts[:, 1]
+
+    A = np.column_stack([x ** 2, y ** 2])
+    b = np.ones(M, dtype=np.float64)
+    (u, v), *_ = np.linalg.lstsq(A, b, rcond=None)
+
+    if u <= 0:
+        raise ValueError(
+            f"Degenerate fit: 1/r_x² = {u:.6g} ≤ 0; "
+            "check that picks are not all on the y-axis"
+        )
+    if v <= 0:
+        raise ValueError(
+            f"Degenerate fit: 1/r_y² = {v:.6g} ≤ 0; "
+            "check that picks are not all on the x-axis"
+        )
+
+    r_x = 1.0 / math.sqrt(u)
+    r_y = 1.0 / math.sqrt(v)
+
+    # RMS residual: radial distance between each observed point and the
+    # ellipse evaluated at the same angle.
+    angles = np.arctan2(y, x)
+    r_fit = 1.0 / np.sqrt(u * np.cos(angles) ** 2 + v * np.sin(angles) ** 2)
+    r_obs = np.hypot(x, y)
+    rms = float(np.sqrt(np.mean((r_obs - r_fit) ** 2)))
+
+    return r_x, r_y, rms
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 20.  piezo_correction  — convert observed/predicted radii to new piezo values
+# ═════════════════════════════════════════════════════════════════════════════
+
+def piezo_correction(
+    r_x_obs: float,
+    r_y_obs: float,
+    r_predicted: float,
+    c_x_current: float,
+    c_y_current: float,
+) -> tuple[float, float]:
+    """Compute corrected piezo constants from observed Bragg semi-axes.
+
+    The function is unit-agnostic: ``r_x_obs``, ``r_y_obs``, and
+    ``r_predicted`` must be in the same unit (e.g., all in nm⁻¹ or all in
+    FFT pixel offsets); ``c_x_current`` and ``c_y_current`` must be in the
+    same unit as each other (e.g., both in Å/V).
+
+    Parameters
+    ----------
+    r_x_obs
+        Observed Bragg semi-axis along x from the ellipse fit.
+    r_y_obs
+        Observed Bragg semi-axis along y.
+    r_predicted
+        Predicted isotropic Bragg radius (same unit as the observed axes).
+    c_x_current
+        Current piezo constant for the x axis.
+    c_y_current
+        Current piezo constant for the y axis.
+
+    Returns
+    -------
+    c_x_new, c_y_new : float, float
+        Recommended corrected piezo constants.
+
+    Raises
+    ------
+    ValueError
+        If any input is not strictly positive.
+    """
+    for name, val in [
+        ("r_x_obs",     r_x_obs),
+        ("r_y_obs",     r_y_obs),
+        ("r_predicted", r_predicted),
+        ("c_x_current", c_x_current),
+        ("c_y_current", c_y_current),
+    ]:
+        if not (val > 0):
+            raise ValueError(f"{name} must be > 0, got {val!r}")
+
+    return c_x_current * (r_x_obs / r_predicted), c_y_current * (r_y_obs / r_predicted)

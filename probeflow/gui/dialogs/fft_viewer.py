@@ -11,7 +11,8 @@ from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFileDialog, QFrame,
-    QHBoxLayout, QLabel, QPushButton, QTabWidget, QVBoxLayout, QWidget,
+    QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit, QPushButton,
+    QTabWidget, QVBoxLayout, QWidget,
 )
 
 
@@ -59,6 +60,7 @@ class FFTViewerDialog(QDialog):
         self._fft_cmap = "gray"
         self._cmap_options = ["gray", "gray_r", "inferno", "hot", "viridis", "plasma", "turbo"]
         self._bragg_artists: list = []
+        self._calib_picks: list = []   # (qx_nm, qy_nm) in nm⁻¹
 
         self._build()
         self._recompute_fft()
@@ -163,7 +165,7 @@ class FFTViewerDialog(QDialog):
         right_col.addWidget(self._canvas_fft, 1)
 
         self._tab_widget = QTabWidget()
-        self._tab_widget.setFixedHeight(250)
+        self._tab_widget.setFixedHeight(340)
         self._tab_widget.setFont(QFont("Helvetica", 9))
 
         # ── Intensity tab ─────────────────────────────────────────────────────
@@ -270,6 +272,85 @@ class FFTViewerDialog(QDialog):
         self._bragg_radius_lbl = QLabel("Radius: —")
         self._bragg_radius_lbl.setFont(QFont("Courier", 9))
         lat_lay.addWidget(self._bragg_radius_lbl)
+
+        # ── calibration section ──────────────────────────────────────────────
+        sep = QFrame()
+        sep.setFrameShape(QFrame.HLine)
+        sep.setFrameShadow(QFrame.Sunken)
+        lat_lay.addWidget(sep)
+
+        det_row = QHBoxLayout()
+        self._bragg_detect_btn = QPushButton("Detect peaks")
+        self._bragg_detect_btn.setFont(QFont("Helvetica", 9))
+        self._bragg_detect_btn.setFixedHeight(24)
+        self._bragg_detect_btn.setToolTip(
+            "Auto-detect first-order Bragg peaks inside the predicted annulus"
+        )
+        self._bragg_detect_btn.clicked.connect(self._detect_bragg_peaks)
+        det_row.addWidget(self._bragg_detect_btn)
+        self._bragg_clear_btn = QPushButton("Clear")
+        self._bragg_clear_btn.setFont(QFont("Helvetica", 9))
+        self._bragg_clear_btn.setFixedHeight(24)
+        self._bragg_clear_btn.clicked.connect(self._clear_bragg_picks)
+        det_row.addWidget(self._bragg_clear_btn)
+        det_row.addStretch(1)
+        lat_lay.addLayout(det_row)
+
+        self._bragg_picks_lbl = QLabel("Picks: 0  (click FFT to add/remove)")
+        self._bragg_picks_lbl.setFont(QFont("Helvetica", 9))
+        lat_lay.addWidget(self._bragg_picks_lbl)
+
+        piezo_row = QHBoxLayout()
+        px_lbl = QLabel("Piezo X:")
+        px_lbl.setFont(QFont("Helvetica", 9))
+        piezo_row.addWidget(px_lbl)
+        self._bragg_cx_edit = QLineEdit("96.52")
+        self._bragg_cx_edit.setFont(QFont("Helvetica", 9))
+        self._bragg_cx_edit.setFixedHeight(24)
+        self._bragg_cx_edit.setFixedWidth(72)
+        piezo_row.addWidget(self._bragg_cx_edit)
+        piezo_row.addSpacing(8)
+        py_lbl = QLabel("Piezo Y:")
+        py_lbl.setFont(QFont("Helvetica", 9))
+        piezo_row.addWidget(py_lbl)
+        self._bragg_cy_edit = QLineEdit("96.52")
+        self._bragg_cy_edit.setFont(QFont("Helvetica", 9))
+        self._bragg_cy_edit.setFixedHeight(24)
+        self._bragg_cy_edit.setFixedWidth(72)
+        piezo_row.addWidget(self._bragg_cy_edit)
+        piezo_row.addStretch(1)
+        lat_lay.addLayout(piezo_row)
+
+        compute_row = QHBoxLayout()
+        self._bragg_compute_btn = QPushButton("Compute correction")
+        self._bragg_compute_btn.setFont(QFont("Helvetica", 9))
+        self._bragg_compute_btn.setFixedHeight(24)
+        self._bragg_compute_btn.setEnabled(False)
+        self._bragg_compute_btn.setToolTip("Need at least 3 picks")
+        self._bragg_compute_btn.clicked.connect(self._compute_bragg_correction)
+        compute_row.addWidget(self._bragg_compute_btn)
+        compute_row.addStretch(1)
+        lat_lay.addLayout(compute_row)
+
+        self._bragg_results_txt = QPlainTextEdit()
+        self._bragg_results_txt.setReadOnly(True)
+        self._bragg_results_txt.setFont(QFont("Courier", 9))
+        self._bragg_results_txt.setFixedHeight(88)
+        self._bragg_results_txt.setPlaceholderText(
+            "Results will appear here after computing."
+        )
+        lat_lay.addWidget(self._bragg_results_txt)
+
+        copy_row = QHBoxLayout()
+        self._bragg_copy_btn = QPushButton("Copy")
+        self._bragg_copy_btn.setFont(QFont("Helvetica", 9))
+        self._bragg_copy_btn.setFixedHeight(22)
+        self._bragg_copy_btn.setMinimumWidth(56)
+        self._bragg_copy_btn.setToolTip("Copy results to clipboard")
+        self._bragg_copy_btn.clicked.connect(self._copy_bragg_results)
+        copy_row.addWidget(self._bragg_copy_btn)
+        copy_row.addStretch(1)
+        lat_lay.addLayout(copy_row)
 
         lat_lay.addStretch(1)
         self._tab_widget.addTab(lat_tab, "Predicted Lattice")
@@ -604,12 +685,15 @@ class FFTViewerDialog(QDialog):
             and event.button == 1
             and event.xdata is not None
             and event.ydata is not None
-            and not self._fft_lattice_overlay_wants_event(event)
         ):
-            self._pan_anchor = (
-                event.xdata, event.ydata,
-                self._fft_xlim, self._fft_ylim,
-            )
+            if self._bragg_pick_mode_active():
+                self._on_bragg_pick_click(event)
+                return
+            if not self._fft_lattice_overlay_wants_event(event):
+                self._pan_anchor = (
+                    event.xdata, event.ydata,
+                    self._fft_xlim, self._fft_ylim,
+                )
 
     def _on_release(self, event):
         self._pan_anchor = None
@@ -894,8 +978,10 @@ class FFTViewerDialog(QDialog):
             return
         if not self._bragg_enable_cb.isChecked():
             self._bragg_radius_lbl.setText("Radius: —")
+            self._draw_calib_pick_artists()
             return
         if self._qx is None or self._qy is None:
+            self._draw_calib_pick_artists()
             return
 
         # ── scan metadata ────────────────────────────────────────────────────
@@ -952,3 +1038,192 @@ class FFTViewerDialog(QDialog):
             label_lines.append("(non-square scan: geom. mean)")
 
         self._bragg_radius_lbl.setText("\n".join(label_lines))
+        self._draw_calib_pick_artists()
+
+    # ── calibration helpers ────────────────────────────────────────────────────
+
+    def _bragg_pick_mode_active(self) -> bool:
+        """True when clicks on the FFT canvas should add/remove calibration picks."""
+        cb = getattr(self, "_bragg_enable_cb", None)
+        return bool(cb is not None and cb.isChecked())
+
+    def _draw_calib_pick_artists(self) -> None:
+        """Draw calibration pick dots on the FFT axes (always, if any picks exist)."""
+        for qx, qy in self._calib_picks:
+            art, = self._ax_fft.plot(
+                qx, qy, "o",
+                color="#a6e3a1", markerfacecolor="none",
+                markersize=9, markeredgewidth=1.8, zorder=8,
+            )
+            self._bragg_artists.append(art)
+
+    def _update_calib_ui(self) -> None:
+        """Refresh the picks label and the compute-button enabled state."""
+        n = len(self._calib_picks)
+        self._bragg_picks_lbl.setText(
+            f"Picks: {n}  (click FFT to add/remove)"
+        )
+        self._bragg_compute_btn.setEnabled(n >= 3)
+        self._bragg_compute_btn.setToolTip(
+            "Fit ellipse and compute piezo correction"
+            if n >= 3
+            else f"Need at least 3 picks ({n} so far)"
+        )
+
+    def _on_bragg_pick_click(self, event) -> None:
+        """Add or remove a calibration pick at the clicked FFT position."""
+        qx_click, qy_click = float(event.xdata), float(event.ydata)
+
+        # Check if clicking near an existing pick (10 screen pixels = hit)
+        click_disp = self._ax_fft.transData.transform((qx_click, qy_click))
+        for i, (qx, qy) in enumerate(self._calib_picks):
+            pt_disp = self._ax_fft.transData.transform((qx, qy))
+            dist = float(np.hypot(click_disp[0] - pt_disp[0],
+                                  click_disp[1] - pt_disp[1]))
+            if dist < 10.0:
+                self._calib_picks.pop(i)
+                self._update_calib_ui()
+                self._on_bragg_changed()
+                return
+
+        # No existing pick nearby — add a new one
+        self._calib_picks.append((qx_click, qy_click))
+        self._update_calib_ui()
+        self._on_bragg_changed()
+
+    def _detect_bragg_peaks(self) -> None:
+        """Auto-detect first-order Bragg peaks and store them as calibration picks."""
+        from probeflow.processing.filters import (
+            find_bragg_peaks_in_annulus,
+            predicted_bragg_radius,
+        )
+        if self._fft_mag is None or self._qx is None:
+            return
+
+        Ny, Nx = self._arr.shape
+        try:
+            w_m = float(self._scan_range_m[0])
+            h_m = float(self._scan_range_m[1])
+        except Exception:
+            return
+        scan_m = (w_m * h_m) ** 0.5
+        n_px = max(Nx, Ny)
+
+        symmetry = "square" if self._bragg_sym_combo.currentIndex() == 0 else "hex"
+        a_val = self._bragg_a_spin.value()
+        unit = self._bragg_unit_combo.currentText()
+        a_m = a_val * 1e-10 if unit == "Å" else a_val * 1e-9
+
+        try:
+            r_predicted_px = predicted_bragg_radius(a_m, symmetry, scan_m, n_px, order=1)
+        except ValueError:
+            return
+
+        expected = 4 if symmetry == "square" else 6
+        peaks_px = find_bragg_peaks_in_annulus(
+            self._fft_mag, r_predicted_px, expected_count=expected,
+        )
+
+        if peaks_px.size == 0:
+            self._bragg_picks_lbl.setText("Peaks: none found in annulus")
+            return
+
+        # Convert (x_px, y_px) offsets from centre → nm⁻¹
+        scan_w_nm = w_m * 1e9
+        scan_h_nm = h_m * 1e9
+        self._calib_picks = [
+            (x_px / scan_w_nm, y_px / scan_h_nm)
+            for x_px, y_px in peaks_px
+        ]
+        self._update_calib_ui()
+        self._on_bragg_changed()
+
+    def _clear_bragg_picks(self) -> None:
+        self._calib_picks = []
+        self._update_calib_ui()
+        self._on_bragg_changed()
+
+    def _compute_bragg_correction(self) -> None:
+        """Fit an axis-aligned ellipse to the picks and report piezo corrections."""
+        from probeflow.processing.filters import (
+            fit_axis_aligned_ellipse,
+            piezo_correction,
+            predicted_bragg_radius,
+        )
+        if len(self._calib_picks) < 3:
+            return
+
+        # ── gather scan metadata ─────────────────────────────────────────────
+        Ny, Nx = self._arr.shape
+        try:
+            w_m = float(self._scan_range_m[0])
+            h_m = float(self._scan_range_m[1])
+        except Exception:
+            self._bragg_results_txt.setPlainText("Error: scan metadata unavailable")
+            return
+        scan_m = (w_m * h_m) ** 0.5
+
+        symmetry = "square" if self._bragg_sym_combo.currentIndex() == 0 else "hex"
+        a_val = self._bragg_a_spin.value()
+        unit = self._bragg_unit_combo.currentText()
+        a_m = a_val * 1e-10 if unit == "Å" else a_val * 1e-9
+
+        try:
+            r_px_1 = predicted_bragg_radius(a_m, symmetry, scan_m, max(Nx, Ny), order=1)
+        except ValueError as exc:
+            self._bragg_results_txt.setPlainText(f"Error: {exc}")
+            return
+        r_predicted_nm = r_px_1 / (scan_m * 1e9)
+
+        # ── parse piezo values, tracking user precision ──────────────────────
+        cx_str = self._bragg_cx_edit.text().strip()
+        cy_str = self._bragg_cy_edit.text().strip()
+
+        def _count_dec(s: str) -> int:
+            return len(s.split(".")[1]) if "." in s else 0
+
+        try:
+            cx_old = float(cx_str)
+            cy_old = float(cy_str)
+        except ValueError:
+            self._bragg_results_txt.setPlainText("Error: invalid piezo values")
+            return
+        if cx_old <= 0 or cy_old <= 0:
+            self._bragg_results_txt.setPlainText("Error: piezo values must be positive")
+            return
+        cx_dec = _count_dec(cx_str)
+        cy_dec = _count_dec(cy_str)
+
+        # ── fit ellipse in nm⁻¹ ──────────────────────────────────────────────
+        pts = np.array(self._calib_picks, dtype=np.float64)
+        try:
+            r_x_nm, r_y_nm, rms_nm = fit_axis_aligned_ellipse(pts)
+        except ValueError as exc:
+            self._bragg_results_txt.setPlainText(f"Fit error: {exc}")
+            return
+
+        # ── compute corrections ──────────────────────────────────────────────
+        try:
+            cx_new, cy_new = piezo_correction(
+                r_x_nm, r_y_nm, r_predicted_nm, cx_old, cy_old,
+            )
+        except ValueError as exc:
+            self._bragg_results_txt.setPlainText(f"Correction error: {exc}")
+            return
+
+        # ── format results ───────────────────────────────────────────────────
+        lines = [
+            f"r_predicted:  {r_predicted_nm:.4f} nm⁻¹",
+            f"r_x_obs:      {r_x_nm:.4f} nm⁻¹",
+            f"r_y_obs:      {r_y_nm:.4f} nm⁻¹",
+            f"fit RMS:      {rms_nm:.4f} nm⁻¹",
+            f"",
+            f"Piezo X:  {cx_old:.{cx_dec}f}  →  {cx_new:.{cx_dec}f}",
+            f"Piezo Y:  {cy_old:.{cy_dec}f}  →  {cy_new:.{cy_dec}f}",
+        ]
+        self._bragg_results_txt.setPlainText("\n".join(lines))
+
+    def _copy_bragg_results(self) -> None:
+        text = self._bragg_results_txt.toPlainText()
+        if text:
+            QApplication.clipboard().setText(text)
