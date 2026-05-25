@@ -93,6 +93,7 @@ class SpecViewerDialog(QDialog):
 
     def __init__(self, entry: VertFile, t: dict, parent=None):
         super().__init__(parent)
+        self.setWindowFlags(self.windowFlags() | Qt.WindowMinimizeButtonHint | Qt.WindowMaximizeButtonHint)
         self.setWindowTitle(entry.stem)
         self.setMinimumSize(900, 560)
         self.resize(1100, 640)

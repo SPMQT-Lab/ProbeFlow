@@ -29,6 +29,7 @@ class FFTViewerDialog(QDialog):
         parent=None,
     ):
         super().__init__(parent)
+        self.setWindowFlags(self.windowFlags() | Qt.WindowMinimizeButtonHint | Qt.WindowMaximizeButtonHint)
         self.setWindowTitle("FFT Viewer")
         self.resize(1000, 700)
         self.setAttribute(Qt.WA_DeleteOnClose, False)

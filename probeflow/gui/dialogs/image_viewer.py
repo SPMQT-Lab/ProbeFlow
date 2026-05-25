@@ -147,6 +147,7 @@ class ImageViewerDialog(
                  spec_image_map: Optional[dict] = None,
                  initial_plane_idx: int = 0):
         super().__init__(parent)
+        self.setWindowFlags(self.windowFlags() | Qt.WindowMinimizeButtonHint | Qt.WindowMaximizeButtonHint)
         self.setWindowTitle(entry.stem)
         self.setMinimumSize(1100, 720)
         self.resize(1400, 860)
