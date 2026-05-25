@@ -947,22 +947,25 @@ class FFTViewerDialog(QDialog):
 
             overlay.set_drag_state_callback(_drag_state_cb)
 
-        # Use a standalone QDialog rather than a floating QDockWidget.
-        # Floating docks are designed for QMainWindow parents; when the parent
-        # is itself a QDialog the Z-order is platform-dependent and the panel
-        # can disappear behind the FFT viewer. A plain modeless QDialog is a
-        # proper top-level OS window: it has well-defined Z-order, appears in
-        # the Window menu via findChildren(QDialog), and lives in a separate
-        # OS window so it cannot intercept mouse events on the FFT canvas.
+        # Use a parentless QWidget (Qt.Window) rather than a QDialog.
         #
-        # Qt.Window overrides the default Qt.Dialog flag. The Qt.Dialog type
-        # tells macOS to create an NSPanel at a higher window level; that panel
-        # level blocks menu-bar interaction in parent windows and greys out menu
-        # actions. Qt.Window creates a regular NSWindow at the normal level so
-        # it participates in ordinary window stacking without blocking menus.
-        dlg = QDialog(self)
-        dlg.setWindowFlags(Qt.Window)
+        # Both QDockWidget(setFloating) and QDialog cause macOS menu-bar
+        # blocking in different ways:
+        #   - floating QDockWidget: Z-order undefined when parent is a QDialog
+        #   - QDialog (any window flags): Qt still creates an NSPanel at an
+        #     elevated window level when the class is QDialog and its parent
+        #     chain contains other dialogs; the elevated level causes macOS to
+        #     grey-out and block the application menu bar (File, View, …)
+        #
+        # A plain QWidget with no parent and Qt.Window is a fully independent
+        # NSWindow at the normal window level. It cannot block menus, cannot
+        # create modal relationships, and participates in ordinary Z-order.
+        # We tag it with _probeflow_tool_window so window_menu.py can include
+        # it in the Window menu even though it has no Qt parent.
+        dlg = QWidget(None, Qt.Window)
         dlg.setWindowTitle("Reciprocal Grid")
+        dlg.setAttribute(Qt.WA_DeleteOnClose)
+        dlg._probeflow_tool_window = True   # recognised by window_menu.py
         dlg_layout = QVBoxLayout(dlg)
         dlg_layout.setContentsMargins(0, 0, 0, 0)
         dlg_layout.setSpacing(0)
@@ -970,6 +973,10 @@ class FFTViewerDialog(QDialog):
         dlg.setMinimumWidth(240)
         dlg.adjustSize()
         self._fft_lattice_dock = dlg
+
+        # No Qt parent means Qt won't auto-close the panel when the FFT viewer
+        # closes; do it explicitly.
+        self.finished.connect(lambda _result, _d=dlg: _d.close())
 
         def _clear_dock_ref():
             if getattr(self, "_fft_lattice_dock", None) is dlg:

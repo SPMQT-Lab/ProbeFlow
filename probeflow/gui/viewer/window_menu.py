@@ -57,10 +57,14 @@ def _is_candidate_tool_window(widget: QWidget, viewer: QWidget) -> bool:
         return True
     if not _safe_visible(widget):
         return False
-    if not _is_owned_by_viewer(widget, viewer):
-        return False
     if isinstance(widget, QFileDialog | QMenu):
         return False
+    if not _is_owned_by_viewer(widget, viewer):
+        # Allow windows explicitly tagged as ProbeFlow tool panels.  These use
+        # parent=None so that macOS treats them as ordinary independent windows
+        # (no elevated NSPanel level, no menu-bar blocking), which means they
+        # are not in the Qt parent chain of any viewer.
+        return bool(getattr(widget, "_probeflow_tool_window", False))
     return isinstance(widget, QDialog | QDockWidget)
 
 
