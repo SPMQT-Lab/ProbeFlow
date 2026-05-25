@@ -95,9 +95,10 @@ def owned_viewer_windows(viewer: QWidget) -> list[ViewerWindowItem]:
         if isinstance(dock, QDockWidget):
             widgets.append(dock)
     for dialog in viewer.findChildren(QDialog):
-        dock = getattr(dialog, "_fft_lattice_dock", None)
-        if isinstance(dock, QDockWidget):
-            widgets.append(dock)
+        flt = getattr(dialog, "_fft_lattice_dock", None)
+        # Accept QDockWidget (legacy) or any QWidget subclass (e.g. QDialog).
+        if isinstance(flt, QWidget) and flt is not dialog:
+            widgets.append(flt)
 
     seen: set[int] = set()
     items: list[ViewerWindowItem] = []

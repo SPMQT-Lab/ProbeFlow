@@ -925,7 +925,6 @@ class FFTViewerDialog(QDialog):
 
     def _on_open_fft_lattice(self):
         from probeflow.gui.lattice_grid import open_fft_tool
-        from PySide6.QtWidgets import QDockWidget
         if self._qx is None or self._qy is None:
             return
         Ny, Nx = self._arr.shape[:2]
@@ -947,18 +946,30 @@ class FFTViewerDialog(QDialog):
                     cb(dragging)
 
             overlay.set_drag_state_callback(_drag_state_cb)
-        dock = QDockWidget("Reciprocal Grid", self)
-        dock.setWidget(panel)
-        dock.setFloating(True)
-        dock.setMinimumWidth(240)
-        self._fft_lattice_dock = dock
+
+        # Use a standalone QDialog rather than a floating QDockWidget.
+        # Floating docks are designed for QMainWindow parents; when the parent
+        # is itself a QDialog the Z-order is platform-dependent and the panel
+        # can disappear behind the FFT viewer. A plain modeless QDialog is a
+        # proper top-level OS window: it has well-defined Z-order, appears in
+        # the Window menu via findChildren(QDialog), and lives in a separate
+        # OS window so it cannot intercept mouse events on the FFT canvas.
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Reciprocal Grid")
+        dlg_layout = QVBoxLayout(dlg)
+        dlg_layout.setContentsMargins(0, 0, 0, 0)
+        dlg_layout.setSpacing(0)
+        dlg_layout.addWidget(panel)
+        dlg.setMinimumWidth(240)
+        dlg.adjustSize()
+        self._fft_lattice_dock = dlg
 
         def _clear_dock_ref():
-            if getattr(self, "_fft_lattice_dock", None) is dock:
+            if getattr(self, "_fft_lattice_dock", None) is dlg:
                 self._fft_lattice_dock = None
 
-        dock.destroyed.connect(_clear_dock_ref)
-        dock.show()
+        dlg.destroyed.connect(_clear_dock_ref)
+        dlg.show()
 
     # ── Bragg ring overlay ─────────────────────────────────────────────────────
 

@@ -180,12 +180,23 @@ class FFTLatticeOverlay:
 
     def _on_motion(self, event) -> None:
         if (not self._dragging
-                or event.inaxes is not self._ax
-                or event.xdata is None
-                or event.ydata is None
                 or self._drag_start_q is None
                 or self._drag_grid_start is None):
             return
+        # Derive data coordinates from the event. When the cursor briefly leaves
+        # the axes (common on Windows when dragging near the border) matplotlib
+        # sets xdata/ydata to None; fall back to the inverse axes transform so
+        # drags are not interrupted. This mirrors the pattern already used in
+        # _hit_handle_display() for hit-testing.
+        xdata = event.xdata
+        ydata = event.ydata
+        if xdata is None or ydata is None or event.inaxes is not self._ax:
+            try:
+                xdata, ydata = self._ax.transData.inverted().transform(
+                    (float(event.x), float(event.y))
+                )
+            except Exception:
+                return
         if self._last_drag_display_xy is not None:
             dx_display = float(event.x) - self._last_drag_display_xy[0]
             dy_display = float(event.y) - self._last_drag_display_xy[1]
@@ -193,8 +204,8 @@ class FFTLatticeOverlay:
                 return
         self._last_drag_display_xy = (float(event.x), float(event.y))
 
-        dqx = event.xdata - self._drag_start_q[0]
-        dqy = event.ydata - self._drag_start_q[1]
+        dqx = xdata - self._drag_start_q[0]
+        dqy = ydata - self._drag_start_q[1]
 
         Nx, Ny = self._image_w, self._image_h
         q_range_x = float(self._qx[-1]) - float(self._qx[0])
@@ -220,13 +231,13 @@ class FFTLatticeOverlay:
                 self._drag_start_q[1] - oy_q,
                 self._drag_start_q[0] - ox_q,
             ))
-            angle_now = math.degrees(math.atan2(event.ydata - oy_q, event.xdata - ox_q))
+            angle_now = math.degrees(math.atan2(ydata - oy_q, xdata - ox_q))
             self._grid = g0.rotate(angle_now - angle_start)
         elif hid == _HANDLE_SCALE:
             ox_px, oy_px = g0.origin_px
             ox_q, oy_q = self._px_to_q(ox_px, oy_px)
             d0 = math.hypot(self._drag_start_q[0] - ox_q, self._drag_start_q[1] - oy_q)
-            d1 = math.hypot(event.xdata - ox_q, event.ydata - oy_q)
+            d1 = math.hypot(xdata - ox_q, ydata - oy_q)
             if d0 > 1e-12:
                 self._grid = g0.scale(d1 / d0)
 
