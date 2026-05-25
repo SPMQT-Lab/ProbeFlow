@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFileDialog, QFrame,
     QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit, QPushButton,
-    QTabWidget, QVBoxLayout, QWidget,
+    QScrollArea, QTabWidget, QVBoxLayout, QWidget,
 )
 
 
@@ -165,7 +165,7 @@ class FFTViewerDialog(QDialog):
         right_col.addWidget(self._canvas_fft, 1)
 
         self._tab_widget = QTabWidget()
-        self._tab_widget.setFixedHeight(340)
+        self._tab_widget.setFixedHeight(250)
         self._tab_widget.setFont(QFont("Helvetica", 9))
 
         # ── Intensity tab ─────────────────────────────────────────────────────
@@ -213,9 +213,13 @@ class FFTViewerDialog(QDialog):
 
         self._tab_widget.addTab(radial_tab, "Radial profile")
 
-        # ── Predicted Lattice tab ─────────────────────────────────────────────
-        lat_tab = QWidget()
-        lat_lay = QVBoxLayout(lat_tab)
+        # ── Predicted Lattice tab (scrollable, so the 250 px tab height is safe) ─
+        lat_scroll = QScrollArea()
+        lat_scroll.setWidgetResizable(True)
+        lat_scroll.setFrameShape(QFrame.NoFrame)
+        lat_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        lat_inner = QWidget()
+        lat_lay = QVBoxLayout(lat_inner)
         lat_lay.setSpacing(4)
         lat_lay.setContentsMargins(6, 6, 6, 4)
 
@@ -353,7 +357,8 @@ class FFTViewerDialog(QDialog):
         lat_lay.addLayout(copy_row)
 
         lat_lay.addStretch(1)
-        self._tab_widget.addTab(lat_tab, "Predicted Lattice")
+        lat_scroll.setWidget(lat_inner)
+        self._tab_widget.addTab(lat_scroll, "Predicted Lattice")
 
         # wrap tab_widget in a row with spacers so its width tracks the FFT axes area
         self._tab_left_spacer = QWidget()
