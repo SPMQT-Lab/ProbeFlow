@@ -165,9 +165,13 @@ def _item_from_scan(
     size_bytes: Optional[int],
 ) -> ProbeFlowItem:
     from probeflow.core.metadata import read_scan_metadata
+    from probeflow.io.scanflow_acquisition import load_scanflow_scan_sidecar
     meta = read_scan_metadata(path)
     extra = dict(meta.raw_header)
     extra["experiment_metadata"] = dict(meta.experiment_metadata)
+    sidecar = load_scanflow_scan_sidecar(path, missing_ok=True)
+    if sidecar is not None:
+        extra["scanflow_acquisition"] = sidecar
     return ProbeFlowItem(
         path=path,
         display_name=meta.display_name or path.stem,
