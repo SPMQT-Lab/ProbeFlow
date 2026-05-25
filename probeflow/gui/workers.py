@@ -26,6 +26,18 @@ from probeflow.core.scan_loader import load_scan
 
 DEFAULT_CUSHION = FILE_CUSHIONS_DIR
 
+
+def _log_preview_failure(loader_name: str, action: str, path, exc: Exception) -> None:
+    _log.warning("%s: failed to %s %s (%s)", loader_name, action, path, exc)
+    _log.debug(
+        "%s traceback while trying to %s %s",
+        loader_name,
+        action,
+        path,
+        exc_info=True,
+    )
+
+
 # ── Worker: thumbnail ─────────────────────────────────────────────────────────
 class ThumbnailSignals(QObject):
     loaded = Signal(str, QPixmap, object)  # stem, pixmap, token
@@ -57,8 +69,8 @@ class ThumbnailLoader(QRunnable):
                 self.thumbnail_channel,
             )
             arr = scan.planes[plane_idx] if plane_idx < scan.n_planes else None
-        except Exception:
-            _log.warning("ThumbnailLoader: failed to load %s", self.entry.path, exc_info=True)
+        except Exception as exc:
+            _log_preview_failure("ThumbnailLoader", "load", self.entry.path, exc)
             arr = None
         img = render_scan_image(
             arr=arr,
@@ -111,8 +123,8 @@ class FolderThumbnailLoader(QRunnable):
                     self.thumbnail_channel,
                 )
                 arr = scan.planes[plane_idx] if plane_idx < scan.n_planes else None
-            except Exception:
-                _log.warning("FolderThumbnailLoader: failed to load %s", path, exc_info=True)
+            except Exception as exc:
+                _log_preview_failure("FolderThumbnailLoader", "load", path, exc)
                 arr = None
             img = render_scan_image(
                 arr=arr,
@@ -141,8 +153,8 @@ class SpecThumbnailLoader(QRunnable):
         try:
             img = render_spec_thumbnail(self.entry.path, size=(self.w, self.h),
                                         dark=self.dark)
-        except Exception:
-            _log.warning("SpecThumbnailLoader: failed to render %s", self.entry.path, exc_info=True)
+        except Exception as exc:
+            _log_preview_failure("SpecThumbnailLoader", "render", self.entry.path, exc)
             img = None
         if img is not None:
             self.signals.loaded.emit(self.entry.stem, pil_to_pixmap(img), self.token)

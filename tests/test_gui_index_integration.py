@@ -6,6 +6,7 @@ conversion layer.  They do not require Qt or a running GUI.
 
 from __future__ import annotations
 
+import logging
 import os
 import importlib
 from pathlib import Path
@@ -119,9 +120,12 @@ class TestGuiWorkers:
         assert emitted[0][0] == "scan"
         assert emitted[0][2] is token
 
-    def test_thumbnail_loader_suppresses_emit_when_render_fails(self, qapp, monkeypatch):
+    def test_thumbnail_loader_suppresses_emit_when_render_fails(
+        self, qapp, monkeypatch, caplog
+    ):
         import probeflow.gui.workers as worker_mod
 
+        caplog.set_level(logging.WARNING, logger=worker_mod.__name__)
         emitted = []
 
         def fail_load_scan(_path):
@@ -141,6 +145,40 @@ class TestGuiWorkers:
         loader.run()
 
         assert emitted == []
+        assert "ThumbnailLoader: failed to load broken.dat (bad scan)" in caplog.text
+        assert "Traceback" not in caplog.text
+
+    def test_folder_thumbnail_loader_logs_load_failure_without_traceback(
+        self, qapp, monkeypatch, caplog
+    ):
+        import probeflow.gui.workers as worker_mod
+
+        caplog.set_level(logging.WARNING, logger=worker_mod.__name__)
+
+        def fail_load_scan(_path):
+            raise ValueError("bad folder scan")
+
+        monkeypatch.setattr(worker_mod, "load_scan", fail_load_scan)
+        monkeypatch.setattr(worker_mod, "render_scan_image", lambda **_kwargs: None)
+
+        emitted = []
+        loader = worker_mod.FolderThumbnailLoader(
+            "folder",
+            [Path("broken.sxm")],
+            "gray",
+            object(),
+            148,
+            116,
+        )
+        loader.signals.loaded.connect(lambda *args: emitted.append(args))
+        loader.run()
+
+        assert emitted
+        assert emitted[0][0] == "folder"
+        assert emitted[0][1] == [None]
+        assert "FolderThumbnailLoader: failed to load broken.sxm" in caplog.text
+        assert "bad folder scan" in caplog.text
+        assert "Traceback" not in caplog.text
 
     def test_channel_and_viewer_loaders_preserve_arr_vs_file_semantics(
         self, qapp, monkeypatch
@@ -241,6 +279,28 @@ class TestGuiWorkers:
         loader.run()
 
         assert emitted == []
+
+    def test_spec_thumbnail_loader_logs_render_failure_without_traceback(
+        self, qapp, monkeypatch, caplog
+    ):
+        import probeflow.gui.workers as worker_mod
+
+        caplog.set_level(logging.WARNING, logger=worker_mod.__name__)
+
+        def fail_render(*_args, **_kwargs):
+            raise ValueError("bad spectrum")
+
+        monkeypatch.setattr(worker_mod, "render_spec_thumbnail", fail_render)
+
+        emitted = []
+        entry = VertFile(path=Path("bad.VERT"), stem="bad")
+        loader = worker_mod.SpecThumbnailLoader(entry, "token", 120, 80)
+        loader.signals.loaded.connect(lambda *args: emitted.append(args))
+        loader.run()
+
+        assert emitted == []
+        assert "SpecThumbnailLoader: failed to render bad.VERT (bad spectrum)" in caplog.text
+        assert "Traceback" not in caplog.text
 
     def test_conversion_worker_reports_empty_sxm_directory(self, qapp, tmp_path):
         import probeflow.gui.workers as worker_mod
