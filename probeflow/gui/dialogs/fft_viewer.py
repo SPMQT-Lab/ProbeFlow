@@ -976,8 +976,15 @@ class FFTViewerDialog(QDialog):
         self._fft_lattice_dock = dlg
 
         # No Qt parent means Qt won't auto-close the panel when the FFT viewer
-        # closes; do it explicitly.
-        self.finished.connect(lambda _result, _d=dlg: _d.close())
+        # closes; do it explicitly.  Guard against the case where the user has
+        # already closed (and WA_DeleteOnClose has destroyed) the panel first.
+        def _close_lattice_panel(_result, _d=dlg):
+            try:
+                _d.close()
+            except RuntimeError:
+                pass  # C++ object already deleted — panel was closed manually
+
+        self.finished.connect(_close_lattice_panel)
 
         def _clear_dock_ref():
             if getattr(self, "_fft_lattice_dock", None) is dlg:

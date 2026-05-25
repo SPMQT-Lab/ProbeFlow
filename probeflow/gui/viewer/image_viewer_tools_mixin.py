@@ -104,6 +104,7 @@ class ImageViewerToolsMixin:
         )
         self._lattice_grid_item = item
         dock = QDockWidget("Lattice Grid", self._viewer_main)
+        dock.setObjectName("imageViewerLatticeGridDock")
         dock.setWidget(panel)
         dock.setFeatures(
             QDockWidget.DockWidgetClosable
