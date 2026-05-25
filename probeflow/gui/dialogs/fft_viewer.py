@@ -1217,7 +1217,7 @@ class FFTViewerDialog(QDialog):
             f"r_x_obs:      {r_x_nm:.4f} nm⁻¹",
             f"r_y_obs:      {r_y_nm:.4f} nm⁻¹",
             f"fit RMS:      {rms_nm:.4f} nm⁻¹",
-            f"",
+            "",
             f"Piezo X:  {cx_old:.{cx_dec}f}  →  {cx_new:.{cx_dec}f}",
             f"Piezo Y:  {cy_old:.{cy_dec}f}  →  {cy_new:.{cy_dec}f}",
         ]
