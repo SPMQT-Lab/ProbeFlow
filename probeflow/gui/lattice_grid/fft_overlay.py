@@ -98,6 +98,12 @@ class FFTLatticeOverlay:
             except Exception:
                 pass
 
+    def clear(self) -> None:
+        """Remove all overlay artists from the axes and disconnect events."""
+        self._grid = None
+        self.redraw()       # grid=None path removes all artists + draw_idle()
+        self.disconnect()
+
     # ── coordinate helpers ────────────────────────────────────────────────────
 
     def _px_to_q(self, ix: float, iy: float) -> tuple[float, float]:

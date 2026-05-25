@@ -143,6 +143,17 @@ class FFTViewerDialog(QDialog):
         grid_btn.setToolTip("Add a reciprocal-space lattice grid overlay to the FFT")
         grid_btn.clicked.connect(self._on_open_fft_lattice)
         tb.addWidget(grid_btn)
+        self._grid_lattice_btn = grid_btn
+
+        clear_btn = QPushButton("Clear Grid")
+        clear_btn.setFont(QFont("Helvetica", 9))
+        clear_btn.setFixedHeight(24)
+        clear_btn.setMinimumWidth(80)
+        clear_btn.setToolTip("Remove the reciprocal-space lattice overlay")
+        clear_btn.setEnabled(False)
+        clear_btn.clicked.connect(self._on_clear_fft_lattice)
+        tb.addWidget(clear_btn)
+        self._clear_grid_btn = clear_btn
 
         return tb
 
@@ -924,8 +935,34 @@ class FFTViewerDialog(QDialog):
         if path:
             self._fig_fft.savefig(path, dpi=150, bbox_inches="tight")
 
+    def _on_clear_fft_lattice(self):
+        """Remove the FFT lattice overlay and close its control panel."""
+        overlay = getattr(self, "_fft_lattice_overlay", None)
+        if overlay is not None:
+            overlay.clear()
+            self._fft_lattice_overlay = None
+        dock = getattr(self, "_fft_lattice_dock", None)
+        if dock is not None:
+            try:
+                dock.close()
+            except RuntimeError:
+                pass
+            self._fft_lattice_dock = None
+        if getattr(self, "_clear_grid_btn", None) is not None:
+            self._clear_grid_btn.setEnabled(False)
+
     def _on_open_fft_lattice(self):
         from probeflow.gui.lattice_grid import open_fft_tool
+        # If a panel is already open, raise it rather than creating another.
+        existing = getattr(self, "_fft_lattice_dock", None)
+        if existing is not None:
+            try:
+                existing.show()
+                existing.raise_()
+                existing.activateWindow()
+                return
+            except RuntimeError:
+                self._fft_lattice_dock = None  # C++ object was deleted
         if self._qx is None or self._qy is None:
             return
         Ny, Nx = self._arr.shape[:2]
@@ -975,6 +1012,10 @@ class FFTViewerDialog(QDialog):
         dlg.adjustSize()
         self._fft_lattice_dock = dlg
 
+        # Enable the Clear Grid button now that a panel is live.
+        if getattr(self, "_clear_grid_btn", None) is not None:
+            self._clear_grid_btn.setEnabled(True)
+
         # No Qt parent means Qt won't auto-close the panel when the FFT viewer
         # closes; do it explicitly.  Guard against the case where the user has
         # already closed (and WA_DeleteOnClose has destroyed) the panel first.
@@ -989,6 +1030,9 @@ class FFTViewerDialog(QDialog):
         def _clear_dock_ref():
             if getattr(self, "_fft_lattice_dock", None) is dlg:
                 self._fft_lattice_dock = None
+            # Panel closed manually — keep overlay artists but disable Clear.
+            if getattr(self, "_clear_grid_btn", None) is not None:
+                self._clear_grid_btn.setEnabled(False)
 
         dlg.destroyed.connect(_clear_dock_ref)
         dlg.show()
