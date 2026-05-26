@@ -58,6 +58,40 @@ from PySide6.QtWidgets import (
 from probeflow.processing.display import clip_range_from_array as _clip_range_from_array
 
 
+# ── Auto-color palette for classify results ───────────────────────────────────
+# Catppuccin Mocha-inspired: perceptually distinct, SPM-dark-background-friendly.
+_CLASSIFY_PALETTE: list[str] = [
+    "#f38ba8",  # pink  (class 0)
+    "#89b4fa",  # blue  (class 1)
+    "#a6e3a1",  # green (class 2)
+    "#fab387",  # orange(class 3)
+    "#cba6f7",  # purple(class 4)
+    "#f9e2af",  # yellow(class 5)
+    "#89dceb",  # cyan  (class 6)
+    "#94e2d5",  # teal  (class 7)
+    "#eba0ac",  # mauve (class 8)
+    "#b4befe",  # lavender (class 9)
+]
+_CLASSIFY_OTHER_COLOR = "#6c7086"   # muted gray for "other" particles
+
+
+def _auto_class_colors(class_names: list) -> dict:
+    """Return {class_name: hex_color} with stable, distinct colors.
+
+    "other" always gets the muted gray.  Remaining names are assigned in
+    sorted order so the mapping is deterministic across reruns.
+    """
+    colors: dict = {}
+    palette_idx = 0
+    for name in sorted(class_names):
+        if name == "other":
+            colors[name] = _CLASSIFY_OTHER_COLOR
+        else:
+            colors[name] = _CLASSIFY_PALETTE[palette_idx % len(_CLASSIFY_PALETTE)]
+            palette_idx += 1
+    return colors
+
+
 def _arr_to_pixmap(arr: np.ndarray) -> QPixmap:
     """Convert a 2-D float array to a grayscale QPixmap (no PIL dependency)."""
     try:
@@ -383,6 +417,8 @@ class FeaturesPanel(QWidget):
         self._classifications: list = []
         self._classification_meta: dict | None = None
         self._label_history: list = []     # undo stack for sample labels
+        self._show_overlay: bool = True    # toggle: show/hide classify overlay
+        self._class_colors: dict = {}      # class_name → hex color string
         self._build()
 
     def _build(self):
@@ -422,6 +458,17 @@ class FeaturesPanel(QWidget):
         _fit_btn.setFont(QFont("Helvetica", 9))
         _fit_btn.clicked.connect(self.reset_view)
         _vt.addWidget(_fit_btn)
+
+        self._overlay_toggle_btn = QPushButton("👁 Original")
+        self._overlay_toggle_btn.setFixedHeight(24)
+        self._overlay_toggle_btn.setFont(QFont("Helvetica", 9))
+        self._overlay_toggle_btn.setToolTip(
+            "Toggle between the original image and the classified overlay.\n"
+            "Use this to judge how accurate the segmentation is.")
+        self._overlay_toggle_btn.setVisible(False)   # hidden until classify runs
+        self._overlay_toggle_btn.clicked.connect(self._toggle_overlay)
+        _vt.addWidget(self._overlay_toggle_btn)
+
         _vt.addStretch(1)
         _hint = QLabel("Scroll to zoom · Drag to pan")
         _hint.setFont(QFont("Helvetica", 8))
@@ -465,6 +512,10 @@ class FeaturesPanel(QWidget):
         self._overlay_mode = "none"
         self._sample_labels = {}
         self._label_history = []
+        self._class_colors  = {}
+        self._show_overlay  = True
+        self._overlay_toggle_btn.setVisible(False)
+        self._overlay_toggle_btn.setText("👁 Original")
         self._redraw(reset_view=True)
         self._results_table.setRowCount(0)
         plane_lbl = PLANE_NAMES[plane_idx] if 0 <= plane_idx < len(PLANE_NAMES) else f"plane {plane_idx}"
@@ -534,11 +585,17 @@ class FeaturesPanel(QWidget):
         self._classifications = classifications
         self._classification_meta = meta
         self._overlay_mode = "classify"
+        self._show_overlay = True   # always start with overlay visible after a new run
+
+        # ── Auto-assign a distinct color to every class ───────────────────────
+        all_classes = list({c.class_name for c in classifications})
+        self._class_colors = _auto_class_colors(all_classes)
+
+        # Reveal the compare toggle button now that classify results exist
+        self._overlay_toggle_btn.setVisible(True)
+        self._overlay_toggle_btn.setText("👁 Original")
 
         # ── Per-class orientation statistics ──────────────────────────────────
-        # Orientation angles are headless (in [0, 180°)), so we use the
-        # *doubled-angle* trick: map θ → 2θ, compute circular mean in [0,360°),
-        # then halve back. This correctly handles the 0°/180° wrap.
         import math
         class_angles: dict[str, list] = {}
         for c in classifications:
@@ -561,13 +618,12 @@ class FeaturesPanel(QWidget):
             # Circular stats on headless orientations
             valid = [a for a in angles if not math.isnan(a)]
             if valid:
-                a2 = np.radians(np.array(valid) * 2.0)   # doubled angle
+                a2 = np.radians(np.array(valid) * 2.0)
                 sin_m = float(np.sin(a2).mean())
                 cos_m = float(np.cos(a2).mean())
                 mean_ang = float(np.degrees(np.arctan2(sin_m, cos_m))) / 2.0
                 if mean_ang < 0.0:
                     mean_ang += 180.0
-                # Circular std via resultant length R
                 R = math.sqrt(sin_m ** 2 + cos_m ** 2)
                 std_ang = float(np.degrees(math.sqrt(max(0.0, -2.0 * math.log(R + 1e-12))))) / 2.0
                 ang_str = f"{mean_ang:.1f}"
@@ -576,7 +632,11 @@ class FeaturesPanel(QWidget):
                 ang_str = "—"
                 std_str = "—"
 
-            self._results_table.setItem(i, 0, QTableWidgetItem(cls_name))
+            # Class name cell — colored text matching the overlay color
+            hex_color = self._class_colors.get(cls_name, _CLASSIFY_OTHER_COLOR)
+            name_item = QTableWidgetItem(f"● {cls_name}")
+            name_item.setForeground(QBrush(QColor(hex_color)))
+            self._results_table.setItem(i, 0, name_item)
             self._results_table.setItem(i, 1, QTableWidgetItem(str(n)))
             self._results_table.setItem(i, 2, QTableWidgetItem(f"{pct:.1f}"))
             self._results_table.setItem(i, 3, QTableWidgetItem(ang_str))
@@ -668,6 +728,20 @@ class FeaturesPanel(QWidget):
             self._sample_labels = self._label_history.pop()
             self._redraw()
 
+    def _toggle_overlay(self) -> None:
+        """Switch between original image and classified overlay (compare button)."""
+        self._show_overlay = not self._show_overlay
+        if self._show_overlay:
+            self._overlay_toggle_btn.setText("👁 Original")
+            self._overlay_toggle_btn.setToolTip(
+                "Click to hide the overlay and see the original scan.\n"
+                "Compare to judge segmentation accuracy.")
+        else:
+            self._overlay_toggle_btn.setText("✦ Overlay")
+            self._overlay_toggle_btn.setToolTip(
+                "Click to show the classified overlay again.")
+        self._redraw()
+
     # ── Events from _FeatureView ──────────────────────────────────────────────
 
     def _on_particle_clicked(self, scene_x: float, scene_y: float) -> None:
@@ -719,22 +793,27 @@ class FeaturesPanel(QWidget):
         # ── Particle overlays ────────────────────────────────────────────────
         if self._overlay_mode == "particles":
             if self._current_mode == "classify":
-                # Color contours / crosses by label assignment
+                # Labeling step: show contour colored by the label already assigned.
+                # Colors come from the auto-palette keyed by class name.
+                label_name_colors: dict[str, str] = {}   # name → hex color cache
+                _pidx = 0
                 for p in self._particles:
                     label_info = self._sample_labels.get(p.index)
-                    color = (
-                        "#{:02x}{:02x}{:02x}".format(*label_info["color"])
-                        if label_info else "#f38ba8"
-                    )
+                    if label_info:
+                        lname = label_info["name"]
+                        if lname not in label_name_colors:
+                            label_name_colors[lname] = _CLASSIFY_PALETTE[
+                                len(label_name_colors) % len(_CLASSIFY_PALETTE)]
+                        color = label_name_colors[lname]
+                    else:
+                        color = "#585b70"   # unlabeled: muted gray
                     xs = [c[0] / self._pixel_size_x_m for c in p.contour_xy_m]
                     ys = [c[1] / self._pixel_size_y_m for c in p.contour_xy_m]
                     if xs:
                         xs.append(xs[0]); ys.append(ys[0])
-                        self._view.add_path(xs, ys, color)
+                        self._view.add_path(xs, ys, color, lw=1.5 if label_info else 0.7)
                     cx = p.centroid_x_m / self._pixel_size_x_m
                     cy = p.centroid_y_m / self._pixel_size_y_m
-                    cross_color = "#a6e3a1" if label_info else "#585b70"
-                    self._view.add_cross(cx, cy, cross_color)
                     if label_info:
                         self._view.add_text(cx + 2, cy - 8, label_info["name"], color)
             else:
@@ -765,32 +844,41 @@ class FeaturesPanel(QWidget):
             pts_y = [cy, cy + ay_, cy + ay_ + by_, cy + by_, cy]
             self._view.add_path(pts_x, pts_y, "#fab387", lw=1.0)
 
-        elif self._overlay_mode == "classify" and self._classifications:
+        elif self._overlay_mode == "classify" and self._classifications and self._show_overlay:
+            # ── Classify overlay: colored contour borders, no text/dots ────────
+            # Colors come from the auto-assigned palette stored in _class_colors.
+            # "other" particles get a thin muted border so they're visible but
+            # don't compete visually with the classified ones.
             classify_map = {c.particle_index: c for c in self._classifications}
-            label_colors = {
-                v["name"]: "#{:02x}{:02x}{:02x}".format(*v["color"])
-                for v in self._sample_labels.values()
-            }
             for p in self._particles:
-                cx = p.centroid_x_m / self._pixel_size_x_m
-                cy = p.centroid_y_m / self._pixel_size_y_m
                 c = classify_map.get(p.index)
-                if c and c.class_name != "other":
-                    color = label_colors.get(c.class_name, "#89b4fa")
-                    self._view.add_dot(cx, cy, color, r=5.0)
-                    self._view.add_text(cx + 2, cy - 8, c.class_name, color)
-                    # Orientation line — length = half bbox diagonal, min 6 px
+                if c is None:
+                    continue
+                color = self._class_colors.get(c.class_name, _CLASSIFY_OTHER_COLOR)
+                is_other = c.class_name == "other"
+                lw = 0.6 if is_other else 2.0
+
+                # Contour border in class color
+                xs = [pt[0] / self._pixel_size_x_m for pt in p.contour_xy_m]
+                ys = [pt[1] / self._pixel_size_y_m for pt in p.contour_xy_m]
+                if xs:
+                    xs.append(xs[0])
+                    ys.append(ys[0])
+                    self._view.add_path(xs, ys, color, lw=lw)
+
+                # For classified (non-other) particles: draw an orientation tick
+                # as a short line through the centroid — same color, same thickness.
+                if not is_other:
+                    cx = p.centroid_x_m / self._pixel_size_x_m
+                    cy = p.centroid_y_m / self._pixel_size_y_m
                     bw = p.bbox_px[2] - p.bbox_px[0]
                     bh = p.bbox_px[3] - p.bbox_px[1]
-                    half = max(6.0, 0.45 * float(np.sqrt(bw ** 2 + bh ** 2)))
-                    orient_rad = np.radians(
-                        getattr(c, "particle_orientation_deg", 0.0))
-                    dx = half * np.cos(orient_rad)
-                    dy = half * np.sin(orient_rad)
-                    self._view.add_line(cx - dx, cy - dy, cx + dx, cy + dy,
-                                        color, lw=1.5)
-                else:
-                    self._view.add_dot(cx, cy, "#585b70", r=3.0)
+                    half = max(5.0, 0.4 * float(np.sqrt(bw ** 2 + bh ** 2)))
+                    orient_rad = np.radians(getattr(c, "particle_orientation_deg", 0.0))
+                    dx_ = half * np.cos(orient_rad)
+                    dy_ = half * np.sin(orient_rad)
+                    self._view.add_line(cx - dx_, cy - dy_, cx + dx_, cy + dy_,
+                                        color, lw=1.2)
 
 
 class FeaturesSidebar(QWidget):
