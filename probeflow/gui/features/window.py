@@ -228,7 +228,8 @@ class FeatureCountingWindow(QMainWindow):
                 f"γ={result.gamma_deg:.1f}°")
 
         elif mode == "classify":
-            import math
+            # Build a compact "T(30°):3  T(60°):2  other:1" summary
+            _BIN = 15
             class_angles: dict = {}
             for c in result:
                 class_angles.setdefault(c.class_name, []).append(
@@ -237,27 +238,25 @@ class FeatureCountingWindow(QMainWindow):
             parts = []
             for cls_name in sorted(class_angles):
                 angles = class_angles[cls_name]
-                n = len(angles)
-                pct = 100.0 * n / total if total > 0 else 0.0
-                valid = [a for a in angles if not math.isnan(a)]
-                if valid:
-                    a2 = np.radians(np.array(valid) * 2.0)
-                    sin_m = float(np.sin(a2).mean())
-                    cos_m = float(np.cos(a2).mean())
-                    mean_a = float(np.degrees(np.arctan2(sin_m, cos_m))) / 2.0
-                    if mean_a < 0.0:
-                        mean_a += 180.0
-                    R = math.sqrt(sin_m ** 2 + cos_m ** 2)
-                    std_a = float(np.degrees(math.sqrt(max(0.0, -2.0 * math.log(R + 1e-12))))) / 2.0
-                    ang_str = f" @ {mean_a:.1f}°±{std_a:.1f}°"
-                else:
-                    ang_str = ""
-                parts.append(f"{cls_name}: {n} ({pct:.0f}%{ang_str})")
+                if cls_name == "other":
+                    pct = 100.0 * len(angles) / total if total > 0 else 0.0
+                    parts.append(f"other: {len(angles)} ({pct:.0f}%)")
+                    continue
+                valid = np.array([a for a in angles if a == a], dtype=float)
+                if valid.size == 0:
+                    parts.append(f"{cls_name}: {len(angles)}")
+                    continue
+                bins = np.floor(valid / _BIN).astype(int)
+                for b in sorted(set(bins.tolist())):
+                    n_b = int((bins == b).sum())
+                    mean_a = float(valid[bins == b].mean())
+                    pct = 100.0 * n_b / total if total > 0 else 0.0
+                    parts.append(f"{cls_name}({mean_a:.0f}°): {n_b} ({pct:.0f}%)")
             summary = "  |  ".join(parts)
             self._panel.set_classifications(result)
             self._sidebar.set_status(
                 f"Classified {total} particle(s) — {summary}")
-            self._status_bar.showMessage(f"Classify done: {summary}")
+            self._status_bar.showMessage(f"Classify: {summary}")
 
     # ── Export ────────────────────────────────────────────────────────────────
 
