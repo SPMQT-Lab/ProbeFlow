@@ -3,6 +3,7 @@ import shutil
 from pathlib import Path
 
 from probeflow.core.indexing import index_folder
+from probeflow.gui.models import SxmFile
 from probeflow.io.scanflow_acquisition import (
     load_scanflow_scan_sidecar,
     load_scanflow_session_manifest,
@@ -43,6 +44,20 @@ def test_scanflow_sidecar_attaches_to_indexed_scan_metadata(tmp_path):
     assert metadata["schema"] == "scanflow.acquisition.v1"
     assert metadata["session"]["session_id"] == "session-1"
     assert metadata["position"]["scan_offset_nm"] == [1.0, 2.0]
+
+
+def test_scanflow_sidecar_survives_gui_model_conversion(tmp_path):
+    scan = tmp_path / CREATEC_SCAN.name
+    shutil.copyfile(CREATEC_SCAN, scan)
+    sidecar = scanflow_sidecar_path(scan)
+    sidecar.write_text(json.dumps(_scanflow_payload(scan.name)), encoding="utf-8")
+
+    items = index_folder(tmp_path)
+    item = next(it for it in items if it.path.name == scan.name)
+    gui_entry = SxmFile.from_index_item(item)
+
+    assert gui_entry.scanflow_acquisition["session"]["session_id"] == "session-1"
+    assert gui_entry.scanflow_acquisition["step"]["label"] == "tile"
 
 
 def test_scanflow_loaders_do_not_import_scanflow(tmp_path):

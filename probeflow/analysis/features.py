@@ -99,6 +99,15 @@ class Particle:
     min_height: float
     n_pixels: int
     contour_xy_m: List[Tuple[float, float]] = field(default_factory=list)
+    orientation_deg: float = 0.0
+    """Major-axis angle in degrees, 0–180°.  Computed via PCA on the rasterised
+    particle mask.  0° = pointing right (East); 90° = pointing down (South in
+    image coordinates).  Two particles with the same shape but mirrored
+    directions have the same orientation (headless vector)."""
+    sharpness: float = 0.0
+    """Variance of the Laplacian within the particle bounding-box crop (uint8
+    scale).  Higher = sharper / more well-defined edges.  Useful to separate
+    fuzzy molecules from sharp ones when the overall shape looks similar."""
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -230,6 +239,36 @@ def segment_particles(
             for pt in cnt
         ]
 
+        # ── Major-axis orientation via PCA on rasterised pixel positions ─────
+        # Pixel x-axis corresponds to scan columns; orientation is 0–180° so
+        # it's a *headless* direction (East=0°, South=90° in image coords).
+        if n_pix >= 2:
+            pts_f = np.column_stack(
+                [xs - float(xs.mean()), ys - float(ys.mean())]
+            ).astype(np.float64)
+            cov = pts_f.T @ pts_f / pts_f.shape[0]
+            _, eigvecs = np.linalg.eigh(cov)
+            major_vec = eigvecs[:, -1]   # eigenvector with largest eigenvalue
+            orient = float(np.degrees(np.arctan2(major_vec[1], major_vec[0])))
+            if orient < 0.0:
+                orient += 180.0
+        else:
+            orient = 0.0
+
+        # ── Sharpness: variance of Laplacian on the bbox crop ────────────────
+        # cv2.Laplacian on a uint8 crop gives a measure of edge strength.
+        # High variance → sharp, well-defined edges.
+        # Low variance → fuzzy / blurred particle.
+        try:
+            crop_u8 = u8[y0: y1 + 1, x0: x1 + 1]
+            if crop_u8.size > 0:
+                lap = cv2.Laplacian(crop_u8.astype(float), cv2.CV_64F)
+                sharpness = float(lap.var())
+            else:
+                sharpness = 0.0
+        except Exception:
+            sharpness = 0.0
+
         particles.append(Particle(
             index=len(particles),
             centroid_x_m=cx_px * dx_m,
@@ -244,6 +283,8 @@ def segment_particles(
             min_height=min_h,
             n_pixels=n_pix,
             contour_xy_m=contour_xy_m,
+            orientation_deg=orient,
+            sharpness=sharpness,
         ))
 
     if size_sigma_clip is not None and len(particles) > 3:
@@ -409,6 +450,8 @@ class Classification:
     particle_index: int
     class_name: str
     similarity: float
+    particle_orientation_deg: float = 0.0
+    """Orientation of the classified particle (copied from Particle.orientation_deg)."""
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -505,6 +548,8 @@ def classify_particles(
     encoder: str = "raw",
     threshold_method: str = "gmm",
     crop_size_px: int = 48,
+    use_sharpness: bool = False,
+    sharpness_weight: float = 3.0,
 ) -> List[Classification]:
     """Classify each particle against labelled sample particles.
 
@@ -523,6 +568,16 @@ def classify_particles(
     threshold_method
         How to pick the "match" cutoff: ``"gmm"`` (default), ``"otsu"``,
         ``"distribution"``.
+    use_sharpness
+        When True, append a normalised sharpness dimension (variance of
+        Laplacian, stored in ``Particle.sharpness``) to each embedding vector.
+        Scaled by ``sharpness_weight`` so it contributes meaningfully to the
+        cosine similarity.  Use this when you have two molecule types that look
+        the same in shape but one is fuzzy and one is sharp.
+    sharpness_weight
+        How strongly the sharpness dimension pulls the embedding apart.
+        Default 3.0 works well when the shape similarity is high and blur is
+        the main discriminating feature.
 
     Returns
     -------
@@ -554,6 +609,26 @@ def classify_particles(
     else:
         raise ValueError(f"Unknown encoder {encoder!r}")
 
+    # ── Optional sharpness dimension ──────────────────────────────────────────
+    # Appends a single z-normalised sharpness value (variance of Laplacian) to
+    # each embedding vector, scaled by sharpness_weight so it contributes
+    # meaningfully to the cosine similarity.  This pulls fuzzy and sharp
+    # molecules apart even when their pixel patterns look nearly identical.
+    if use_sharpness:
+        p_sharp = np.array([getattr(p,  "sharpness", 0.0) for p in all_particles],
+                           dtype=np.float64)
+        s_sharp = np.array([getattr(sp, "sharpness", 0.0) for sp in sample_particles],
+                           dtype=np.float64)
+        all_sharp = np.concatenate([p_sharp, s_sharp])
+        sharp_mean = float(all_sharp.mean())
+        sharp_std  = float(all_sharp.std()) + 1e-8
+        p_sharp_n = ((p_sharp - sharp_mean) / sharp_std * sharpness_weight
+                     ).reshape(-1, 1)
+        s_sharp_n = ((s_sharp - sharp_mean) / sharp_std * sharpness_weight
+                     ).reshape(-1, 1)
+        p_emb = np.concatenate([p_emb, p_sharp_n], axis=1)
+        s_emb = np.concatenate([s_emb, s_sharp_n], axis=1)
+
     # Cosine similarity: normalise rows, dot.
     def _unit(x: np.ndarray) -> np.ndarray:
         n = np.linalg.norm(x, axis=1, keepdims=True)
@@ -576,5 +651,6 @@ def classify_particles(
             particle_index=p.index,
             class_name=label,
             similarity=float(sim),
+            particle_orientation_deg=getattr(p, "orientation_deg", 0.0),
         ))
     return out

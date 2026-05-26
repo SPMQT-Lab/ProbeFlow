@@ -129,6 +129,10 @@ class ProbeFlowWindow(QMainWindow):
         # garbage-collected while open (show() does not block like exec()).
         self._open_viewers: list = []
 
+        # Per-scan processing memory: path_str → processing dict.
+        # Populated when a viewer closes; restored when the same scan is reopened.
+        self._saved_processing: dict = {}
+
         self._build_ui()
         self._apply_theme()
         self._restore_desktop_layout()
@@ -236,6 +240,9 @@ class ProbeFlowWindow(QMainWindow):
         self._features_signals = _FeaturesWorkerSignals()
         self._features_signals.finished.connect(self._on_features_finished)
 
+        # Floating Feature Counting window (lazy-created on first open)
+        self._fc_window = None
+
         # TV-denoise tab plumbing
         self._tv_pool    = QThreadPool.globalInstance()
         self._tv_signals = _TVWorkerSignals()
@@ -260,6 +267,7 @@ class ProbeFlowWindow(QMainWindow):
         self._browse_tools.filter_changed.connect(self._on_filter_changed)
         self._browse_tools.thumbnail_channel_changed.connect(self._on_thumbnail_channel_changed)
         self._browse_tools.thumbnail_size_changed.connect(self._on_thumbnail_size_changed)
+        self._browse_tools.open_fc_window_requested.connect(self._open_fc_window)
         # Apply saved thumbnail size preference.
         saved_size = self._cfg.get("thumbnail_size", "large")
         if saved_size != "large":
@@ -425,7 +433,11 @@ class ProbeFlowWindow(QMainWindow):
         map_action.triggered.connect(self._on_map_spectra)
         tools_menu.addAction(map_action)
         tools_menu.addSeparator()
-        _mode_action(tools_menu, "Feature counting", "features", "Ctrl+3")
+        fc_window_action = QAction("Open Feature Counting window…", self)
+        fc_window_action.setShortcut(QKeySequence("Ctrl+Shift+F"))
+        fc_window_action.triggered.connect(self._open_fc_window)
+        tools_menu.addAction(fc_window_action)
+        _mode_action(tools_menu, "Feature counting (tab)", "features", "Ctrl+3")
         _mode_action(tools_menu, "TV denoise", "tv", "Ctrl+4")
         tools_menu.addSeparator()
         _mode_action(tools_menu, "Survey (ScanFlow campaign)", "survey", "Ctrl+Shift+S")
@@ -926,6 +938,80 @@ class ProbeFlowWindow(QMainWindow):
             v.addWidget(close_btn)
             dlg.exec()
 
+    # ── Floating Feature Counting window ──────────────────────────────────────
+
+    def _open_fc_window(self) -> None:
+        """Open (or raise) the floating Feature Counting window."""
+        if self._fc_window is None:
+            from probeflow.gui.features.window import FeatureCountingWindow
+            self._fc_window = FeatureCountingWindow(parent=None)
+            self._fc_window.load_from_browse_needed.connect(
+                self._on_fc_load_from_browse)
+        self._fc_window.show()
+        self._fc_window.raise_()
+        self._fc_window.activateWindow()
+
+    def _load_scan_plane_for_analysis(
+        self, entry, plane_idx: int
+    ) -> tuple:
+        """Load a scan plane and apply any saved viewer processing.
+
+        Returns ``(arr, px_m, px_x_m, px_y_m, actual_plane_idx)`` or raises.
+        The returned array is the *processed* version — identical to what the
+        user last saw in the image viewer — so Feature Counting and TV-denoise
+        work on the same data the user inspected.
+        """
+        _scan = load_scan(entry.path)
+        if plane_idx >= _scan.n_planes:
+            plane_idx = 0
+        arr = _scan.planes[plane_idx]
+        w_m, h_m = _scan.scan_range_m
+        if arr is None:
+            raise ValueError("Scan returned no array for that plane.")
+        Ny, Nx = arr.shape
+        if Nx > 0 and Ny > 0 and w_m > 0 and h_m > 0:
+            px_x_m = float(w_m / Nx)
+            px_y_m = float(h_m / Ny)
+            px_m   = float(np.sqrt(px_x_m * px_y_m))
+        else:
+            px_x_m = px_y_m = px_m = 1e-10
+
+        # Apply saved processing (align rows, background, etc.) so Feature
+        # Counting sees the same image the user processed in the viewer.
+        saved_proc = self._saved_processing.get(str(entry.path))
+        if saved_proc:
+            try:
+                from probeflow.gui.rendering import _apply_processing
+                arr = _apply_processing(arr, saved_proc)
+            except Exception:
+                pass   # fall back to raw if processing fails
+
+        return arr, px_m, px_x_m, px_y_m, plane_idx
+
+    def _on_fc_load_from_browse(self) -> None:
+        """Bridge: read Browse selection → load into the floating FC window."""
+        from probeflow.gui.models import VertFile
+        if self._fc_window is None:
+            return
+        primary = self._grid.get_primary()
+        if not primary:
+            self._fc_window._sidebar.set_status(
+                "Select a scan in the Browse tab first.")
+            return
+        entry = next((e for e in self._grid.get_entries() if e.stem == primary), None)
+        if not entry or isinstance(entry, VertFile):
+            self._fc_window._sidebar.set_status(
+                "Selected entry is not a topography scan.")
+            return
+        plane_idx = self._fc_window._sidebar.plane_index()
+        try:
+            arr, px_m, px_x_m, px_y_m, plane_idx = \
+                self._load_scan_plane_for_analysis(entry, plane_idx)
+        except Exception as exc:
+            self._fc_window._sidebar.set_status(f"Could not read scan: {exc}")
+            return
+        self._fc_window.load_entry(entry, plane_idx, arr, px_m, px_x_m, px_y_m)
+
     # ── Features tab handlers ──────────────────────────────────────────────────
     def _on_features_load_from_browse(self):
         primary = self._grid.get_primary()
@@ -939,24 +1025,11 @@ class ProbeFlowWindow(QMainWindow):
             return
         plane_idx = self._features_sidebar.plane_index()
         try:
-            _scan = load_scan(entry.path)
-            if plane_idx >= _scan.n_planes:
-                plane_idx = 0
-            arr = _scan.planes[plane_idx]
-            w_m, h_m = _scan.scan_range_m
+            arr, px_m, px_x_m, px_y_m, plane_idx = \
+                self._load_scan_plane_for_analysis(entry, plane_idx)
         except Exception as exc:
             self._features_sidebar.set_status(f"Could not read scan: {exc}")
             return
-        if arr is None:
-            self._features_sidebar.set_status("Could not read scan plane.")
-            return
-        Ny, Nx = arr.shape
-        if Nx <= 0 or Ny <= 0 or w_m <= 0 or h_m <= 0:
-            px_x_m = px_y_m = px_m = 1e-10
-        else:
-            px_x_m = float(w_m / Nx)
-            px_y_m = float(h_m / Ny)
-            px_m = float(np.sqrt(px_x_m * px_y_m))
         self._features_panel.load_entry(entry, plane_idx, arr, px_m, px_x_m, px_y_m)
         self._features_sidebar.set_status(
             f"Loaded {entry.stem} (plane {plane_idx}, px = {px_m * 1e12:.1f} pm)")
@@ -1000,7 +1073,9 @@ class ProbeFlowWindow(QMainWindow):
                 for k, v in self._features_panel._sample_labels.items()
                 if k in idx_to_p
             ]
-            params = {"particles": particles, "samples": samples}
+            run_p = self._features_sidebar.classify_run_params()
+            params = {"particles": particles, "samples": samples,
+                      "use_sharpness": run_p.get("use_sharpness", False)}
         else:
             self._features_sidebar.set_status(f"Unknown mode {mode!r}")
             return
@@ -1038,13 +1113,33 @@ class ProbeFlowWindow(QMainWindow):
                 f"|b|={result.b_length_m * 1e9:.3f} nm  "
                 f"γ={result.gamma_deg:.1f}°")
         elif mode == "classify":
-            counts: dict = {}
+            _BIN = 15
+            class_angles: dict = {}
             for c in result:
-                counts[c.class_name] = counts.get(c.class_name, 0) + 1
-            summary = ", ".join(f"{k}: {v}" for k, v in sorted(counts.items()))
+                class_angles.setdefault(c.class_name, []).append(
+                    getattr(c, "particle_orientation_deg", 0.0))
+            total = len(result)
+            parts = []
+            for cls_name in sorted(class_angles):
+                angles = class_angles[cls_name]
+                if cls_name == "other":
+                    pct = 100.0 * len(angles) / total if total > 0 else 0.0
+                    parts.append(f"other: {len(angles)} ({pct:.0f}%)")
+                    continue
+                valid = np.array([a for a in angles if a == a], dtype=float)
+                if valid.size == 0:
+                    parts.append(f"{cls_name}: {len(angles)}")
+                    continue
+                bins = np.floor(valid / _BIN).astype(int)
+                for b in sorted(set(bins.tolist())):
+                    n_b = int((bins == b).sum())
+                    mean_a = float(valid[bins == b].mean())
+                    pct = 100.0 * n_b / total if total > 0 else 0.0
+                    parts.append(f"{cls_name}({mean_a:.0f}°): {n_b} ({pct:.0f}%)")
+            summary = "  |  ".join(parts)
             self._features_panel.set_classifications(result)
             self._features_sidebar.set_status(
-                f"Classified {len(result)} particle(s) — {summary}")
+                f"Classified {total} particle(s) — {summary}")
 
     def _features_segmentation_signature(self, params: dict) -> tuple:
         return tuple(sorted(params.items()))
@@ -1221,6 +1316,10 @@ class ProbeFlowWindow(QMainWindow):
             dlg = SpecViewerDialog(entry, t, self)
         else:
             cmap_key, clip, proc = self._grid.get_card_state(entry.stem)
+            # Restore any processing the user applied last time this scan was open.
+            saved = self._saved_processing.get(str(entry.path))
+            if saved:
+                proc = dict(saved)
             sxm_entries = [e for e in self._grid.get_entries() if isinstance(e, SxmFile)]
             initial_plane_idx = self._grid.thumbnail_plane_index_for_entry(entry)
             dlg = ImageViewerDialog(entry, sxm_entries, cmap_key, t, self,
@@ -1238,6 +1337,21 @@ class ProbeFlowWindow(QMainWindow):
                 self._open_viewers.remove(d)
             except ValueError:
                 pass
+            # ── Save processing state so it's restored when this scan is reopened ──
+            if not spec:
+                try:
+                    last_entry = d._entries[d._idx]
+                    state = dict(getattr(d, "_processing", {}) or {})
+                    key = str(last_entry.path)
+                    if state:
+                        self._saved_processing[key] = state
+                    else:
+                        # User reset to original — forget the saved state too.
+                        self._saved_processing.pop(key, None)
+                    # Also update the Browse thumbnail so it shows the processed view.
+                    self._grid.set_entry_processing(key, state)
+                except Exception:
+                    pass
             # Handle "Send to …" actions requested from inside the image viewer.
             if not spec and d._deferred.is_pending():
                 self._load_from_viewer(d, d._deferred.action)

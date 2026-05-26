@@ -24,6 +24,16 @@ from probeflow.analysis.features import (
     count_features,
     segment_particles,
 )
+from probeflow.analysis.preview import (
+    FeatureMode,
+    apply_preview_background,
+    detect_preview_features,
+    PreviewAnalysisParams,
+    PreviewFeatureRow,
+    PreviewResult,
+    preview_record,
+    run_preview,
+)
 from probeflow.analysis.lattice import (
     LatticeParams,
     LatticeResult,
@@ -50,9 +60,15 @@ __all__ = [
     "format_period",
     "format_result_text",
     "Detection",
+    "FeatureMode",
+    "apply_preview_background",
+    "detect_preview_features",
     "LatticeParams",
     "LatticeResult",
     "Particle",
+    "PreviewAnalysisParams",
+    "PreviewFeatureRow",
+    "PreviewResult",
     "UnitCellResult",
     "average_unit_cell",
     "build_agr",
@@ -60,6 +76,8 @@ __all__ = [
     "count_features",
     "export_bundle",
     "extract_lattice",
+    "preview_record",
+    "run_preview",
     "segment_particles",
     "write_lattice_pdf",
 ]

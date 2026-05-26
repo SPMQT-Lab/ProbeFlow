@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from PySide6.QtCore import Qt, QThreadPool, Signal, Slot
 from PySide6.QtGui import QColor, QCursor, QFont, QPixmap
 from PySide6.QtWidgets import (
@@ -47,6 +49,7 @@ class BrowseToolPanel(QWidget):
     filter_changed             = Signal(str)   # "all" | "images" | "spectra"
     thumbnail_channel_changed  = Signal(str)
     thumbnail_size_changed     = Signal(str)   # "large" | "small"
+    open_fc_window_requested   = Signal()      # floating Feature Counting window
 
     def __init__(self, t: dict, cfg: dict, parent=None):
         super().__init__(parent)
@@ -192,6 +195,20 @@ class BrowseToolPanel(QWidget):
             "waterfall one common signal channel.")
         self._overlay_spectra_btn.clicked.connect(self.overlay_spectra_requested.emit)
         lay.addWidget(self._overlay_spectra_btn)
+
+        lay.addWidget(_sep())
+
+        fc_btn = QPushButton("🔬  Feature Counting  ↗")
+        fc_btn.setFont(QFont("Helvetica", 10, QFont.Bold))
+        fc_btn.setFixedHeight(34)
+        fc_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        fc_btn.setObjectName("accentBtn")
+        fc_btn.setToolTip(
+            "Open the Feature Counting window as a separate floating panel.\n"
+            "You can keep browsing thumbnails while counting molecules.\n"
+            "Shortcut: Ctrl+Shift+F")
+        fc_btn.clicked.connect(self.open_fc_window_requested.emit)
+        lay.addWidget(fc_btn)
 
         lay.addStretch()
         scroll.setWidget(inner)
@@ -522,6 +539,24 @@ class BrowseInfoPanel(QWidget):
                 s = str(v).strip()
                 if s:
                     rows.append((k, s))
+
+        scanflow = dict(entry.scanflow_acquisition or {})
+        if scanflow:
+            rows.append(("SCANFLOW_SCHEMA", str(scanflow.get("schema") or "")))
+            rows.append(("SCANFLOW_RECORD_TYPE", str(scanflow.get("record_type") or "")))
+            session = scanflow.get("session") or {}
+            if isinstance(session, dict):
+                for key in ("session_id", "routine"):
+                    value = session.get(key)
+                    if value not in (None, ""):
+                        rows.append((f"SCANFLOW_SESSION_{key.upper()}", str(value)))
+            for key in ("step", "motion", "drift", "quality", "safety", "scan_parameters", "position"):
+                value = scanflow.get(key)
+                if value not in (None, {}, []):
+                    if isinstance(value, dict):
+                        rows.append((f"SCANFLOW_{key.upper()}", json.dumps(value, sort_keys=True, default=str)))
+                    else:
+                        rows.append((f"SCANFLOW_{key.upper()}", str(value)))
         self._meta_rows = rows
         self._filter_meta()
 
