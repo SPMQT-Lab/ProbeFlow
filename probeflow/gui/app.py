@@ -263,6 +263,7 @@ class ProbeFlowWindow(QMainWindow):
         self._browse_tools.filter_changed.connect(self._on_filter_changed)
         self._browse_tools.thumbnail_channel_changed.connect(self._on_thumbnail_channel_changed)
         self._browse_tools.thumbnail_size_changed.connect(self._on_thumbnail_size_changed)
+        self._browse_tools.open_fc_window_requested.connect(self._open_fc_window)
         # Apply saved thumbnail size preference.
         saved_size = self._cfg.get("thumbnail_size", "large")
         if saved_size != "large":

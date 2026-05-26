@@ -49,7 +49,9 @@ class FeatureCountingWindow(QMainWindow):
     load_from_browse_needed = Signal()
 
     def __init__(self, parent=None):
-        super().__init__(parent)
+        # Qt.Window ensures this is an independent top-level window with its own
+        # taskbar entry on Windows, not a child that hides behind the main window.
+        super().__init__(parent, Qt.Window)
         self.setWindowTitle("ProbeFlow — Feature Counting")
         self.resize(1200, 760)
 
