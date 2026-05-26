@@ -236,6 +236,9 @@ class ProbeFlowWindow(QMainWindow):
         self._features_signals = _FeaturesWorkerSignals()
         self._features_signals.finished.connect(self._on_features_finished)
 
+        # Floating Feature Counting window (lazy-created on first open)
+        self._fc_window = None
+
         # TV-denoise tab plumbing
         self._tv_pool    = QThreadPool.globalInstance()
         self._tv_signals = _TVWorkerSignals()
@@ -425,7 +428,11 @@ class ProbeFlowWindow(QMainWindow):
         map_action.triggered.connect(self._on_map_spectra)
         tools_menu.addAction(map_action)
         tools_menu.addSeparator()
-        _mode_action(tools_menu, "Feature counting", "features", "Ctrl+3")
+        fc_window_action = QAction("Open Feature Counting window…", self)
+        fc_window_action.setShortcut(QKeySequence("Ctrl+Shift+F"))
+        fc_window_action.triggered.connect(self._open_fc_window)
+        tools_menu.addAction(fc_window_action)
+        _mode_action(tools_menu, "Feature counting (tab)", "features", "Ctrl+3")
         _mode_action(tools_menu, "TV denoise", "tv", "Ctrl+4")
         tools_menu.addSeparator()
         _mode_action(tools_menu, "Survey (ScanFlow campaign)", "survey", "Ctrl+Shift+S")
@@ -925,6 +932,57 @@ class ProbeFlowWindow(QMainWindow):
             close_btn.clicked.connect(dlg.accept)
             v.addWidget(close_btn)
             dlg.exec()
+
+    # ── Floating Feature Counting window ──────────────────────────────────────
+
+    def _open_fc_window(self) -> None:
+        """Open (or raise) the floating Feature Counting window."""
+        if self._fc_window is None:
+            from probeflow.gui.features.window import FeatureCountingWindow
+            self._fc_window = FeatureCountingWindow(parent=None)
+            self._fc_window.load_from_browse_needed.connect(
+                self._on_fc_load_from_browse)
+        self._fc_window.show()
+        self._fc_window.raise_()
+        self._fc_window.activateWindow()
+
+    def _on_fc_load_from_browse(self) -> None:
+        """Bridge: read Browse selection → load into the floating FC window."""
+        from probeflow.core.scan_loader import load_scan
+        from probeflow.gui.models import VertFile
+        if self._fc_window is None:
+            return
+        primary = self._grid.get_primary()
+        if not primary:
+            self._fc_window._sidebar.set_status(
+                "Select a scan in the Browse tab first.")
+            return
+        entry = next((e for e in self._grid.get_entries() if e.stem == primary), None)
+        if not entry or isinstance(entry, VertFile):
+            self._fc_window._sidebar.set_status(
+                "Selected entry is not a topography scan.")
+            return
+        plane_idx = self._fc_window._sidebar.plane_index()
+        try:
+            _scan = load_scan(entry.path)
+            if plane_idx >= _scan.n_planes:
+                plane_idx = 0
+            arr  = _scan.planes[plane_idx]
+            w_m, h_m = _scan.scan_range_m
+        except Exception as exc:
+            self._fc_window._sidebar.set_status(f"Could not read scan: {exc}")
+            return
+        if arr is None:
+            self._fc_window._sidebar.set_status("Could not read scan plane.")
+            return
+        Ny, Nx = arr.shape
+        if Nx <= 0 or Ny <= 0 or w_m <= 0 or h_m <= 0:
+            px_x_m = px_y_m = px_m = 1e-10
+        else:
+            px_x_m = float(w_m / Nx)
+            px_y_m = float(h_m / Ny)
+            px_m   = float(np.sqrt(px_x_m * px_y_m))
+        self._fc_window.load_entry(entry, plane_idx, arr, px_m, px_x_m, px_y_m)
 
     # ── Features tab handlers ──────────────────────────────────────────────────
     def _on_features_load_from_browse(self):
