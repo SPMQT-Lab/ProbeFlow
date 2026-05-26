@@ -183,7 +183,9 @@ class FeatureCountingWindow(QMainWindow):
                 for k, v in self._panel._sample_labels.items()
                 if k in idx_to_p
             ]
-            params = {"particles": particles, "samples": samples}
+            run_p = self._sidebar.classify_run_params()
+            params = {"particles": particles, "samples": samples,
+                      "use_sharpness": run_p.get("use_sharpness", False)}
         else:
             self._sidebar.set_status(f"Unknown mode {mode!r}")
             return

@@ -372,7 +372,10 @@ class _FeaturesWorker(QRunnable):
                 from probeflow.analysis.features import classify_particles
                 particles = self._params["particles"]
                 samples   = self._params["samples"]   # list of (class_name, Particle)
-                res = classify_particles(self._arr, particles, samples)
+                res = classify_particles(
+                    self._arr, particles, samples,
+                    use_sharpness=self._params.get("use_sharpness", False),
+                )
             else:
                 raise ValueError(f"Unknown mode {self._mode!r}")
             self._signals.finished.emit(self._mode, res, "")
@@ -1130,6 +1133,22 @@ class FeaturesSidebar(QWidget):
         undo_btn.clicked.connect(self.undo_label_requested.emit)
         l.addWidget(undo_btn)
 
+        l.addWidget(_sep())
+
+        self._sharpness_cb = QCheckBox("Sharpness-sensitive")
+        self._sharpness_cb.setFont(QFont("Helvetica", 9))
+        self._sharpness_cb.setToolTip(
+            "Enable when two molecule types look the same in shape but one is\n"
+            "fuzzy/blurred and the other is sharp. Adds the Laplacian variance\n"
+            "of each particle as an extra classification feature.")
+        l.addWidget(self._sharpness_cb)
+
+        sharp_hint = QLabel("Use when one class is fuzzy,\nthe other is sharp.")
+        sharp_hint.setFont(QFont("Helvetica", 8))
+        sharp_hint.setStyleSheet("color: #888;")
+        sharp_hint.setWordWrap(True)
+        l.addWidget(sharp_hint)
+
         return w
 
     def _build_lattice_tab(self) -> QWidget:
@@ -1189,6 +1208,12 @@ class FeaturesSidebar(QWidget):
             "threshold":    self._cls_thr_cb.currentText(),
             "invert":       self._cls_invert_cb.isChecked(),
             "min_area_nm2": self._cls_min_area_spin.value(),
+        }
+
+    def classify_run_params(self) -> dict:
+        """Extra parameters forwarded to classify_particles() at run time."""
+        return {
+            "use_sharpness": self._sharpness_cb.isChecked(),
         }
 
     def set_status(self, text: str):

@@ -1073,7 +1073,9 @@ class ProbeFlowWindow(QMainWindow):
                 for k, v in self._features_panel._sample_labels.items()
                 if k in idx_to_p
             ]
-            params = {"particles": particles, "samples": samples}
+            run_p = self._features_sidebar.classify_run_params()
+            params = {"particles": particles, "samples": samples,
+                      "use_sharpness": run_p.get("use_sharpness", False)}
         else:
             self._features_sidebar.set_status(f"Unknown mode {mode!r}")
             return
