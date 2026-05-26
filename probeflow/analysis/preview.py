@@ -277,16 +277,26 @@ def _detect_features(
 ) -> tuple[list[PreviewFeatureRow], list[str]]:
     warnings: list[str] = []
     if params.feature_mode != "points_only":
-        segmentation = _segment_features(
-            corrected,
-            pixel_size_x_m=pixel_size_x_m,
-            pixel_size_y_m=pixel_size_y_m,
-            params=params,
-            max_features=params.max_features,
-        )
-        if segmentation:
-            return segmentation, warnings
-        warnings.append("segmentation returned no features; falling back to point detection")
+        try:
+            segmentation = _segment_features(
+                corrected,
+                pixel_size_x_m=pixel_size_x_m,
+                pixel_size_y_m=pixel_size_y_m,
+                params=params,
+                max_features=params.max_features,
+            )
+        except ImportError as exc:
+            detail = str(exc).splitlines()[0]
+            warnings.append(f"segmentation unavailable ({detail}); falling back to point detection")
+            if params.feature_mode == "segmentation_only":
+                return [], warnings
+        else:
+            if segmentation:
+                return segmentation, warnings
+            warnings.append("segmentation returned no features; falling back to point detection")
+            if params.feature_mode == "segmentation_only":
+                return [], warnings
+
         if params.feature_mode == "segmentation_only":
             return [], warnings
 
