@@ -270,6 +270,8 @@ class ProbeFlowWindow(QMainWindow):
         self._convert_sidebar.run_btn.clicked.connect(self._run)
         self._conv_panel.input_entry.textChanged.connect(self._update_count)
 
+        self._features_panel.go_to_browse_requested.connect(
+            lambda: self._switch_mode("browse"))
         self._features_sidebar.load_from_browse_requested.connect(
             self._on_features_load_from_browse)
         self._features_sidebar.run_requested.connect(self._on_features_run)
