@@ -23,11 +23,11 @@ from __future__ import annotations
 import numpy as np
 import os as _os
 _os.environ.setdefault("QT_API", "pyside6")
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
-from matplotlib.figure import Figure
 
-from PySide6.QtCore import QObject, QRunnable, Qt, Signal, Slot
-from PySide6.QtGui import QCursor, QFont
+from PySide6.QtCore import QObject, QPointF, QRectF, QRunnable, Qt, Signal, Slot
+from PySide6.QtGui import (
+    QBrush, QColor, QCursor, QFont, QImage, QPainterPath, QPen, QPixmap,
+)
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QButtonGroup,
@@ -35,6 +35,14 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
     QFrame,
+    QGraphicsEllipseItem,
+    QGraphicsLineItem,
+    QGraphicsPathItem,
+    QGraphicsPixmapItem,
+    QGraphicsRectItem,
+    QGraphicsScene,
+    QGraphicsTextItem,
+    QGraphicsView,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -50,6 +58,24 @@ from PySide6.QtWidgets import (
 from probeflow.processing.display import clip_range_from_array as _clip_range_from_array
 
 
+def _arr_to_pixmap(arr: np.ndarray) -> QPixmap:
+    """Convert a 2-D float array to a grayscale QPixmap (no PIL dependency)."""
+    try:
+        vmin, vmax = _clip_range_from_array(arr, 1.0, 99.0)
+    except ValueError:
+        vmin, vmax = float(arr.min()), float(arr.max())
+    rng = vmax - vmin
+    if rng == 0:
+        u8 = np.zeros(arr.shape, dtype=np.uint8)
+    else:
+        u8 = np.clip((arr - vmin) / rng * 255.0, 0, 255).astype(np.uint8)
+    u8 = np.ascontiguousarray(u8)
+    h, w = u8.shape
+    data = u8.tobytes()
+    qimg = QImage(data, w, h, w, QImage.Format_Grayscale8)
+    return QPixmap.fromImage(qimg)
+
+
 PLANE_NAMES = ["Z fwd", "Z bwd", "I fwd", "I bwd"]
 
 
@@ -59,6 +85,195 @@ def _sep() -> QFrame:
     line.setFrameShadow(QFrame.Sunken)
     line.setFixedHeight(1)
     return line
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# QGraphicsView-based image canvas for the Features panel
+# Replaces the previous matplotlib canvas — gives the same native Qt
+# scroll-wheel zoom / click-drag pan as the thumbnail double-click viewer.
+# ─────────────────────────────────────────────────────────────────────────────
+
+class _FeatureView(QGraphicsView):
+    """Lightweight QGraphicsView for Features-panel image display.
+
+    Modes
+    -----
+    normal
+        Scroll-wheel zooms, left-drag pans (ScrollHandDrag).
+    classify
+        Left-click emits ``particle_clicked(scene_x, scene_y)``; drag pans.
+    crop
+        Left-drag draws a rectangle; release emits
+        ``crop_completed(x0, y0, x1, y1)`` in image-pixel coordinates.
+    """
+
+    particle_clicked = Signal(float, float)        # scene (image-pixel) coords
+    crop_completed   = Signal(int, int, int, int)  # x0, y0, x1, y1 in image px
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        from PySide6.QtGui import QPainter
+        self._scene = QGraphicsScene(self)
+        self.setScene(self._scene)
+        self._pixmap_item = QGraphicsPixmapItem()
+        self._scene.addItem(self._pixmap_item)
+        self._overlay_items: list = []
+
+        self._classify_armed = False
+        self._cropping       = False
+        self._crop_start     = None
+        self._crop_rect_item = None
+
+        self.setDragMode(QGraphicsView.ScrollHandDrag)
+        self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
+        self.setResizeAnchor(QGraphicsView.AnchorViewCenter)
+        self.setRenderHint(QPainter.SmoothPixmapTransform)
+        self.setRenderHint(QPainter.Antialiasing)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.setMinimumSize(300, 300)
+
+    # ── Image display ─────────────────────────────────────────────────────────
+
+    def set_pixmap(self, pixmap: QPixmap, reset_view: bool = False) -> None:
+        self._pixmap_item.setPixmap(pixmap)
+        self._scene.setSceneRect(QRectF(pixmap.rect()))
+        if reset_view:
+            self.fitInView(self._pixmap_item, Qt.KeepAspectRatio)
+
+    def fit_view(self) -> None:
+        """Reset zoom to show the full image."""
+        if not self._pixmap_item.pixmap().isNull():
+            self.fitInView(self._pixmap_item, Qt.KeepAspectRatio)
+
+    # ── Overlay items ─────────────────────────────────────────────────────────
+
+    def clear_overlay(self) -> None:
+        for item in self._overlay_items:
+            self._scene.removeItem(item)
+        self._overlay_items.clear()
+
+    def _add(self, item) -> None:
+        item.setZValue(10)
+        self._scene.addItem(item)
+        self._overlay_items.append(item)
+
+    def add_path(self, xs: list, ys: list, color: str, lw: float = 0.8) -> None:
+        if len(xs) < 2:
+            return
+        path = QPainterPath()
+        path.moveTo(xs[0], ys[0])
+        for x, y in zip(xs[1:], ys[1:]):
+            path.lineTo(x, y)
+        item = QGraphicsPathItem(path)
+        item.setPen(QPen(QColor(color), lw))
+        item.setBrush(QBrush(Qt.NoBrush))
+        self._add(item)
+
+    def add_cross(self, cx: float, cy: float, color: str, size: float = 5.0) -> None:
+        h = size / 2
+        for x1, y1, x2, y2 in [(cx - h, cy, cx + h, cy), (cx, cy - h, cx, cy + h)]:
+            item = QGraphicsLineItem(x1, y1, x2, y2)
+            item.setPen(QPen(QColor(color), 0.8))
+            self._add(item)
+
+    def add_dot(self, cx: float, cy: float, color: str, r: float = 4.0) -> None:
+        item = QGraphicsEllipseItem(cx - r, cy - r, r * 2, r * 2)
+        item.setPen(QPen(Qt.NoPen))
+        item.setBrush(QBrush(QColor(color)))
+        self._add(item)
+
+    def add_circle(self, cx: float, cy: float, r: float, color: str,
+                   lw: float = 1.2) -> None:
+        item = QGraphicsEllipseItem(cx - r, cy - r, r * 2, r * 2)
+        item.setPen(QPen(QColor(color), lw))
+        item.setBrush(QBrush(Qt.NoBrush))
+        self._add(item)
+
+    def add_text(self, x: float, y: float, text: str, color: str,
+                 font_size: int = 7) -> None:
+        item = QGraphicsTextItem(text)
+        item.setPos(x, y)
+        item.setDefaultTextColor(QColor(color))
+        item.setFont(QFont("Helvetica", font_size))
+        self._add(item)
+
+    def add_line(self, x1: float, y1: float, x2: float, y2: float,
+                 color: str, lw: float = 1.8) -> None:
+        item = QGraphicsLineItem(x1, y1, x2, y2)
+        item.setPen(QPen(QColor(color), lw))
+        self._add(item)
+
+    # ── Mode switches ─────────────────────────────────────────────────────────
+
+    def set_classify_armed(self, armed: bool) -> None:
+        self._classify_armed = armed
+        self.setCursor(Qt.CrossCursor if armed else Qt.ArrowCursor)
+
+    def set_cropping(self, cropping: bool) -> None:
+        self._cropping   = cropping
+        self._crop_start = None
+        if self._crop_rect_item:
+            self._scene.removeItem(self._crop_rect_item)
+            self._crop_rect_item = None
+        if cropping:
+            self.setDragMode(QGraphicsView.NoDrag)
+            self.setCursor(Qt.CrossCursor)
+        else:
+            self.setDragMode(QGraphicsView.ScrollHandDrag)
+            self.setCursor(Qt.ArrowCursor)
+
+    # ── Events ────────────────────────────────────────────────────────────────
+
+    def wheelEvent(self, event) -> None:
+        """Scroll-wheel zoom — no Ctrl needed (same feel as the thumbnail viewer)."""
+        delta = event.angleDelta().y()
+        factor = 1.12 if delta > 0 else 1 / 1.12
+        self.scale(factor, factor)
+        event.accept()
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton:
+            pos = self.mapToScene(event.pos())
+            if self._cropping:
+                self._crop_start = (pos.x(), pos.y())
+                if self._crop_rect_item:
+                    self._scene.removeItem(self._crop_rect_item)
+                self._crop_rect_item = QGraphicsRectItem(QRectF(pos, QPointF(pos.x() + 1, pos.y() + 1)))
+                self._crop_rect_item.setPen(QPen(QColor("#f9e2af"), 1.2, Qt.DashLine))
+                self._crop_rect_item.setBrush(QBrush(Qt.NoBrush))
+                self._crop_rect_item.setZValue(20)
+                self._scene.addItem(self._crop_rect_item)
+                return
+            if self._classify_armed:
+                self.particle_clicked.emit(pos.x(), pos.y())
+                return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._cropping and self._crop_start and (event.buttons() & Qt.LeftButton):
+            pos = self.mapToScene(event.pos())
+            x0, y0 = self._crop_start
+            rect = QRectF(
+                QPointF(min(x0, pos.x()), min(y0, pos.y())),
+                QPointF(max(x0, pos.x()), max(y0, pos.y())),
+            )
+            if self._crop_rect_item:
+                self._crop_rect_item.setRect(rect)
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if self._cropping and self._crop_start and event.button() == Qt.LeftButton:
+            pos = self.mapToScene(event.pos())
+            x0, y0 = self._crop_start
+            x1, y1 = pos.x(), pos.y()
+            ix0, iy0 = int(min(x0, x1)), int(min(y0, y1))
+            ix1, iy1 = int(max(x0, x1)), int(max(y0, y1))
+            self._crop_start = None
+            self.crop_completed.emit(ix0, iy0, ix1, iy1)
+            return
+        super().mouseReleaseEvent(event)
 
 
 class _FeaturesWorkerSignals(QObject):
@@ -139,8 +354,9 @@ class FeaturesPanel(QWidget):
     not mutate Browse thumbnails or Viewer processing state.
     """
 
-    analysis_requested = Signal(str)        # mode name
+    analysis_requested    = Signal(str)   # mode name
     template_crop_requested = Signal()
+    go_to_browse_requested  = Signal()    # ← Browse button
 
     def __init__(self, t: dict, parent=None):
         super().__init__(parent)
@@ -167,9 +383,6 @@ class FeaturesPanel(QWidget):
         self._classifications: list = []
         self._classification_meta: dict | None = None
         self._label_history: list = []     # undo stack for sample labels
-        self._full_xlim = None             # zoom: full-image x limits after first draw
-        self._full_ylim = None             # zoom: full-image y limits after first draw
-        self._reset_zoom_pending: bool = False
         self._build()
 
     def _build(self):
@@ -177,46 +390,44 @@ class FeaturesPanel(QWidget):
         lay.setContentsMargins(8, 8, 8, 4)
         lay.setSpacing(6)
 
+        # ── Top bar: title + Browse back-button ─────────────────────────────
+        top_row = QHBoxLayout()
+        top_row.setSpacing(6)
         self._title = QLabel("FeatureCounting - load a scan from the Browse tab, then run an analysis.")
         self._title.setFont(QFont("Helvetica", 11, QFont.Bold))
         self._title.setWordWrap(True)
-        lay.addWidget(self._title)
+        top_row.addWidget(self._title, 1)
 
-        self._fig    = Figure(figsize=(6, 6), dpi=90)
-        self._fig.patch.set_alpha(0)
-        self._ax     = self._fig.add_subplot(111)
-        self._ax.set_axis_off()
-        self._canvas = FigureCanvasQTAgg(self._fig)
-        lay.addWidget(self._canvas, 1)
+        _back_btn = QPushButton("← Browse")
+        _back_btn.setFont(QFont("Helvetica", 9))
+        _back_btn.setFixedHeight(28)
+        _back_btn.setToolTip("Go back to the thumbnail browser")
+        _back_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        _back_btn.clicked.connect(self.go_to_browse_requested.emit)
+        top_row.addWidget(_back_btn)
+        lay.addLayout(top_row)
 
-        self._canvas.mpl_connect("button_press_event",   self._on_press)
-        self._canvas.mpl_connect("motion_notify_event",  self._on_motion)
-        self._canvas.mpl_connect("button_release_event", self._on_release)
-        self._canvas.mpl_connect("scroll_event",         self._on_scroll)
+        # ── Image view (QGraphicsView — same zoom engine as thumbnail viewer) ─
+        self._view = _FeatureView(self)
+        self._view.particle_clicked.connect(self._on_particle_clicked)
+        self._view.crop_completed.connect(self._on_crop_completed)
+        lay.addWidget(self._view, 1)
 
-        # ── Zoom / view controls ────────────────────────────────────────────
-        _zoom_row = QHBoxLayout()
-        _zoom_row.setSpacing(4)
-        _zi = QPushButton("🔍+")
-        _zi.setFixedSize(36, 24)
-        _zi.setToolTip("Zoom in  (or scroll ↑)")
-        _zi.setFont(QFont("Helvetica", 9))
-        _zi.clicked.connect(lambda: self._zoom_view(1.5))
-        _zo = QPushButton("🔍−")
-        _zo.setFixedSize(36, 24)
-        _zo.setToolTip("Zoom out  (or scroll ↓)")
-        _zo.setFont(QFont("Helvetica", 9))
-        _zo.clicked.connect(lambda: self._zoom_view(1 / 1.5))
-        _fit = QPushButton("⟲ Fit")
-        _fit.setFixedHeight(24)
-        _fit.setToolTip("Reset zoom to show the full image")
-        _fit.setFont(QFont("Helvetica", 9))
-        _fit.clicked.connect(self.reset_view)
-        _zoom_row.addWidget(_zi)
-        _zoom_row.addWidget(_zo)
-        _zoom_row.addWidget(_fit)
-        _zoom_row.addStretch(1)
-        lay.addLayout(_zoom_row)
+        # ── View toolbar ────────────────────────────────────────────────────
+        _vt = QHBoxLayout()
+        _vt.setSpacing(4)
+        _fit_btn = QPushButton("⟲ Fit")
+        _fit_btn.setFixedHeight(24)
+        _fit_btn.setToolTip("Reset zoom to show the full image")
+        _fit_btn.setFont(QFont("Helvetica", 9))
+        _fit_btn.clicked.connect(self.reset_view)
+        _vt.addWidget(_fit_btn)
+        _vt.addStretch(1)
+        _hint = QLabel("Scroll to zoom · Drag to pan")
+        _hint.setFont(QFont("Helvetica", 8))
+        _hint.setStyleSheet("color: #888;")
+        _vt.addWidget(_hint)
+        lay.addLayout(_vt)
 
         self._results_table = QTableWidget(0, 4)
         self._results_table.setHorizontalHeaderLabels(["#", "x (nm)", "y (nm)", "value"])
@@ -254,10 +465,7 @@ class FeaturesPanel(QWidget):
         self._overlay_mode = "none"
         self._sample_labels = {}
         self._label_history = []
-        self._full_xlim    = None
-        self._full_ylim    = None
-        self._reset_zoom_pending = False
-        self._redraw()
+        self._redraw(reset_view=True)
         self._results_table.setRowCount(0)
         plane_lbl = PLANE_NAMES[plane_idx] if 0 <= plane_idx < len(PLANE_NAMES) else f"plane {plane_idx}"
         self._title.setText(
@@ -283,6 +491,7 @@ class FeaturesPanel(QWidget):
 
     def set_sample_selection_armed(self, armed: bool) -> None:
         self._sample_armed = armed
+        self._view.set_classify_armed(armed)
 
     def has_sample_labels(self) -> bool:
         return bool(self._sample_labels)
@@ -405,58 +614,16 @@ class FeaturesPanel(QWidget):
     def begin_template_crop(self):
         if self._arr is None:
             return
-        self._cropping = True
-        self._crop_start = None
-        self._crop_rect  = None
-        self._title.setText("Template crop - drag a rectangle over one motif, release to set.")
-        self._canvas.setCursor(QCursor(Qt.CrossCursor))
+        self._view.set_cropping(True)
+        self._title.setText("Template crop — drag a rectangle over one motif, release to set.")
 
     def cancel_template_crop(self):
-        self._cropping = False
-        self._crop_start = None
-        self._crop_rect  = None
-        self._canvas.setCursor(QCursor(Qt.ArrowCursor))
+        self._view.set_cropping(False)
         self._redraw()
 
-    # ── Zoom helpers ─────────────────────────────────────────────────────────
-
-    def _on_scroll(self, event):
-        """Zoom the matplotlib view with the mouse wheel."""
-        if event.inaxes is not self._ax or self._arr is None:
-            return
-        factor = 1.25 if event.step > 0 else 0.8
-        xl, xr = self._ax.get_xlim()
-        yb, yt = self._ax.get_ylim()
-        xc = float(event.xdata) if event.xdata is not None else (xl + xr) / 2
-        yc = float(event.ydata) if event.ydata is not None else (yb + yt) / 2
-        xhalf = (xr - xl) / 2 / factor
-        yhalf = (yt - yb) / 2 / factor
-        self._ax.set_xlim(xc - xhalf, xc + xhalf)
-        self._ax.set_ylim(yc - yhalf, yc + yhalf)
-        self._canvas.draw_idle()
-
-    def _zoom_view(self, factor: float):
-        """Zoom by *factor* around the image centre (>1 = in, <1 = out)."""
-        if self._arr is None:
-            return
-        xl, xr = self._ax.get_xlim()
-        yb, yt = self._ax.get_ylim()
-        xc = (xl + xr) / 2
-        yc = (yb + yt) / 2
-        xhalf = (xr - xl) / 2 / factor
-        yhalf = (yt - yb) / 2 / factor
-        self._ax.set_xlim(xc - xhalf, xc + xhalf)
-        self._ax.set_ylim(yc - yhalf, yc + yhalf)
-        self._canvas.draw_idle()
-
-    def reset_view(self):
-        """Reset zoom to show the full image (back to thumbnail view)."""
-        if self._full_xlim is not None:
-            self._ax.set_xlim(self._full_xlim)
-            self._ax.set_ylim(self._full_ylim)
-            self._canvas.draw_idle()
-
-    # ── Classify-label undo ──────────────────────────────────────────────────
+    def reset_view(self) -> None:
+        """Reset zoom to fit the full image (⟲ Fit button)."""
+        self._view.fit_view()
 
     def undo_last_label(self):
         """Undo the most recent sample-label assignment."""
@@ -464,98 +631,58 @@ class FeaturesPanel(QWidget):
             self._sample_labels = self._label_history.pop()
             self._redraw()
 
-    def _on_press(self, event):
-        if event.inaxes is not self._ax:
-            return
-        if event.xdata is None or event.ydata is None:
-            return
+    # ── Events from _FeatureView ──────────────────────────────────────────────
 
-        # ── Template-crop mode ───────────────────────────────────────────────
-        if self._cropping:
-            self._crop_start = (int(event.xdata), int(event.ydata))
-            self._crop_rect  = (self._crop_start[0], self._crop_start[1],
-                                self._crop_start[0], self._crop_start[1])
-            return
-
-        # ── Classify label-by-clicking mode ─────────────────────────────────
-        if (self._sample_armed and self._current_mode == "classify"
+    def _on_particle_clicked(self, scene_x: float, scene_y: float) -> None:
+        """Handle a classify-mode click — find the nearest particle and label it."""
+        if not (self._sample_armed and self._current_mode == "classify"
                 and self._particles and self._arr is not None):
-            click_x, click_y = event.xdata, event.ydata
-            best_p, best_dist_sq = None, float("inf")
-            for p in self._particles:
-                cx = p.centroid_x_m / self._pixel_size_x_m
-                cy = p.centroid_y_m / self._pixel_size_y_m
-                dist_sq = (cx - click_x) ** 2 + (cy - click_y) ** 2
-                if dist_sq < best_dist_sq:
-                    best_dist_sq = dist_sq
-                    best_p = p
-            # Accept click only if within 15 % of the image diagonal
-            max_dist_sq = (max(self._arr.shape) * 0.15) ** 2
-            if best_p is not None and best_dist_sq < max_dist_sq:
-                import copy
-                self._label_history.append(copy.deepcopy(self._sample_labels))
-                self._edit_sample_label(best_p)
-                self._redraw()
+            return
+        best_p, best_dist_sq = None, float("inf")
+        for p in self._particles:
+            cx = p.centroid_x_m / self._pixel_size_x_m
+            cy = p.centroid_y_m / self._pixel_size_y_m
+            dist_sq = (cx - scene_x) ** 2 + (cy - scene_y) ** 2
+            if dist_sq < best_dist_sq:
+                best_dist_sq = dist_sq
+                best_p = p
+        max_dist_sq = (max(self._arr.shape) * 0.15) ** 2
+        if best_p is not None and best_dist_sq < max_dist_sq:
+            import copy
+            self._label_history.append(copy.deepcopy(self._sample_labels))
+            self._edit_sample_label(best_p)
+            self._redraw()
 
-    def _on_motion(self, event):
-        if not self._cropping or self._crop_start is None:
-            return
-        if event.inaxes is not self._ax or event.xdata is None or event.ydata is None:
-            return
-        x0, y0 = self._crop_start
-        x1, y1 = int(event.xdata), int(event.ydata)
-        self._crop_rect = (min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1))
-        self._redraw()
-
-    def _on_release(self, event):
-        if not self._cropping or self._crop_start is None:
-            return
-        if self._crop_rect is None:
-            return
-        x0, y0, x1, y1 = self._crop_rect
-        if x1 - x0 < 4 or y1 - y0 < 4 or self._arr is None:
-            self.cancel_template_crop()
-            self._title.setText("Template crop cancelled - rectangle too small.")
+    def _on_crop_completed(self, x0: int, y0: int, x1: int, y1: int) -> None:
+        """Handle template crop rectangle from _FeatureView."""
+        self._view.set_cropping(False)
+        if self._arr is None or x1 - x0 < 4 or y1 - y0 < 4:
+            self._title.setText("Template crop cancelled — rectangle too small.")
             return
         Ny, Nx = self._arr.shape
         x0c, y0c = max(0, x0), max(0, y0)
         x1c, y1c = min(Nx, x1), min(Ny, y1)
         self._template_arr = self._arr[y0c:y1c, x0c:x1c].copy()
-        self._cropping   = False
-        self._crop_start = None
-        self._canvas.setCursor(QCursor(Qt.ArrowCursor))
         th, tw = self._template_arr.shape
         self._title.setText(
-            f"Template captured - {tw}x{th} px.  Press 'Run' to count matches.")
+            f"Template captured — {tw}×{th} px.  Press 'Run' to count matches.")
         self._redraw()
 
-    def _redraw(self):
-        # ── Preserve current zoom across redraws ─────────────────────────────
-        save_zoom = (
-            self._arr is not None
-            and self._full_xlim is not None
-            and not self._reset_zoom_pending
-        )
-        if save_zoom:
-            cur_xlim = list(self._ax.get_xlim())
-            cur_ylim = list(self._ax.get_ylim())
+    def _redraw(self, *, reset_view: bool = False) -> None:
+        """Rebuild the QGraphicsView display from scratch."""
+        self._view.clear_overlay()
 
-        self._ax.clear()
-        self._ax.set_axis_off()
         if self._arr is None:
-            self._canvas.draw_idle()
             return
 
-        try:
-            vmin, vmax = _clip_range_from_array(self._arr, 1.0, 99.0)
-        except ValueError:
-            vmin, vmax = 0.0, 1.0
-        self._ax.imshow(self._arr, cmap="gray", vmin=vmin, vmax=vmax,
-                         interpolation="nearest", origin="upper")
+        # ── Background pixmap ────────────────────────────────────────────────
+        pixmap = _arr_to_pixmap(self._arr)
+        self._view.set_pixmap(pixmap, reset_view=reset_view)
 
+        # ── Particle overlays ────────────────────────────────────────────────
         if self._overlay_mode == "particles":
             if self._current_mode == "classify":
-                # Show particles colored by their label assignment
+                # Color contours / crosses by label assignment
                 for p in self._particles:
                     label_info = self._sample_labels.get(p.index)
                     color = (
@@ -564,43 +691,44 @@ class FeaturesPanel(QWidget):
                     )
                     xs = [c[0] / self._pixel_size_x_m for c in p.contour_xy_m]
                     ys = [c[1] / self._pixel_size_y_m for c in p.contour_xy_m]
-                    if xs and ys:
+                    if xs:
                         xs.append(xs[0]); ys.append(ys[0])
-                        self._ax.plot(xs, ys, color=color, lw=0.8)
+                        self._view.add_path(xs, ys, color)
                     cx = p.centroid_x_m / self._pixel_size_x_m
                     cy = p.centroid_y_m / self._pixel_size_y_m
-                    center_color = "#a6e3a1" if label_info else "#585b70"
-                    self._ax.plot(cx, cy, marker="+", color=center_color, ms=5)
+                    cross_color = "#a6e3a1" if label_info else "#585b70"
+                    self._view.add_cross(cx, cy, cross_color)
                     if label_info:
-                        self._ax.text(cx + 2, cy - 2, label_info["name"],
-                                     color=color, fontsize=7, clip_on=True)
+                        self._view.add_text(cx + 2, cy - 8, label_info["name"], color)
             else:
                 for p in self._particles:
                     xs = [c[0] / self._pixel_size_x_m for c in p.contour_xy_m]
                     ys = [c[1] / self._pixel_size_y_m for c in p.contour_xy_m]
-                    if xs and ys:
+                    if xs:
                         xs.append(xs[0]); ys.append(ys[0])
-                        self._ax.plot(xs, ys, color="#f38ba8", lw=0.8)
+                        self._view.add_path(xs, ys, "#f38ba8")
                     cx = p.centroid_x_m / self._pixel_size_x_m
                     cy = p.centroid_y_m / self._pixel_size_y_m
-                    self._ax.plot(cx, cy, marker="+", color="#a6e3a1", ms=5)
+                    self._view.add_cross(cx, cy, "#a6e3a1")
+
         elif self._overlay_mode == "template":
             for d in self._detections:
-                self._ax.plot(d.x_px, d.y_px, marker="o", mfc="none",
-                              mec="#89b4fa", ms=8, mew=1.2)
+                self._view.add_circle(d.x_px, d.y_px, 5.0, "#89b4fa")
+
         elif self._overlay_mode == "lattice" and self._lattice is not None:
             lat = self._lattice
             Ny, Nx = self._arr.shape
-            cx, cy = Nx / 2, Ny / 2
+            cx, cy = Nx / 2.0, Ny / 2.0
             ax_, ay_ = lat.a_vector_px
             bx_, by_ = lat.b_vector_px
-            self._ax.plot([cx, cx + ax_], [cy, cy + ay_], color="#f38ba8", lw=1.8)
-            self._ax.plot([cx, cx + bx_], [cy, cy + by_], color="#89b4fa", lw=1.8)
+            self._view.add_line(cx, cy, cx + ax_, cy + ay_, "#f38ba8")
+            self._view.add_line(cx, cy, cx + bx_, cy + by_, "#89b4fa")
+            # Unit cell outline
             pts_x = [cx, cx + ax_, cx + ax_ + bx_, cx + bx_, cx]
             pts_y = [cy, cy + ay_, cy + ay_ + by_, cy + by_, cy]
-            self._ax.plot(pts_x, pts_y, color="#fab387", lw=1.0, ls="--")
+            self._view.add_path(pts_x, pts_y, "#fab387", lw=1.0)
+
         elif self._overlay_mode == "classify" and self._classifications:
-            # Show classification results: particles colored by assigned class
             classify_map = {c.particle_index: c for c in self._classifications}
             label_colors = {
                 v["name"]: "#{:02x}{:02x}{:02x}".format(*v["color"])
@@ -612,40 +740,10 @@ class FeaturesPanel(QWidget):
                 c = classify_map.get(p.index)
                 if c and c.class_name != "other":
                     color = label_colors.get(c.class_name, "#89b4fa")
-                    self._ax.plot(cx, cy, marker="o", color=color, ms=7,
-                                  mfc=color, mew=0, alpha=0.85)
-                    self._ax.text(cx + 2, cy - 2, c.class_name,
-                                 color=color, fontsize=7, clip_on=True)
+                    self._view.add_dot(cx, cy, color, r=5.0)
+                    self._view.add_text(cx + 2, cy - 8, c.class_name, color)
                 else:
-                    self._ax.plot(cx, cy, marker=".", color="#585b70",
-                                  ms=4, alpha=0.5)
-
-        if self._crop_rect is not None:
-            x0, y0, x1, y1 = self._crop_rect
-            self._ax.plot([x0, x1, x1, x0, x0], [y0, y0, y1, y1, y0],
-                          color="#f9e2af", lw=1.2)
-
-        if self._template_arr is not None and self._overlay_mode == "template":
-            th, tw = self._template_arr.shape
-            self._ax.text(5, 15,
-                          f"template: {tw}x{th} px",
-                          color="#f9e2af", fontsize=8,
-                          bbox=dict(boxstyle="round", fc="#1e1e2e88", ec="none"))
-
-        # ── Zoom state management ─────────────────────────────────────────────
-        if self._full_xlim is None:
-            # First draw of this image: capture full-view limits
-            self._full_xlim = list(self._ax.get_xlim())
-            self._full_ylim = list(self._ax.get_ylim())
-        elif self._reset_zoom_pending:
-            self._ax.set_xlim(self._full_xlim)
-            self._ax.set_ylim(self._full_ylim)
-            self._reset_zoom_pending = False
-        elif save_zoom:
-            self._ax.set_xlim(cur_xlim)
-            self._ax.set_ylim(cur_ylim)
-
-        self._canvas.draw_idle()
+                    self._view.add_dot(cx, cy, "#585b70", r=3.0)
 
 
 class FeaturesSidebar(QWidget):
