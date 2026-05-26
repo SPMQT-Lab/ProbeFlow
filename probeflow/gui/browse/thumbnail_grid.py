@@ -92,6 +92,7 @@ class ThumbnailGrid(QWidget):
         self._primary:        Optional[str]                    = None
         self._thumbnail_colormap: str                          = DEFAULT_CMAP_KEY
         self._thumbnail_processing: dict                       = {}
+        self._per_scan_processing: dict                        = {}  # path_str → processing dict
         self._thumbnail_clip: tuple[float, float]              = (1.0, 99.0)
         self._thumbnail_channel: str                           = THUMBNAIL_CHANNEL_DEFAULT
         self._load_token                                       = object()
@@ -303,11 +304,18 @@ class ThumbnailGrid(QWidget):
 
     def _make_thumbnail_loader(self, entry: SxmFile, token) -> ThumbnailLoader:
         clip_low, clip_high = self._thumbnail_clip
+        # Merge global thumbnail processing with any per-scan override.
+        # Per-scan processing (saved from the viewer) takes precedence.
+        per_scan = self._per_scan_processing.get(str(entry.path), {})
+        if per_scan:
+            proc = {**self._thumbnail_processing, **per_scan}
+        else:
+            proc = self._thumbnail_processing or None
         Loader = _browse_attr("ThumbnailLoader", ThumbnailLoader)
         return Loader(entry, self._thumbnail_colormap, token,
                                ScanCard.IMG_W, ScanCard.IMG_H,
                                clip_low, clip_high,
-                               processing=self._thumbnail_processing or None,
+                               processing=proc,
                                thumbnail_channel=self._thumbnail_channel)
 
     def _rerender_scan_thumbnails(self) -> int:
@@ -368,6 +376,27 @@ class ThumbnailGrid(QWidget):
 
     def thumbnail_processing(self) -> dict:
         return dict(self._thumbnail_processing)
+
+    def set_entry_processing(self, path_str: str, proc: dict) -> None:
+        """Save per-scan processing and re-render that scan's thumbnail.
+
+        Called by ProbeFlowWindow when an ImageViewerDialog closes with a
+        non-empty processing state, so the Browse thumbnail reflects the
+        viewer processing the user applied.
+        """
+        if proc:
+            self._per_scan_processing[path_str] = dict(proc)
+        else:
+            self._per_scan_processing.pop(path_str, None)
+        # Find the entry and re-render just its thumbnail.
+        token = self._load_token
+        for entry in self._entries:
+            if isinstance(entry, SxmFile) and str(entry.path) == path_str:
+                if entry.stem in self._cards:
+                    loader = self._make_thumbnail_loader(entry, token)
+                    loader.signals.loaded.connect(self._on_thumb)
+                    self._pool.start(loader)
+                break
 
     def thumbnail_plane_index_for_entry(self, entry: SxmFile) -> int:
         try:

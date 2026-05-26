@@ -129,6 +129,10 @@ class ProbeFlowWindow(QMainWindow):
         # garbage-collected while open (show() does not block like exec()).
         self._open_viewers: list = []
 
+        # Per-scan processing memory: path_str → processing dict.
+        # Populated when a viewer closes; restored when the same scan is reopened.
+        self._saved_processing: dict = {}
+
         self._build_ui()
         self._apply_theme()
         self._restore_desktop_layout()
@@ -1302,6 +1306,10 @@ class ProbeFlowWindow(QMainWindow):
             dlg = SpecViewerDialog(entry, t, self)
         else:
             cmap_key, clip, proc = self._grid.get_card_state(entry.stem)
+            # Restore any processing the user applied last time this scan was open.
+            saved = self._saved_processing.get(str(entry.path))
+            if saved:
+                proc = dict(saved)
             sxm_entries = [e for e in self._grid.get_entries() if isinstance(e, SxmFile)]
             initial_plane_idx = self._grid.thumbnail_plane_index_for_entry(entry)
             dlg = ImageViewerDialog(entry, sxm_entries, cmap_key, t, self,
@@ -1319,6 +1327,21 @@ class ProbeFlowWindow(QMainWindow):
                 self._open_viewers.remove(d)
             except ValueError:
                 pass
+            # ── Save processing state so it's restored when this scan is reopened ──
+            if not spec:
+                try:
+                    last_entry = d._entries[d._idx]
+                    state = dict(getattr(d, "_processing", {}) or {})
+                    key = str(last_entry.path)
+                    if state:
+                        self._saved_processing[key] = state
+                    else:
+                        # User reset to original — forget the saved state too.
+                        self._saved_processing.pop(key, None)
+                    # Also update the Browse thumbnail so it shows the processed view.
+                    self._grid.set_entry_processing(key, state)
+                except Exception:
+                    pass
             # Handle "Send to …" actions requested from inside the image viewer.
             if not spec and d._deferred.is_pending():
                 self._load_from_viewer(d, d._deferred.action)
