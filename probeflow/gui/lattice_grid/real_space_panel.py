@@ -41,6 +41,7 @@ from probeflow.analysis.lattice_grid import (
     RealSpaceCalibration,
     format_real_space_measurements,
 )
+from probeflow.gui.no_wheel import install_no_wheel_spinboxes
 
 from .controller import LatticeGridController
 from .graphics_item import LatticeGridItem
@@ -436,6 +437,7 @@ class LatticeGridPanel(QWidget):
         dist_lay.addWidget(self._apply_btn)
 
         self._tabs.addTab(dist_tab, "Distortion")
+        install_no_wheel_spinboxes(self)
 
     # ── model↔UI sync ─────────────────────────────────────────────────────────
 

@@ -72,6 +72,7 @@ def open_fft_tool(
     qy_axis: np.ndarray,
     image_shape: tuple,
     parent=None,
+    on_change=None,
 ) -> tuple[FFTLatticeOverlay, FFTLatticePanel]:
     """
     Create a reciprocal-space lattice grid overlay on an FFT matplotlib axes.
@@ -91,5 +92,5 @@ def open_fft_tool(
     overlay = FFTLatticeOverlay(ax, canvas, qx_axis, qy_axis, Nx, Ny)
     overlay.set_grid(grid)
 
-    panel = FFTLatticePanel(overlay, cal, Nx, Ny, parent=parent)
+    panel = FFTLatticePanel(overlay, cal, Nx, Ny, parent=parent, on_change=on_change)
     return overlay, panel

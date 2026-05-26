@@ -17,6 +17,7 @@ from probeflow.analysis.lattice_grid import (
     RealSpaceCalibration,
     ReciprocalCalibration,
     _fmt_angle_deg,
+    direct_lattice_vectors_from_reciprocal_grid,
     format_real_space_measurements,
     format_reciprocal_measurements,
 )
@@ -398,6 +399,25 @@ class TestReciprocalCalibration:
         g2 = self.cal.vec_length_q((0, 1))
         # Square FFT → symmetric axes
         assert abs(g1 - g2) < 1e-10
+
+    def test_direct_lattice_from_square_reciprocal_grid(self):
+        grid = LatticeGrid.make_square(128, 128, 10, space="reciprocal")
+
+        a_nm, b_nm = direct_lattice_vectors_from_reciprocal_grid(grid, self.cal)
+
+        assert a_nm == pytest.approx((1.0, 0.0))
+        assert b_nm == pytest.approx((0.0, 1.0))
+
+    def test_direct_lattice_from_hex_reciprocal_grid(self):
+        grid = LatticeGrid.make_hexagonal(128, 128, 10, space="reciprocal")
+
+        a_nm, b_nm = direct_lattice_vectors_from_reciprocal_grid(grid, self.cal)
+
+        assert math.hypot(*a_nm) == pytest.approx(1.0 / math.sin(math.radians(60.0)))
+        assert math.hypot(*b_nm) == pytest.approx(1.0 / math.sin(math.radians(60.0)))
+        dot = a_nm[0] * b_nm[0] + a_nm[1] * b_nm[1]
+        angle = math.degrees(math.acos(dot / (math.hypot(*a_nm) * math.hypot(*b_nm))))
+        assert angle == pytest.approx(120.0)
 
 
 # ── format_real_space_measurements ───────────────────────────────────────────

@@ -425,12 +425,34 @@ class ImageViewerToolsMixin:
         if arr is None:
             self._status_lbl.setText("No image loaded.")
             return
+        def _get_image():
+            return self._display_arr if self._display_arr is not None else self._raw_arr
+
+        def _preview_fft_correction(corrected_arr) -> None:
+            self._display_arr = corrected_arr
+            self._refresh_viewer_pixmap(reset_zoom=False)
+
+        def _clear_fft_correction_preview() -> None:
+            self._refresh_display_array(reset_zoom_if_shape_changed=False)
+            self._refresh_viewer_pixmap(reset_zoom=False)
+
+        def _apply_fft_correction(op_name: str, op_params: dict) -> None:
+            ops = list(self._processing.get("geometric_ops") or [])
+            ops.append({"op": op_name, "params": op_params})
+            self._processing["geometric_ops"] = ops
+            self._refresh_processing_display()
+            self._status_lbl.setText("Applied FFT-derived lattice correction.")
+
         dlg = FFTViewerDialog(
             arr,
             self._scan_range_m or (1e-9, 1e-9),
             colormap=self._colormap,
             theme=self._t,
             channel_unit=self._channel_unit(),
+            get_image_fn=_get_image,
+            apply_correction_fn=_apply_fft_correction,
+            preview_image_fn=_preview_fft_correction,
+            clear_preview_fn=_clear_fft_correction_preview,
             parent=self,
         )
         dlg.show()

@@ -50,9 +50,99 @@ class _MockFftClick:
         self.ydata = ydata
 
 
-def test_fft_lattice_panel_close_clears_overlay(qapp):
+class _FakeWheelEvent:
+    def __init__(self, delta_y=-120):
+        from PySide6.QtCore import QEvent
+
+        self._type = QEvent.Wheel
+        self._delta_y = delta_y
+        self.accepted = False
+
+    def type(self):
+        return self._type
+
+    def angleDelta(self):
+        class _Delta:
+            def __init__(self, y):
+                self._y = y
+
+            def y(self):
+                return self._y
+
+        return _Delta(self._delta_y)
+
+    def accept(self):
+        self.accepted = True
+
+
+def test_fft_viewer_gives_fft_canvas_priority(qapp):
     import numpy as np
-    from PySide6.QtCore import QCoreApplication
+
+    dlg = FFTViewerDialog(np.ones((16, 16)), (1e-9, 1e-9))
+    try:
+        dlg.resize(1180, 820)
+        dlg.show()
+        qapp.processEvents()
+
+        assert dlg._canvas_real.width() <= 260
+        assert dlg._canvas_fft.width() > dlg._canvas_real.width()
+        assert dlg._canvas_fft.height() > dlg._canvas_real.height()
+    finally:
+        dlg.close()
+        dlg.deleteLater()
+        qapp.processEvents()
+
+
+def test_fft_splitter_can_give_more_height_to_fft(qapp):
+    import numpy as np
+
+    dlg = FFTViewerDialog(np.ones((32, 32)), (1e-9, 1e-9))
+    try:
+        dlg.resize(1180, 820)
+        dlg.show()
+        qapp.processEvents()
+
+        dlg._fft_splitter.setSizes([260, 420])
+        qapp.processEvents()
+        compact_h = dlg._canvas_fft.height()
+
+        dlg._fft_splitter.setSizes([640, 80])
+        qapp.processEvents()
+        expanded_h = dlg._canvas_fft.height()
+
+        assert expanded_h > compact_h
+    finally:
+        dlg.close()
+        dlg.deleteLater()
+        qapp.processEvents()
+
+
+def test_focus_fft_hides_reference_and_tools_then_restores(qapp):
+    import numpy as np
+
+    dlg = FFTViewerDialog(np.ones((16, 16)), (1e-9, 1e-9))
+    try:
+        dlg.show()
+        qapp.processEvents()
+
+        dlg._focus_fft_btn.setChecked(True)
+        qapp.processEvents()
+        assert not dlg._left_panel.isVisible()
+        assert not dlg._tab_widget.isVisible()
+
+        dlg._focus_fft_btn.setChecked(False)
+        qapp.processEvents()
+        assert dlg._left_panel.isVisible()
+        assert dlg._tab_widget.isVisible()
+    finally:
+        dlg.close()
+        dlg.deleteLater()
+        qapp.processEvents()
+
+
+def test_fft_lattice_panel_embeds_in_grid_tab_and_clear_removes_overlay(qapp):
+    import numpy as np
+    from PySide6.QtWidgets import QApplication
 
     dlg = FFTViewerDialog(np.ones((16, 16)), (1e-9, 1e-9))
     try:
@@ -62,19 +152,89 @@ def test_fft_lattice_panel_close_clears_overlay(qapp):
         qapp.processEvents()
 
         overlay = dlg._fft_lattice_overlay
-        panel = dlg._fft_lattice_dock
+        panel = dlg._fft_lattice_panel
         assert overlay is not None
         assert panel is not None
+        assert dlg._fft_lattice_dock is None
         assert dlg._clear_grid_btn.isEnabled()
+        assert dlg._tab_widget.currentIndex() == dlg._grid_tab_index
 
-        panel.close()
-        qapp.processEvents()
-        QCoreApplication.sendPostedEvents(None, 0)
+        app = QApplication.instance()
+        assert app is not None
+        visible_tool_titles = {
+            widget.windowTitle()
+            for widget in app.topLevelWidgets()
+            if widget.isVisible() and widget is not dlg
+        }
+        assert "Reciprocal Grid" not in visible_tool_titles
+
+        dlg._on_clear_fft_lattice()
         qapp.processEvents()
 
         assert dlg._fft_lattice_overlay is None
-        assert dlg._fft_lattice_dock is None
+        assert dlg._fft_lattice_panel is None
         assert not dlg._clear_grid_btn.isEnabled()
+    finally:
+        dlg.close()
+        dlg.deleteLater()
+        qapp.processEvents()
+
+
+def test_wheel_over_fft_grid_spinbox_scrolls_panel_without_changing_value(qapp):
+    import numpy as np
+    from probeflow.gui.no_wheel import _no_wheel_filter
+
+    dlg = FFTViewerDialog(np.ones((16, 16)), (1e-9, 1e-9))
+    try:
+        dlg.show()
+        qapp.processEvents()
+        dlg._on_open_fft_lattice()
+        qapp.processEvents()
+
+        panel = dlg._fft_lattice_panel
+        spin = panel._g1_spin
+        old_value = spin.value()
+        event = _FakeWheelEvent(delta_y=-120)
+
+        assert _no_wheel_filter().eventFilter(spin, event)
+        assert event.accepted
+        assert spin.value() == old_value
+    finally:
+        dlg.close()
+        dlg.deleteLater()
+        qapp.processEvents()
+
+
+def test_fft_grid_correction_preview_and_apply_hooks(qapp):
+    import numpy as np
+
+    arr = np.arange(64, dtype=float).reshape(8, 8)
+    previewed = []
+    applied = []
+
+    dlg = FFTViewerDialog(
+        arr,
+        (1e-9, 1e-9),
+        get_image_fn=lambda: arr,
+        preview_image_fn=previewed.append,
+        clear_preview_fn=lambda: previewed.append(None),
+        apply_correction_fn=lambda op, params: applied.append((op, params)),
+    )
+    try:
+        dlg.show()
+        qapp.processEvents()
+        dlg._on_open_fft_lattice()
+        qapp.processEvents()
+
+        assert dlg._fft_correction is not None
+        dlg._on_fft_preview_correction()
+        assert previewed
+        assert previewed[-1] is not None
+
+        dlg._on_fft_apply_correction()
+        assert applied
+        assert applied[0][0] == "affine_lattice_correction"
+        assert applied[0][1]["source"] == "fft_reciprocal_grid"
     finally:
         dlg.close()
         dlg.deleteLater()

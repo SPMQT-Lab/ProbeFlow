@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -26,6 +27,7 @@ from probeflow.analysis.lattice_grid import (
     ReciprocalCalibration,
     format_reciprocal_measurements,
 )
+from probeflow.gui.no_wheel import install_no_wheel_spinboxes
 
 from .fft_overlay import FFTLatticeOverlay
 
@@ -41,12 +43,14 @@ class FFTLatticePanel(QWidget):
         image_w: int,
         image_h: int,
         parent=None,
+        on_change=None,
     ):
         super().__init__(parent)
         self._overlay = overlay
         self._cal = calibration
         self._image_w = image_w
         self._image_h = image_h
+        self._external_on_change = on_change
         self._updating_controls = False
         self._build()
         overlay.set_on_change(self._on_grid_changed)
@@ -74,15 +78,18 @@ class FFTLatticePanel(QWidget):
 
         params_grp = QGroupBox("Parameters")
         params_grp.setFont(QFont("Helvetica", 9))
-        params_lay = QVBoxLayout(params_grp)
-        params_lay.setSpacing(3)
-        params_lay.setContentsMargins(6, 6, 6, 4)
+        params_lay = QGridLayout(params_grp)
+        params_lay.setHorizontalSpacing(8)
+        params_lay.setVerticalSpacing(4)
+        params_lay.setContentsMargins(8, 8, 8, 6)
 
-        def _row(label, lo, hi, step, dec, sfx=""):
-            r = QHBoxLayout()
+        def _make_label(label):
             lb = QLabel(label)
             lb.setFont(QFont("Helvetica", 9))
-            lb.setMinimumWidth(68)
+            lb.setMinimumWidth(64)
+            return lb
+
+        def _double_cell(row, col, label, lo, hi, step, dec, sfx=""):
             sp = QDoubleSpinBox()
             sp.setRange(lo, hi)
             sp.setSingleStep(step)
@@ -91,35 +98,35 @@ class FFTLatticePanel(QWidget):
                 sp.setSuffix(f" {sfx}")
             sp.setFont(QFont("Helvetica", 9))
             sp.setFixedHeight(22)
-            r.addWidget(lb)
-            r.addWidget(sp, 1)
-            params_lay.addLayout(r)
+            params_lay.addWidget(_make_label(label), row, col * 2)
+            params_lay.addWidget(sp, row, col * 2 + 1)
             return sp
 
-        self._ox_spin  = _row("Origin x:", 0, float(self._image_w), 1, 1, "px")
-        self._oy_spin  = _row("Origin y:", 0, float(self._image_h), 1, 1, "px")
-        self._g1_spin  = _row("|g1|:", 0.001, 1000.0, 0.01, 3, "nm⁻¹")
-        self._g2_spin  = _row("|g2|:", 0.001, 1000.0, 0.01, 3, "nm⁻¹")
-        self._rot_spin = _row("Rotation:", -180, 180, 0.1, 1, "°")
+        def _int_cell(row, col, label, lo, hi, value):
+            sp = QSpinBox()
+            sp.setRange(lo, hi)
+            sp.setValue(value)
+            sp.setFont(QFont("Helvetica", 9))
+            sp.setFixedHeight(22)
+            params_lay.addWidget(_make_label(label), row, col * 2)
+            params_lay.addWidget(sp, row, col * 2 + 1)
+            return sp
 
-        self._angle_ab_spin = _row("Angle g1-g2:", 1.0, 179.0, 0.1, 2, "°")
+        self._ox_spin  = _double_cell(0, 0, "Origin x:", 0, float(self._image_w), 1, 1, "px")
+        self._oy_spin  = _double_cell(0, 1, "Origin y:", 0, float(self._image_h), 1, 1, "px")
+        self._g1_spin  = _double_cell(1, 0, "|g1|:", 0.001, 1000.0, 0.01, 3, "nm⁻¹")
+        self._g2_spin  = _double_cell(1, 1, "|g2|:", 0.001, 1000.0, 0.01, 3, "nm⁻¹")
+        self._rot_spin = _double_cell(2, 0, "Rotation:", -180, 180, 0.1, 1, "°")
+
+        self._angle_ab_spin = _double_cell(2, 1, "Angle g1-g2:", 1.0, 179.0, 0.1, 2, "°")
         self._angle_ab_spin.setEnabled(False)
 
-        cells_r = QHBoxLayout()
-        cells_lb = QLabel("Cells ±:")
-        cells_lb.setFont(QFont("Helvetica", 9))
-        cells_lb.setMinimumWidth(68)
-        self._cells_spin = QSpinBox()
-        self._cells_spin.setRange(1, 200)
-        self._cells_spin.setValue(12)
-        self._cells_spin.setFont(QFont("Helvetica", 9))
-        self._cells_spin.setFixedHeight(22)
-        cells_r.addWidget(cells_lb)
-        cells_r.addWidget(self._cells_spin, 1)
-        params_lay.addLayout(cells_r)
+        self._cells_spin = _int_cell(3, 0, "Cells ±:", 1, 200, 12)
 
-        self._line_width_spin = _row("Line width:", 0.25, 10.0, 0.25, 2, "px")
+        self._line_width_spin = _double_cell(3, 1, "Line width:", 0.25, 10.0, 0.25, 2, "px")
         self._line_width_spin.setValue(1.5)
+        params_lay.setColumnStretch(1, 1)
+        params_lay.setColumnStretch(3, 1)
 
         lay.addWidget(params_grp)
 
@@ -131,12 +138,13 @@ class FFTLatticePanel(QWidget):
         self._angle_ab_spin.valueChanged.connect(self._on_angle_ab_changed)
         self._cells_spin.valueChanged.connect(self._on_cells_changed)
         self._line_width_spin.valueChanged.connect(self._on_line_width_changed)
+        install_no_wheel_spinboxes(params_grp)
 
         disp_grp = QGroupBox("Display")
         disp_grp.setFont(QFont("Helvetica", 9))
-        disp_lay = QVBoxLayout(disp_grp)
-        disp_lay.setSpacing(2)
-        disp_lay.setContentsMargins(6, 6, 6, 4)
+        disp_lay = QHBoxLayout(disp_grp)
+        disp_lay.setSpacing(10)
+        disp_lay.setContentsMargins(8, 8, 8, 6)
         self._show_grid_cb    = QCheckBox("Show grid")
         self._show_handles_cb = QCheckBox("Show handles")
         self._show_labels_cb  = QCheckBox("Show labels")
@@ -145,6 +153,7 @@ class FFTLatticePanel(QWidget):
             cb.setChecked(True)
             cb.toggled.connect(self._on_visibility_changed)
             disp_lay.addWidget(cb)
+        disp_lay.addStretch(1)
         lay.addWidget(disp_grp)
 
         reset_btn = QPushButton("Reset origin to FFT centre")
@@ -166,7 +175,8 @@ class FFTLatticePanel(QWidget):
         lay.addWidget(meas_grp)
 
         fft_note = QLabel(
-            "Linear lattice correction is available\nonly from real-space grids."
+            "FFT-derived direct lattice measurements can be used for affine "
+            "image correction from the FFT viewer."
         )
         fft_note.setFont(QFont("Helvetica", 8))
         fft_note.setWordWrap(True)
@@ -176,6 +186,8 @@ class FFTLatticePanel(QWidget):
 
     def _on_grid_changed(self, grid: LatticeGrid) -> None:
         self.sync_from_model()
+        if self._external_on_change is not None:
+            self._external_on_change(grid)
 
     def sync_from_model(self) -> None:
         if self._updating_controls:

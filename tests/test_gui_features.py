@@ -94,7 +94,7 @@ def test_features_window_classify_requires_labels(qapp):
 
     win._on_features_run("classify")
 
-    assert "Label at least one target molecule" in win._features_sidebar._status_lbl.text()
+    assert "Click particles on the image" in win._features_sidebar._status_lbl.text()
     win.close()
     win.deleteLater()
 

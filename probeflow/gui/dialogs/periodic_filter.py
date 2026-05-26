@@ -45,6 +45,10 @@ class PeriodicFilterDialog(FFTViewerDialog):
         super().__init__(arr, scan_range_m, colormap=colormap, theme=theme, parent=parent)
         self.setWindowTitle("Periodic FFT filter")
         self.resize(1050, 760)
+        if hasattr(self, "_tab_widget"):
+            self._tab_widget.setTabVisible(0, False)  # FFT correction workflow
+            self._tab_widget.setTabVisible(2, False)  # reciprocal-grid advanced controls
+            self._tab_widget.setCurrentIndex(1)
 
     # ── layout ────────────────────────────────────────────────────────────────
 

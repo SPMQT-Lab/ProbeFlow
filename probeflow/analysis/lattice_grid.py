@@ -563,3 +563,23 @@ def format_reciprocal_measurements(
         "direct_b":    direct_b,
         "direct_angle": direct_angle,
     }
+
+
+def direct_lattice_vectors_from_reciprocal_grid(
+    grid: LatticeGrid,
+    cal: ReciprocalCalibration,
+) -> tuple[tuple[float, float], tuple[float, float]]:
+    """
+    Derive direct real-space basis vectors in nm from an FFT reciprocal grid.
+
+    Reciprocal vectors use cycles/nm.  The direct basis A is defined by
+    G.T @ A = I, so no 2π factor appears.
+    """
+    qax, qay = cal.vec_px_to_q(grid.a_px)
+    qbx, qby = cal.vec_px_to_q(grid.b_px)
+    G = np.array([[qax, qbx], [qay, qby]], dtype=float)
+    A = np.linalg.inv(G.T)
+    return (
+        (float(A[0, 0]), float(A[1, 0])),
+        (float(A[0, 1]), float(A[1, 1])),
+    )
