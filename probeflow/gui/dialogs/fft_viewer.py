@@ -13,8 +13,8 @@ from PySide6.QtWidgets import (
     QApplication,
     QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFileDialog, QFrame,
     QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit,
-    QPushButton, QScrollArea, QSizePolicy, QSpinBox, QSplitter, QTabWidget,
-    QVBoxLayout, QWidget,
+    QInputDialog, QPushButton, QScrollArea, QSizePolicy, QSpinBox, QSplitter,
+    QTabWidget, QVBoxLayout, QWidget,
 )
 
 from probeflow.analysis.lattice_correction_workflow import (
@@ -28,6 +28,16 @@ from probeflow.analysis.lattice_distortion import (
     compute_correction,
 )
 from probeflow.analysis.lattice_grid import direct_lattice_vectors_from_reciprocal_grid
+from probeflow.gui.lattice_correction_ui import (
+    KnownStructure,
+    correction_main_lines,
+    delete_structure,
+    ideal_lattice_from_structure,
+    load_known_structures,
+    save_known_structures,
+    structure_display_value_nm,
+    upsert_structure,
+)
 from probeflow.gui.no_wheel import install_no_wheel_spinboxes
 
 
@@ -65,6 +75,9 @@ class FFTViewerDialog(QDialog):
         self._fft_correction: LatticeCorrection | None = None
         self._fft_preview_active = False
         self._updating_fft_ideal = False
+        self._updating_structure = False
+        self._known_structures = load_known_structures()
+        self._active_known_structure = self._known_structures[0]
 
         self._fft_mag: np.ndarray | None = None
         self._qx: np.ndarray | None = None
@@ -247,38 +260,55 @@ class FFTViewerDialog(QDialog):
         fft_top_lay.addWidget(side_panel)
 
         self._tab_widget = QTabWidget()
-        self._tab_widget.setMinimumHeight(220)
+        self._tab_widget.setMinimumHeight(300)
         self._tab_widget.setFont(QFont("Helvetica", 9))
 
         # ── Guided Correction tab ────────────────────────────────────────────
-        corr_scroll = QScrollArea()
-        corr_scroll.setWidgetResizable(True)
-        corr_scroll.setFrameShape(QFrame.NoFrame)
-        corr_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        corr_inner = QWidget()
-        corr_lay = QVBoxLayout(corr_inner)
-        corr_lay.setSpacing(8)
-        corr_lay.setContentsMargins(8, 8, 8, 6)
+        corr_tab = QWidget()
+        corr_lay = QVBoxLayout(corr_tab)
+        corr_lay.setSpacing(4)
+        corr_lay.setContentsMargins(6, 5, 6, 4)
 
-        ref_grp = QGroupBox("1. Reference lattice")
+        ref_grp = QGroupBox("1. Known structure")
         ref_grp.setFont(QFont("Helvetica", 9))
+        ref_grp.setMinimumHeight(120)
         ref_grid = QGridLayout(ref_grp)
-        ref_grid.setContentsMargins(8, 8, 8, 6)
+        ref_grid.setContentsMargins(8, 7, 8, 4)
         ref_grid.setHorizontalSpacing(8)
-        ref_grid.setVerticalSpacing(4)
+        ref_grid.setVerticalSpacing(2)
 
-        self._bragg_enable_cb = QCheckBox("Show predicted shells")
+        structure_row = QHBoxLayout()
+        self._structure_combo = QComboBox()
+        self._structure_combo.setFont(QFont("Helvetica", 9))
+        self._structure_combo.setFixedHeight(24)
+        self._structure_combo.setToolTip("Known surface lattice used for shell guides and undistortion target.")
+        self._structure_combo.currentIndexChanged.connect(self._on_structure_selected)
+        self._structure_save_btn = QPushButton("Save")
+        self._structure_update_btn = QPushButton("Update")
+        self._structure_delete_btn = QPushButton("Delete")
+        for btn in (
+            self._structure_save_btn,
+            self._structure_update_btn,
+            self._structure_delete_btn,
+        ):
+            btn.setFont(QFont("Helvetica", 8))
+            btn.setFixedHeight(23)
+            structure_row.addWidget(btn)
+        self._structure_save_btn.clicked.connect(self._on_save_structure)
+        self._structure_update_btn.clicked.connect(self._on_update_structure)
+        self._structure_delete_btn.clicked.connect(self._on_delete_structure)
+
+        self._bragg_enable_cb = QCheckBox("Show shell rings")
         self._bragg_enable_cb.setFont(QFont("Helvetica", 9))
         self._bragg_enable_cb.setChecked(True)
-        self._bragg_enable_cb.setToolTip("Overlay expected low-index Bragg shell radii on the FFT.")
+        self._bragg_enable_cb.setToolTip("Overlay the expected Bragg-shell radii from the known lattice.")
         self._bragg_enable_cb.toggled.connect(self._on_bragg_changed)
-        ref_grid.addWidget(self._bragg_enable_cb, 0, 0, 1, 2)
 
         self._bragg_sym_combo = QComboBox()
         self._bragg_sym_combo.addItems(["Square", "Hexagonal"])
         self._bragg_sym_combo.setFont(QFont("Helvetica", 9))
         self._bragg_sym_combo.setFixedHeight(24)
-        self._bragg_sym_combo.setToolTip("Crystal symmetry used for predicted FFT shell spacing.")
+        self._bragg_sym_combo.setToolTip("Surface symmetry used for the predicted reciprocal-lattice shells.")
         self._bragg_sym_combo.currentIndexChanged.connect(self._on_bragg_symmetry_changed)
         self._bragg_a_spin = QDoubleSpinBox()
         self._bragg_a_spin.setRange(0.001, 999.0)
@@ -306,76 +336,72 @@ class FFTViewerDialog(QDialog):
         a_value_row.setSpacing(4)
         a_value_row.addWidget(self._bragg_a_spin, 1)
         a_value_row.addWidget(self._bragg_unit_combo)
+        ref_grid.addWidget(QLabel("Structure:"), 0, 0)
+        ref_grid.addWidget(self._structure_combo, 0, 1, 1, 2)
+        ref_grid.addLayout(structure_row, 0, 3)
         ref_grid.addWidget(QLabel("Symmetry:"), 1, 0)
         ref_grid.addWidget(self._bragg_sym_combo, 1, 1)
         ref_grid.addWidget(QLabel("Lattice a:"), 1, 2)
         ref_grid.addLayout(a_value_row, 1, 3)
-        ref_grid.addWidget(QLabel("Max shells:"), 2, 0)
+        ref_grid.addWidget(QLabel("Shells:"), 2, 0)
         ref_grid.addWidget(self._bragg_max_shells_spin, 2, 1)
+        ref_grid.addWidget(self._bragg_enable_cb, 2, 2, 1, 2)
         ref_grid.setColumnStretch(1, 1)
         ref_grid.setColumnStretch(3, 1)
-        self._bragg_radius_lbl = QLabel("Radius: —")
-        self._bragg_radius_lbl.setFont(QFont("Courier", 9))
+        self._bragg_radius_lbl = QLabel("Shells: —")
+        self._bragg_radius_lbl.setFont(QFont("Courier", 8))
+        self._bragg_radius_lbl.setWordWrap(True)
+        self._bragg_radius_lbl.setMaximumHeight(34)
         self._bragg_radius_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
         ref_grid.addWidget(self._bragg_radius_lbl, 3, 0, 1, 4)
+        self._refresh_structure_combo(self._active_known_structure.name)
+        self._apply_known_structure_to_fft(self._active_known_structure, refresh=False)
         corr_lay.addWidget(ref_grp)
 
-        meas_grp = QGroupBox("2. Measure reciprocal lattice")
+        meas_grp = QGroupBox("2. Fit reciprocal grid")
         meas_grp.setFont(QFont("Helvetica", 9))
+        meas_grp.setMinimumHeight(86)
         meas_lay = QVBoxLayout(meas_grp)
-        meas_lay.setContentsMargins(8, 8, 8, 6)
-        meas_lay.setSpacing(5)
+        meas_lay.setContentsMargins(8, 7, 8, 4)
+        meas_lay.setSpacing(3)
         meas_btn_row = QHBoxLayout()
-        self._edit_grid_btn = QPushButton("Edit reciprocal grid")
+        self._edit_grid_btn = QPushButton("Create/Edit reciprocal grid")
         self._edit_grid_btn.setFont(QFont("Helvetica", 9))
         self._edit_grid_btn.setFixedHeight(24)
         self._edit_grid_btn.setToolTip("Create/select the FFT grid overlay and adjust g1/g2 handles on the FFT.")
         self._edit_grid_btn.clicked.connect(self._on_edit_reciprocal_grid)
         meas_btn_row.addWidget(self._edit_grid_btn)
-        self._bragg_detect_btn = QPushButton("Detect peaks")
-        self._bragg_detect_btn.setFont(QFont("Helvetica", 9))
-        self._bragg_detect_btn.setFixedHeight(24)
-        self._bragg_detect_btn.setToolTip("Auto-detect compact first-shell Bragg peaks as visual picks.")
-        self._bragg_detect_btn.clicked.connect(self._detect_bragg_peaks)
-        meas_btn_row.addWidget(self._bragg_detect_btn)
-        self._bragg_clear_btn = QPushButton("Clear picks")
-        self._bragg_clear_btn.setFont(QFont("Helvetica", 9))
-        self._bragg_clear_btn.setFixedHeight(24)
-        self._bragg_clear_btn.clicked.connect(self._clear_bragg_picks)
-        meas_btn_row.addWidget(self._bragg_clear_btn)
+        meas_btn_row.addSpacing(8)
+        meas_btn_row.addWidget(QLabel("Grid orders ±:"))
+        self._grid_extent_spin = QSpinBox()
+        self._grid_extent_spin.setRange(1, 200)
+        self._grid_extent_spin.setValue(12)
+        self._grid_extent_spin.setFont(QFont("Helvetica", 9))
+        self._grid_extent_spin.setFixedHeight(24)
+        self._grid_extent_spin.setToolTip("How many reciprocal-lattice repeats to draw in each direction.")
+        self._grid_extent_spin.valueChanged.connect(self._on_grid_extent_changed)
+        meas_btn_row.addWidget(self._grid_extent_spin)
         meas_btn_row.addStretch(1)
         meas_lay.addLayout(meas_btn_row)
 
-        pick_row = QHBoxLayout()
-        self._bragg_pick_cb = QCheckBox("Pick peaks")
-        self._bragg_pick_cb.setFont(QFont("Helvetica", 9))
-        self._bragg_pick_cb.setToolTip("When enabled, clicks on the FFT add/remove Bragg calibration picks.")
-        self._bragg_pick_cb.toggled.connect(self._update_calib_ui)
-        pick_row.addWidget(self._bragg_pick_cb)
-        self._bragg_snap_cb = QCheckBox("Snap picks to compact peak")
-        self._bragg_snap_cb.setFont(QFont("Helvetica", 9))
-        self._bragg_snap_cb.setChecked(True)
-        self._bragg_snap_cb.setToolTip("Move manual picks to nearby compact local maxima rather than streak pixels.")
-        pick_row.addWidget(self._bragg_snap_cb)
-        pick_row.addStretch(1)
-        meas_lay.addLayout(pick_row)
-        self._bragg_picks_lbl = QLabel("Picks: 0  (enable Pick peaks to edit)")
-        self._bragg_picks_lbl.setFont(QFont("Helvetica", 9))
-        meas_lay.addWidget(self._bragg_picks_lbl)
         self._fft_measured_lbl = QLabel("Create or edit a reciprocal grid to measure the direct lattice.")
         self._fft_measured_lbl.setFont(QFont("Courier", 8))
+        self._fft_measured_lbl.setWordWrap(True)
+        self._fft_measured_lbl.setMinimumHeight(32)
+        self._fft_measured_lbl.setMaximumHeight(44)
         self._fft_measured_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
         meas_lay.addWidget(self._fft_measured_lbl)
         corr_lay.addWidget(meas_grp)
 
-        apply_grp = QGroupBox("3. Preview/apply correction")
+        apply_grp = QGroupBox("3. Undistort image")
         apply_grp.setFont(QFont("Helvetica", 9))
+        apply_grp.setMinimumHeight(98)
         apply_lay = QVBoxLayout(apply_grp)
-        apply_lay.setContentsMargins(8, 8, 8, 6)
-        apply_lay.setSpacing(5)
-        ideal_grid = QGridLayout()
-        ideal_grid.setHorizontalSpacing(8)
-        ideal_grid.setVerticalSpacing(4)
+        apply_lay.setContentsMargins(8, 7, 8, 4)
+        apply_lay.setSpacing(3)
+
+        # Internal target controls. The main workflow takes its target from
+        # Known lattice; these widgets preserve the existing correction code path.
         self._fft_ideal_combo = QComboBox()
         self._fft_ideal_combo.addItems(["Match measured", "Square", "Rectangular", "Hexagonal", "Custom"])
         self._fft_ideal_combo.setCurrentText("Square")
@@ -401,54 +427,31 @@ class FFTViewerDialog(QDialog):
         self._fft_ideal_angle_spin.setSuffix(" °")
         self._fft_ideal_angle_spin.setFixedHeight(24)
         self._fft_ideal_angle_spin.valueChanged.connect(self._on_fft_ideal_changed)
-        ideal_grid.addWidget(QLabel("Ideal:"), 0, 0)
-        ideal_grid.addWidget(self._fft_ideal_combo, 0, 1)
-        ideal_grid.addWidget(QLabel("|a|:"), 0, 2)
-        ideal_grid.addWidget(self._fft_ideal_a_spin, 0, 3)
-        ideal_grid.addWidget(QLabel("|b|:"), 1, 0)
-        ideal_grid.addWidget(self._fft_ideal_b_spin, 1, 1)
-        ideal_grid.addWidget(QLabel("Angle:"), 1, 2)
-        ideal_grid.addWidget(self._fft_ideal_angle_spin, 1, 3)
-        ideal_grid.setColumnStretch(1, 1)
-        ideal_grid.setColumnStretch(3, 1)
-        apply_lay.addLayout(ideal_grid)
         self._fft_preserve_orientation_cb = QCheckBox("Preserve image orientation")
         self._fft_preserve_orientation_cb.setFont(QFont("Helvetica", 9))
         self._fft_preserve_orientation_cb.setChecked(True)
         self._fft_preserve_orientation_cb.setToolTip("Apply only stretch/shear and remove the fitted rigid rotation.")
         self._fft_preserve_orientation_cb.toggled.connect(self._on_fft_ideal_changed)
-        apply_lay.addWidget(self._fft_preserve_orientation_cb)
-
-        opts_grp = QGroupBox("Advanced correction options")
-        opts_grp.setFont(QFont("Helvetica", 9))
-        opts_grp.setCheckable(True)
-        opts_grp.setChecked(False)
-        opts_lay = QGridLayout(opts_grp)
-        opts_lay.setContentsMargins(8, 8, 8, 6)
         self._fft_expand_cb = QCheckBox("Expand canvas")
         self._fft_expand_cb.setChecked(True)
         self._fft_interp_combo = QComboBox()
         self._fft_interp_combo.addItems(["Bilinear", "Nearest", "Bicubic"])
         self._fft_fill_combo = QComboBox()
         self._fft_fill_combo.addItems(["NaN", "Background", "Zero"])
-        opts_lay.addWidget(self._fft_expand_cb, 0, 0)
-        opts_lay.addWidget(QLabel("Interpolation:"), 0, 1)
-        opts_lay.addWidget(self._fft_interp_combo, 0, 2)
-        opts_lay.addWidget(QLabel("Fill:"), 0, 3)
-        opts_lay.addWidget(self._fft_fill_combo, 0, 4)
-        apply_lay.addWidget(opts_grp)
 
-        self._fft_correction_lbl = QLabel("Create a reciprocal grid to compute correction.")
+        self._fft_correction_lbl = QLabel("Align a reciprocal grid to compute correction factors.")
         self._fft_correction_lbl.setFont(QFont("Courier", 8))
         self._fft_correction_lbl.setWordWrap(True)
+        self._fft_correction_lbl.setMinimumHeight(34)
+        self._fft_correction_lbl.setMaximumHeight(48)
         self._fft_correction_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
         apply_lay.addWidget(self._fft_correction_lbl)
         action_row = QHBoxLayout()
-        self._fft_preview_btn = QPushButton("Preview correction")
+        self._fft_preview_btn = QPushButton("Preview corrected image")
         self._fft_preview_btn.setFont(QFont("Helvetica", 9))
         self._fft_preview_btn.setFixedHeight(24)
         self._fft_preview_btn.setEnabled(False)
-        self._fft_preview_btn.setToolTip("Temporarily show the corrected image in the parent viewer.")
+        self._fft_preview_btn.setToolTip("Show the affine-corrected real-space image in the left preview rail.")
         self._fft_preview_btn.clicked.connect(self._on_fft_preview_correction)
         self._fft_clear_preview_btn = QPushButton("Clear preview")
         self._fft_clear_preview_btn.setFont(QFont("Helvetica", 9))
@@ -467,10 +470,10 @@ class FFTViewerDialog(QDialog):
         action_row.addStretch(1)
         action_row.addWidget(self._fft_apply_btn)
         apply_lay.addLayout(action_row)
+        self._apply_known_structure_to_fft(self._active_known_structure, refresh=False)
         corr_lay.addWidget(apply_grp)
         corr_lay.addStretch(1)
-        corr_scroll.setWidget(corr_inner)
-        self._tab_widget.addTab(corr_scroll, "Correction")
+        self._tab_widget.addTab(corr_tab, "Correction")
 
         # ── Inspect tab ─────────────────────────────────────────────────────
         inspect_tab = QWidget()
@@ -516,20 +519,98 @@ class FFTViewerDialog(QDialog):
         advanced_lay = QVBoxLayout(advanced_inner)
         advanced_lay.setContentsMargins(8, 8, 8, 6)
         advanced_lay.setSpacing(8)
-        grid_grp = QGroupBox("Reciprocal grid details")
+
+        def _collapsible_group(title: str, checked: bool = False):
+            grp = QGroupBox(title)
+            grp.setFont(QFont("Helvetica", 9))
+            grp.setCheckable(True)
+            grp.setChecked(checked)
+            outer = QVBoxLayout(grp)
+            outer.setContentsMargins(8, 8, 8, 6)
+            content = QWidget()
+            content_lay = QVBoxLayout(content)
+            content_lay.setContentsMargins(0, 0, 0, 0)
+            content_lay.setSpacing(6)
+            outer.addWidget(content)
+            content.setVisible(checked)
+            grp.toggled.connect(content.setVisible)
+            return grp, content_lay
+
+        grid_grp, grid_content_lay = _collapsible_group("Reciprocal grid details", checked=False)
         grid_grp.setFont(QFont("Helvetica", 9))
-        self._grid_tab_lay = QVBoxLayout(grid_grp)
-        self._grid_tab_lay.setContentsMargins(8, 8, 8, 6)
+        self._advanced_grid_grp = grid_grp
+        self._grid_tab_lay = grid_content_lay
         self._grid_placeholder_lbl = QLabel("Click Edit reciprocal grid to create controls.")
         self._grid_placeholder_lbl.setFont(QFont("Helvetica", 9))
         self._grid_placeholder_lbl.setAlignment(Qt.AlignCenter)
         self._grid_tab_lay.addWidget(self._grid_placeholder_lbl)
         advanced_lay.addWidget(grid_grp)
 
-        piezo_grp = QGroupBox("Piezo calibration from picked peaks")
-        piezo_grp.setFont(QFont("Helvetica", 9))
-        piezo_lay = QVBoxLayout(piezo_grp)
-        piezo_lay.setContentsMargins(8, 8, 8, 6)
+        correction_opts_grp, opts_lay_outer = _collapsible_group(
+            "Advanced correction options", checked=False,
+        )
+        target_grid = QGridLayout()
+        target_grid.setHorizontalSpacing(8)
+        target_grid.setVerticalSpacing(4)
+        target_grid.addWidget(QLabel("Ideal:"), 0, 0)
+        target_grid.addWidget(self._fft_ideal_combo, 0, 1)
+        target_grid.addWidget(QLabel("|a|:"), 0, 2)
+        target_grid.addWidget(self._fft_ideal_a_spin, 0, 3)
+        target_grid.addWidget(QLabel("|b|:"), 1, 0)
+        target_grid.addWidget(self._fft_ideal_b_spin, 1, 1)
+        target_grid.addWidget(QLabel("Angle:"), 1, 2)
+        target_grid.addWidget(self._fft_ideal_angle_spin, 1, 3)
+        target_grid.setColumnStretch(1, 1)
+        target_grid.setColumnStretch(3, 1)
+        opts_lay_outer.addLayout(target_grid)
+        opts_row = QHBoxLayout()
+        opts_row.addWidget(self._fft_preserve_orientation_cb)
+        opts_row.addSpacing(8)
+        opts_row.addWidget(self._fft_expand_cb)
+        opts_row.addSpacing(8)
+        opts_row.addWidget(QLabel("Interpolation:"))
+        opts_row.addWidget(self._fft_interp_combo)
+        opts_row.addSpacing(8)
+        opts_row.addWidget(QLabel("Fill:"))
+        opts_row.addWidget(self._fft_fill_combo)
+        opts_row.addStretch(1)
+        opts_lay_outer.addLayout(opts_row)
+        advanced_lay.addWidget(correction_opts_grp)
+
+        piezo_grp, piezo_lay = _collapsible_group(
+            "Automatic peak picking and piezo constants", checked=False,
+        )
+        peak_btn_row = QHBoxLayout()
+        self._bragg_detect_btn = QPushButton("Detect peaks")
+        self._bragg_detect_btn.setFont(QFont("Helvetica", 9))
+        self._bragg_detect_btn.setFixedHeight(24)
+        self._bragg_detect_btn.setToolTip("Auto-detect compact first-shell Bragg peaks as visual picks.")
+        self._bragg_detect_btn.clicked.connect(self._detect_bragg_peaks)
+        peak_btn_row.addWidget(self._bragg_detect_btn)
+        self._bragg_clear_btn = QPushButton("Clear picks")
+        self._bragg_clear_btn.setFont(QFont("Helvetica", 9))
+        self._bragg_clear_btn.setFixedHeight(24)
+        self._bragg_clear_btn.clicked.connect(self._clear_bragg_picks)
+        peak_btn_row.addWidget(self._bragg_clear_btn)
+        peak_btn_row.addStretch(1)
+        piezo_lay.addLayout(peak_btn_row)
+
+        pick_row = QHBoxLayout()
+        self._bragg_pick_cb = QCheckBox("Pick peaks")
+        self._bragg_pick_cb.setFont(QFont("Helvetica", 9))
+        self._bragg_pick_cb.setToolTip("When enabled, clicks on the FFT add/remove Bragg calibration picks.")
+        self._bragg_pick_cb.toggled.connect(self._update_calib_ui)
+        pick_row.addWidget(self._bragg_pick_cb)
+        self._bragg_snap_cb = QCheckBox("Snap picks to compact peak")
+        self._bragg_snap_cb.setFont(QFont("Helvetica", 9))
+        self._bragg_snap_cb.setChecked(True)
+        self._bragg_snap_cb.setToolTip("Move manual picks to nearby compact local maxima rather than streak pixels.")
+        pick_row.addWidget(self._bragg_snap_cb)
+        pick_row.addStretch(1)
+        piezo_lay.addLayout(pick_row)
+        self._bragg_picks_lbl = QLabel("Picks: 0  (enable Pick peaks to edit)")
+        self._bragg_picks_lbl.setFont(QFont("Helvetica", 9))
+        piezo_lay.addWidget(self._bragg_picks_lbl)
         piezo_row = QHBoxLayout()
         piezo_row.addWidget(QLabel("Piezo X:"))
         self._bragg_cx_edit = QLineEdit("96.52")
@@ -568,7 +649,7 @@ class FFTViewerDialog(QDialog):
         self._fft_splitter.addWidget(self._tab_widget)
         self._fft_splitter.setStretchFactor(0, 1)
         self._fft_splitter.setStretchFactor(1, 0)
-        self._fft_splitter.setSizes([450, 330])
+        self._fft_splitter.setSizes([420, 360])
         right_col.addWidget(self._fft_splitter, 1)
         install_no_wheel_spinboxes(self._tab_widget)
 
@@ -625,8 +706,26 @@ class FFTViewerDialog(QDialog):
         self._info_lbl.setFont(QFont("Courier", 9))
         self._info_lbl.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         info_lay.addWidget(self._info_lbl)
-        info_lay.addStretch(1)
-        left_col.addWidget(info_frame, 1)
+        left_col.addWidget(info_frame)
+
+        self._fft_preview_frame = QFrame()
+        preview_lay = QVBoxLayout(self._fft_preview_frame)
+        preview_lay.setContentsMargins(0, 4, 0, 0)
+        preview_lay.setSpacing(2)
+        preview_title = QLabel("Corrected preview")
+        preview_title.setFont(QFont("Helvetica", 9, QFont.Bold))
+        preview_lay.addWidget(preview_title)
+        self._fig_preview = Figure(figsize=(2.7, 2.1), dpi=90)
+        self._fig_preview.patch.set_facecolor(bg)
+        self._canvas_preview = FigureCanvasQTAgg(self._fig_preview)
+        self._canvas_preview.setFixedHeight(205)
+        self._ax_preview = self._fig_preview.add_subplot(111)
+        self._ax_preview.set_facecolor(bg)
+        self._fig_preview.subplots_adjust(left=0.02, right=0.98, top=0.98, bottom=0.02)
+        preview_lay.addWidget(self._canvas_preview)
+        self._fft_preview_frame.setVisible(False)
+        left_col.addWidget(self._fft_preview_frame)
+        left_col.addStretch(1)
 
         body_row.addWidget(left_panel)
         body_row.addLayout(self._build_fft_column(), 1)
@@ -741,6 +840,48 @@ class FFTViewerDialog(QDialog):
         for spine in ax.spines.values():
             spine.set_color(fg)
         self._canvas_real.draw_idle()
+
+    def _show_fft_preview(self, arr: np.ndarray) -> None:
+        """Render the corrected real-space preview in the left rail."""
+        bg = self._theme.get("bg", "#1e1e1e")
+        fg = self._theme.get("fg", "#dddddd")
+        ax = self._ax_preview
+        ax.cla()
+        ax.set_facecolor(bg)
+        h, w = arr.shape[:2]
+        px = self._fft_pixel_sizes_m()
+        if px is not None:
+            w_nm = w * px[0] * 1e9
+            h_nm = h * px[1] * 1e9
+        else:
+            w_nm = float(w)
+            h_nm = float(h)
+        ax.imshow(
+            arr, cmap=self._colormap, origin="upper",
+            extent=[0, w_nm, h_nm, 0], aspect="equal",
+        )
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.tick_params(colors=fg, labelsize=7, length=0)
+        for spine in ax.spines.values():
+            spine.set_color(fg)
+        self._fft_preview_frame.setVisible(True)
+        self._canvas_preview.draw_idle()
+
+    def _hide_fft_preview(self) -> None:
+        frame = getattr(self, "_fft_preview_frame", None)
+        if frame is not None:
+            frame.setVisible(False)
+        ax = getattr(self, "_ax_preview", None)
+        if ax is not None:
+            ax.cla()
+        canvas = getattr(self, "_canvas_preview", None)
+        if canvas is not None:
+            canvas.draw_idle()
+        self._fft_preview_active = False
+        btn = getattr(self, "_fft_clear_preview_btn", None)
+        if btn is not None:
+            btn.setEnabled(False)
 
     def _redraw_fft_panel(self):
         bg = self._theme.get("bg", "#1e1e1e")
@@ -1137,13 +1278,155 @@ class FFTViewerDialog(QDialog):
 
     # ── FFT-derived lattice correction ───────────────────────────────────────
 
+    def _refresh_structure_combo(self, selected_name: str | None = None) -> None:
+        combo = getattr(self, "_structure_combo", None)
+        if combo is None:
+            return
+        self._updating_structure = True
+        try:
+            combo.clear()
+            for structure in self._known_structures:
+                combo.addItem(structure.name, structure)
+            if selected_name:
+                for idx, structure in enumerate(self._known_structures):
+                    if structure.name == selected_name:
+                        combo.setCurrentIndex(idx)
+                        break
+        finally:
+            self._updating_structure = False
+
+    def _on_structure_selected(self, idx: int) -> None:
+        if self._updating_structure:
+            return
+        combo = getattr(self, "_structure_combo", None)
+        if combo is None or idx < 0:
+            return
+        structure = combo.itemData(idx)
+        if not isinstance(structure, KnownStructure):
+            return
+        self._apply_known_structure_to_fft(structure)
+
+    def _apply_known_structure_to_fft(
+        self,
+        structure: KnownStructure,
+        *,
+        refresh: bool = True,
+    ) -> None:
+        self._active_known_structure = structure
+        self._updating_structure = True
+        try:
+            if structure.symmetry in {"square", "hexagonal"}:
+                self._bragg_sym_combo.setCurrentIndex(0 if structure.symmetry == "square" else 1)
+                if not self._bragg_enable_cb.isChecked():
+                    self._bragg_enable_cb.setChecked(True)
+            else:
+                self._bragg_enable_cb.setChecked(False)
+            unit = "Å" if structure.unit == "Å" else "nm"
+            self._bragg_unit_combo.setCurrentText(unit)
+            self._bragg_a_spin.setValue(structure_display_value_nm(structure))
+        finally:
+            self._updating_structure = False
+
+        if hasattr(self, "_fft_ideal_combo"):
+            target = {
+                "square": "Square",
+                "rectangular": "Rectangular",
+                "hexagonal": "Hexagonal",
+            }.get(structure.symmetry, "Custom")
+            self._updating_fft_ideal = True
+            try:
+                self._fft_ideal_combo.setCurrentText(target)
+                self._fft_ideal_a_spin.setValue(max(self._fft_ideal_a_spin.minimum(), structure.a_nm))
+                self._fft_ideal_b_spin.setValue(max(self._fft_ideal_b_spin.minimum(), structure.b_nm))
+                self._fft_ideal_angle_spin.setValue(
+                    min(179.0, max(1.0, structure.angle_deg))
+                )
+            finally:
+                self._updating_fft_ideal = False
+        if refresh:
+            self._on_bragg_changed()
+            self._refresh_fft_correction_ui()
+
+    def _structure_from_fft_controls(self, name: str) -> KnownStructure:
+        active = getattr(self, "_active_known_structure", None)
+        symmetry = active.symmetry if isinstance(active, KnownStructure) else "hexagonal"
+        if symmetry in {"square", "hexagonal"}:
+            symmetry = "square" if self._bragg_sym_combo.currentIndex() == 0 else "hexagonal"
+        a_nm = self._reference_lattice_a_nm()
+        if symmetry == "square":
+            return KnownStructure(name, "square", a_nm, a_nm, 90.0, self._bragg_unit_combo.currentText())
+        if symmetry == "hexagonal":
+            return KnownStructure(name, "hexagonal", a_nm, a_nm, 60.0, self._bragg_unit_combo.currentText())
+        b_nm = getattr(self, "_fft_ideal_b_spin", None)
+        angle = getattr(self, "_fft_ideal_angle_spin", None)
+        return KnownStructure(
+            name,
+            symmetry,
+            a_nm,
+            float(b_nm.value()) if b_nm is not None else a_nm,
+            float(angle.value()) if angle is not None else 90.0,
+            self._bragg_unit_combo.currentText(),
+        )
+
+    def _persist_known_structures(self, selected_name: str) -> None:
+        save_known_structures(self._known_structures)
+        self._refresh_structure_combo(selected_name)
+
+    def _on_save_structure(self) -> None:
+        default = getattr(self, "_active_known_structure", self._known_structures[0]).name
+        name, ok = QInputDialog.getText(self, "Save known structure", "Structure name:", text=default)
+        if not ok or not name.strip():
+            return
+        structure = self._structure_from_fft_controls(name.strip())
+        self._known_structures = upsert_structure(self._known_structures, structure)
+        self._persist_known_structures(structure.name)
+        self._apply_known_structure_to_fft(structure)
+
+    def _on_update_structure(self) -> None:
+        combo = getattr(self, "_structure_combo", None)
+        if combo is None or combo.currentIndex() < 0:
+            return
+        name = combo.currentText().strip()
+        if not name:
+            return
+        structure = self._structure_from_fft_controls(name)
+        self._known_structures = upsert_structure(self._known_structures, structure)
+        self._persist_known_structures(structure.name)
+        self._apply_known_structure_to_fft(structure)
+
+    def _on_delete_structure(self) -> None:
+        combo = getattr(self, "_structure_combo", None)
+        if combo is None or combo.currentIndex() < 0:
+            return
+        name = combo.currentText().strip()
+        self._known_structures = delete_structure(self._known_structures, name)
+        selected = self._known_structures[0]
+        self._persist_known_structures(selected.name)
+        self._apply_known_structure_to_fft(selected)
+
     def _on_bragg_symmetry_changed(self, _idx: int) -> None:
+        if self._updating_structure:
+            return
         self._on_bragg_changed()
         self._sync_fft_ideal_from_symmetry()
         self._refresh_fft_correction_ui()
 
     def _on_fft_grid_changed(self, _grid=None) -> None:
+        self._clear_fft_preview_if_active()
         self._refresh_fft_correction_ui()
+
+    def _on_grid_extent_changed(self, value: int) -> None:
+        overlay = getattr(self, "_fft_lattice_overlay", None)
+        if overlay is not None:
+            overlay.set_cells(value)
+        panel = getattr(self, "_fft_lattice_panel", None)
+        spin = getattr(panel, "_cells_spin", None)
+        if spin is not None and spin.value() != value:
+            blocked = spin.blockSignals(True)
+            try:
+                spin.setValue(value)
+            finally:
+                spin.blockSignals(blocked)
 
     def _fft_pixel_sizes_m(self) -> tuple[float, float] | None:
         Ny, Nx = self._arr.shape[:2]
@@ -1200,15 +1483,27 @@ class FFTViewerDialog(QDialog):
 
     def _sync_fft_ideal_values(self, a_nm: float, b_nm: float, angle: float) -> None:
         combo = self._fft_ideal_combo.currentText()
-        if combo == "Custom":
+        structure = getattr(self, "_active_known_structure", None)
+        structure_combo = {
+            "square": "Square",
+            "rectangular": "Rectangular",
+            "hexagonal": "Hexagonal",
+            "custom": "Custom",
+        }.get(structure.symmetry if isinstance(structure, KnownStructure) else "", "")
+        if isinstance(structure, KnownStructure) and combo == structure_combo:
+            ideal = ideal_lattice_from_structure(structure, measured_angle_deg=angle)
+            values = (ideal.a_nm, ideal.b_nm, ideal.angle_deg)
+        elif combo == "Custom":
             return
-        ref_a_nm = self._reference_lattice_a_nm()
-        if combo == "Square":
+        elif combo == "Square":
+            ref_a_nm = self._reference_lattice_a_nm()
             side = ref_a_nm
             values = (side, side, 90.0)
         elif combo == "Rectangular":
+            ref_a_nm = self._reference_lattice_a_nm()
             values = (ref_a_nm, b_nm, 90.0)
         elif combo == "Hexagonal":
+            ref_a_nm = self._reference_lattice_a_nm()
             side = ref_a_nm
             values = (side, side, 120.0 if angle >= 90.0 else 60.0)
         else:
@@ -1244,8 +1539,11 @@ class FFTViewerDialog(QDialog):
 
         vectors = self._fft_measured_direct_vectors_nm()
         if vectors is None:
-            measured_lbl.setText("Create or edit a reciprocal grid to measure the direct lattice.")
-            corr_lbl.setText("Create a reciprocal grid to compute correction.")
+            measured_lbl.setText(
+                "Create a reciprocal grid, then drag g1/g2 handles until the grid "
+                "tracks the visible Bragg peaks."
+            )
+            corr_lbl.setText("Align a reciprocal grid to compute correction factors.")
             if status_lbl is not None:
                 status_lbl.setText("No reciprocal grid yet")
             return
@@ -1254,17 +1552,20 @@ class FFTViewerDialog(QDialog):
         a_len = self._vec_len_nm(a_vec)
         b_len = self._vec_len_nm(b_vec)
         angle = self._vec_angle_deg(a_vec, b_vec)
-        measured_lbl.setText(
-            f"direct |a| = {a_len:.4g} nm\n"
-            f"direct |b| = {b_len:.4g} nm\n"
-            f"direct angle = {angle:.2f}°"
-        )
         self._sync_fft_ideal_values(a_len, b_len, angle)
 
         ideal = IdealLattice(
             a_nm=self._fft_ideal_a_spin.value(),
             b_nm=self._fft_ideal_b_spin.value(),
             angle_deg=self._fft_ideal_angle_spin.value(),
+        )
+        da_pct = 100.0 * (a_len / ideal.a_nm - 1.0) if ideal.a_nm > 0 else float("nan")
+        db_pct = 100.0 * (b_len / ideal.b_nm - 1.0) if ideal.b_nm > 0 else float("nan")
+        measured_lbl.setText(
+            f"Measured |a|={a_len:.4g} nm |b|={b_len:.4g} nm angle={angle:.2f}°\n"
+            f"Target |a|={ideal.a_nm:.4g} nm |b|={ideal.b_nm:.4g} nm "
+            f"angle={ideal.angle_deg:.2f}°   "
+            f"da {da_pct:+.2f}% db {db_pct:+.2f}% dAngle {angle - ideal.angle_deg:+.2f}°"
         )
         result = compute_correction(MeasuredLattice(a_nm=a_vec, b_nm=b_vec), ideal)
         if isinstance(result, str):
@@ -1274,16 +1575,15 @@ class FFTViewerDialog(QDialog):
             return
 
         self._fft_correction = result
-        y_scale = result.x_scale * result.y_over_x
-        rot_state = "removed" if self._fft_preserve_orientation_cb.isChecked() else "applied"
-        lines = [
-            f"X ×{result.x_scale:.5f}   Y ×{y_scale:.5f}",
-            f"shear {result.shear:.5f}   rigid rotation {result.polar_rotation_deg:.3f}° ({rot_state})",
-        ]
-        corr_lbl.setText("\n".join(lines))
+        corr_lbl.setText("\n".join(
+            correction_main_lines(
+                result,
+                preserve_orientation=self._fft_preserve_orientation_cb.isChecked(),
+            )
+        ))
         if status_lbl is not None:
-            status_lbl.setText("FFT-derived affine correction ready")
-        if self._get_image_fn is not None and self._preview_image_fn is not None:
+            status_lbl.setText("Correction ready")
+        if self._get_image_fn is not None:
             self._fft_preview_btn.setEnabled(True)
         if self._apply_correction_fn is not None:
             self._fft_apply_btn.setEnabled(True)
@@ -1313,11 +1613,8 @@ class FFTViewerDialog(QDialog):
         )
 
     def _clear_fft_preview_if_active(self) -> None:
-        if self._fft_preview_active and self._clear_preview_fn is not None:
-            self._clear_preview_fn()
-            self._fft_preview_active = False
-            if getattr(self, "_fft_clear_preview_btn", None) is not None:
-                self._fft_clear_preview_btn.setEnabled(False)
+        if self._fft_preview_active:
+            self._hide_fft_preview()
 
     def _on_fft_preview_correction(self) -> None:
         if self._fft_correction is None or self._get_image_fn is None:
@@ -1341,17 +1638,13 @@ class FFTViewerDialog(QDialog):
         except Exception as exc:
             self._fft_correction_lbl.setText(f"Preview failed: {exc}")
             return
-        if self._preview_image_fn is not None:
-            self._preview_image_fn(corrected)
-            self._fft_preview_active = True
-            self._fft_clear_preview_btn.setEnabled(True)
-            self._fft_correction_status_lbl.setText("Previewing FFT-derived correction")
+        self._show_fft_preview(corrected)
+        self._fft_preview_active = True
+        self._fft_clear_preview_btn.setEnabled(True)
+        self._fft_correction_status_lbl.setText("Preview shown")
 
     def _on_fft_clear_preview(self) -> None:
-        if self._clear_preview_fn is not None:
-            self._clear_preview_fn()
-        self._fft_preview_active = False
-        self._fft_clear_preview_btn.setEnabled(False)
+        self._hide_fft_preview()
         self._refresh_fft_correction_ui()
 
     def _on_fft_apply_correction(self) -> None:
@@ -1360,9 +1653,8 @@ class FFTViewerDialog(QDialog):
         px = self._fft_pixel_sizes_m()
         if px is None or self._fft_correction_matrix_px() is None:
             return
-        if self._fft_preview_active and self._clear_preview_fn is not None:
-            self._clear_preview_fn()
-            self._fft_preview_active = False
+        if self._fft_preview_active:
+            self._hide_fft_preview()
         opts = self._fft_correction_options()
         op_params = lattice_correction_operation_params(
             self._fft_correction,
@@ -1376,6 +1668,9 @@ class FFTViewerDialog(QDialog):
         if op_params is None:
             return
         op_params["source"] = "fft_reciprocal_grid"
+        structure = getattr(self, "_active_known_structure", None)
+        if isinstance(structure, KnownStructure):
+            op_params["known_structure"] = structure.as_dict()
         self._apply_correction_fn("affine_lattice_correction", op_params)
         self._fft_correction_lbl.setText(
             "Correction applied.\n"
@@ -1447,6 +1742,9 @@ class FFTViewerDialog(QDialog):
         existing_panel = getattr(self, "_fft_lattice_panel", None)
         if existing is not None and existing_panel is not None:
             if select_advanced:
+                grp = getattr(self, "_advanced_grid_grp", None)
+                if grp is not None:
+                    grp.setChecked(True)
                 self._tab_widget.setCurrentIndex(self._grid_tab_index)
             return
         if self._qx is None or self._qy is None:
@@ -1476,7 +1774,11 @@ class FFTViewerDialog(QDialog):
         overlay.set_drag_state_callback(_drag_state_cb)
 
         self._set_grid_tab_panel(panel)
+        self._on_grid_extent_changed(self._grid_extent_spin.value())
         if select_advanced:
+            grp = getattr(self, "_advanced_grid_grp", None)
+            if grp is not None:
+                grp.setChecked(True)
             self._tab_widget.setCurrentIndex(self._grid_tab_index)
         if getattr(self, "_clear_grid_btn", None) is not None:
             self._clear_grid_btn.setEnabled(True)
@@ -1486,6 +1788,7 @@ class FFTViewerDialog(QDialog):
 
     def _on_bragg_changed(self):
         """Fast-path update: remove old ring artists, draw new ones, redraw."""
+        self._clear_fft_preview_if_active()
         for art in self._bragg_artists:
             try:
                 art.remove()
@@ -1505,7 +1808,7 @@ class FFTViewerDialog(QDialog):
         if not getattr(self, "_bragg_enable_cb", None):
             return
         if not self._bragg_enable_cb.isChecked():
-            self._bragg_radius_lbl.setText("Radius: —")
+            self._bragg_radius_lbl.setText("Shells hidden")
             self._draw_calib_pick_artists()
             return
         if self._qx is None or self._qy is None:
@@ -1523,7 +1826,7 @@ class FFTViewerDialog(QDialog):
         try:
             q1 = first_bragg_q(a_m, symmetry) * 1e-9
         except ValueError:
-            self._bragg_radius_lbl.setText("Radius: invalid input")
+            self._bragg_radius_lbl.setText("Shells: invalid input")
             return
 
         q_nyquist = 0.95 * min(
@@ -1539,7 +1842,7 @@ class FFTViewerDialog(QDialog):
         theta = np.linspace(0.0, 2.0 * np.pi, 360)
         colours = ["#f38ba8", "#fab387", "#f9e2af", "#a6e3a1", "#89b4fa", "#cba6f7"]
         styles = ["--", ":", "-.", (0, (5, 2, 1, 2))]
-        label_lines: list[str] = []
+        label_bits: list[str] = []
         for idx, shell in enumerate(shells, start=1):
             q_shell = q1 * shell.factor
             art, = self._ax_fft.plot(
@@ -1551,15 +1854,12 @@ class FFTViewerDialog(QDialog):
                 zorder=7,
             )
             self._bragg_artists.append(art)
-            d_angstrom = 1.0 / q_shell * 10.0 if q_shell > 0 else float("inf")
-            label_lines.append(
-                f"{idx}: {shell.label}  q={q_shell:.4f} nm⁻¹  "
-                f"(plane d={d_angstrom:.3g} Å)"
-            )
+            label_bits.append(f"{idx}:{shell.label} q={q_shell:.3g}")
         if not shells:
-            label_lines.append("No shells within FFT q-range")
+            label_bits.append("No shells within FFT q-range")
 
-        self._bragg_radius_lbl.setText("\n".join(label_lines))
+        suffix = " nm^-1" if shells else ""
+        self._bragg_radius_lbl.setText("Shells: " + "; ".join(label_bits) + suffix)
         self._draw_calib_pick_artists()
 
     # ── calibration helpers ────────────────────────────────────────────────────

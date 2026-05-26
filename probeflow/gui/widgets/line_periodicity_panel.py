@@ -23,6 +23,7 @@ class LinePeriodicityPanel(QWidget):
     findPeriodicityRequested = Signal()
     copyResultRequested = Signal()
     exportProfileCsvRequested = Signal()
+    saveStructureRequested = Signal()
 
     _METHODS = [
         ("Autocorrelation", "autocorrelation"),
@@ -85,9 +86,12 @@ class LinePeriodicityPanel(QWidget):
         has_result = not math.isnan(result.period_m)
         self._copy_btn.setEnabled(has_result)
         self._export_btn.setEnabled(has_result)
+        self._structure_btn.setEnabled(has_result)
 
     def show_message(self, message: str) -> None:
         self._result_lbl.setText(str(message))
+        if hasattr(self, "_structure_btn"):
+            self._structure_btn.setEnabled(False)
 
     def _build(self) -> None:
         lay = QVBoxLayout(self)
@@ -175,8 +179,15 @@ class LinePeriodicityPanel(QWidget):
         self._export_btn.setDefault(False)
         self._export_btn.setAutoDefault(False)
         self._export_btn.clicked.connect(self.exportProfileCsvRequested.emit)
+        self._structure_btn = QPushButton("Save as structure…")
+        self._structure_btn.setEnabled(False)
+        self._structure_btn.setDefault(False)
+        self._structure_btn.setAutoDefault(False)
+        self._structure_btn.setToolTip("Save this period as a reusable known lattice spacing.")
+        self._structure_btn.clicked.connect(self.saveStructureRequested.emit)
         action_row.addWidget(self._copy_btn)
         action_row.addWidget(self._export_btn)
+        action_row.addWidget(self._structure_btn)
         lay.addLayout(action_row)
 
         lay.addStretch(1)

@@ -280,6 +280,19 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
                         params[key] = [float(v) for v in op_params[key]]
                     except (TypeError, ValueError):
                         pass
+            if isinstance(op_params.get("known_structure"), dict):
+                known = op_params["known_structure"]
+                try:
+                    params["known_structure"] = {
+                        "name": str(known.get("name", "")),
+                        "symmetry": str(known.get("symmetry", "")),
+                        "a_nm": float(known.get("a_nm", 0.0)),
+                        "b_nm": float(known.get("b_nm", 0.0)),
+                        "angle_deg": float(known.get("angle_deg", 0.0)),
+                        "unit": str(known.get("unit", "")),
+                    }
+                except (TypeError, ValueError):
+                    pass
             _append_step(ProcessingStep("affine_lattice_correction", params))
         elif op_name == "rotate_arbitrary":
             _append_step(ProcessingStep("rotate_arbitrary", {

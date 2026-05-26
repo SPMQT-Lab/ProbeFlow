@@ -16,7 +16,7 @@ from typing import Any
 import numpy as np
 
 from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QApplication, QFileDialog
+from PySide6.QtWidgets import QApplication, QFileDialog, QInputDialog
 
 from probeflow.measurements.export import (
     feature_points_to_csv_text,
@@ -49,6 +49,12 @@ from probeflow.gui.roi_context import (
     selected_or_active_area_roi_context,
     selected_or_active_roi_context,
     selected_roi_ids_for_context,
+)
+from probeflow.gui.lattice_correction_ui import (
+    load_known_structures,
+    save_known_structures,
+    structure_from_period,
+    upsert_structure,
 )
 
 
@@ -114,6 +120,9 @@ class ImageMeasurementController:
             line_periodicity_panel.copyResultRequested.connect(self.copy_periodicity_result)
             line_periodicity_panel.exportProfileCsvRequested.connect(
                 self.export_periodicity_profile_csv
+            )
+            line_periodicity_panel.saveStructureRequested.connect(
+                self.save_periodicity_as_known_structure
             )
 
     @property
@@ -356,6 +365,45 @@ class ImageMeasurementController:
             text = f"{text}\n" + "\n".join(context)
         QApplication.clipboard().setText(text)
         self._set_status("Copied periodicity result.")
+
+    def save_periodicity_as_known_structure(
+        self,
+        name: str | None = None,
+        symmetry: str | None = None,
+    ) -> None:
+        result = self._last_periodicity_result
+        if result is None or not np.isfinite(getattr(result, "period_m", float("nan"))):
+            self._set_status("Find a valid line periodicity before saving a known structure.")
+            return
+        if name is None:
+            roi_name = self._last_periodicity_settings.get("roi_name", "line")
+            default = f"{roi_name} period"
+            name, ok = QInputDialog.getText(
+                self._viewer,
+                "Save known structure",
+                "Structure name:",
+                text=default,
+            )
+            if not ok:
+                return
+        name = str(name).strip()
+        if not name:
+            return
+        if symmetry is None:
+            symmetry, ok = QInputDialog.getItem(
+                self._viewer,
+                "Save known structure",
+                "Symmetry:",
+                ["hexagonal", "square", "rectangular", "custom"],
+                0,
+                False,
+            )
+            if not ok:
+                return
+        structure = structure_from_period(name, float(result.period_m), str(symmetry))
+        structures = upsert_structure(load_known_structures(), structure)
+        save_known_structures(structures)
+        self._set_status(f"Saved known structure '{structure.name}'.")
 
     def export_periodicity_profile_csv(self) -> None:
         if self._last_periodicity_diag is None:

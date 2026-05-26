@@ -158,6 +158,7 @@ def test_fft_lattice_panel_embeds_in_grid_tab_and_clear_removes_overlay(qapp):
         assert dlg._fft_lattice_dock is None
         assert dlg._clear_grid_btn.isEnabled()
         assert dlg._tab_widget.currentIndex() == dlg._grid_tab_index
+        assert dlg._advanced_grid_grp.isChecked()
 
         app = QApplication.instance()
         assert app is not None
@@ -174,6 +175,59 @@ def test_fft_lattice_panel_embeds_in_grid_tab_and_clear_removes_overlay(qapp):
         assert dlg._fft_lattice_overlay is None
         assert dlg._fft_lattice_panel is None
         assert not dlg._clear_grid_btn.isEnabled()
+    finally:
+        dlg.close()
+        dlg.deleteLater()
+        qapp.processEvents()
+
+
+def test_correction_tab_defaults_to_manual_grid_workflow(qapp):
+    import numpy as np
+    from PySide6.QtWidgets import QCheckBox, QGroupBox, QPushButton
+
+    dlg = FFTViewerDialog(np.ones((16, 16)), (1e-9, 1e-9))
+    try:
+        dlg.show()
+        qapp.processEvents()
+
+        correction_tab = dlg._tab_widget.widget(0)
+        button_texts = {btn.text() for btn in correction_tab.findChildren(QPushButton)}
+        checkbox_texts = {cb.text() for cb in correction_tab.findChildren(QCheckBox)}
+        group_titles = {grp.title() for grp in correction_tab.findChildren(QGroupBox)}
+
+        assert "Create/Edit reciprocal grid" in button_texts
+        assert "Preview corrected image" in button_texts
+        assert {"1. Known structure", "2. Fit reciprocal grid", "3. Undistort image"} <= group_titles
+        assert "Detect peaks" not in button_texts
+        assert "Pick peaks" not in checkbox_texts
+    finally:
+        dlg.close()
+        dlg.deleteLater()
+        qapp.processEvents()
+
+
+def test_fft_known_structure_updates_shell_and_target_controls(qapp):
+    import numpy as np
+    from probeflow.gui.lattice_correction_ui import KnownStructure
+
+    dlg = FFTViewerDialog(np.ones((16, 16)), (1e-9, 1e-9))
+    try:
+        dlg.show()
+        qapp.processEvents()
+
+        structure = KnownStructure("Square 0.5 nm", "square", 0.5, 0.5, 90.0, "nm")
+        dlg._known_structures = [structure]
+        dlg._refresh_structure_combo(structure.name)
+        dlg._on_structure_selected(0)
+        qapp.processEvents()
+
+        assert dlg._active_known_structure == structure
+        assert dlg._bragg_sym_combo.currentText() == "Square"
+        assert dlg._bragg_unit_combo.currentText() == "nm"
+        assert dlg._bragg_a_spin.value() == pytest.approx(0.5)
+        assert dlg._fft_ideal_combo.currentText() == "Square"
+        assert dlg._fft_ideal_a_spin.value() == pytest.approx(0.5)
+        assert dlg._fft_ideal_b_spin.value() == pytest.approx(0.5)
     finally:
         dlg.close()
         dlg.deleteLater()
@@ -228,13 +282,15 @@ def test_fft_grid_correction_preview_and_apply_hooks(qapp):
 
         assert dlg._fft_correction is not None
         dlg._on_fft_preview_correction()
-        assert previewed
-        assert previewed[-1] is not None
+        assert previewed == []
+        assert dlg._fft_preview_frame.isVisible()
+        assert dlg._fft_preview_active
 
         dlg._on_fft_apply_correction()
         assert applied
         assert applied[0][0] == "affine_lattice_correction"
         assert applied[0][1]["source"] == "fft_reciprocal_grid"
+        assert applied[0][1]["known_structure"]["name"] == "Hexagonal 2.46 Å"
     finally:
         dlg.close()
         dlg.deleteLater()

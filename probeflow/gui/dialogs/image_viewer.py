@@ -621,8 +621,8 @@ class ImageViewerDialog(
         fft_viewer_btn.setFont(QFont("Helvetica", 8))
         fft_viewer_btn.setFixedHeight(24)
         fft_viewer_btn.setToolTip(
-            "Open a side-by-side real-space / FFT window with zoom, pan, "
-            "and cursor readout in nm⁻¹.")
+            "Open the FFT viewer to fit reciprocal Bragg peaks to a known "
+            "structure and preview affine undistortion.")
         fft_viewer_btn.clicked.connect(self._on_open_fft_viewer)
         advanced_lay.addWidget(fft_viewer_btn)
 

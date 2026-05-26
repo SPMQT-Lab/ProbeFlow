@@ -625,6 +625,12 @@ def test_ideal_lattice_presets_control_enabled_fields(qapp):
     cal = RealSpaceCalibration.from_scan_range((10e-9, 10e-9), 100, 100)
     panel = LatticeGridPanel(_FakeGridItem(grid), _FakeController(), cal, 100, 100)
     try:
+        assert panel._structure_combo.currentText() == "Hexagonal 2.46 Å"
+        assert panel._ideal_preset_combo.currentText() == "Hexagonal"
+        assert "Undistort: y/x=" in panel._correction_lbl.text()
+
+        panel._ideal_preset_combo.setCurrentText("Match grid")
+        qapp.processEvents()
         assert panel._ideal_preset_combo.currentText() == "Match grid"
         assert not panel._ideal_a_spin.isEnabled()
         assert not panel._ideal_b_spin.isEnabled()
@@ -655,6 +661,31 @@ def test_ideal_lattice_presets_control_enabled_fields(qapp):
         assert panel._ideal_a_spin.isEnabled()
         assert panel._ideal_b_spin.isEnabled()
         assert panel._ideal_angle_spin.isEnabled()
+    finally:
+        panel.close()
+        panel.deleteLater()
+        qapp.processEvents()
+
+
+def test_real_space_known_structure_feeds_correction_target(qapp):
+    from probeflow.gui.lattice_correction_ui import KnownStructure
+    from probeflow.gui.lattice_grid.real_space_panel import LatticeGridPanel
+
+    grid = LatticeGrid.make_square(50, 50, 20)
+    cal = RealSpaceCalibration.from_scan_range((10e-9, 10e-9), 100, 100)
+    panel = LatticeGridPanel(_FakeGridItem(grid), _FakeController(), cal, 100, 100)
+    try:
+        structure = KnownStructure("Square 1 nm", "square", 1.0, 1.0, 90.0, "nm")
+        panel._known_structures = [structure]
+        panel._refresh_structure_combo(structure.name)
+        panel._on_structure_selected(0)
+        qapp.processEvents()
+
+        assert panel._active_known_structure == structure
+        assert panel._ideal_preset_combo.currentText() == "Square"
+        assert panel._ideal_a_spin.value() == pytest.approx(10.0)
+        assert panel._ideal_b_spin.value() == pytest.approx(10.0)
+        assert "Undistort: y/x=" in panel._correction_lbl.text()
     finally:
         panel.close()
         panel.deleteLater()

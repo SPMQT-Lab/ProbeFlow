@@ -946,6 +946,7 @@ def test_periodicity_secondary_exports_include_method_context(qapp, monkeypatch,
             self.findPeriodicityRequested = _FakeSignal()
             self.copyResultRequested = _FakeSignal()
             self.exportProfileCsvRequested = _FakeSignal()
+            self.saveStructureRequested = _FakeSignal()
             self.result = None
 
         def settings(self):
@@ -1013,6 +1014,37 @@ def test_periodicity_secondary_exports_include_method_context(qapp, monkeypatch,
     assert "# width_px,3" in text
     assert "# min_period_m,5e-09" in text
     assert "s_m,s_nm,z_raw,z_processed" in text
+
+
+def test_periodicity_result_can_be_saved_as_known_structure(monkeypatch):
+    from probeflow.gui.viewer import ImageMeasurementController
+
+    class FakeResult:
+        period_m = 2.46e-10
+
+    saved = []
+    monkeypatch.setattr(
+        "probeflow.gui.viewer.image_measurements.load_known_structures",
+        lambda: [],
+    )
+    monkeypatch.setattr(
+        "probeflow.gui.viewer.image_measurements.save_known_structures",
+        lambda structures: saved.extend(structures),
+    )
+
+    dlg = type("FakeViewer", (), {})()
+    dlg._status_lbl = _FakeStatus()
+    controller = ImageMeasurementController(dlg, _FakeMeasurementTable())
+    controller._last_periodicity_result = FakeResult()
+    controller._last_periodicity_settings = {"roi_name": "row"}
+
+    controller.save_periodicity_as_known_structure("row spacing", "hexagonal")
+
+    assert saved
+    assert saved[0].name == "row spacing"
+    assert saved[0].symmetry == "hexagonal"
+    assert saved[0].a_nm == pytest.approx(0.246)
+    assert "Saved known structure" in dlg._status_lbl.text
 
 
 def test_viewer_feature_maxima_action_adds_summary_measurement(

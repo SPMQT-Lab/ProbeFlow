@@ -167,6 +167,14 @@ class TestGUIAdapterCoverage:
                 "ideal_a_nm": 0.25,
                 "ideal_b_nm": 0.25,
                 "ideal_angle_deg": 90.0,
+                "known_structure": {
+                    "name": "Hexagonal 2.46 Å",
+                    "symmetry": "hexagonal",
+                    "a_nm": 0.246,
+                    "b_nm": 0.246,
+                    "angle_deg": 60.0,
+                    "unit": "Å",
+                },
             },
         }]}
         state = processing_state_from_gui(gui)
@@ -180,6 +188,8 @@ class TestGUIAdapterCoverage:
         assert params["ideal_a_nm"] == pytest.approx(0.25)
         assert params["ideal_b_nm"] == pytest.approx(0.25)
         assert params["ideal_angle_deg"] == pytest.approx(90.0)
+        assert params["known_structure"]["name"] == "Hexagonal 2.46 Å"
+        assert params["known_structure"]["a_nm"] == pytest.approx(0.246)
 
     def test_stm_line_bg_in_geometric_ops_produces_no_step(self):
         # stm_line_bg has dispatch in state.py but NO path in gui_adapter.py.

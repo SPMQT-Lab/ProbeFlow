@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QInputDialog,
     QPushButton,
     QSpinBox,
     QTabWidget,
@@ -40,6 +41,15 @@ from probeflow.analysis.lattice_grid import (
     LatticeKind,
     RealSpaceCalibration,
     format_real_space_measurements,
+)
+from probeflow.gui.lattice_correction_ui import (
+    KnownStructure,
+    correction_main_lines,
+    delete_structure,
+    ideal_lattice_from_structure,
+    load_known_structures,
+    save_known_structures,
+    upsert_structure,
 )
 from probeflow.gui.no_wheel import install_no_wheel_spinboxes
 
@@ -94,6 +104,9 @@ class LatticeGridPanel(QWidget):
         self._clear_preview_fn = clear_preview_fn
         self._correction: Optional[LatticeCorrection] = None
         self._preview_active: bool = False
+        self._updating_structure = False
+        self._known_structures = load_known_structures()
+        self._active_known_structure = self._known_structures[0]
 
         self._unit_scale, self._unit_label = _choose_display_unit(calibration)
         self._updating_controls = False
@@ -287,12 +300,41 @@ class LatticeGridPanel(QWidget):
         dist_lay.setSpacing(4)
 
         # ── ideal lattice group ───────────────────────────────────────────────
-        ideal_grp = QGroupBox("Ideal lattice")
+        ideal_grp = QGroupBox("Known structure")
         ideal_grp.setFont(QFont("Helvetica", 9))
         ideal_lay = QVBoxLayout(ideal_grp)
         ideal_lay.setSpacing(3)
         ideal_lay.setContentsMargins(6, 6, 6, 4)
         _ideal_spin = _make_spin_row(ideal_lay)
+
+        structure_row = QHBoxLayout()
+        structure_lbl = QLabel("Structure:")
+        structure_lbl.setFont(QFont("Helvetica", 9))
+        structure_lbl.setMinimumWidth(68)
+        self._structure_combo = QComboBox()
+        self._structure_combo.setFont(QFont("Helvetica", 9))
+        self._structure_combo.setFixedHeight(22)
+        self._structure_combo.setToolTip("Known surface lattice used as the correction target.")
+        self._structure_combo.currentIndexChanged.connect(self._on_structure_selected)
+        self._structure_save_btn = QPushButton("Save")
+        self._structure_update_btn = QPushButton("Update")
+        self._structure_delete_btn = QPushButton("Delete")
+        for btn in (
+            self._structure_save_btn,
+            self._structure_update_btn,
+            self._structure_delete_btn,
+        ):
+            btn.setFont(QFont("Helvetica", 8))
+            btn.setFixedHeight(22)
+        self._structure_save_btn.clicked.connect(self._on_save_structure)
+        self._structure_update_btn.clicked.connect(self._on_update_structure)
+        self._structure_delete_btn.clicked.connect(self._on_delete_structure)
+        structure_row.addWidget(structure_lbl)
+        structure_row.addWidget(self._structure_combo, 1)
+        structure_row.addWidget(self._structure_save_btn)
+        structure_row.addWidget(self._structure_update_btn)
+        structure_row.addWidget(self._structure_delete_btn)
+        ideal_lay.addLayout(structure_row)
 
         preset_row = QHBoxLayout()
         preset_lbl = QLabel("Preset:")
@@ -322,6 +364,8 @@ class LatticeGridPanel(QWidget):
 
         self._ideal_angle_spin = _ideal_spin("Angle:", 1.0, 179.0, 0.1, 2, "°")
         self._ideal_angle_spin.setValue(90.0)
+        self._refresh_structure_combo(self._active_known_structure.name)
+        self._apply_known_structure(self._active_known_structure, refresh=False)
 
         dist_lay.addWidget(ideal_grp)
 
@@ -440,6 +484,117 @@ class LatticeGridPanel(QWidget):
         install_no_wheel_spinboxes(self)
 
     # ── model↔UI sync ─────────────────────────────────────────────────────────
+
+    def _refresh_structure_combo(self, selected_name: str | None = None) -> None:
+        combo = getattr(self, "_structure_combo", None)
+        if combo is None:
+            return
+        self._updating_structure = True
+        try:
+            combo.clear()
+            for structure in self._known_structures:
+                combo.addItem(structure.name, structure)
+            if selected_name:
+                for idx, structure in enumerate(self._known_structures):
+                    if structure.name == selected_name:
+                        combo.setCurrentIndex(idx)
+                        break
+        finally:
+            self._updating_structure = False
+
+    def _on_structure_selected(self, idx: int) -> None:
+        if self._updating_structure:
+            return
+        combo = getattr(self, "_structure_combo", None)
+        if combo is None or idx < 0:
+            return
+        structure = combo.itemData(idx)
+        if isinstance(structure, KnownStructure):
+            self._apply_known_structure(structure)
+
+    def _apply_known_structure(
+        self,
+        structure: KnownStructure,
+        *,
+        refresh: bool = True,
+    ) -> None:
+        self._active_known_structure = structure
+        measured_angle = None
+        try:
+            measured_angle = self._measured_lattice_values()[2]
+        except Exception:
+            pass
+        ideal = ideal_lattice_from_structure(structure, measured_angle_deg=measured_angle)
+        preset = {
+            "square": "Square",
+            "rectangular": "Rectangular",
+            "hexagonal": "Hexagonal",
+        }.get(structure.symmetry, "Custom")
+        self._updating_controls = True
+        try:
+            self._ideal_preset_combo.setCurrentText(preset)
+            self._ideal_a_spin.setValue(max(self._ideal_a_spin.minimum(), ideal.a_nm / (self._unit_scale * 1e9)))
+            self._ideal_b_spin.setValue(max(self._ideal_b_spin.minimum(), ideal.b_nm / (self._unit_scale * 1e9)))
+            self._ideal_angle_spin.setValue(min(179.0, max(1.0, ideal.angle_deg)))
+        finally:
+            self._updating_controls = False
+        self._refresh_ideal_control_state()
+        if refresh:
+            self._clear_preview_if_active()
+            self._refresh_correction_label()
+
+    def _structure_from_ideal_controls(self, name: str) -> KnownStructure:
+        a_nm = self._ideal_a_spin.value() * self._unit_scale * 1e9
+        b_nm = self._ideal_b_spin.value() * self._unit_scale * 1e9
+        angle = self._ideal_angle_spin.value()
+        preset = self._ideal_preset_combo.currentText()
+        symmetry = {
+            "Square": "square",
+            "Rectangular": "rectangular",
+            "Hexagonal": "hexagonal",
+        }.get(preset, "custom")
+        if symmetry == "square":
+            b_nm, angle = a_nm, 90.0
+        elif symmetry == "hexagonal":
+            b_nm, angle = a_nm, 60.0
+        elif symmetry == "rectangular":
+            angle = 90.0
+        return KnownStructure(name, symmetry, a_nm, b_nm, angle, self._unit_label)
+
+    def _persist_known_structures(self, selected_name: str) -> None:
+        save_known_structures(self._known_structures)
+        self._refresh_structure_combo(selected_name)
+
+    def _on_save_structure(self) -> None:
+        default = getattr(self, "_active_known_structure", self._known_structures[0]).name
+        name, ok = QInputDialog.getText(self, "Save known structure", "Structure name:", text=default)
+        if not ok or not name.strip():
+            return
+        structure = self._structure_from_ideal_controls(name.strip())
+        self._known_structures = upsert_structure(self._known_structures, structure)
+        self._persist_known_structures(structure.name)
+        self._apply_known_structure(structure)
+
+    def _on_update_structure(self) -> None:
+        combo = getattr(self, "_structure_combo", None)
+        if combo is None or combo.currentIndex() < 0:
+            return
+        name = combo.currentText().strip()
+        if not name:
+            return
+        structure = self._structure_from_ideal_controls(name)
+        self._known_structures = upsert_structure(self._known_structures, structure)
+        self._persist_known_structures(structure.name)
+        self._apply_known_structure(structure)
+
+    def _on_delete_structure(self) -> None:
+        combo = getattr(self, "_structure_combo", None)
+        if combo is None or combo.currentIndex() < 0:
+            return
+        self._known_structures = delete_structure(self._known_structures, combo.currentText())
+        selected = self._known_structures[0]
+        self._persist_known_structures(selected.name)
+        self._apply_known_structure(selected)
 
     def sync_from_model(self) -> None:
         """Update all spinboxes and measurement display from the current grid."""
@@ -774,24 +929,12 @@ class LatticeGridPanel(QWidget):
             )
             self._apply_btn.setEnabled(self._apply_correction_fn is not None)
 
-            preserve = self._preserve_orientation_cb.isChecked()
-            rot_label = (
-                f"  rigid rot:  {result.polar_rotation_deg:.3f}°  (removed)"
-                if preserve
-                else f"  rigid rot:  {result.polar_rotation_deg:.3f}°  (applied)"
-            )
-            # x_scale and y_scale are the diagonal stretch factors from the
-            # QR decomposition.  They tell the user: multiply the current scan
-            # width by x_scale to get the corrected width (and same for height).
-            y_scale = result.x_scale * result.y_over_x
-            lines = [
-                f"  X:  ×{result.x_scale:.5f}",
-                f"  Y:  ×{y_scale:.5f}",
-            ]
-            if abs(result.shear) > 1e-4:
-                lines.append(f"  shear:  {result.shear:.5f}")
-            lines.append(rot_label)
-            self._correction_lbl.setText("\n".join(lines))
+            self._correction_lbl.setText("\n".join(
+                correction_main_lines(
+                    result,
+                    preserve_orientation=self._preserve_orientation_cb.isChecked(),
+                )
+            ))
         except Exception as exc:
             self._correction = None
             self._preview_btn.setEnabled(False)
@@ -931,6 +1074,9 @@ class LatticeGridPanel(QWidget):
         )
         if op_params is None:
             return
+        structure = getattr(self, "_active_known_structure", None)
+        if isinstance(structure, KnownStructure):
+            op_params["known_structure"] = structure.as_dict()
         self._apply_correction_fn("affine_lattice_correction", op_params)
 
         # Hide the grid overlay — it was measured on the pre-correction image
