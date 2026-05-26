@@ -951,9 +951,45 @@ class ProbeFlowWindow(QMainWindow):
         self._fc_window.raise_()
         self._fc_window.activateWindow()
 
+    def _load_scan_plane_for_analysis(
+        self, entry, plane_idx: int
+    ) -> tuple:
+        """Load a scan plane and apply any saved viewer processing.
+
+        Returns ``(arr, px_m, px_x_m, px_y_m, actual_plane_idx)`` or raises.
+        The returned array is the *processed* version — identical to what the
+        user last saw in the image viewer — so Feature Counting and TV-denoise
+        work on the same data the user inspected.
+        """
+        _scan = load_scan(entry.path)
+        if plane_idx >= _scan.n_planes:
+            plane_idx = 0
+        arr = _scan.planes[plane_idx]
+        w_m, h_m = _scan.scan_range_m
+        if arr is None:
+            raise ValueError("Scan returned no array for that plane.")
+        Ny, Nx = arr.shape
+        if Nx > 0 and Ny > 0 and w_m > 0 and h_m > 0:
+            px_x_m = float(w_m / Nx)
+            px_y_m = float(h_m / Ny)
+            px_m   = float(np.sqrt(px_x_m * px_y_m))
+        else:
+            px_x_m = px_y_m = px_m = 1e-10
+
+        # Apply saved processing (align rows, background, etc.) so Feature
+        # Counting sees the same image the user processed in the viewer.
+        saved_proc = self._saved_processing.get(str(entry.path))
+        if saved_proc:
+            try:
+                from probeflow.gui.rendering import _apply_processing
+                arr = _apply_processing(arr, saved_proc)
+            except Exception:
+                pass   # fall back to raw if processing fails
+
+        return arr, px_m, px_x_m, px_y_m, plane_idx
+
     def _on_fc_load_from_browse(self) -> None:
         """Bridge: read Browse selection → load into the floating FC window."""
-        from probeflow.core.scan_loader import load_scan
         from probeflow.gui.models import VertFile
         if self._fc_window is None:
             return
@@ -969,24 +1005,11 @@ class ProbeFlowWindow(QMainWindow):
             return
         plane_idx = self._fc_window._sidebar.plane_index()
         try:
-            _scan = load_scan(entry.path)
-            if plane_idx >= _scan.n_planes:
-                plane_idx = 0
-            arr  = _scan.planes[plane_idx]
-            w_m, h_m = _scan.scan_range_m
+            arr, px_m, px_x_m, px_y_m, plane_idx = \
+                self._load_scan_plane_for_analysis(entry, plane_idx)
         except Exception as exc:
             self._fc_window._sidebar.set_status(f"Could not read scan: {exc}")
             return
-        if arr is None:
-            self._fc_window._sidebar.set_status("Could not read scan plane.")
-            return
-        Ny, Nx = arr.shape
-        if Nx <= 0 or Ny <= 0 or w_m <= 0 or h_m <= 0:
-            px_x_m = px_y_m = px_m = 1e-10
-        else:
-            px_x_m = float(w_m / Nx)
-            px_y_m = float(h_m / Ny)
-            px_m   = float(np.sqrt(px_x_m * px_y_m))
         self._fc_window.load_entry(entry, plane_idx, arr, px_m, px_x_m, px_y_m)
 
     # ── Features tab handlers ──────────────────────────────────────────────────
@@ -1002,24 +1025,11 @@ class ProbeFlowWindow(QMainWindow):
             return
         plane_idx = self._features_sidebar.plane_index()
         try:
-            _scan = load_scan(entry.path)
-            if plane_idx >= _scan.n_planes:
-                plane_idx = 0
-            arr = _scan.planes[plane_idx]
-            w_m, h_m = _scan.scan_range_m
+            arr, px_m, px_x_m, px_y_m, plane_idx = \
+                self._load_scan_plane_for_analysis(entry, plane_idx)
         except Exception as exc:
             self._features_sidebar.set_status(f"Could not read scan: {exc}")
             return
-        if arr is None:
-            self._features_sidebar.set_status("Could not read scan plane.")
-            return
-        Ny, Nx = arr.shape
-        if Nx <= 0 or Ny <= 0 or w_m <= 0 or h_m <= 0:
-            px_x_m = px_y_m = px_m = 1e-10
-        else:
-            px_x_m = float(w_m / Nx)
-            px_y_m = float(h_m / Ny)
-            px_m = float(np.sqrt(px_x_m * px_y_m))
         self._features_panel.load_entry(entry, plane_idx, arr, px_m, px_x_m, px_y_m)
         self._features_sidebar.set_status(
             f"Loaded {entry.stem} (plane {plane_idx}, px = {px_m * 1e12:.1f} pm)")
