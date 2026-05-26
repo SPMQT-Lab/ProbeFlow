@@ -119,6 +119,11 @@ class _FeaturesWorker(QRunnable):
                     pixel_size_y_m=self._px_y,
                     params=LatticeParams(),
                 )
+            elif self._mode == "classify":
+                from probeflow.analysis.features import classify_particles
+                particles = self._params["particles"]
+                samples   = self._params["samples"]   # list of (class_name, Particle)
+                res = classify_particles(self._arr, particles, samples)
             else:
                 raise ValueError(f"Unknown mode {self._mode!r}")
             self._signals.finished.emit(self._mode, res, "")
@@ -161,6 +166,10 @@ class FeaturesPanel(QWidget):
         self._sample_labels: dict = {}     # particle_index → {"name": str, "color": tuple}
         self._classifications: list = []
         self._classification_meta: dict | None = None
+        self._label_history: list = []     # undo stack for sample labels
+        self._full_xlim = None             # zoom: full-image x limits after first draw
+        self._full_ylim = None             # zoom: full-image y limits after first draw
+        self._reset_zoom_pending: bool = False
         self._build()
 
     def _build(self):
@@ -183,6 +192,31 @@ class FeaturesPanel(QWidget):
         self._canvas.mpl_connect("button_press_event",   self._on_press)
         self._canvas.mpl_connect("motion_notify_event",  self._on_motion)
         self._canvas.mpl_connect("button_release_event", self._on_release)
+        self._canvas.mpl_connect("scroll_event",         self._on_scroll)
+
+        # ── Zoom / view controls ────────────────────────────────────────────
+        _zoom_row = QHBoxLayout()
+        _zoom_row.setSpacing(4)
+        _zi = QPushButton("🔍+")
+        _zi.setFixedSize(36, 24)
+        _zi.setToolTip("Zoom in  (or scroll ↑)")
+        _zi.setFont(QFont("Helvetica", 9))
+        _zi.clicked.connect(lambda: self._zoom_view(1.5))
+        _zo = QPushButton("🔍−")
+        _zo.setFixedSize(36, 24)
+        _zo.setToolTip("Zoom out  (or scroll ↓)")
+        _zo.setFont(QFont("Helvetica", 9))
+        _zo.clicked.connect(lambda: self._zoom_view(1 / 1.5))
+        _fit = QPushButton("⟲ Fit")
+        _fit.setFixedHeight(24)
+        _fit.setToolTip("Reset zoom to show the full image")
+        _fit.setFont(QFont("Helvetica", 9))
+        _fit.clicked.connect(self.reset_view)
+        _zoom_row.addWidget(_zi)
+        _zoom_row.addWidget(_zo)
+        _zoom_row.addWidget(_fit)
+        _zoom_row.addStretch(1)
+        lay.addLayout(_zoom_row)
 
         self._results_table = QTableWidget(0, 4)
         self._results_table.setHorizontalHeaderLabels(["#", "x (nm)", "y (nm)", "value"])
@@ -218,6 +252,11 @@ class FeaturesPanel(QWidget):
         self._lattice      = None
         self._template_arr = None
         self._overlay_mode = "none"
+        self._sample_labels = {}
+        self._label_history = []
+        self._full_xlim    = None
+        self._full_ylim    = None
+        self._reset_zoom_pending = False
         self._redraw()
         self._results_table.setRowCount(0)
         plane_lbl = PLANE_NAMES[plane_idx] if 0 <= plane_idx < len(PLANE_NAMES) else f"plane {plane_idx}"
@@ -285,6 +324,19 @@ class FeaturesPanel(QWidget):
     def set_classifications(self, classifications: list, meta: dict | None = None) -> None:
         self._classifications = classifications
         self._classification_meta = meta
+        self._overlay_mode = "classify"
+        # Populate results table with class counts
+        counts: dict[str, int] = {}
+        for c in classifications:
+            counts[c.class_name] = counts.get(c.class_name, 0) + 1
+        self._results_table.setColumnCount(2)
+        self._results_table.setHorizontalHeaderLabels(["class", "count"])
+        rows = sorted(counts.items())
+        self._results_table.setRowCount(len(rows))
+        for i, (k, v) in enumerate(rows):
+            self._results_table.setItem(i, 0, QTableWidgetItem(k))
+            self._results_table.setItem(i, 1, QTableWidgetItem(str(v)))
+        self._redraw()
 
     def get_classifications(self) -> list:
         return list(self._classifications)
@@ -366,14 +418,84 @@ class FeaturesPanel(QWidget):
         self._canvas.setCursor(QCursor(Qt.ArrowCursor))
         self._redraw()
 
+    # ── Zoom helpers ─────────────────────────────────────────────────────────
+
+    def _on_scroll(self, event):
+        """Zoom the matplotlib view with the mouse wheel."""
+        if event.inaxes is not self._ax or self._arr is None:
+            return
+        factor = 1.25 if event.step > 0 else 0.8
+        xl, xr = self._ax.get_xlim()
+        yb, yt = self._ax.get_ylim()
+        xc = float(event.xdata) if event.xdata is not None else (xl + xr) / 2
+        yc = float(event.ydata) if event.ydata is not None else (yb + yt) / 2
+        xhalf = (xr - xl) / 2 / factor
+        yhalf = (yt - yb) / 2 / factor
+        self._ax.set_xlim(xc - xhalf, xc + xhalf)
+        self._ax.set_ylim(yc - yhalf, yc + yhalf)
+        self._canvas.draw_idle()
+
+    def _zoom_view(self, factor: float):
+        """Zoom by *factor* around the image centre (>1 = in, <1 = out)."""
+        if self._arr is None:
+            return
+        xl, xr = self._ax.get_xlim()
+        yb, yt = self._ax.get_ylim()
+        xc = (xl + xr) / 2
+        yc = (yb + yt) / 2
+        xhalf = (xr - xl) / 2 / factor
+        yhalf = (yt - yb) / 2 / factor
+        self._ax.set_xlim(xc - xhalf, xc + xhalf)
+        self._ax.set_ylim(yc - yhalf, yc + yhalf)
+        self._canvas.draw_idle()
+
+    def reset_view(self):
+        """Reset zoom to show the full image (back to thumbnail view)."""
+        if self._full_xlim is not None:
+            self._ax.set_xlim(self._full_xlim)
+            self._ax.set_ylim(self._full_ylim)
+            self._canvas.draw_idle()
+
+    # ── Classify-label undo ──────────────────────────────────────────────────
+
+    def undo_last_label(self):
+        """Undo the most recent sample-label assignment."""
+        if self._label_history:
+            self._sample_labels = self._label_history.pop()
+            self._redraw()
+
     def _on_press(self, event):
-        if not self._cropping or event.inaxes is not self._ax:
+        if event.inaxes is not self._ax:
             return
         if event.xdata is None or event.ydata is None:
             return
-        self._crop_start = (int(event.xdata), int(event.ydata))
-        self._crop_rect  = (self._crop_start[0], self._crop_start[1],
-                            self._crop_start[0], self._crop_start[1])
+
+        # ── Template-crop mode ───────────────────────────────────────────────
+        if self._cropping:
+            self._crop_start = (int(event.xdata), int(event.ydata))
+            self._crop_rect  = (self._crop_start[0], self._crop_start[1],
+                                self._crop_start[0], self._crop_start[1])
+            return
+
+        # ── Classify label-by-clicking mode ─────────────────────────────────
+        if (self._sample_armed and self._current_mode == "classify"
+                and self._particles and self._arr is not None):
+            click_x, click_y = event.xdata, event.ydata
+            best_p, best_dist_sq = None, float("inf")
+            for p in self._particles:
+                cx = p.centroid_x_m / self._pixel_size_x_m
+                cy = p.centroid_y_m / self._pixel_size_y_m
+                dist_sq = (cx - click_x) ** 2 + (cy - click_y) ** 2
+                if dist_sq < best_dist_sq:
+                    best_dist_sq = dist_sq
+                    best_p = p
+            # Accept click only if within 15 % of the image diagonal
+            max_dist_sq = (max(self._arr.shape) * 0.15) ** 2
+            if best_p is not None and best_dist_sq < max_dist_sq:
+                import copy
+                self._label_history.append(copy.deepcopy(self._sample_labels))
+                self._edit_sample_label(best_p)
+                self._redraw()
 
     def _on_motion(self, event):
         if not self._cropping or self._crop_start is None:
@@ -408,6 +530,16 @@ class FeaturesPanel(QWidget):
         self._redraw()
 
     def _redraw(self):
+        # ── Preserve current zoom across redraws ─────────────────────────────
+        save_zoom = (
+            self._arr is not None
+            and self._full_xlim is not None
+            and not self._reset_zoom_pending
+        )
+        if save_zoom:
+            cur_xlim = list(self._ax.get_xlim())
+            cur_ylim = list(self._ax.get_ylim())
+
         self._ax.clear()
         self._ax.set_axis_off()
         if self._arr is None:
@@ -422,15 +554,36 @@ class FeaturesPanel(QWidget):
                          interpolation="nearest", origin="upper")
 
         if self._overlay_mode == "particles":
-            for p in self._particles:
-                xs = [c[0] / self._pixel_size_x_m for c in p.contour_xy_m]
-                ys = [c[1] / self._pixel_size_y_m for c in p.contour_xy_m]
-                if xs and ys:
-                    xs.append(xs[0]); ys.append(ys[0])
-                    self._ax.plot(xs, ys, color="#f38ba8", lw=0.8)
-                cx = p.centroid_x_m / self._pixel_size_x_m
-                cy = p.centroid_y_m / self._pixel_size_y_m
-                self._ax.plot(cx, cy, marker="+", color="#a6e3a1", ms=5)
+            if self._current_mode == "classify":
+                # Show particles colored by their label assignment
+                for p in self._particles:
+                    label_info = self._sample_labels.get(p.index)
+                    color = (
+                        "#{:02x}{:02x}{:02x}".format(*label_info["color"])
+                        if label_info else "#f38ba8"
+                    )
+                    xs = [c[0] / self._pixel_size_x_m for c in p.contour_xy_m]
+                    ys = [c[1] / self._pixel_size_y_m for c in p.contour_xy_m]
+                    if xs and ys:
+                        xs.append(xs[0]); ys.append(ys[0])
+                        self._ax.plot(xs, ys, color=color, lw=0.8)
+                    cx = p.centroid_x_m / self._pixel_size_x_m
+                    cy = p.centroid_y_m / self._pixel_size_y_m
+                    center_color = "#a6e3a1" if label_info else "#585b70"
+                    self._ax.plot(cx, cy, marker="+", color=center_color, ms=5)
+                    if label_info:
+                        self._ax.text(cx + 2, cy - 2, label_info["name"],
+                                     color=color, fontsize=7, clip_on=True)
+            else:
+                for p in self._particles:
+                    xs = [c[0] / self._pixel_size_x_m for c in p.contour_xy_m]
+                    ys = [c[1] / self._pixel_size_y_m for c in p.contour_xy_m]
+                    if xs and ys:
+                        xs.append(xs[0]); ys.append(ys[0])
+                        self._ax.plot(xs, ys, color="#f38ba8", lw=0.8)
+                    cx = p.centroid_x_m / self._pixel_size_x_m
+                    cy = p.centroid_y_m / self._pixel_size_y_m
+                    self._ax.plot(cx, cy, marker="+", color="#a6e3a1", ms=5)
         elif self._overlay_mode == "template":
             for d in self._detections:
                 self._ax.plot(d.x_px, d.y_px, marker="o", mfc="none",
@@ -446,6 +599,26 @@ class FeaturesPanel(QWidget):
             pts_x = [cx, cx + ax_, cx + ax_ + bx_, cx + bx_, cx]
             pts_y = [cy, cy + ay_, cy + ay_ + by_, cy + by_, cy]
             self._ax.plot(pts_x, pts_y, color="#fab387", lw=1.0, ls="--")
+        elif self._overlay_mode == "classify" and self._classifications:
+            # Show classification results: particles colored by assigned class
+            classify_map = {c.particle_index: c for c in self._classifications}
+            label_colors = {
+                v["name"]: "#{:02x}{:02x}{:02x}".format(*v["color"])
+                for v in self._sample_labels.values()
+            }
+            for p in self._particles:
+                cx = p.centroid_x_m / self._pixel_size_x_m
+                cy = p.centroid_y_m / self._pixel_size_y_m
+                c = classify_map.get(p.index)
+                if c and c.class_name != "other":
+                    color = label_colors.get(c.class_name, "#89b4fa")
+                    self._ax.plot(cx, cy, marker="o", color=color, ms=7,
+                                  mfc=color, mew=0, alpha=0.85)
+                    self._ax.text(cx + 2, cy - 2, c.class_name,
+                                 color=color, fontsize=7, clip_on=True)
+                else:
+                    self._ax.plot(cx, cy, marker=".", color="#585b70",
+                                  ms=4, alpha=0.5)
 
         if self._crop_rect is not None:
             x0, y0, x1, y1 = self._crop_rect
@@ -459,18 +632,33 @@ class FeaturesPanel(QWidget):
                           color="#f9e2af", fontsize=8,
                           bbox=dict(boxstyle="round", fc="#1e1e2e88", ec="none"))
 
+        # ── Zoom state management ─────────────────────────────────────────────
+        if self._full_xlim is None:
+            # First draw of this image: capture full-view limits
+            self._full_xlim = list(self._ax.get_xlim())
+            self._full_ylim = list(self._ax.get_ylim())
+        elif self._reset_zoom_pending:
+            self._ax.set_xlim(self._full_xlim)
+            self._ax.set_ylim(self._full_ylim)
+            self._reset_zoom_pending = False
+        elif save_zoom:
+            self._ax.set_xlim(cur_xlim)
+            self._ax.set_ylim(cur_ylim)
+
         self._canvas.draw_idle()
 
 
 class FeaturesSidebar(QWidget):
     """Right sidebar for Features-tab analysis parameters."""
 
-    mode_changed          = Signal(str)      # "particles" / "template" / "lattice" / "classify"
-    classify_params_changed = Signal()
-    load_from_browse_requested = Signal()
-    run_requested         = Signal(str)      # mode
-    export_requested      = Signal(str)      # mode
-    crop_template_requested = Signal()
+    mode_changed                    = Signal(str)   # "particles" / "template" / "lattice" / "classify"
+    classify_params_changed         = Signal()
+    segment_for_classify_requested  = Signal()
+    undo_label_requested            = Signal()
+    load_from_browse_requested      = Signal()
+    run_requested                   = Signal(str)   # mode
+    export_requested                = Signal(str)   # mode
+    crop_template_requested         = Signal()
 
     def __init__(self, t: dict, parent=None):
         super().__init__(parent)
@@ -666,11 +854,16 @@ class FeaturesSidebar(QWidget):
         l.setSpacing(4)
 
         info = QLabel(
-            "Segment particles, then label examples by clicking them.\n"
-            "Run to classify all particles by similarity to your labels.")
+            "① Set threshold below and click\n"
+            "    'Segment particles'.\n"
+            "② Click any particle on the image\n"
+            "    to assign it a class label.\n"
+            "③ Press Run to classify all.")
         info.setFont(QFont("Helvetica", 9))
         info.setWordWrap(True)
         l.addWidget(info)
+
+        l.addWidget(_sep())
 
         l.addWidget(QLabel("Threshold"))
         self._cls_thr_cb = QComboBox()
@@ -689,6 +882,20 @@ class FeaturesSidebar(QWidget):
         self._cls_min_area_spin.valueChanged.connect(lambda _: self.classify_params_changed.emit())
         row.addWidget(self._cls_min_area_spin)
         l.addLayout(row)
+
+        seg_btn = QPushButton("① Segment particles")
+        seg_btn.setFont(QFont("Helvetica", 9, QFont.Bold))
+        seg_btn.setFixedHeight(28)
+        seg_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        seg_btn.clicked.connect(self.segment_for_classify_requested.emit)
+        l.addWidget(seg_btn)
+
+        undo_btn = QPushButton("↩ Undo last label")
+        undo_btn.setFont(QFont("Helvetica", 9))
+        undo_btn.setFixedHeight(26)
+        undo_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        undo_btn.clicked.connect(self.undo_label_requested.emit)
+        l.addWidget(undo_btn)
 
         return w
 
