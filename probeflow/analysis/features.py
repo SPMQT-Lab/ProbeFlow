@@ -99,6 +99,11 @@ class Particle:
     min_height: float
     n_pixels: int
     contour_xy_m: List[Tuple[float, float]] = field(default_factory=list)
+    orientation_deg: float = 0.0
+    """Major-axis angle in degrees, 0–180°.  Computed via PCA on the rasterised
+    particle mask.  0° = pointing right (East); 90° = pointing down (South in
+    image coordinates).  Two particles with the same shape but mirrored
+    directions have the same orientation (headless vector)."""
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -230,6 +235,22 @@ def segment_particles(
             for pt in cnt
         ]
 
+        # ── Major-axis orientation via PCA on rasterised pixel positions ─────
+        # Pixel x-axis corresponds to scan columns; orientation is 0–180° so
+        # it's a *headless* direction (East=0°, South=90° in image coords).
+        if n_pix >= 2:
+            pts_f = np.column_stack(
+                [xs - float(xs.mean()), ys - float(ys.mean())]
+            ).astype(np.float64)
+            cov = pts_f.T @ pts_f / pts_f.shape[0]
+            _, eigvecs = np.linalg.eigh(cov)
+            major_vec = eigvecs[:, -1]   # eigenvector with largest eigenvalue
+            orient = float(np.degrees(np.arctan2(major_vec[1], major_vec[0])))
+            if orient < 0.0:
+                orient += 180.0
+        else:
+            orient = 0.0
+
         particles.append(Particle(
             index=len(particles),
             centroid_x_m=cx_px * dx_m,
@@ -244,6 +265,7 @@ def segment_particles(
             min_height=min_h,
             n_pixels=n_pix,
             contour_xy_m=contour_xy_m,
+            orientation_deg=orient,
         ))
 
     if size_sigma_clip is not None and len(particles) > 3:
@@ -409,6 +431,8 @@ class Classification:
     particle_index: int
     class_name: str
     similarity: float
+    particle_orientation_deg: float = 0.0
+    """Orientation of the classified particle (copied from Particle.orientation_deg)."""
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -576,5 +600,6 @@ def classify_particles(
             particle_index=p.index,
             class_name=label,
             similarity=float(sim),
+            particle_orientation_deg=getattr(p, "orientation_deg", 0.0),
         ))
     return out

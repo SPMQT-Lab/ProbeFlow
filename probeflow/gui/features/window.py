@@ -224,13 +224,35 @@ class FeatureCountingWindow(QMainWindow):
                 f"γ={result.gamma_deg:.1f}°")
 
         elif mode == "classify":
-            counts: dict = {}
+            import math
+            class_angles: dict = {}
             for c in result:
-                counts[c.class_name] = counts.get(c.class_name, 0) + 1
-            summary = ", ".join(f"{k}: {v}" for k, v in sorted(counts.items()))
+                class_angles.setdefault(c.class_name, []).append(
+                    getattr(c, "particle_orientation_deg", 0.0))
+            total = len(result)
+            parts = []
+            for cls_name in sorted(class_angles):
+                angles = class_angles[cls_name]
+                n = len(angles)
+                pct = 100.0 * n / total if total > 0 else 0.0
+                valid = [a for a in angles if not math.isnan(a)]
+                if valid:
+                    a2 = np.radians(np.array(valid) * 2.0)
+                    sin_m = float(np.sin(a2).mean())
+                    cos_m = float(np.cos(a2).mean())
+                    mean_a = float(np.degrees(np.arctan2(sin_m, cos_m))) / 2.0
+                    if mean_a < 0.0:
+                        mean_a += 180.0
+                    R = math.sqrt(sin_m ** 2 + cos_m ** 2)
+                    std_a = float(np.degrees(math.sqrt(max(0.0, -2.0 * math.log(R + 1e-12))))) / 2.0
+                    ang_str = f" @ {mean_a:.1f}°±{std_a:.1f}°"
+                else:
+                    ang_str = ""
+                parts.append(f"{cls_name}: {n} ({pct:.0f}%{ang_str})")
+            summary = "  |  ".join(parts)
             self._panel.set_classifications(result)
             self._sidebar.set_status(
-                f"Classified {len(result)} particle(s) — {summary}")
+                f"Classified {total} particle(s) — {summary}")
             self._status_bar.showMessage(f"Classify done: {summary}")
 
     # ── Export ────────────────────────────────────────────────────────────────

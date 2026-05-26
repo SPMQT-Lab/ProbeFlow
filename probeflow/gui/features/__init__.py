@@ -534,17 +534,54 @@ class FeaturesPanel(QWidget):
         self._classifications = classifications
         self._classification_meta = meta
         self._overlay_mode = "classify"
-        # Populate results table with class counts
-        counts: dict[str, int] = {}
+
+        # ── Per-class orientation statistics ──────────────────────────────────
+        # Orientation angles are headless (in [0, 180°)), so we use the
+        # *doubled-angle* trick: map θ → 2θ, compute circular mean in [0,360°),
+        # then halve back. This correctly handles the 0°/180° wrap.
+        import math
+        class_angles: dict[str, list] = {}
         for c in classifications:
-            counts[c.class_name] = counts.get(c.class_name, 0) + 1
-        self._results_table.setColumnCount(2)
-        self._results_table.setHorizontalHeaderLabels(["class", "count"])
-        rows = sorted(counts.items())
+            class_angles.setdefault(c.class_name, []).append(
+                getattr(c, "particle_orientation_deg", 0.0)
+            )
+
+        total = len(classifications)
+        rows = sorted(class_angles.items())
+
+        self._results_table.setColumnCount(5)
+        self._results_table.setHorizontalHeaderLabels(
+            ["class", "N", "%", "angle (°)", "± std (°)"])
         self._results_table.setRowCount(len(rows))
-        for i, (k, v) in enumerate(rows):
-            self._results_table.setItem(i, 0, QTableWidgetItem(k))
-            self._results_table.setItem(i, 1, QTableWidgetItem(str(v)))
+
+        for i, (cls_name, angles) in enumerate(rows):
+            n = len(angles)
+            pct = 100.0 * n / total if total > 0 else 0.0
+
+            # Circular stats on headless orientations
+            valid = [a for a in angles if not math.isnan(a)]
+            if valid:
+                a2 = np.radians(np.array(valid) * 2.0)   # doubled angle
+                sin_m = float(np.sin(a2).mean())
+                cos_m = float(np.cos(a2).mean())
+                mean_ang = float(np.degrees(np.arctan2(sin_m, cos_m))) / 2.0
+                if mean_ang < 0.0:
+                    mean_ang += 180.0
+                # Circular std via resultant length R
+                R = math.sqrt(sin_m ** 2 + cos_m ** 2)
+                std_ang = float(np.degrees(math.sqrt(max(0.0, -2.0 * math.log(R + 1e-12))))) / 2.0
+                ang_str = f"{mean_ang:.1f}"
+                std_str = f"{std_ang:.1f}"
+            else:
+                ang_str = "—"
+                std_str = "—"
+
+            self._results_table.setItem(i, 0, QTableWidgetItem(cls_name))
+            self._results_table.setItem(i, 1, QTableWidgetItem(str(n)))
+            self._results_table.setItem(i, 2, QTableWidgetItem(f"{pct:.1f}"))
+            self._results_table.setItem(i, 3, QTableWidgetItem(ang_str))
+            self._results_table.setItem(i, 4, QTableWidgetItem(std_str))
+
         self._redraw()
 
     def get_classifications(self) -> list:
@@ -742,6 +779,16 @@ class FeaturesPanel(QWidget):
                     color = label_colors.get(c.class_name, "#89b4fa")
                     self._view.add_dot(cx, cy, color, r=5.0)
                     self._view.add_text(cx + 2, cy - 8, c.class_name, color)
+                    # Orientation line — length = half bbox diagonal, min 6 px
+                    bw = p.bbox_px[2] - p.bbox_px[0]
+                    bh = p.bbox_px[3] - p.bbox_px[1]
+                    half = max(6.0, 0.45 * float(np.sqrt(bw ** 2 + bh ** 2)))
+                    orient_rad = np.radians(
+                        getattr(c, "particle_orientation_deg", 0.0))
+                    dx = half * np.cos(orient_rad)
+                    dy = half * np.sin(orient_rad)
+                    self._view.add_line(cx - dx, cy - dy, cx + dx, cy + dy,
+                                        color, lw=1.5)
                 else:
                     self._view.add_dot(cx, cy, "#585b70", r=3.0)
 
