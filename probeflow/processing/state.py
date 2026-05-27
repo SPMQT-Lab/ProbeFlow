@@ -56,6 +56,7 @@ _SUPPORTED_OPS: frozenset[str] = frozenset({
     "shear",
     "scale_image",
     "image_threshold",
+    "quantize_bit_depth",
 })
 
 _ROI_ELIGIBLE_OPS: frozenset[str] = frozenset({
@@ -736,6 +737,8 @@ def apply_processing_state(
                 upper=upper,
                 mode=str(p.get("mode", "clip")),
             )
+        elif step.op == "quantize_bit_depth":
+            a = _proc.quantize_bit_depth(a, bits=int(p["bits"]))
         else:
             raise ValueError(
                 f"Unknown processing operation {step.op!r}. "

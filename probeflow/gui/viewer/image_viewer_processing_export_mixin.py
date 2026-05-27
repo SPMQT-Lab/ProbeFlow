@@ -412,6 +412,17 @@ class ImageViewerProcessingExportMixin:
         sx, sy = params.get("shear_x", 0.0), params.get("shear_y", 0.0)
         self._status_lbl.setText(f"Shear applied (x={sx:.4f}, y={sy:.4f}).")
 
+    def _on_convert_bit_depth(self, bits: int) -> None:
+        """Quantize the current image to *bits*-bit precision as a processing step."""
+        if self._display_arr is None:
+            return
+        ops = list(self._processing.get("geometric_ops") or [])
+        ops.append({"op": "quantize_bit_depth", "params": {"bits": bits}})
+        self._processing["geometric_ops"] = ops
+        self._refresh_processing_display()
+        n = 2 ** bits
+        self._status_lbl.setText(f"Converted to {bits}-bit ({n:,} levels).")
+
     def _on_geometric_op(self, op_name: str) -> None:
         self._transform_image_roi_set_for_display_op(op_name)
         ops = list(self._processing.get("geometric_ops") or [])

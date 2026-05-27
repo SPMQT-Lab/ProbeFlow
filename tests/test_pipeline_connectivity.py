@@ -67,6 +67,7 @@ _MINIMAL_PARAMS: dict[str, dict] = {
     "shear": {"shear_x": 0.0, "shear_y": 0.0, "interpolation": "bilinear"},
     "scale_image": {"new_height": 8, "new_width": 8, "order": 1},
     "image_threshold": {"mode": "clip", "lower": 0.0, "upper": 1.0},
+    "quantize_bit_depth": {"bits": 8},
 }
 
 

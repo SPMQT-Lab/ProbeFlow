@@ -102,6 +102,16 @@ VIEWER_COMMANDS: tuple[ViewerCommand, ...] = (
         status_tip="Apply a 2-component shear correction to the image.",
         aliases=("shear x", "shear y", "distort", "skew"),
     ),
+    ViewerCommand(
+        "image.type_8bit", "8-bit (256 levels)", "Image",
+        status_tip="Quantize image to 8-bit precision (256 levels, same physical range).",
+        aliases=("8 bit", "8bit", "quantize 8", "reduce precision"),
+    ),
+    ViewerCommand(
+        "image.type_16bit", "16-bit (65 536 levels)", "Image",
+        status_tip="Quantize image to 16-bit precision (65 536 levels, same physical range).",
+        aliases=("16 bit", "16bit", "quantize 16"),
+    ),
     ViewerCommand("measure.distance", "Ruler / distance...", "Measurements", ("Ctrl+Alt+D",), "Measure distance from the active line ROI.", "distance", aliases=("ruler", "length")),
     ViewerCommand("measure.angle", "Angle measurement...", "Measurements", ("Ctrl+Alt+A",), "Measure an angle between selected line ROIs.", aliases=("angle",)),
     ViewerCommand("measure.roi_stats", "ROI statistics...", "Measurements", ("Ctrl+Alt+S",), "Compute statistics for the active area ROI.", "roi_stats", aliases=("statistics", "area")),

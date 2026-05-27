@@ -318,6 +318,10 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
             if op_params.get("upper") is not None:
                 thr_params["upper"] = float(op_params["upper"])
             _append_step(ProcessingStep("image_threshold", thr_params))
+        elif op_name == "quantize_bit_depth":
+            _append_step(ProcessingStep("quantize_bit_depth", {
+                "bits": int(op_params.get("bits", 8)),
+            }))
 
     for op_spec in gui_state.get("arithmetic_ops") or []:
         try:

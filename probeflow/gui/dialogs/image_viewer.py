@@ -1089,6 +1089,17 @@ class ImageViewerDialog(
 
         scale_action = self._viewer_action("image.scale", self._on_scale_image)
         image_menu.addAction(scale_action)
+
+        # Type submenu (bit-depth quantization)
+        type_menu = image_menu.addMenu("Type")
+        type_menu.addAction(
+            self._viewer_action("image.type_8bit",
+                                lambda: self._on_convert_bit_depth(8))
+        )
+        type_menu.addAction(
+            self._viewer_action("image.type_16bit",
+                                lambda: self._on_convert_bit_depth(16))
+        )
         image_menu.addSeparator()
 
         # Transform submenu

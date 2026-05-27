@@ -636,3 +636,43 @@ def threshold_image(
             mask &= a <= upper
         a = mask.astype(np.float64)
     return a
+
+
+def quantize_bit_depth(arr: np.ndarray, bits: int) -> np.ndarray:
+    """Reduce the effective precision of *arr* to *bits* integer levels.
+
+    Maps the finite value range ``[vmin, vmax]`` to ``2**bits`` evenly-spaced
+    levels (round-trip through integer quantization), then maps back to the
+    original physical range.  The result is still a float64 array but contains
+    only ``2**bits`` distinct values.  NaN pixels are preserved unchanged.
+
+    Parameters
+    ----------
+    arr:
+        2-D float64 input array (SI values).
+    bits:
+        Target bit depth.  Typical values: ``8`` (256 levels) or
+        ``16`` (65 536 levels).
+
+    Returns
+    -------
+    np.ndarray
+        float64 array with quantized values.
+    """
+    if bits < 1 or bits > 32:
+        raise ValueError(f"bits must be in [1, 32], got {bits}")
+    n_levels = 2 ** bits
+    finite = np.isfinite(arr)
+    if not finite.any():
+        return arr.astype(np.float64, copy=True)
+    vmin = float(arr[finite].min())
+    vmax = float(arr[finite].max())
+    if vmax == vmin:
+        return arr.astype(np.float64, copy=True)
+    result = arr.astype(np.float64, copy=True)
+    # Normalise finite pixels to [0, n_levels-1], round, then back to SI
+    scale = (n_levels - 1) / (vmax - vmin)
+    result[finite] = (
+        np.round((arr[finite] - vmin) * scale) / scale + vmin
+    )
+    return result
