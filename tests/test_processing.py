@@ -802,6 +802,29 @@ class TestGmmAutoclip:
         low, high = gmm_autoclip(np.array([1.0, 2.0]))
         assert (low, high) == (1.0, 99.0)
 
+    def test_fallback_on_constant_array_no_nan_warning(self):
+        """Regression for review numerical #9 — a sharply-peaked input
+        where ``data > median`` is empty must not produce NaN means
+        (and therefore NaN mu1/mu2 inside EM).  The function must
+        cleanly fall back to (1.0, 99.0)."""
+        import warnings
+        flat = np.full(500, 0.42)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")  # any RuntimeWarning -> error
+            low, high = gmm_autoclip(flat)
+        assert (low, high) == (1.0, 99.0)
+
+    def test_fallback_on_strongly_skewed_no_nan_warning(self):
+        """A near-constant input with a couple of outliers — the median
+        equals the dominant value, so ``data > median`` is empty."""
+        import warnings
+        arr = np.full(500, 0.42)
+        arr[0] = 0.42  # explicitly still equal so median is exactly here
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            low, high = gmm_autoclip(arr)
+        assert (low, high) == (1.0, 99.0)
+
 
 # ─── detect_grains ───────────────────────────────────────────────────────────
 

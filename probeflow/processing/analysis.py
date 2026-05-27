@@ -42,9 +42,19 @@ def gmm_autoclip(arr: np.ndarray, n_samples: int = 2000) -> tuple[float, float]:
     if data_max <= data_min:
         return 1.0, 99.0
 
-    # Initialise: split at median
+    # Initialise: split at median.  When the data is sharply peaked at
+    # a single value (e.g. an all-equal mask, or a strongly bi-modal
+    # distribution where the median falls at the upper mode) one of the
+    # subsets can be empty, making numpy's .mean() return NaN with a
+    # RuntimeWarning.  Fall back to the safe default before EM ever
+    # touches NaN.  Review numerical #9 (fixed 2026-05-28).
     med = float(np.median(data))
-    mu1, mu2 = float(data[data <= med].mean()), float(data[data > med].mean())
+    lower_mask = data <= med
+    upper_mask = data > med
+    if not lower_mask.any() or not upper_mask.any():
+        return 1.0, 99.0
+    mu1 = float(data[lower_mask].mean())
+    mu2 = float(data[upper_mask].mean())
     s1 = s2 = float(data.std()) / 2.0 + 1e-10
     pi1 = pi2 = 0.5
 
