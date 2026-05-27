@@ -124,11 +124,19 @@ class SourceRecord:
 
 
 @dataclass(frozen=True)
-class ProcessingStep:
+class ProvenanceStep:
     """One provenance-aware operation step.
 
     ``input_state_id`` and ``output_state_id`` are linear today but graph-ready:
     future graph conversion can treat them as DataNode identifiers.
+
+    .. note::
+       Review arch-backend #12 (2026-05-28) — this class was previously
+       named ``ProcessingStep``, which collided with
+       :class:`probeflow.processing.state.ProcessingStep` (a different
+       dataclass with different fields).  The legacy name is kept as
+       an alias at the bottom of this module for backward compatibility,
+       but new code should use ``ProvenanceStep``.
     """
 
     step_id: str
@@ -155,7 +163,7 @@ class ProcessingStep:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ProcessingStep":
+    def from_dict(cls, data: dict[str, Any]) -> "ProvenanceStep":
         return cls(
             step_id=str(data["step_id"]),
             operation_id=str(data["operation_id"]),
@@ -169,12 +177,17 @@ class ProcessingStep:
         )
 
 
+# Backward-compatibility alias.  See ProvenanceStep docstring for the
+# motivation (arch-backend #12).
+ProcessingStep = ProvenanceStep
+
+
 @dataclass
 class ProcessingHistory:
     """Linear history for one opened image/channel."""
 
     source_record: SourceRecord
-    steps: list[ProcessingStep] = field(default_factory=list)
+    steps: list[ProvenanceStep] = field(default_factory=list)
     current_state_id: str | None = None
     schema_version: int = SCHEMA_VERSION
 
@@ -192,7 +205,7 @@ class ProcessingHistory:
         warnings: list[str] | tuple[str, ...] | None = None,
         timestamp: str | None = None,
         output_state_id: str | None = None,
-    ) -> ProcessingStep:
+    ) -> ProvenanceStep:
         input_state_id = str(self.current_state_id)
         params = copy.deepcopy(dict(parameters or {}))
         step_index = len(self.steps) + 1
@@ -206,7 +219,7 @@ class ProcessingHistory:
             },
             "state",
         )
-        step = ProcessingStep(
+        step = ProvenanceStep(
             step_id=step_id,
             operation_id=str(operation_id),
             operation_name=str(operation_name or operation_id),
@@ -235,7 +248,7 @@ class ProcessingHistory:
         history = cls(
             source_record=SourceRecord.from_dict(source_data),
             steps=[
-                ProcessingStep.from_dict(step)
+                ProvenanceStep.from_dict(step)
                 for step in data.get("steps") or []
             ],
             current_state_id=data.get("current_state_id"),
@@ -614,7 +627,7 @@ def _operation_name(op: str, params: dict[str, Any]) -> str:
     return op.replace("_", " ").title()
 
 
-def _step_summary(step: ProcessingStep) -> str:
+def _step_summary(step: ProvenanceStep) -> str:
     p = step.parameters or {}
     op = step.operation_id
     if op == "file_load":

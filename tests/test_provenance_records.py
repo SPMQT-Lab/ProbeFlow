@@ -105,6 +105,22 @@ def test_processing_history_from_scan_with_empty_steps_dict(tmp_path):
     assert history.current_state_id is not None
 
 
+def test_provenance_step_canonical_name_and_legacy_alias():
+    """Regression for review arch-backend #12 — the provenance package
+    no longer collides with ``probeflow.processing.state.ProcessingStep``
+    by accident.  ``ProvenanceStep`` is the canonical name; the legacy
+    ``ProcessingStep`` re-export is preserved as an alias for backward
+    compatibility."""
+    from probeflow import provenance
+    from probeflow.provenance.records import ProcessingStep, ProvenanceStep
+    # Both names refer to the exact same class
+    assert ProcessingStep is ProvenanceStep
+    assert provenance.ProcessingStep is provenance.ProvenanceStep
+    # Both are exported via __all__
+    assert "ProvenanceStep" in provenance.__all__
+    assert "ProcessingStep" in provenance.__all__
+
+
 def test_step_summary_roi_branch(tmp_path):
     from probeflow.provenance.records import ProcessingHistory, SourceRecord
 

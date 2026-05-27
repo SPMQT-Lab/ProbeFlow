@@ -33,7 +33,8 @@ from probeflow.provenance.records import (
     PROCESSED_EXPORT_WARNING,
     ExportRecord,
     ProcessingHistory,
-    ProcessingStep,
+    ProcessingStep,  # deprecated alias — prefer ProvenanceStep
+    ProvenanceStep,
     SourceRecord,
     append_processing_state,
     build_export_record,
@@ -61,7 +62,8 @@ __all__ = [
     "PROCESSED_EXPORT_WARNING",
     "ExportRecord",
     "ProcessingHistory",
-    "ProcessingStep",
+    "ProcessingStep",      # deprecated alias for ProvenanceStep
+    "ProvenanceStep",
     "SourceRecord",
     "append_processing_state",
     "build_export_record",
