@@ -183,6 +183,9 @@ def _apply_processing(
     arr: np.ndarray,
     processing: dict,
     roi_set=None,
+    *,
+    pixel_size_x_m: float | None = None,
+    pixel_size_y_m: float | None = None,
 ) -> np.ndarray:
     """Apply the array-transform portion of the processing pipeline.
 
@@ -190,12 +193,21 @@ def _apply_processing(
     delegates to apply_processing_state().  Grain detection / colormap / clip
     settings are display-only and are silently ignored.  Returns a new float64
     array; the input is never modified.
+
+    ``pixel_size_x_m``/``pixel_size_y_m`` are forwarded to operations whose
+    semantics depend on physical units (step-tolerant background, facet
+    level).  Callers with access to ``scan.scan_range_m`` and the array
+    shape should compute ``scan_range_m[0] / Nx`` and ``scan_range_m[1] / Ny``
+    and pass them through — without this the GUI silently degrades step-
+    tolerant background to a non-step-tolerant fit (review image-proc #1).
     """
     from probeflow.processing.state import apply_processing_state
     return apply_processing_state(
         arr,
         processing_state_from_gui(processing or {}),
         roi_set=roi_set,
+        pixel_size_x_m=pixel_size_x_m,
+        pixel_size_y_m=pixel_size_y_m,
     )
 
 

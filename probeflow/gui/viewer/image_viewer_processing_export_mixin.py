@@ -199,7 +199,14 @@ class ImageViewerProcessingExportMixin:
             and self._processing_state_has_image_arithmetic_operand(ps)
         ):
             try:
-                apply_processing_state(self._raw_arr, ps, self._image_roi_set)
+                # Forward calibration (review image-proc #1) — preflight
+                # must mirror what _refresh_display_array does so it
+                # validates the same pipeline that will execute.
+                psx, psy = self._processing_pixel_sizes_m()
+                apply_processing_state(
+                    self._raw_arr, ps, self._image_roi_set,
+                    pixel_size_x_m=psx, pixel_size_y_m=psy,
+                )
             except Exception as exc:
                 self._status_lbl.setText(f"Export blocked: Processing failed: {exc}")
                 return False

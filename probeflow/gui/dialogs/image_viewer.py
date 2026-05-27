@@ -1656,6 +1656,27 @@ class ImageViewerDialog(
             return
         self._history_text.setText("\n".join(display_lines(self._processing_history)))
 
+    def _processing_pixel_sizes_m(self) -> tuple[float | None, float | None]:
+        """Return (pixel_size_x_m, pixel_size_y_m) derived from the loaded scan.
+
+        Returns ``(None, None)`` when calibration data is missing.  Forwarded
+        to :func:`probeflow.gui.rendering._apply_processing` so step-tolerance
+        and facet-level operations interpret ``step_threshold_deg`` as a real
+        surface slope (review image-proc #1).
+        """
+        scan_range = getattr(self, "_scan_range_m", None)
+        shape = getattr(self, "_scan_shape", None)
+        if scan_range is None or shape is None:
+            return None, None
+        try:
+            w_m, h_m = float(scan_range[0]), float(scan_range[1])
+            Ny, Nx = int(shape[0]), int(shape[1])
+        except (TypeError, ValueError, IndexError):
+            return None, None
+        if Nx <= 0 or Ny <= 0 or w_m <= 0 or h_m <= 0:
+            return None, None
+        return w_m / Nx, h_m / Ny
+
     def _refresh_display_array(self, reset_zoom_if_shape_changed: bool = False):
         old_shape = self._display_arr.shape if self._display_arr is not None else None
         # display array: raw with processing applied (no grain overlay — that's visual only)
@@ -1678,11 +1699,18 @@ class ImageViewerDialog(
                         self._status_lbl.setText(self._processing_roi_error)
                     self._display_arr = self._raw_arr
                     return
+                # Compute physical pixel sizes for step-tolerance / facet
+                # operations so step_threshold_deg is a real surface slope
+                # (review image-proc #1).  When scan_range_m is unknown we
+                # fall back to the kernel default (1.0 m/pixel).
+                psx, psy = self._processing_pixel_sizes_m()
                 try:
                     self._display_arr = _apply_processing(
                         self._raw_arr,
                         self._processing,
                         roi_set=self._image_roi_set,
+                        pixel_size_x_m=psx,
+                        pixel_size_y_m=psy,
                     )
                 except TypeError as exc:
                     if "roi_set" not in str(exc):

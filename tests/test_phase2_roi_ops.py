@@ -17,6 +17,95 @@ from probeflow.processing.state import (
 )
 
 
+# ── Regression for review image-proc #1: calibration forwarded ──────────────
+
+class TestApplyProcessingStateForwardsCalibration:
+    """``apply_processing_state`` must forward ``pixel_size_x_m`` /
+    ``pixel_size_y_m`` to ``subtract_background(step_tolerance=True)``
+    and to ``facet_level``.  Before review image-proc #1 was fixed
+    (2026-05-28), the kwargs were dropped and ``step_threshold_deg`` was
+    silently interpreted in data-units-per-pixel, making step-tolerant
+    background fall back to non-step-tolerant on every GUI invocation.
+    """
+
+    def test_subtract_background_kwarg_forwarded(self, monkeypatch):
+        """Verify ``pixel_size_x_m`` / ``pixel_size_y_m`` are forwarded to
+        :func:`probeflow.processing.subtract_background`.  This is the
+        plumbing-correctness test for review image-proc #1; downstream
+        effects on the polynomial fit depend on input geometry and are
+        covered by the existing background tests in the kernel file."""
+        import probeflow.processing as _proc
+
+        captured: dict = {}
+        orig = _proc.subtract_background
+
+        def spy(arr, **kwargs):
+            captured.update(kwargs)
+            return orig(arr, **kwargs)
+
+        monkeypatch.setattr(_proc, "subtract_background", spy)
+
+        arr = np.zeros((32, 32), dtype=np.float64)
+        state = ProcessingState(steps=[
+            ProcessingStep(
+                "plane_bg",
+                {"order": 1, "step_tolerance": True},
+            ),
+        ])
+        apply_processing_state(
+            arr, state, pixel_size_x_m=50e-12, pixel_size_y_m=75e-12,
+        )
+        assert captured.get("pixel_size_x_m") == pytest.approx(50e-12)
+        assert captured.get("pixel_size_y_m") == pytest.approx(75e-12)
+
+    def test_facet_level_kwarg_forwarded(self, monkeypatch):
+        import probeflow.processing as _proc
+
+        captured: dict = {}
+        orig = _proc.facet_level
+
+        def spy(arr, **kwargs):
+            captured.update(kwargs)
+            return orig(arr, **kwargs)
+
+        monkeypatch.setattr(_proc, "facet_level", spy)
+
+        arr = np.zeros((32, 32), dtype=np.float64)
+        state = ProcessingState(steps=[
+            ProcessingStep("facet_level", {"threshold_deg": 5.0}),
+        ])
+        apply_processing_state(
+            arr, state, pixel_size_x_m=50e-12, pixel_size_y_m=75e-12,
+        )
+        assert captured.get("pixel_size_x_m") == pytest.approx(50e-12)
+        assert captured.get("pixel_size_y_m") == pytest.approx(75e-12)
+
+    def test_no_calibration_does_not_pass_kwargs(self, monkeypatch):
+        """When the caller does NOT supply calibration, the kernel
+        defaults (1.0 m/pixel) must apply — i.e. the apply_processing_state
+        wrapper passes no ``pixel_size_*_m`` kwargs so existing callers
+        without scan context are unaffected."""
+        import probeflow.processing as _proc
+
+        captured: dict = {}
+        orig = _proc.subtract_background
+
+        def spy(arr, **kwargs):
+            captured.update(kwargs)
+            return orig(arr, **kwargs)
+
+        monkeypatch.setattr(_proc, "subtract_background", spy)
+
+        arr = np.zeros((32, 32), dtype=np.float64)
+        state = ProcessingState(steps=[
+            ProcessingStep("plane_bg", {"order": 1}),
+        ])
+        apply_processing_state(arr, state)
+        # Neither pixel_size_x_m nor pixel_size_y_m was forwarded:
+        assert "pixel_size_x_m" not in captured
+        assert "pixel_size_y_m" not in captured
+
+
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
 @pytest.fixture

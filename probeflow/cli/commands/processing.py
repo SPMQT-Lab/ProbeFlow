@@ -72,7 +72,21 @@ def _cmd_prepare_png(args) -> int:
     state = _processing_state_from_ops(ops)
     if state.steps:
         from probeflow.processing.state import apply_processing_state
-        scan.planes[args.plane] = apply_processing_state(scan.planes[args.plane], state)
+        # Forward calibration so step-tolerance / facet operations
+        # interpret step_threshold_deg as a real surface slope
+        # (review image-proc #1).
+        psx = psy = None
+        plane = scan.planes[args.plane]
+        try:
+            w_m, h_m = float(scan.scan_range_m[0]), float(scan.scan_range_m[1])
+            Ny, Nx = int(plane.shape[0]), int(plane.shape[1])
+            if Nx > 0 and Ny > 0 and w_m > 0 and h_m > 0:
+                psx, psy = w_m / Nx, h_m / Ny
+        except (TypeError, ValueError, IndexError, AttributeError):
+            pass
+        scan.planes[args.plane] = apply_processing_state(
+            plane, state, pixel_size_x_m=psx, pixel_size_y_m=psy
+        )
         scan.record_processing_state(state)
 
     from probeflow.provenance.prepared_export import write_prepared_png

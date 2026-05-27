@@ -476,6 +476,8 @@ def apply_processing_state(
     state: "ProcessingState",
     roi_set: "Any | None" = None,
     *,
+    pixel_size_x_m: float | None = None,
+    pixel_size_y_m: float | None = None,
     _depth: int = 0,
 ) -> np.ndarray:
     """Apply *state* steps in order to *arr*.
@@ -490,6 +492,19 @@ def apply_processing_state(
         Optional :class:`probeflow.core.roi.ROISet`.  ``roi`` steps reference
         ROIs by ``roi_id`` and resolve them from this set at execution time. If
         the ID is not found, the step is skipped with a warning.
+    pixel_size_x_m, pixel_size_y_m:
+        Physical pixel size in metres for each axis.  When provided, these
+        are forwarded to operations whose semantics depend on physical units
+        — currently :func:`subtract_background` (with ``step_tolerance=True``)
+        and :func:`facet_level` (both interpret ``step_threshold_deg`` /
+        ``threshold_deg`` as a real surface slope).  Before this kwarg was
+        added (review image-proc #1, 2026-05-28) every GUI/CLI invocation
+        silently fell back to the kernels' 1.0 m/pixel default, so a
+        ``step_threshold_deg=3°`` (tan ≈ 0.052) was interpreted as
+        ``0.052 data-units per pixel`` instead of a real surface slope —
+        the step-tolerant background fit degraded to non-step-tolerant
+        and was biased by step edges on every stepped-surface workflow.
+        Pass calibrated values whenever the scan has them.
 
     Returns
     -------
@@ -527,6 +542,16 @@ def apply_processing_state(
             fit_roi = _resolve_bg_roi_param(p, "fit_roi", a.shape, roi_set)
             apply_roi = _resolve_bg_roi_param(p, "apply_roi", a.shape, roi_set)
             exclude_roi = _resolve_bg_roi_param(p, "exclude_roi", a.shape, roi_set)
+            # Calibration kwargs (review image-proc #1): forward to the
+            # kernel so step_threshold_deg is a real surface slope, not
+            # a data-units-per-pixel ratio.  When the caller didn't
+            # supply pixel sizes the kernel defaults (1.0 m/pixel) are
+            # preserved for backward compatibility.
+            cal_kwargs: dict[str, float] = {}
+            if pixel_size_x_m is not None:
+                cal_kwargs["pixel_size_x_m"] = float(pixel_size_x_m)
+            if pixel_size_y_m is not None:
+                cal_kwargs["pixel_size_y_m"] = float(pixel_size_y_m)
             a = _proc.subtract_background(
                 a,
                 order=int(p.get("order", 1)),
@@ -535,6 +560,7 @@ def apply_processing_state(
                 exclude_roi=exclude_roi,
                 step_tolerance=bool(p.get("step_tolerance", False)),
                 fit_rect=p.get("fit_rect"),
+                **cal_kwargs,
             )
         elif step.op == "stm_line_bg":
             a = _proc.stm_line_background(
@@ -557,9 +583,17 @@ def apply_processing_state(
                 mask=fit_mask,
             )
         elif step.op == "facet_level":
+            # Review image-proc #1: forward calibration so threshold_deg
+            # is a real surface slope.
+            cal_kwargs: dict[str, float] = {}
+            if pixel_size_x_m is not None:
+                cal_kwargs["pixel_size_x_m"] = float(pixel_size_x_m)
+            if pixel_size_y_m is not None:
+                cal_kwargs["pixel_size_y_m"] = float(pixel_size_y_m)
             a = _proc.facet_level(
                 a,
                 threshold_deg=float(p.get("threshold_deg", 3.0)),
+                **cal_kwargs,
             )
         elif step.op == "smooth":
             a = _proc.gaussian_smooth(a, sigma_px=float(p.get("sigma_px", 1.0)))
@@ -691,6 +725,8 @@ def apply_processing_state(
                     image,
                     ProcessingState(steps=[nested]),
                     roi_set,
+                    pixel_size_x_m=pixel_size_x_m,
+                    pixel_size_y_m=pixel_size_y_m,
                     _depth=_depth + 1,
                 ),
                 mask,
