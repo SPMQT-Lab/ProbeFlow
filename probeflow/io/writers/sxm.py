@@ -115,9 +115,14 @@ def write_sxm(
 # ─── SXM-sourced fast path ──────────────────────────────────────────────────
 
 def _write_from_sxm(scan: Scan, out_path: Path, prov: ExportProvenance) -> None:
+    # write_sxm already ran check_overwrite() against scan.source_path and
+    # check_output_available() against out_path, so pass overwrite=True
+    # to the underlying writer to suppress its own existence check.  The
+    # source-collision guard inside write_sxm_with_planes still runs.
     write_sxm_with_planes(
         scan.source_path, out_path, scan.planes,
         comment_override=_build_comment(scan, prov),
+        overwrite=True,
     )
 
 

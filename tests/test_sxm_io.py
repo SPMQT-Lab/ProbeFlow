@@ -172,3 +172,41 @@ class TestRoundTrip:
             assert a.shape == b.shape
             finite = np.isfinite(a) & np.isfinite(b)
             assert np.allclose(a[finite], b[finite], atol=0, rtol=0)
+
+
+class TestWriteSxmSafetyGuards:
+    """Regression tests for review IO #1: write_sxm_with_planes must
+    refuse to overwrite its source and must respect overwrite=False."""
+
+    def test_refuses_to_overwrite_source_file(self, sample_sxm):
+        _, planes = read_all_sxm_planes(sample_sxm)
+        with pytest.raises(ValueError, match="overwrite the source"):
+            write_sxm_with_planes(sample_sxm, sample_sxm, planes)
+
+    def test_refuses_existing_destination_without_overwrite(self, sample_sxm, tmp_path):
+        out = tmp_path / "exists.sxm"
+        out.write_bytes(b"placeholder")
+        _, planes = read_all_sxm_planes(sample_sxm)
+        with pytest.raises(FileExistsError, match="already exists"):
+            write_sxm_with_planes(sample_sxm, out, planes)
+        # Original placeholder content is preserved
+        assert out.read_bytes() == b"placeholder"
+
+    def test_overwrite_true_replaces_existing_destination(self, sample_sxm, tmp_path):
+        out = tmp_path / "exists.sxm"
+        out.write_bytes(b"placeholder")
+        _, planes = read_all_sxm_planes(sample_sxm)
+        write_sxm_with_planes(sample_sxm, out, planes, overwrite=True)
+        # Now the file is a real SXM
+        hdr_out, planes_out = read_all_sxm_planes(out)
+        assert len(planes_out) == len(planes)
+
+    def test_source_equality_uses_resolved_paths(self, sample_sxm, tmp_path):
+        """Disguised same-file path (relative vs absolute) must still raise."""
+        # Build a path that resolves to the same file but spells differently:
+        # use a symlink or a relative path through tmp_path that points back.
+        link = tmp_path / "link.sxm"
+        link.symlink_to(sample_sxm)
+        _, planes = read_all_sxm_planes(sample_sxm)
+        with pytest.raises(ValueError, match="overwrite the source"):
+            write_sxm_with_planes(sample_sxm, link, planes)

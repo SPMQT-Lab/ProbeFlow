@@ -356,6 +356,8 @@ def write_sxm_with_planes(
     new_planes: List[np.ndarray],
     cushion_dir: Optional[Path] = None,
     comment_override: Optional[str] = None,
+    *,
+    overwrite: bool = False,
 ) -> None:
     """Rewrite ``out_sxm`` using the header of ``src_sxm`` and new plane data.
 
@@ -366,9 +368,24 @@ def write_sxm_with_planes(
     file had.  Arrays are cast to big-endian float32 on write.  Each array is
     expected to be in the **display orientation** returned by ``orient_plane``
     — on write we invert that orientation to match how Nanonis stores data.
+
+    Safety guards (added 2026-05-28, review IO #1):
+        * Raises ``ValueError`` if ``out_sxm`` resolves to the same file as
+          ``src_sxm`` (would silently corrupt the source instrument file).
+        * Raises ``FileExistsError`` if ``out_sxm`` already exists and
+          ``overwrite=False`` (default).  Pass ``overwrite=True`` to allow
+          replacing an existing artifact (e.g. when called from
+          :func:`probeflow.io.writers.sxm.write_sxm` which has already done
+          its own collision check upstream).
     """
+    # Lazy import to avoid the import-cycle: io.common -> core -> io
+    from probeflow.io.common import check_output_available, check_overwrite
+
     src_sxm = Path(src_sxm)
     out_sxm = Path(out_sxm)
+
+    check_overwrite(src_sxm, out_sxm)
+    check_output_available(out_sxm, overwrite=overwrite)
 
     hdr = parse_sxm_header(src_sxm)
     Nx, Ny = sxm_dims(hdr)
