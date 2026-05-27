@@ -124,7 +124,15 @@ def tv_denoise(
     if method not in ("huber_rof", "tv_l1"):
         raise ValueError(f"Unknown method {method!r}")
 
-    for it in range(max_iter + 1):
+    # Review numerical #2 (fixed 2026-05-28): the loop previously used
+    # range(max_iter + 1), which ran one extra iteration past the cap,
+    # and only checked convergence at it % 50, so callers using
+    # max_iter < 50 (e.g. preview pipelines) never saw their tol
+    # honoured.  Now: exactly max_iter iterations, with the RMSE-vs-tol
+    # check every 10 iterations after a brief warmup.
+    _CONVERGENCE_CHECK_EVERY = 10
+    _CONVERGENCE_WARMUP = 5
+    for it in range(max_iter):
         u_old = u.copy()
         u = u - tau * _nabla_T_apply(p, Ny, Nx, nabla_comp)
 
@@ -145,7 +153,7 @@ def tv_denoise(
         denom = np.maximum(1.0, norm)
         p = (p2 / denom[np.newaxis, :]).ravel()
 
-        if it > 0 and it % 50 == 0:
+        if it >= _CONVERGENCE_WARMUP and it % _CONVERGENCE_CHECK_EVERY == 0:
             rmse = float(np.sqrt(np.mean((u - u_old) ** 2)))
             if rmse < tol:
                 break
