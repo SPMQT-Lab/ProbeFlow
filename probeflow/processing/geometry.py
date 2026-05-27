@@ -558,8 +558,45 @@ def rotate_arbitrary(
         raise ValueError(f"order must be 0–3, got {order!r}")
     from scipy.ndimage import rotate as _ndimage_rotate
     a = arr.astype(np.float64, copy=True)
-    return _ndimage_rotate(a, float(angle_degrees), reshape=True, order=order,
-                           mode='constant', cval=np.nan)
+    Ny, Nx = a.shape
+
+    # Review physics #2 (fixed 2026-05-28): the previous implementation
+    # passed ``cval=np.nan`` directly to scipy.ndimage.rotate.  With
+    # order>=1 (bilinear), every output pixel within one pixel of the
+    # boundary samples one or more NaN neighbours and a single NaN
+    # contribution propagates as NaN — the rotated image lost a halo of
+    # valid data ~1 px deep all around its boundary, and oblique angles
+    # made the loss worse.  Now follow the same pattern as
+    # ``affine_lattice_correction``: temp-fill NaN with the finite mean
+    # so interpolation stays well-defined, then explicitly mark
+    # out-of-bounds pixels as NaN by inverse-mapping a "valid" mask.
+    nan_mask = ~np.isfinite(a)
+    if nan_mask.any():
+        finite_vals = a[~nan_mask]
+        temp_fill = float(finite_vals.mean()) if finite_vals.size else 0.0
+        a[nan_mask] = temp_fill
+    else:
+        temp_fill = 0.0
+
+    out = _ndimage_rotate(
+        a, float(angle_degrees), reshape=True, order=order,
+        mode='constant', cval=temp_fill,
+    )
+
+    # Build a 0/1 "valid input pixel" mask, rotate it with the same
+    # parameters, and mark output pixels NaN wherever the rotated mask
+    # dropped below 1 (i.e. the bilinear stencil partly sampled outside
+    # the original valid area).  This correctly NaN-marks both the
+    # canvas-expanded corners and the interior holes that the original
+    # nan_mask carved out.
+    valid_in = (~nan_mask).astype(np.float64) if nan_mask.any() else np.ones_like(a)
+    valid_out = _ndimage_rotate(
+        valid_in, float(angle_degrees), reshape=True,
+        order=max(order, 1),  # >=1 so the mask shrinks by the interpolation footprint
+        mode='constant', cval=0.0,
+    )
+    out[valid_out < (1.0 - 1e-6)] = np.nan
+    return out
 
 
 def shear(

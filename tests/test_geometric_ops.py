@@ -188,6 +188,37 @@ class TestRotateArbitrary:
         with pytest.raises(ValueError):
             rotate_arbitrary(square_arr, 10.0, order=5)
 
+    def test_interior_pixels_are_not_nan_after_rotation(self):
+        """Regression for review physics #2 — bilinear-rotating a clean
+        finite array with ``cval=NaN`` produced a ~1-px NaN halo
+        creeping into every interior pixel near the rotated boundary.
+        The fix uses temp-fill + explicit OOB mask so interior pixels
+        stay finite."""
+        # All-finite input
+        N = 64
+        arr = np.linspace(0, 1, N * N).reshape(N, N)
+        out = rotate_arbitrary(arr, 30.0)
+        # The geometric centre of the rotated canvas must be finite.
+        cy, cx = out.shape[0] // 2, out.shape[1] // 2
+        assert np.isfinite(out[cy, cx])
+        # An axis-aligned interior strip near the centre must be finite.
+        assert np.all(np.isfinite(out[cy - 4:cy + 5, cx - 4:cx + 5]))
+
+    def test_at_45deg_inscribed_interior_is_finite(self):
+        """At 45° the rotated input fills an inscribed square inside the
+        canvas.  The very centre of that inscribed region must be all
+        finite (previously NaN propagation from cval=NaN polluted a
+        ring up to the inscribed boundary)."""
+        N = 30
+        arr = np.ones((N, N))
+        out = rotate_arbitrary(arr, 45.0)
+        cy, cx = out.shape[0] // 2, out.shape[1] // 2
+        # Take a 5×5 patch around the centre — should be all finite.
+        patch = out[cy - 2:cy + 3, cx - 2:cx + 3]
+        assert np.all(np.isfinite(patch)), (
+            f"Interior centre patch has NaNs after 45° rotation: {patch}"
+        )
+
 
 # ── ProcessingState integration ───────────────────────────────────────────────
 
