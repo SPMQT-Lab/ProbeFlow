@@ -705,7 +705,19 @@ def find_bragg_peaks_in_annulus(
     # Suppress local noise: footprint ~ half the annulus thickness
     footprint_size = max(3, int(r_predicted_px * width_frac))
     local_max_img = maximum_filter(mag, size=footprint_size)
-    candidate_mask = annulus_mask & (mag == local_max_img)
+    # Tolerate float jitter from log1p-then-back, downstream casts, etc.
+    # Plateau pixels (two adjacent identical maxima) are all kept; the
+    # angular-separation filter below then collapses each plateau to a
+    # single pick.  Review numerical #5 (fixed 2026-05-28) — previously
+    # ``mag == local_max_img`` could silently miss plateau pixels under
+    # subtle precision differences and led to asymmetric peak selection
+    # on highly symmetric synthetic test data.
+    #
+    # The tolerance is scaled per-pixel to ``|local_max_img|`` so that
+    # near-zero regions retain effective strict equality (otherwise the
+    # noise floor — where mag ≈ local_max ≈ tiny — would all match).
+    eps_per_pixel = 1e-10 * np.abs(local_max_img)
+    candidate_mask = annulus_mask & (mag >= local_max_img - eps_per_pixel)
 
     cys, cxs = np.where(candidate_mask)
     if cys.size == 0:

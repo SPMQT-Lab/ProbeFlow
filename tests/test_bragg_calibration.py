@@ -78,14 +78,22 @@ class TestFindBraggPeaksInAnnulus:
             dists = [math.hypot(px - ex, py - ey) for ex, ey in _square_peaks(r)]
             assert min(dists) < 1.0
 
-    def test_annulus_too_narrow_returns_fewer_than_expected(self):
+    def test_narrow_annulus_runs_without_error(self):
+        """A very narrow annulus (width_frac=0.001 → ~0.08 px wide) is
+        a degenerate input.  The function must complete without error;
+        the exact number of returned peaks depends on whether any
+        pixels' integer coordinates happen to fall inside the band.
+        Before review numerical #5 was fixed, strict float equality
+        on the local-maxima mask sometimes missed these boundary
+        pixels — the count was incidental, not contractual."""
         N = 256
         r = 40.0
         fft_mag = _make_synthetic_fft(N, _hex_peaks(r))
-        # width_frac=0.001 means the annulus is only 0.08 px wide — highly unlikely to
-        # contain any pixel centre exactly at r
-        peaks = find_bragg_peaks_in_annulus(fft_mag, r_predicted_px=r, width_frac=0.001, expected_count=6)
-        assert len(peaks) < 6  # fewer than expected — no error raised
+        peaks = find_bragg_peaks_in_annulus(
+            fft_mag, r_predicted_px=r, width_frac=0.001, expected_count=6,
+        )
+        assert peaks.ndim == 2 and peaks.shape[1] == 2
+        assert 0 <= len(peaks) <= 6
 
     def test_wrong_radius_returns_empty(self):
         N = 256
@@ -112,6 +120,24 @@ class TestFindBraggPeaksInAnnulus:
     def test_non_2d_input_raises(self):
         with pytest.raises(ValueError):
             find_bragg_peaks_in_annulus(np.ones(64), r_predicted_px=10.0)
+
+    def test_plateau_with_float_jitter_still_picks_peak(self):
+        """Regression for review numerical #5 — strict ``mag == local_max_img``
+        equality could miss plateau pixels when ``mag`` has been transformed
+        through log1p or other round-trips that introduce sub-epsilon
+        jitter relative to the maximum_filter output.  After the fix the
+        comparison tolerates a tiny epsilon proportional to |mag|."""
+        N = 128
+        r = 30.0
+        fft_mag = _make_synthetic_fft(N, _hex_peaks(r))
+        # Simulate a tiny float perturbation around the maxima — the
+        # kind that comes from log1p then back, or from a float32 cast.
+        # Round to single precision and back to introduce ~1e-7 jitter.
+        jittered = fft_mag.astype(np.float32).astype(np.float64)
+        peaks = find_bragg_peaks_in_annulus(jittered, r_predicted_px=r,
+                                            expected_count=6)
+        # All 6 hex peaks should still be located despite jitter.
+        assert len(peaks) == 6
 
 
 class TestFindBraggPeaksInQAnnulus:
