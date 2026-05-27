@@ -145,6 +145,39 @@ class TestPosition:
         assert px != 0.0
         assert py != 0.0
 
+    def test_missing_xy_keys_yield_nan_position(self, tmp_path):
+        """Regression for review IO #4.
+
+        Files missing ``X (m)`` / ``Y (m)`` (or with empty values) must
+        not be silently coerced to the origin (0.0, 0.0) — that makes
+        an unknown position indistinguishable from a real centred
+        spectrum.  After the fix, missing values yield NaN.
+        """
+        from probeflow.io.readers.nanonis_spec import _parse_header_float
+        import math
+
+        # Missing key
+        assert math.isnan(_parse_header_float({}, "X (m)"))
+        # Empty value
+        assert math.isnan(_parse_header_float({"X (m)": ""}, "X (m)"))
+        # Whitespace-only value
+        assert math.isnan(_parse_header_float({"X (m)": "   "}, "X (m)"))
+        # Malformed value
+        assert math.isnan(_parse_header_float({"X (m)": "not a number"}, "X (m)"))
+        # Real value still parses
+        assert _parse_header_float({"X (m)": "1.5e-9"}, "X (m)") == pytest.approx(1.5e-9)
+
+    def test_nan_position_does_not_resolve_to_pixel_overlay(self):
+        """NaN position must propagate through spec_position_to_pixel so
+        the GUI overlay does not draw a spurious marker at the origin."""
+        from probeflow.analysis.spec_plot import spec_position_to_pixel
+        result = spec_position_to_pixel(
+            float("nan"), float("nan"),
+            scan_shape=(256, 256),
+            scan_range_m=(10e-9, 10e-9),
+        )
+        assert result is None
+
 
 class TestDispatcher:
     def test_read_spec_file_routes_nanonis(self):

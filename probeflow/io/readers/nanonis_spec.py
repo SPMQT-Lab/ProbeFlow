@@ -432,13 +432,24 @@ def _data_offset_bytes(path: Path) -> int | None:
 
 
 def _parse_header_float(hdr: dict[str, str], key: str) -> float:
+    """Parse a numeric header value, returning NaN when missing or malformed.
+
+    Used for tip-position keys (``X (m)``, ``Y (m)``).  Before the
+    2026-05-28 fix this returned ``0.0`` for missing values, making a
+    spectrum acquired at the scan origin indistinguishable from one
+    where the header did not record a position.  NaN propagates
+    visibly through downstream math (formats as ``"nan"``, breaks
+    pixel mapping rather than silently overlaying at (0, 0)) which is
+    the correct behaviour when the position is genuinely unknown.
+    Review IO #4.
+    """
     raw = hdr.get(key, "").strip()
     if not raw:
-        return 0.0
+        return float("nan")
     try:
         return float(raw)
     except ValueError:
-        return 0.0
+        return float("nan")
 
 
 def _parse_optional_header_float(hdr: dict[str, str], key: str) -> Optional[float]:
