@@ -32,7 +32,6 @@ from probeflow.gui.features import (
     FeaturesPanel,
     FeaturesSidebar,
     _FeaturesWorker,
-    _FeaturesWorkerSignals,
 )
 
 
@@ -56,8 +55,10 @@ class FeatureCountingWindow(QMainWindow):
         self.resize(1200, 760)
 
         self._pool    = QThreadPool.globalInstance()
-        self._signals = _FeaturesWorkerSignals()
-        self._signals.finished.connect(self._on_finished)
+        # Review gui-arch #2: per-worker signals (each spawn connects its
+        # own ``worker.signals.finished`` to ``_on_finished`` so two
+        # concurrent workers cannot cross-talk via a shared signal
+        # instance).
         self._pending_classify_segment: bool = False
 
         # ── Widgets ──────────────────────────────────────────────────────────
@@ -138,8 +139,9 @@ class FeatureCountingWindow(QMainWindow):
         self._sidebar.set_status("Segmenting particles for labeling…")
         self._pending_classify_segment = True
         worker = _FeaturesWorker(
-            "particles", arr, px_m, px_x_m, px_y_m, params, self._signals
+            "particles", arr, px_m, px_x_m, px_y_m, params,
         )
+        worker.signals.finished.connect(self._on_finished)
         self._pool.start(worker)
 
     # ── Run ───────────────────────────────────────────────────────────────────
@@ -192,8 +194,9 @@ class FeatureCountingWindow(QMainWindow):
 
         self._sidebar.set_status(f"Running {mode}…")
         worker = _FeaturesWorker(
-            mode, arr, px_m, px_x_m, px_y_m, params, self._signals
+            mode, arr, px_m, px_x_m, px_y_m, params,
         )
+        worker.signals.finished.connect(self._on_finished)
         self._pool.start(worker)
 
     # ── Results ───────────────────────────────────────────────────────────────

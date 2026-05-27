@@ -40,7 +40,6 @@ from probeflow.gui.features import (
     FeaturesPanel,
     FeaturesSidebar,
     _FeaturesWorker,
-    _FeaturesWorkerSignals,
 )
 from probeflow.gui.features.tv import (
     TVPanel,
@@ -235,10 +234,11 @@ class ProbeFlowWindow(QMainWindow):
         self._splitter.setStretchFactor(1, 0)
         self._apply_default_splitter_sizes()
 
-        # Features tab plumbing
+        # Features tab plumbing.  Review gui-arch #2 (fixed 2026-05-28):
+        # each spawned _FeaturesWorker now owns its own signals; we
+        # connect ``worker.signals.finished`` at spawn time so concurrent
+        # runs cannot cross-talk via a shared signal instance.
         self._features_pool    = QThreadPool.globalInstance()
-        self._features_signals = _FeaturesWorkerSignals()
-        self._features_signals.finished.connect(self._on_features_finished)
 
         # Floating Feature Counting window (lazy-created on first open)
         self._fc_window = None
@@ -1082,8 +1082,9 @@ class ProbeFlowWindow(QMainWindow):
 
         self._features_sidebar.set_status(f"Running {mode}…")
         worker = _FeaturesWorker(
-            mode, arr, px_m, px_x_m, px_y_m, params, self._features_signals
+            mode, arr, px_m, px_x_m, px_y_m, params,
         )
+        worker.signals.finished.connect(self._on_features_finished)
         self._features_pool.start(worker)
 
     def _on_features_finished(self, mode: str, result, error: str):
@@ -1174,8 +1175,9 @@ class ProbeFlowWindow(QMainWindow):
         self._features_sidebar.set_status("Segmenting particles for labeling…")
         self._pending_classify_segment = True
         worker = _FeaturesWorker(
-            "particles", arr, px_m, px_x_m, px_y_m, params, self._features_signals
+            "particles", arr, px_m, px_x_m, px_y_m, params,
         )
+        worker.signals.finished.connect(self._on_features_finished)
         self._features_pool.start(worker)
 
     def _on_features_export(self, mode: str):

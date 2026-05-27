@@ -320,11 +320,21 @@ class _FeaturesWorker(QRunnable):
     The imports stay lazy on purpose. OpenCV/scikit-learn/lattice dependencies
     belong to Features workflows and should not be imported merely to browse a
     folder or open a normal image-processing Viewer.
+
+    Review gui-arch #2 (fixed 2026-05-28): ``signals`` is now optional —
+    when omitted, each worker owns its own ``_FeaturesWorkerSignals`` and
+    exposes it as ``worker.signals``.  Callers should prefer per-worker
+    signals so that two concurrent (or rapidly back-to-back) workers can
+    never deliver their ``finished`` to the same connected slot — the
+    "second click of Run while the first hasn't finished" cross-talk
+    that the agent flagged.  Passing a shared ``signals`` instance
+    remains supported for backward compatibility but is not recommended.
     """
 
     def __init__(self, mode: str, arr: np.ndarray, pixel_size_m: float,
                  pixel_size_x_m: float, pixel_size_y_m: float,
-                 params: dict, signals: _FeaturesWorkerSignals):
+                 params: dict,
+                 signals: "_FeaturesWorkerSignals | None" = None):
         super().__init__()
         self._mode    = mode
         self._arr     = arr
@@ -332,7 +342,9 @@ class _FeaturesWorker(QRunnable):
         self._px_x    = float(pixel_size_x_m)
         self._px_y    = float(pixel_size_y_m)
         self._params  = params
-        self._signals = signals
+        self.signals  = signals if signals is not None else _FeaturesWorkerSignals()
+        # Keep _signals for the existing internal .emit() calls below.
+        self._signals = self.signals
 
     @Slot()
     def run(self):
