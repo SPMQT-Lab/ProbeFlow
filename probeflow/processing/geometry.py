@@ -716,13 +716,21 @@ def threshold_image(
     return a
 
 
-def quantize_bit_depth(arr: np.ndarray, bits: int) -> np.ndarray:
+def quantize_bit_depth(
+    arr: np.ndarray,
+    bits: int,
+    *,
+    vmin: "float | None" = None,
+    vmax: "float | None" = None,
+) -> np.ndarray:
     """Reduce the effective precision of *arr* to *bits* integer levels.
 
     Maps the finite value range ``[vmin, vmax]`` to ``2**bits`` evenly-spaced
     levels (round-trip through integer quantization), then maps back to the
     original physical range.  The result is still a float64 array but contains
     only ``2**bits`` distinct values.  NaN pixels are preserved unchanged.
+    Values outside ``[vmin, vmax]`` are clipped to that range before
+    quantization.
 
     Parameters
     ----------
@@ -731,6 +739,17 @@ def quantize_bit_depth(arr: np.ndarray, bits: int) -> np.ndarray:
     bits:
         Target bit depth.  Typical values: ``8`` (256 levels) or
         ``16`` (65 536 levels).
+    vmin, vmax:
+        Explicit physical range to map onto the ``2**bits`` levels.  When
+        either is ``None``, a robust percentile band (0.1 / 99.9) of the
+        finite data is used — this resists the failure mode flagged by
+        review physics #3 / numerical #3, where a single tip-crash pixel
+        previously stretched the levels across the noise spike instead
+        of across the meaningful signal range.  Callers wanting
+        cross-scan reproducibility should pass explicit values
+        (typically the GUI display range) and record them in the
+        processing-state step params so the operation is replayable
+        deterministically.
 
     Returns
     -------
@@ -743,14 +762,28 @@ def quantize_bit_depth(arr: np.ndarray, bits: int) -> np.ndarray:
     finite = np.isfinite(arr)
     if not finite.any():
         return arr.astype(np.float64, copy=True)
-    vmin = float(arr[finite].min())
-    vmax = float(arr[finite].max())
+    if vmin is None or vmax is None:
+        # Review physics #3 / numerical #3: default to a robust
+        # percentile band rather than raw extrema.  A single tip-crash
+        # pixel no longer wastes most of the quantization range on
+        # noise.
+        finite_vals = arr[finite]
+        if vmin is None:
+            vmin = float(np.percentile(finite_vals, 0.1))
+        if vmax is None:
+            vmax = float(np.percentile(finite_vals, 99.9))
+    vmin = float(vmin)
+    vmax = float(vmax)
     if vmax == vmin:
         return arr.astype(np.float64, copy=True)
+    if vmax < vmin:
+        raise ValueError(
+            f"quantize_bit_depth: vmax ({vmax}) must be >= vmin ({vmin})"
+        )
     result = arr.astype(np.float64, copy=True)
-    # Normalise finite pixels to [0, n_levels-1], round, then back to SI
+    # Clip finite pixels to [vmin, vmax] (out-of-range values are
+    # otherwise mapped to fractional levels outside [0, n_levels-1]).
+    clipped = np.clip(arr[finite], vmin, vmax)
     scale = (n_levels - 1) / (vmax - vmin)
-    result[finite] = (
-        np.round((arr[finite] - vmin) * scale) / scale + vmin
-    )
+    result[finite] = np.round((clipped - vmin) * scale) / scale + vmin
     return result

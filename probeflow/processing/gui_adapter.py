@@ -222,6 +222,16 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
                 "patch": int(gui_state.get("set_zero_patch", 1)),
             }))
 
+    # Quantize bit-depth steps are deferred to the very end of the
+    # pipeline (review image-proc #2, fixed 2026-05-28).  Running
+    # quantize before arithmetic_ops broke the "256 distinct levels"
+    # guarantee: a subsequent constant add/subtract shifted every
+    # pixel by a non-integer-multiple of the quantum, so the saved
+    # 8-bit/16-bit image silently contained more than 2**bits distinct
+    # values.  Collect any quantize specs from geometric_ops and emit
+    # them after arithmetic_ops below.
+    deferred_quantize_specs: list[dict] = []
+
     for op_spec in gui_state.get("geometric_ops") or []:
         try:
             if isinstance(op_spec, str):
@@ -319,9 +329,13 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
                 thr_params["upper"] = float(op_params["upper"])
             _append_step(ProcessingStep("image_threshold", thr_params))
         elif op_name == "quantize_bit_depth":
-            _append_step(ProcessingStep("quantize_bit_depth", {
-                "bits": int(op_params.get("bits", 8)),
-            }))
+            # Defer to the end (after arithmetic_ops).  See note above.
+            q_params: dict = {"bits": int(op_params.get("bits", 8))}
+            if op_params.get("vmin") is not None:
+                q_params["vmin"] = float(op_params["vmin"])
+            if op_params.get("vmax") is not None:
+                q_params["vmax"] = float(op_params["vmax"])
+            deferred_quantize_specs.append(q_params)
 
     for op_spec in gui_state.get("arithmetic_ops") or []:
         try:
@@ -346,6 +360,13 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
                 "roi_id": str(roi_id_for_step),
                 "step": {"op": "arithmetic", "params": dict(params)},
             }))
+
+    # Emit deferred quantize_bit_depth steps last, so any arithmetic
+    # offset applied above lands BEFORE quantization and the saved
+    # image actually contains 2**bits distinct values
+    # (review image-proc #2).
+    for q_params in deferred_quantize_specs:
+        steps.append(ProcessingStep("quantize_bit_depth", q_params))
 
     return ProcessingState(steps=steps)
 

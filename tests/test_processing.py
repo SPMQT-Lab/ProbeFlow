@@ -547,6 +547,67 @@ class TestStmLineBackground:
             stm_line_background(np.ones((4, 4)), mode="other")
 
 
+class TestQuantizeBitDepth:
+    """Regression tests for the review cluster: physics #3, numerical #3,
+    image-proc #2, image-proc #7 — explicit vmin/vmax, robust default,
+    pipeline ordering vs arithmetic, reproducibility across crops."""
+
+    def test_default_uses_robust_percentile_band_not_extrema(self):
+        """A single tip-crash pixel must not steal precision from the
+        rest of the array.  Default vmin/vmax now come from 0.1/99.9
+        percentiles."""
+        from probeflow.processing import quantize_bit_depth
+        # Surface in [0, 1] nm with one ~50 nm tip-crash pixel.
+        rng = np.random.default_rng(1)
+        arr = rng.uniform(0.0, 1e-9, size=(100, 100))
+        arr[0, 0] = 50e-9  # tip crash
+        out_robust = quantize_bit_depth(arr, bits=8)
+        # The vast majority of pixels (away from the crash) should be
+        # quantized to many distinct levels — at least 200 of 256.
+        finite = np.isfinite(out_robust)
+        # Exclude the clipped tip-crash pixel from the count
+        in_band = (out_robust >= 0) & (out_robust <= 1e-9 + 1e-12)
+        distinct = len(np.unique(out_robust[finite & in_band]))
+        assert distinct > 200, (
+            f"Robust default should give >200 distinct quantization "
+            f"levels across the meaningful signal range; got {distinct}."
+        )
+
+    def test_explicit_vmin_vmax_reproducible_across_crops(self):
+        """When explicit vmin/vmax are passed, the quantized output for
+        the same physical value is identical regardless of what else is
+        in the array (the failure mode flagged by numerical #3)."""
+        from probeflow.processing import quantize_bit_depth
+        # Same target pixel value embedded in two different arrays.
+        arr_a = np.linspace(0, 1, 100).reshape(10, 10).astype(float)
+        arr_b = arr_a.copy()
+        arr_b[0, 0] = 100.0  # different extrema
+        out_a = quantize_bit_depth(arr_a, bits=8, vmin=0.0, vmax=1.0)
+        out_b = quantize_bit_depth(arr_b, bits=8, vmin=0.0, vmax=1.0)
+        # Pixels [1:, :] are identical in both arrays, and with explicit
+        # vmin/vmax both should quantize them to the same value.
+        np.testing.assert_array_equal(out_a[1:, :], out_b[1:, :])
+
+    def test_pipeline_quantize_after_arithmetic(self):
+        """Review image-proc #2 — the GUI adapter must defer quantize
+        to AFTER arithmetic_ops so a subsequent constant offset doesn't
+        break the discrete-levels guarantee."""
+        from probeflow.processing.gui_adapter import processing_state_from_gui
+        state = processing_state_from_gui({
+            "geometric_ops": [
+                {"op": "quantize_bit_depth", "params": {"bits": 8}},
+            ],
+            "arithmetic_ops": [
+                {"params": {"op": "subtract", "value": 0.5}},
+            ],
+        })
+        ops_in_order = [s.op for s in state.steps]
+        # Both must appear; quantize must come AFTER arithmetic.
+        assert "quantize_bit_depth" in ops_in_order
+        assert "arithmetic" in ops_in_order
+        assert ops_in_order.index("arithmetic") < ops_in_order.index("quantize_bit_depth")
+
+
 class TestEliminateProfileJumpsSymmetry:
     """Regression for review numerical #8 — jump elimination must be
     approximately symmetric.  Before the fix, a single noise spike

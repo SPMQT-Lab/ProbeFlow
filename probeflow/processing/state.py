@@ -774,7 +774,16 @@ def apply_processing_state(
                 mode=str(p.get("mode", "clip")),
             )
         elif step.op == "quantize_bit_depth":
-            a = _proc.quantize_bit_depth(a, bits=int(p["bits"]))
+            # Review physics #3 / numerical #3 / image-proc #7 cluster:
+            # forward explicit vmin/vmax from the step params when set
+            # (the GUI captures these for cross-scan reproducibility),
+            # else the kernel falls back to a robust percentile band.
+            q_kwargs: dict[str, float] = {}
+            if p.get("vmin") is not None:
+                q_kwargs["vmin"] = float(p["vmin"])
+            if p.get("vmax") is not None:
+                q_kwargs["vmax"] = float(p["vmax"])
+            a = _proc.quantize_bit_depth(a, bits=int(p["bits"]), **q_kwargs)
         else:
             raise ValueError(
                 f"Unknown processing operation {step.op!r}. "
