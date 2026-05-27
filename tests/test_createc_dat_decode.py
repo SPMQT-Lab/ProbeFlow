@@ -249,6 +249,36 @@ def test_implausible_header_channel_count_falls_back_to_payload(tmp_path):
     assert report.detected_channel_count == 4
 
 
+def test_header_two_channels_with_extra_telemetry_tail_stays_two(tmp_path):
+    """Regression for review IO #3 — Createc routinely tail-pads .dat
+    files with telemetry past the declared image-plane payload.  When
+    ``Channels=2`` is set in the header, a tail that makes
+    ``payload_float_count >= 4 * Nx * Ny`` must not be re-interpreted
+    as two synthetic backward planes; the header is authoritative.
+    """
+    dat = tmp_path / "two_with_tail.dat"
+    header = (
+        b"[Paramco32]\n"
+        b"Num.X=2\n"
+        b"Num.Y=2\n"
+        b"Channels=2\n"
+        b"Channelselectval=1\n"
+    )
+    # Two real channels of (2,2) pixels = 8 floats, then 12 telemetry
+    # floats so total payload (20 floats) >= 4*Nx*Ny (16 floats).
+    n_pixels = 2 * 2
+    real_floats = np.arange(1, 2 * n_pixels + 1, dtype="<f4")
+    telemetry = np.arange(100, 100 + 12, dtype="<f4")
+    payload = np.concatenate([real_floats, telemetry]).tobytes()
+    dat.write_bytes(header + b"DATA" + zlib.compress(payload))
+
+    report = read_createc_dat_report(dat, include_raw=False)
+
+    # Must trust the header: 2 channels, not 4 manufactured from telemetry.
+    assert report.detected_channel_count == 2
+    assert report.ignored_tail_float_count >= 12
+
+
 def test_anonymized_qplus_fixture_decodes_all_10_channels():
     report = read_createc_dat_report(QPLUS_10CH_DAT)
     scan = load_scan(QPLUS_10CH_DAT)
