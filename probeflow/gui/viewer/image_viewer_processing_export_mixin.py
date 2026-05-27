@@ -346,8 +346,13 @@ class ImageViewerProcessingExportMixin:
             if arr_orig is not None:
                 self._refresh_processing_display()
 
-        dlg = ThresholdDialog(arr, preview_fn=_preview, clear_preview_fn=_clear_preview,
-                               parent=self)
+        dlg = ThresholdDialog(
+            arr,
+            preview_fn=_preview,
+            clear_preview_fn=_clear_preview,
+            theme=getattr(self, "_t", None),
+            parent=self,
+        )
         dlg.applied.connect(self._on_threshold_applied)
         dlg.show()
 
