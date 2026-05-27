@@ -642,7 +642,18 @@ def _modal_shift(values: np.ndarray, *, bins: int = 128) -> Optional[float]:
     if hist.size == 0 or int(hist.max()) == 0:
         return float(np.nanmedian(values))
     peak = int(np.argmax(hist))
-    in_peak = (values >= edges[peak]) & (values <= edges[peak + 1])
+    # Match np.histogram's right-open bin convention exactly:
+    #   bin k contains v iff edges[k] <= v < edges[k+1]
+    # except the LAST bin which is closed-right (edges[k] <= v <= edges[k+1]).
+    # The previous implementation used >= and <= on both sides, so on a
+    # value sitting exactly at an inner boundary the "in_peak" mask could
+    # disagree with which bin np.histogram counted it in (review
+    # numerical #6 / image-proc #14, fixed 2026-05-28).
+    bin_idx = np.minimum(
+        np.searchsorted(edges, values, side="right") - 1,
+        len(edges) - 2,
+    )
+    in_peak = bin_idx == peak
     if np.any(in_peak):
         return float(np.nanmedian(values[in_peak]))
     return float(0.5 * (edges[peak] + edges[peak + 1]))

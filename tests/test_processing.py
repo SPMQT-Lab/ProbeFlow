@@ -462,6 +462,48 @@ class TestSubtractBackground:
 
 # ─── stm_line_background ─────────────────────────────────────────────────────
 
+class TestModalShiftBinMatching:
+    """Regression for review numerical #6 / image-proc #14 — _modal_shift
+    must match np.histogram's right-open bin convention so a value sitting
+    exactly at an inner bin boundary is counted in the same bin by both
+    the histogram tally and the in_peak mask.
+    """
+
+    def test_inner_boundary_value_matched_consistently(self):
+        from probeflow.processing.background import _modal_shift
+        # 5 copies of 1.0 at the exact bin-1 lower edge plus filler so
+        # bin 1 wins argmax.  Before the fix, ``>= edges[1] & <= edges[2]``
+        # AND ``>= edges[0] & <= edges[1]`` were both true at v=1.0,
+        # so the mask could include the boundary value in either bin.
+        # After the fix, np.searchsorted with side='right' assigns 1.0
+        # to bin 1 unambiguously.
+        values = np.array([0.5, 0.6, 1.0, 1.0, 1.0, 1.0, 1.0, 2.5])
+        result = _modal_shift(values, bins=4)
+        # 1.0 should be the modal value — must not be NaN/None.
+        assert result is not None
+        assert np.isfinite(result)
+        # The function returns the median of pixels in the modal bin.
+        # With bins=[0.5, 1.0, 1.5, 2.0, 2.5] and 5 ones in [1.0, 1.5):
+        assert result == pytest.approx(1.0)
+
+    def test_last_bin_boundary_inclusive(self):
+        """np.histogram's last bin is closed-right.  _modal_shift must
+        agree, otherwise the maximum value of the input would be dropped
+        from the modal-bin selection mask."""
+        from probeflow.processing.background import _modal_shift
+        # Cluster at vmax exactly.
+        values = np.array([0.1, 0.2, 5.0, 5.0, 5.0, 5.0])
+        result = _modal_shift(values, bins=4)
+        assert result is not None
+        assert result == pytest.approx(5.0)
+
+    def test_flat_input_returns_value(self):
+        """Sanity: all-equal input still returns the value."""
+        from probeflow.processing.background import _modal_shift
+        result = _modal_shift(np.full(20, 3.7))
+        assert result == pytest.approx(3.7)
+
+
 class TestStmLineBackground:
     @staticmethod
     def _stepped_drift_image():
