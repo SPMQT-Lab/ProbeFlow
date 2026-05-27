@@ -335,10 +335,22 @@ class ImageViewerProcessingExportMixin:
             self._status_lbl.setText("No image loaded.")
             return
 
+        # Snapshot of the pipeline-output array at dialog-open time.
+        # _preview must restore _display_arr to this value immediately after
+        # submitting the render job so that other concurrent modeless operations
+        # (Scale, Shear, etc.) read the real pipeline state, not a transient
+        # preview result.
+        _pipeline_arr = arr
+
         def _preview(result_arr):
-            # Temporarily show the clipped/binarised result without committing it.
+            # Temporarily install the preview array so _refresh_viewer_pixmap
+            # reads its range for vmin/vmax and passes it to the ViewerLoader.
             self._display_arr = result_arr
             self._refresh_viewer_pixmap(reset_zoom=False)
+            # Restore immediately — ViewerLoader captured its own reference to
+            # result_arr at construction; restoring here is safe and prevents
+            # other handlers from seeing the transient preview data.
+            self._display_arr = _pipeline_arr
 
         def _preview_pixmap(pixmap):
             # Coloured highlight preview — set pixmap directly, bypass async loader.
@@ -414,7 +426,9 @@ class ImageViewerProcessingExportMixin:
 
     def _on_convert_bit_depth(self, bits: int) -> None:
         """Quantize the current image to *bits*-bit precision as a processing step."""
-        if self._display_arr is None:
+        arr = self._display_arr if self._display_arr is not None else self._raw_arr
+        if arr is None:
+            self._status_lbl.setText("No image loaded.")
             return
         ops = list(self._processing.get("geometric_ops") or [])
         ops.append({"op": "quantize_bit_depth", "params": {"bits": bits}})
