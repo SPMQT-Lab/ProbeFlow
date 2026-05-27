@@ -514,6 +514,17 @@ def reconstruct_from_hdr_imgs(
         if a.shape != (Ny, Nx):
             raise ValueError(f"Plane {i} shape {a.shape} != expected {(Ny, Nx)}")
 
+    # Un-orient for storage: SXM stores acquisition-order rows.  If the
+    # source scan was acquired with reverse Y direction (SCAN_DIR='up'),
+    # the reader's orient_plane will np.flipud on next read; we must
+    # flipud here so the round trip restores the original display
+    # orientation.  Matches the convention used by
+    # write_sxm_with_planes in probeflow.io.sxm_io.  (Review IO #5,
+    # fixed 2026-05-28.)
+    scan_dir = (hdr.get("SCAN_DIR") or "down").strip().lower()
+    if scan_dir == "up":
+        arrs = [np.flipud(a) for a in arrs]
+
     payload = b"".join(
         np.asarray(a, dtype=dt, order="C").tobytes(order="C") for a in arrs
     )

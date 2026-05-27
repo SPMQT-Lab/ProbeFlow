@@ -210,3 +210,80 @@ class TestWriteSxmSafetyGuards:
         _, planes = read_all_sxm_planes(sample_sxm)
         with pytest.raises(ValueError, match="overwrite the source"):
             write_sxm_with_planes(sample_sxm, link, planes)
+
+
+class TestScanDirUpRoundTrip:
+    """Regression for review IO #5 — DAT files acquired with reverse Y
+    scan direction (Createc ``ScanYDirec=0``) produce SXM headers with
+    ``SCAN_DIR='up'``.  The writer must un-orient the planes (np.flipud)
+    so the reader's orient_plane flip restores the original display
+    orientation.  Before the fix the DAT-sourced write path dropped
+    this flip and the round-trip image was upside-down.
+    """
+
+    def _build_minimal_sxm_args(self, cushion_dir, scan_dir: str):
+        """Build a header + asymmetric plane so flipud is observable."""
+        from probeflow.io.converters.createc_dat_to_sxm import (
+            load_layout_and_format,
+        )
+        # Asymmetric pattern: top half = 1.0, bottom half = 0.0 → flipud
+        # produces the inverse pattern, immediately visible in equality test.
+        Ny, Nx = 8, 8
+        plane = np.zeros((Ny, Nx), dtype=np.float32)
+        plane[: Ny // 2, :] = 1.0
+        hdr = {
+            "NANONIS_VERSION": "2",
+            "SCAN_PIXELS": f"{Nx} {Ny}",
+            "SCAN_RANGE": "1.0E-9 1.0E-9",
+            "SCAN_DIR": scan_dir,
+            "DATA_INFO": (
+                "\tChannel\tName\tUnit\tDirection\tCalibration\tOffset\n"
+                "\t14\tZ\tm\tforward\t1.0E-9\t0.0"
+            ),
+            "SCANIT_TYPE": "FLOAT MSBFIRST",
+        }
+        imgs = [("Z", "m", "forward", plane)]
+        layout, header_format = load_layout_and_format(Path(cushion_dir))
+        return hdr, imgs, layout, header_format, plane
+
+    def test_scan_dir_up_round_trips(self, tmp_path, cushion_dir):
+        from probeflow.io.converters.createc_dat_to_sxm import (
+            reconstruct_from_hdr_imgs,
+        )
+        hdr, imgs, layout, header_format, original = self._build_minimal_sxm_args(
+            cushion_dir, scan_dir="up"
+        )
+        out = tmp_path / "up.sxm"
+        reconstruct_from_hdr_imgs(
+            hdr=hdr, imgs=imgs, header_format=header_format,
+            post_end_bytes=layout["post_end_bytes"],
+            pre_payload_bytes=layout["pre_payload_bytes"],
+            out_path=out,
+            tail_bytes=layout["tail_bytes"],
+            force_data_offset=layout["data_offset"],
+        )
+
+        _, planes = read_all_sxm_planes(out)
+        assert len(planes) == 1
+        np.testing.assert_array_equal(planes[0], original)
+
+    def test_scan_dir_down_unchanged(self, tmp_path, cushion_dir):
+        """Sanity check: SCAN_DIR='down' (the common case) is unchanged
+        by the new flipud branch."""
+        from probeflow.io.converters.createc_dat_to_sxm import (
+            reconstruct_from_hdr_imgs,
+        )
+        hdr, imgs, layout, header_format, original = self._build_minimal_sxm_args(
+            cushion_dir, scan_dir="down"
+        )
+        out = tmp_path / "down.sxm"
+        reconstruct_from_hdr_imgs(
+            hdr=hdr, imgs=imgs, header_format=header_format,
+            post_end_bytes=layout["post_end_bytes"],
+            pre_payload_bytes=layout["pre_payload_bytes"],
+            out_path=out,
+            tail_bytes=layout["tail_bytes"],
+            force_data_offset=layout["data_offset"],
+        )
+        _, planes = read_all_sxm_planes(out)
+        np.testing.assert_array_equal(planes[0], original)
