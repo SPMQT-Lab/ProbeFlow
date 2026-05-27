@@ -152,17 +152,30 @@ class TestPolarDecompEdgeCases:
         assert np.all(np.isfinite(S))
         assert np.all(np.isfinite(R))
 
-    def test_reflection_matrix_guard_gives_proper_rotation(self):
-        # T = [[-1, 0], [0, 1]] has det = -1; the sign-flip guard should
-        # produce R with det(R) = +1.
+    def test_reflective_T_yields_psd_stretch_and_improper_R(self):
+        # T = [[-1, 0], [0, 1]] has det = -1 (pure reflection across the
+        # y-axis).  Polar decomposition T = R @ S must have S positive
+        # semi-definite; R then has det(R) = -1 (improper orthogonal).
+        # This is the corrected behaviour — previously the function
+        # silently produced an indefinite S to force det(R) = +1.
         T = np.array([[-1.0, 0.0], [0.0, 1.0]])
-        R, S, rot_deg = _polar_decompose(T)
-        assert abs(float(np.linalg.det(R)) - 1.0) < 1e-10
-
-    def test_reflection_matrix_rotation_is_orthogonal(self):
-        T = np.array([[-1.0, 0.0], [0.0, 1.0]])
-        R, S, rot_deg = _polar_decompose(T)
+        with pytest.warns(UserWarning, match="reflection component"):
+            R, S, rot_deg = _polar_decompose(T)
+        # S must be PSD (eigenvalues >= 0)
+        eigvals = np.linalg.eigvalsh(S)
+        assert np.all(eigvals >= -1e-12), f"S not PSD; eigvals={eigvals}"
+        # R is orthogonal but improper (det = -1)
         np.testing.assert_allclose(R @ R.T, np.eye(2), atol=1e-10)
+        assert abs(float(np.linalg.det(R)) + 1.0) < 1e-10
+        # rotation_deg is undefined for an improper R
+        assert math.isnan(rot_deg)
+        # Reconstruction still holds: T = R @ S
+        np.testing.assert_allclose(R @ S, T, atol=1e-10)
+
+    def test_reflective_T_emits_warning(self):
+        T = np.array([[-1.0, 0.0], [0.0, 1.0]])
+        with pytest.warns(UserWarning, match="reflection component"):
+            _polar_decompose(T)
 
     def test_stretch_is_symmetric(self):
         T = np.array([[1.2, 0.3], [0.1, 0.9]])

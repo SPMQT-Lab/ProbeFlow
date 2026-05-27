@@ -24,6 +24,7 @@ approximately aligned with the original scan axes.
 from __future__ import annotations
 
 import math
+import warnings
 from dataclasses import dataclass
 from typing import Union
 
@@ -184,19 +185,45 @@ def _polar_decompose(
     """
     Polar decomposition of T into (R, S, rotation_deg) where T = R @ S.
 
-    R is an orthogonal matrix (pure rotation, det = +1).
-    S is symmetric positive semi-definite (stretch + shear, no rotation).
-    rotation_deg is the angle of R.
+    Uses SVD: T = U @ diag(sigma) @ Vt, then R = U @ Vt and
+    S = Vt.T @ diag(sigma) @ Vt.  Because sigma >= 0, S is always
+    symmetric positive semi-definite.
 
-    Uses SVD: T = U @ diag(sigma) @ Vt, then R = U @ Vt, S = Vt.T @ diag(sigma) @ Vt.
+    For non-reflective T (``det(T) >= 0``):
+        - R is a proper rotation (``det(R) = +1``)
+        - ``rotation_deg`` is the rotation angle of R
+        - In "preserve image orientation" mode, applying S corrects
+          stretch + shear while keeping the image axis-aligned.
+
+    For reflective T (``det(T) < 0``):
+        - R is improper orthogonal (``det(R) = -1``: rotation + flip)
+        - S remains positive semi-definite (no reflection)
+        - ``rotation_deg`` is returned as ``NaN`` because ``atan2`` on
+          an improper orthogonal matrix does not yield a meaningful
+          rotation angle.  In "preserve image orientation" mode the
+          stretch is still well defined; the reflection in T is
+          dropped along with the rigid rotation.
+        - A ``UserWarning`` is emitted so callers can surface the
+          reflection to the user (it usually signals swapped lattice
+          vectors or a flipped scan direction).
     """
     U, sigma, Vt = np.linalg.svd(T)
-    R = U @ Vt
-    # If det(R) < 0, T has a reflection component; fix by flipping one singular vector.
-    if np.linalg.det(R) < 0:
-        U[:, -1] *= -1
-        sigma[-1] *= -1
-        R = U @ Vt
+    # S is built from the (non-negative) singular values: always PSD.
     S = Vt.T @ np.diag(sigma) @ Vt
-    rotation_deg = math.degrees(math.atan2(R[1, 0], R[0, 0]))
+    # R inherits the sign of det(T).  Do NOT flip a singular value to
+    # force det(R) = +1: that would make S indefinite and silently
+    # apply a reflection in "preserve image orientation" mode.
+    R = U @ Vt
+    if float(np.linalg.det(R)) < 0:
+        warnings.warn(
+            "Lattice correction T has a reflection component "
+            "(det(T) < 0). The polar rotation angle is undefined; "
+            "stretch_matrix remains positive semi-definite. "
+            "Check measured lattice-vector ordering and scan direction.",
+            UserWarning,
+            stacklevel=2,
+        )
+        rotation_deg = float("nan")
+    else:
+        rotation_deg = math.degrees(math.atan2(R[1, 0], R[0, 0]))
     return R, S, rotation_deg
