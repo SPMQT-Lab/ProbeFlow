@@ -334,6 +334,9 @@ class ThresholdDialog(QDialog):
         return QPixmap.fromImage(qimg)
 
     def _do_apply(self) -> None:
+        if self._lo >= self._hi:
+            # Degenerate range — nothing meaningful to apply; let the user fix it.
+            return
         self.applied.emit(self._current_params())
         self.close()
 
@@ -353,8 +356,11 @@ class ThresholdDialog(QDialog):
         self._do_preview()
 
     def _on_min_slider_released(self, v: int) -> None:
-        """Min slider released → sync lower spinbox + auto-preview."""
+        """Min slider released → clamp to stay below _hi, sync spinbox, preview."""
         lo = self._hist.sl_to_si(v)   # scale=1.0 → SI == physical
+        # Clamp: min slider must stay strictly below the current upper bound.
+        if lo >= self._hi:
+            lo = self._hi - abs(self._hi - self._vmin) * 1e-6 or self._hi - 1e-15
         self._lo = lo
         self._lower_spin.blockSignals(True)
         self._lower_spin.setValue(lo)
@@ -363,8 +369,11 @@ class ThresholdDialog(QDialog):
         self._do_preview()
 
     def _on_max_slider_released(self, v: int) -> None:
-        """Max slider released → sync upper spinbox + auto-preview."""
+        """Max slider released → clamp to stay above _lo, sync spinbox, preview."""
         hi = self._hist.sl_to_si(v)
+        # Clamp: max slider must stay strictly above the current lower bound.
+        if hi <= self._lo:
+            hi = self._lo + abs(self._vmax - self._lo) * 1e-6 or self._lo + 1e-15
         self._hi = hi
         self._upper_spin.blockSignals(True)
         self._upper_spin.setValue(hi)
@@ -373,11 +382,27 @@ class ThresholdDialog(QDialog):
         self._do_preview()
 
     def _on_spinbox_changed(self) -> None:
-        """Spinbox editing finished → sync internal state, histogram, preview."""
+        """Spinbox editing finished → sync internal state, histogram, preview.
+
+        If the entered value would produce an invalid range (lo >= hi) the
+        spinbox is reverted to the last accepted value so the display never
+        disagrees with the internal state.
+        """
         lo = self._lower_spin.value()
         hi = self._upper_spin.value()
         if lo >= hi:
-            return   # ignore invalid range silently
+            # Revert the spinbox that was just edited back to the last valid value
+            # so the display stays consistent with self._lo / self._hi.
+            sender = self.sender()
+            if sender is self._lower_spin:
+                self._lower_spin.blockSignals(True)
+                self._lower_spin.setValue(self._lo)
+                self._lower_spin.blockSignals(False)
+            elif sender is self._upper_spin:
+                self._upper_spin.blockSignals(True)
+                self._upper_spin.setValue(self._hi)
+                self._upper_spin.blockSignals(False)
+            return
         self._lo = lo
         self._hi = hi
         self._hist.update_drag_lines(lo, hi)
