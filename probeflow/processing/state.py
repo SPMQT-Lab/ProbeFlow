@@ -53,6 +53,9 @@ _SUPPORTED_OPS: frozenset[str] = frozenset({
     "rotate_180",
     "rotate_270_cw",
     "rotate_arbitrary",
+    "shear",
+    "scale_image",
+    "image_threshold",
 })
 
 _ROI_ELIGIBLE_OPS: frozenset[str] = frozenset({
@@ -709,6 +712,29 @@ def apply_processing_state(
                 a,
                 angle_degrees=float(p.get("angle_degrees", 0.0)),
                 order=int(p.get("order", 1)),
+            )
+        elif step.op == "shear":
+            a = _proc.shear(
+                a,
+                shear_x=float(p.get("shear_x", 0.0)),
+                shear_y=float(p.get("shear_y", 0.0)),
+                interpolation=str(p.get("interpolation", "bilinear")),
+            )
+        elif step.op == "scale_image":
+            a = _proc.scale_image(
+                a,
+                int(p["new_height"]),
+                int(p["new_width"]),
+                order=int(p.get("order", 1)),
+            )
+        elif step.op == "image_threshold":
+            lower = float(p["lower"]) if p.get("lower") is not None else None
+            upper = float(p["upper"]) if p.get("upper") is not None else None
+            a = _proc.threshold_image(
+                a,
+                lower=lower,
+                upper=upper,
+                mode=str(p.get("mode", "clip")),
             )
         else:
             raise ValueError(

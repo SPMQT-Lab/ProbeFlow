@@ -29,4 +29,6 @@ def test_command_finder_filters_and_ranks_high_level_commands():
     assert checkerboard
     assert checkerboard[0].command_id == "processing.image_operations"
 
-    assert filter_viewer_commands(commands, "threshold") == []
+    threshold_results = filter_viewer_commands(commands, "threshold")
+    assert threshold_results
+    assert threshold_results[0].command_id == "image.threshold"

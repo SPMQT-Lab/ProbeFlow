@@ -158,18 +158,54 @@ def _add_send_to_tool_actions(menu: QMenu, viewer) -> None:
 
 
 def _add_transform_menu(menu: QMenu, viewer) -> None:
+    """Build the Transform submenu using VIEWER_COMMANDS for labels/shortcuts."""
+    from probeflow.gui.viewer.shortcuts import viewer_command as _vc
+    from PySide6.QtGui import QKeySequence
+
+    def _cmd_action(cmd_id: str) -> QAction:
+        """Create a QAction labelled from VIEWER_COMMANDS without registering it."""
+        cmd = _vc(cmd_id)
+        act = QAction(cmd.label, viewer)
+        if cmd.shortcuts:
+            act.setShortcuts([QKeySequence(s) for s in cmd.shortcuts])
+        if cmd.status_tip:
+            act.setStatusTip(cmd.status_tip)
+        return act
+
     transform_menu = QMenu("Transform", viewer)
-    for label, op in [
-        ("Flip Horizontal", "flip_horizontal"),
-        ("Flip Vertical", "flip_vertical"),
-        ("Rotate 90 deg CW", "rotate_90_cw"),
-        ("Rotate 180 deg", "rotate_180"),
-        ("Rotate 270 deg CW", "rotate_270_cw"),
+
+    for cmd_id, op_name in [
+        ("image.flip_h", "flip_horizontal"),
+        ("image.flip_v", "flip_vertical"),
     ]:
-        act = transform_menu.addAction(label)
-        act.triggered.connect(lambda _checked=False, op_name=op: viewer._on_geometric_op(op_name))
-    arb_act = transform_menu.addAction("Rotate arbitrary...")
+        act = _cmd_action(cmd_id)
+        act.triggered.connect(
+            lambda _checked=False, op=op_name: viewer._on_geometric_op(op)
+        )
+        transform_menu.addAction(act)
+
+    transform_menu.addSeparator()
+
+    for cmd_id, op_name in [
+        ("image.rotate_90_cw",  "rotate_90_cw"),
+        ("image.rotate_180",    "rotate_180"),
+        ("image.rotate_270_cw", "rotate_270_cw"),
+    ]:
+        act = _cmd_action(cmd_id)
+        act.triggered.connect(
+            lambda _checked=False, op=op_name: viewer._on_geometric_op(op)
+        )
+        transform_menu.addAction(act)
+
+    arb_act = _cmd_action("image.rotate_arbitrary")
     arb_act.triggered.connect(viewer._on_rotate_arbitrary)
+    transform_menu.addAction(arb_act)
+
+    transform_menu.addSeparator()
+    shear_act = _cmd_action("image.shear")
+    shear_act.triggered.connect(viewer._on_shear)
+    transform_menu.addAction(shear_act)
+
     menu.addMenu(transform_menu)
 
 

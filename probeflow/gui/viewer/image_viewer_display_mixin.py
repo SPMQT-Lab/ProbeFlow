@@ -71,6 +71,30 @@ class ImageViewerDisplayMixin:
         self._viewer_colormap = _CMAP_KEY.get(label, label)
         self._refresh_viewer_pixmap(reset_zoom=False)
 
+    def _set_viewer_colormap_by_key(self, mpl_key: str, label: str) -> None:
+        """Set the viewer colormap directly by matplotlib key.
+
+        Tries to sync the colormap combo-box by matching *label*.  Falls back
+        to a direct pixmap refresh if the label is not found in the combo.
+        """
+        self._viewer_colormap = mpl_key
+        if hasattr(self, "_viewer_cmap_cb"):
+            idx = self._viewer_cmap_cb.findText(label)
+            if idx >= 0:
+                # Temporarily block signals to avoid a double-refresh
+                self._viewer_cmap_cb.blockSignals(True)
+                try:
+                    self._viewer_cmap_cb.setCurrentIndex(idx)
+                finally:
+                    self._viewer_cmap_cb.blockSignals(False)
+        self._refresh_viewer_pixmap(reset_zoom=False)
+
+    def _on_colormap_picker(self) -> None:
+        """Switch to the display panel and open the colormap combo drop-down."""
+        self._show_sidebar_tab("display")
+        if hasattr(self, "_viewer_cmap_cb"):
+            self._viewer_cmap_cb.showPopup()
+
     # ── Display range sliders ─────────────────────────────────────────────────
 
     def _update_display_sliders(self) -> None:

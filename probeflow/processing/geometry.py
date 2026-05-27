@@ -519,3 +519,120 @@ def rotate_arbitrary(
     a = arr.astype(np.float64, copy=True)
     return _ndimage_rotate(a, float(angle_degrees), reshape=True, order=order,
                            mode='constant', cval=np.nan)
+
+
+def shear(
+    arr: np.ndarray,
+    *,
+    shear_x: float = 0.0,
+    shear_y: float = 0.0,
+    interpolation: str = "bilinear",
+) -> np.ndarray:
+    """Apply a 2-component shear correction to a scan plane.
+
+    Applies the shear matrix ``[[1, shear_x], [shear_y, 1]]`` via
+    :func:`affine_lattice_correction` with canvas expansion.  Positive
+    ``shear_x`` tilts columns to the right; positive ``shear_y`` tilts rows
+    downward.
+
+    Parameters
+    ----------
+    arr
+        2-D scan plane.
+    shear_x
+        Off-diagonal element in the column direction (horizontal shear).
+    shear_y
+        Off-diagonal element in the row direction (vertical shear).
+    interpolation
+        ``'nearest'``, ``'bilinear'`` (default), or ``'bicubic'``.
+    """
+    matrix = np.array([[1.0, shear_x], [shear_y, 1.0]], dtype=np.float64)
+    return affine_lattice_correction(
+        arr, matrix,
+        expand_canvas=True,
+        interpolation=interpolation,
+        fill_mode="nan",
+    )
+
+
+def scale_image(
+    arr: np.ndarray,
+    new_height: int,
+    new_width: int,
+    *,
+    order: int = 1,
+) -> np.ndarray:
+    """Resample *arr* to ``(new_height, new_width)`` pixels.
+
+    The physical scan range (nm²) is unchanged; only pixel density differs.
+    Uses ``scipy.ndimage.zoom`` with the requested interpolation order.
+
+    Parameters
+    ----------
+    arr
+        2-D scan plane.
+    new_height, new_width
+        Target pixel dimensions in (row, column) order.
+    order
+        Interpolation order: 0 = nearest, 1 = bilinear (default), 3 = bicubic.
+    """
+    from scipy.ndimage import zoom as _zoom
+    if arr.ndim != 2:
+        raise ValueError("scale_image expects a 2-D array")
+    if new_height < 1 or new_width < 1:
+        raise ValueError("Target dimensions must be >= 1")
+    a = arr.astype(np.float64, copy=True)
+    Ny, Nx = a.shape
+    zoom_y = new_height / Ny
+    zoom_x = new_width / Nx
+    nan_mask = ~np.isfinite(a)
+    if nan_mask.any():
+        fill = float(np.nanmean(a)) if np.isfinite(a).any() else 0.0
+        a[nan_mask] = fill
+    out = _zoom(a, (zoom_y, zoom_x), order=order, mode="reflect")
+    if nan_mask.any():
+        scaled_nan = _zoom(
+            nan_mask.astype(np.float64), (zoom_y, zoom_x), order=0, mode="reflect"
+        ) > 0.5
+        out[scaled_nan] = np.nan
+    return out
+
+
+def threshold_image(
+    arr: np.ndarray,
+    *,
+    lower: "float | None" = None,
+    upper: "float | None" = None,
+    mode: str = "clip",
+) -> np.ndarray:
+    """Apply a threshold to a scan plane.
+
+    Parameters
+    ----------
+    arr
+        2-D scan plane.
+    lower, upper
+        Threshold bounds in the same units as *arr*.  ``None`` means unbounded
+        on that side.
+    mode
+        ``'clip'``: values outside ``[lower, upper]`` become NaN, preserving
+        the original data range inside the band.
+        ``'binarize'``: pixels *inside* ``[lower, upper]`` become 1.0, outside 0.0.
+    """
+    if mode not in ("clip", "binarize"):
+        raise ValueError(f"mode must be 'clip' or 'binarize', got {mode!r}")
+    a = arr.astype(np.float64, copy=True)
+    if mode == "clip":
+        finite = np.isfinite(a)
+        if lower is not None:
+            a[finite & (a < lower)] = np.nan
+        if upper is not None:
+            a[finite & (a > upper)] = np.nan
+    else:  # binarize
+        mask = np.ones(a.shape, dtype=bool)
+        if lower is not None:
+            mask &= a >= lower
+        if upper is not None:
+            mask &= a <= upper
+        a = mask.astype(np.float64)
+    return a

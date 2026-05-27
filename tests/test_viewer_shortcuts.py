@@ -55,7 +55,7 @@ def test_command_finder_shortcut_and_visible_commands_are_high_level():
     assert "measure.clear_lattice_grid" in finder_ids
     assert "help.definitions" in finder_ids
     assert not any(command_id.startswith("roi.tool.") for command_id in finder_ids)
-    assert not any("threshold" in command_id for command_id in finder_ids)
+    assert "image.threshold" in finder_ids
 
 
 def test_shortcut_help_shows_mac_and_windows_forms():

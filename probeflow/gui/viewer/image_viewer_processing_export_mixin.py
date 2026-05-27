@@ -327,6 +327,82 @@ class ImageViewerProcessingExportMixin:
         menu = build_blank_image_context_menu(self)
         menu.exec(pos)
 
+    def _on_threshold(self) -> None:
+        """Open the Threshold dialog (modeless) for the current image."""
+        from probeflow.gui.dialogs.threshold_dialog import ThresholdDialog
+        arr = self._display_arr if self._display_arr is not None else self._raw_arr
+        if arr is None:
+            self._status_lbl.setText("No image loaded.")
+            return
+
+        def _preview(result_arr):
+            # Temporarily show the thresholded result without committing it
+            self._display_arr = result_arr
+            self._refresh_viewer_pixmap(reset_zoom=False)
+
+        def _clear_preview():
+            # Restore the normal display
+            arr_orig = self._display_arr if self._display_arr is not None else self._raw_arr
+            if arr_orig is not None:
+                self._refresh_processing_display()
+
+        dlg = ThresholdDialog(arr, preview_fn=_preview, clear_preview_fn=_clear_preview,
+                               parent=self)
+        dlg.applied.connect(self._on_threshold_applied)
+        dlg.show()
+
+    def _on_threshold_applied(self, params: dict) -> None:
+        ops = list(self._processing.get("geometric_ops") or [])
+        ops.append({"op": "image_threshold", "params": params})
+        self._processing["geometric_ops"] = ops
+        self._refresh_processing_display()
+        mode = params.get("mode", "clip")
+        self._status_lbl.setText(f"Threshold applied ({mode} mode).")
+
+    def _on_scale_image(self) -> None:
+        """Open the Scale dialog to resample the image to new pixel dimensions."""
+        from probeflow.gui.dialogs.scale_dialog import ScaleDialog
+        arr = self._display_arr if self._display_arr is not None else self._raw_arr
+        if arr is None:
+            self._status_lbl.setText("No image loaded.")
+            return
+        dlg = ScaleDialog(
+            arr.shape,
+            scan_range_m=self._scan_range_m,
+            parent=self,
+        )
+        dlg.applied.connect(self._on_scale_image_applied)
+        dlg.exec()
+
+    def _on_scale_image_applied(self, params: dict) -> None:
+        ops = list(self._processing.get("geometric_ops") or [])
+        ops.append({"op": "scale_image", "params": params})
+        self._processing["geometric_ops"] = ops
+        self._refresh_processing_display()
+        w, h = params["new_width"], params["new_height"]
+        self._status_lbl.setText(
+            f"Scaled to {w} × {h} px (ROI coordinates may be invalid — use Reset to undo)."
+        )
+
+    def _on_shear(self) -> None:
+        """Open the Shear dialog to apply a 2-component shear correction."""
+        from probeflow.gui.dialogs.shear_dialog import ShearDialog
+        arr = self._display_arr if self._display_arr is not None else self._raw_arr
+        if arr is None:
+            self._status_lbl.setText("No image loaded.")
+            return
+        dlg = ShearDialog(parent=self)
+        dlg.applied.connect(self._on_shear_applied)
+        dlg.exec()
+
+    def _on_shear_applied(self, params: dict) -> None:
+        ops = list(self._processing.get("geometric_ops") or [])
+        ops.append({"op": "shear", "params": params})
+        self._processing["geometric_ops"] = ops
+        self._refresh_processing_display()
+        sx, sy = params.get("shear_x", 0.0), params.get("shear_y", 0.0)
+        self._status_lbl.setText(f"Shear applied (x={sx:.4f}, y={sy:.4f}).")
+
     def _on_geometric_op(self, op_name: str) -> None:
         self._transform_image_roi_set_for_display_op(op_name)
         ops = list(self._processing.get("geometric_ops") or [])

@@ -307,6 +307,41 @@ class ImageViewerToolsMixin:
         self._measurement_dock.raise_()
         self._status_lbl.setText(str(result.context.get("summary") or ""))
 
+    def _on_show_image_info(self) -> None:
+        """Open the Image Info dialog (modeless) for the current image."""
+        from probeflow.gui.dialogs.image_info import ImageInfoDialog
+        from probeflow.provenance import display_lines
+
+        # Try to load lightweight metadata for the current entry
+        metadata = None
+        try:
+            entry = self._entries[self._idx]
+            from probeflow.core.metadata import read_scan_metadata
+            metadata = read_scan_metadata(entry.path)
+        except Exception:
+            pass
+
+        # Build processing history text
+        history = getattr(self, "_processing_history", None)
+        if history is not None:
+            try:
+                hist_text = "\n".join(display_lines(history))
+            except Exception:
+                hist_text = "(Processing history unavailable)"
+        else:
+            hist_text = "(No processing history)"
+
+        arr = getattr(self, "_display_arr", None) or getattr(self, "_raw_arr", None)
+        current_shape = arr.shape if arr is not None else None
+
+        dlg = ImageInfoDialog(
+            metadata=metadata,
+            processing_history_text=hist_text,
+            current_shape=current_shape,
+            parent=self,
+        )
+        dlg.show()
+
     def _source_label(self) -> str:
         """Short label for the currently loaded file, for measurement provenance."""
         try:

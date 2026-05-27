@@ -299,6 +299,25 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
                 "angle_degrees": float(op_params.get("angle_degrees", 0.0)),
                 "order": int(op_params.get("order", 1)),
             }))
+        elif op_name == "shear":
+            _append_step(ProcessingStep("shear", {
+                "shear_x": float(op_params.get("shear_x", 0.0)),
+                "shear_y": float(op_params.get("shear_y", 0.0)),
+                "interpolation": str(op_params.get("interpolation", "bilinear")),
+            }))
+        elif op_name == "scale_image":
+            _append_step(ProcessingStep("scale_image", {
+                "new_height": int(op_params["new_height"]),
+                "new_width": int(op_params["new_width"]),
+                "order": int(op_params.get("order", 1)),
+            }))
+        elif op_name == "image_threshold":
+            thr_params: dict = {"mode": str(op_params.get("mode", "clip"))}
+            if op_params.get("lower") is not None:
+                thr_params["lower"] = float(op_params["lower"])
+            if op_params.get("upper") is not None:
+                thr_params["upper"] = float(op_params["upper"])
+            _append_step(ProcessingStep("image_threshold", thr_params))
 
     for op_spec in gui_state.get("arithmetic_ops") or []:
         try:

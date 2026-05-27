@@ -1046,6 +1046,82 @@ class ImageViewerDialog(
             self._configure_viewer_action(action, label)
             view_menu.addAction(action)
 
+        # ── Image menu ────────────────────────────────────────────────────────
+        image_menu = menu_bar.addMenu("Image")
+
+        info_action = self._viewer_action("image.info", self._on_show_image_info)
+        image_menu.addAction(info_action)
+        image_menu.addSeparator()
+
+        # Color submenu
+        color_menu = image_menu.addMenu("Color")
+        _QUICK_CMAPS = [
+            ("Gray",         "gray"),
+            ("Gray (inv.)",  "gray_r"),
+            ("Hot",          "hot"),
+            ("AFM Hot",      "afmhot"),
+            ("Viridis",      "viridis"),
+            ("Plasma",       "plasma"),
+            ("Inferno",      "inferno"),
+            ("Cividis",      "cividis"),
+        ]
+        for _cmap_label, _mpl_key in _QUICK_CMAPS:
+            _act = QAction(_cmap_label, self)
+            _act.triggered.connect(
+                lambda _c=False, k=_mpl_key, lbl=_cmap_label:
+                    self._set_viewer_colormap_by_key(k, lbl)
+            )
+            color_menu.addAction(_act)
+        color_menu.addSeparator()
+        colormap_action = self._viewer_action("image.colormap", self._on_colormap_picker)
+        color_menu.addAction(colormap_action)
+        image_menu.addSeparator()
+
+        # Adjust submenu
+        adjust_menu = image_menu.addMenu("Adjust")
+        bc_action = self._viewer_action(
+            "panel.view",
+            lambda: self._show_sidebar_tab("display"),
+        )
+        adjust_menu.addAction(bc_action)
+        threshold_action = self._viewer_action("image.threshold", self._on_threshold)
+        adjust_menu.addAction(threshold_action)
+
+        scale_action = self._viewer_action("image.scale", self._on_scale_image)
+        image_menu.addAction(scale_action)
+        image_menu.addSeparator()
+
+        # Transform submenu
+        transform_menu = image_menu.addMenu("Transform")
+        transform_menu.addAction(
+            self._viewer_action("image.flip_h",
+                                lambda: self._on_geometric_op("flip_horizontal"))
+        )
+        transform_menu.addAction(
+            self._viewer_action("image.flip_v",
+                                lambda: self._on_geometric_op("flip_vertical"))
+        )
+        transform_menu.addSeparator()
+        transform_menu.addAction(
+            self._viewer_action("image.rotate_90_cw",
+                                lambda: self._on_geometric_op("rotate_90_cw"))
+        )
+        transform_menu.addAction(
+            self._viewer_action("image.rotate_180",
+                                lambda: self._on_geometric_op("rotate_180"))
+        )
+        transform_menu.addAction(
+            self._viewer_action("image.rotate_270_cw",
+                                lambda: self._on_geometric_op("rotate_270_cw"))
+        )
+        transform_menu.addAction(
+            self._viewer_action("image.rotate_arbitrary", self._on_rotate_arbitrary)
+        )
+        transform_menu.addSeparator()
+        transform_menu.addAction(
+            self._viewer_action("image.shear", self._on_shear)
+        )
+
         processing_menu = menu_bar.addMenu("Processing")
         plane_action = self._viewer_action(
             "processing.plane_background",
@@ -1251,6 +1327,14 @@ class ImageViewerDialog(
         )
         measurements_menu.addAction(clear_lattice_grid_action)
         measurements_menu.addSeparator()
+        open_fft_action = self._viewer_action("fft.open", self._on_open_fft_viewer)
+        measurements_menu.addAction(open_fft_action)
+        periodic_filter_action = self._viewer_action(
+            "fft.periodic_filter",
+            self._on_periodic_filter,
+        )
+        measurements_menu.addAction(periodic_filter_action)
+        measurements_menu.addSeparator()
         show_measurements_action = self._viewer_action(
             "measure.show_table",
             self._show_measurements,
@@ -1261,15 +1345,6 @@ class ImageViewerDialog(
             lambda: self._show_sidebar_tab("measurements"),
         )
         measurements_menu.addAction(show_measure_tab_action)
-
-        fft_menu = menu_bar.addMenu("FFT")
-        open_fft_action = self._viewer_action("fft.open", self._on_open_fft_viewer)
-        fft_menu.addAction(open_fft_action)
-        periodic_filter_action = self._viewer_action(
-            "fft.periodic_filter",
-            self._on_periodic_filter,
-        )
-        fft_menu.addAction(periodic_filter_action)
 
         export_menu = menu_bar.addMenu("Export")
         save_png_action = self._viewer_action("export.save_png", self._on_save_png)
