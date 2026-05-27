@@ -584,6 +584,44 @@ class TestAlignRows:
         with pytest.raises(ValueError, match="method must be"):
             align_rows(np.ones((4, 4)), method="mode")
 
+    def test_linear_preserves_nan_columns(self):
+        """Regression for review numerical #7 — originally-NaN columns
+        must remain NaN after linear row fitting.  The previous code
+        relied on NaN - finite = NaN propagation which works in
+        isolation but is fragile.  After the fix the function
+        explicitly writes NaN back where the input had NaN."""
+        rng = np.random.default_rng(2)
+        arr = rng.normal(size=(8, 32)) + np.linspace(-1, 1, 32) * 3.0
+        arr[:, 5:8] = np.nan  # 3 NaN columns spanning rows
+        out = align_rows(arr, method="linear")
+        assert np.all(np.isnan(out[:, 5:8]))
+        # Other columns should be finite
+        assert np.all(np.isfinite(out[:, :5]))
+        assert np.all(np.isfinite(out[:, 8:]))
+
+    def test_linear_skips_rows_with_too_narrow_x_span(self):
+        """Rows with only 2 finite points spanning a tiny x range must
+        not produce a near-singular slope that corrupts the whole row.
+        The function now skips such rows (leaves them unchanged)."""
+        arr = np.full((4, 64), np.nan)
+        # Row 0 has 2 finite points at adjacent columns (xs differ by
+        # 2/63 ≈ 0.032, far below the 4-pixel-span guard of ~0.127).
+        arr[0, 30] = 0.0
+        arr[0, 31] = 1.0  # large noise difference, would give slope ~31
+        # Row 1 has 2 finite points spanning a comfortable range.
+        arr[1, 0] = 0.0
+        arr[1, 63] = 0.0
+        out = align_rows(arr, method="linear")
+        # Row 0 is skipped (rank-deficient guard): finite pixels stay
+        # at their input values, NaN columns remain NaN.
+        assert out[0, 30] == 0.0
+        assert out[0, 31] == 1.0
+        assert np.all(np.isnan(out[0, :30]))
+        assert np.all(np.isnan(out[0, 32:]))
+        # Row 1: the linear fit can run safely (no slope blowup).
+        assert np.isfinite(out[1, 0])
+        assert np.isfinite(out[1, 63])
+
 
 # ─── facet_level ─────────────────────────────────────────────────────────────
 

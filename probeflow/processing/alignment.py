@@ -46,14 +46,34 @@ def align_rows(arr: np.ndarray, method: str = 'median') -> np.ndarray:
                 arr[r] -= float(finite.mean())
 
     elif method == 'linear':
+        # Review numerical #7 (fixed 2026-05-28): two hardenings vs the
+        # original `polyfit` path:
+        #
+        # 1. Skip rows whose finite x-values span too narrow a range
+        #    (rank-deficient: a near-singular slope blows up under any
+        #    noise difference between the two points and corrupts the
+        #    whole row when subtracted).
+        # 2. Explicitly restore NaN at originally-NaN columns after
+        #    subtraction.  The previous behaviour relied on
+        #    ``NaN - finite = NaN`` propagation which is correct in
+        #    isolation but fragile if a future caller hot-replaces
+        #    np.polyval with a function that pre-fills NaN.
         xs = np.linspace(-1.0, 1.0, Nx)
+        # 2/Nx is a natural per-pixel x step; require at least 4 pixels
+        # of span so a 2-point fit isn't fitting nearly-coincident xs.
+        min_span = 4.0 * (2.0 / max(Nx - 1, 1))
         for r in range(Ny):
             row = arr[r]
             fin = np.isfinite(row)
             if fin.sum() < 2:
                 continue
-            coeffs = np.polyfit(xs[fin], row[fin], 1)
+            xs_fin = xs[fin]
+            if float(xs_fin.max() - xs_fin.min()) < min_span:
+                continue
+            coeffs = np.polyfit(xs_fin, row[fin], 1)
             arr[r] -= np.polyval(coeffs, xs)
+            # Defensive NaN restore (point 2 above).
+            arr[r, ~fin] = np.nan
     return arr
 
 
