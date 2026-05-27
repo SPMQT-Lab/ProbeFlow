@@ -2,7 +2,8 @@
 
 Provides an ImageJ-style histogram with two draggable lines (lower / upper
 bounds) so the user can set the threshold visually rather than by typing
-raw SI values.
+raw SI values.  An optional highlight colour overlays out-of-range pixels
+in the preview so the user can see exactly what would be clipped.
 """
 
 from __future__ import annotations
@@ -11,7 +12,7 @@ from typing import Callable
 
 import numpy as np
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QValidator
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -22,6 +23,52 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+
+# ── Scientific-notation spinbox ───────────────────────────────────────────────
+
+class _SciSpinBox(QDoubleSpinBox):
+    """QDoubleSpinBox that stores full float64 precision and displays as ``:.6g``.
+
+    Standard QDoubleSpinBox with ``setDecimals(6)`` truncates values like
+    ``-1.38e-9`` to ``0.000000``.  This subclass uses 15 internal decimal
+    places and overrides the text/validate round-trip so that scientific
+    notation values entered by the user (e.g. ``-1.38e-9``) are accepted
+    and displayed cleanly.
+    """
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setDecimals(15)
+        self.setRange(-1e15, 1e15)
+
+    # ── Display ───────────────────────────────────────────────────────────────
+
+    def textFromValue(self, value: float) -> str:  # type: ignore[override]
+        return f"{value:.6g}"
+
+    def valueFromText(self, text: str) -> float:  # type: ignore[override]
+        try:
+            return float(text.strip())
+        except ValueError:
+            return 0.0
+
+    def validate(self, text: str, pos: int):  # type: ignore[override]
+        stripped = text.strip()
+        # Empty / sign only / decimal started / exponent started → intermediate
+        if stripped in ("", "-", "+", ".", "-.", "+."):
+            return (QValidator.State.Intermediate, text, pos)
+        if stripped and stripped[-1].lower() == "e":
+            return (QValidator.State.Intermediate, text, pos)
+        if len(stripped) > 1 and stripped[-2].lower() == "e" and stripped[-1] in "+-":
+            return (QValidator.State.Intermediate, text, pos)
+        try:
+            float(stripped)
+            return (QValidator.State.Acceptable, text, pos)
+        except ValueError:
+            return (QValidator.State.Intermediate, text, pos)
+
+
+# ── Main dialog ───────────────────────────────────────────────────────────────
 
 class ThresholdDialog(QDialog):
     """Modeless dialog to apply a data threshold to the current image.
@@ -34,6 +81,13 @@ class ThresholdDialog(QDialog):
     -----
     *Clip*: values outside ``[lower, upper]`` become NaN.
     *Binarize*: pixels inside the range become 1.0, outside 0.0.
+
+    Highlight
+    ---------
+    When a highlight colour is chosen the preview shows the *original* image
+    in greyscale with out-of-range pixels tinted in that colour (ImageJ
+    style).  Pass a *preview_pixmap_fn* callback to enable this path; it
+    receives a ``QPixmap`` instead of a float array.
 
     Signals
     -------
@@ -53,11 +107,21 @@ class ThresholdDialog(QDialog):
         "sep":       "#cccccc",
     }
 
+    # Highlight colour table (name → normalised RGB triple)
+    _HIGHLIGHT_COLORS: dict[str, tuple[float, float, float]] = {
+        "Red":    (1.00, 0.15, 0.15),
+        "Blue":   (0.15, 0.45, 1.00),
+        "Green":  (0.15, 1.00, 0.25),
+        "Yellow": (1.00, 1.00, 0.15),
+        "Cyan":   (0.15, 1.00, 0.95),
+    }
+
     def __init__(
         self,
         arr: np.ndarray,
         *,
         preview_fn: "Callable | None" = None,
+        preview_pixmap_fn: "Callable | None" = None,
         clear_preview_fn: "Callable | None" = None,
         theme: dict | None = None,
         parent=None,
@@ -65,10 +129,11 @@ class ThresholdDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Threshold")
         self.setAttribute(Qt.WA_DeleteOnClose)
-        self.setMinimumWidth(400)
+        self.setMinimumWidth(420)
 
         self._arr = arr
         self._preview_fn = preview_fn
+        self._preview_pixmap_fn = preview_pixmap_fn
         self._clear_preview_fn = clear_preview_fn
         self._theme = theme or self._FALLBACK_THEME
 
@@ -87,6 +152,11 @@ class ThresholdDialog(QDialog):
         hi_init = float(np.percentile(self._finite, 99.0))
         if lo_init >= hi_init:
             lo_init, hi_init = self._vmin, self._vmax
+
+        # Internal authoritative lo / hi (spinbox values are display-only when
+        # the data range is smaller than spinbox precision allows)
+        self._lo: float = lo_init
+        self._hi: float = hi_init
 
         # ── Histogram panel ───────────────────────────────────────────────────
         from probeflow.gui.viewer.histogram import HistogramPanel
@@ -114,18 +184,13 @@ class ThresholdDialog(QDialog):
         self._hist.minReleased.connect(self._on_min_slider_released)
         self._hist.maxReleased.connect(self._on_max_slider_released)
 
-        # ── Spinboxes (precise numeric entry) ─────────────────────────────────
-        def _spin() -> QDoubleSpinBox:
-            s = QDoubleSpinBox()
-            s.setRange(-1e15, 1e15)
-            s.setDecimals(6)
-            s.setFont(QFont("Helvetica", 8))
-            return s
-
-        self._lower_spin = _spin()
+        # ── Spinboxes (precise numeric entry, scientific notation) ────────────
+        self._lower_spin = _SciSpinBox()
         self._lower_spin.setValue(lo_init)
-        self._upper_spin = _spin()
+        self._lower_spin.setFont(QFont("Helvetica", 8))
+        self._upper_spin = _SciSpinBox()
         self._upper_spin.setValue(hi_init)
+        self._upper_spin.setFont(QFont("Helvetica", 8))
 
         self._lower_spin.editingFinished.connect(self._on_spinbox_changed)
         self._upper_spin.editingFinished.connect(self._on_spinbox_changed)
@@ -154,6 +219,20 @@ class ThresholdDialog(QDialog):
         mode_row.addWidget(mode_lbl)
         mode_row.addWidget(self._mode_cb, 1)
 
+        # ── Highlight colour selector ─────────────────────────────────────────
+        hl_row = QHBoxLayout()
+        hl_lbl = QLabel("Highlight:")
+        hl_lbl.setFont(QFont("Helvetica", 8))
+        self._highlight_cb = QComboBox()
+        self._highlight_cb.setFont(QFont("Helvetica", 8))
+        self._highlight_cb.addItem("None", None)
+        for name in self._HIGHLIGHT_COLORS:
+            self._highlight_cb.addItem(name, name)
+        self._highlight_cb.setCurrentIndex(1)   # default to Red
+        self._highlight_cb.currentIndexChanged.connect(self._on_highlight_changed)
+        hl_row.addWidget(hl_lbl)
+        hl_row.addWidget(self._highlight_cb, 1)
+
         # ── Buttons ───────────────────────────────────────────────────────────
         btn_row = QHBoxLayout()
         btn_row.addStretch()
@@ -172,6 +251,7 @@ class ThresholdDialog(QDialog):
         root.addLayout(spin_row)
         root.addWidget(self._pct_lbl)
         root.addLayout(mode_row)
+        root.addLayout(hl_row)
         root.addLayout(btn_row)
 
     # ── Internal helpers ───────────────────────────────────────────────────────
@@ -185,24 +265,75 @@ class ThresholdDialog(QDialog):
         self._pct_lbl.setText(f"{pct:.1f}% of pixels in range")
 
     def _current_params(self) -> dict:
+        """Return threshold parameters using the authoritative internal floats."""
         return {
             "mode":  self._mode_cb.currentData(),
-            "lower": self._lower_spin.value(),
-            "upper": self._upper_spin.value(),
+            "lower": self._lo,
+            "upper": self._hi,
         }
 
+    # ── Preview ────────────────────────────────────────────────────────────────
+
     def _do_preview(self) -> None:
-        if self._preview_fn is None:
-            return
-        from probeflow.processing.geometry import threshold_image
-        params = self._current_params()
-        result = threshold_image(
-            self._arr,
-            lower=params.get("lower"),
-            upper=params.get("upper"),
-            mode=params.get("mode", "clip"),
-        )
-        self._preview_fn(result)
+        """Fire the live preview if the current bounds form a valid range."""
+        if self._lo >= self._hi:
+            return   # invalid or collapsed range — skip silently
+
+        highlight = self._highlight_cb.currentData()   # str colour key or None
+
+        if highlight is not None and self._preview_pixmap_fn is not None:
+            pixmap = self._build_highlight_pixmap(self._lo, self._hi, highlight)
+            self._preview_pixmap_fn(pixmap)
+        elif self._preview_fn is not None:
+            from probeflow.processing.geometry import threshold_image
+            params = self._current_params()
+            result = threshold_image(
+                self._arr,
+                lower=params["lower"],
+                upper=params["upper"],
+                mode=params["mode"],
+            )
+            self._preview_fn(result)
+
+    def _build_highlight_pixmap(
+        self, lo: float, hi: float, color: str
+    ) -> "QPixmap":  # type: ignore[name-defined]
+        """Render the original image in greyscale with out-of-range pixels tinted.
+
+        This mirrors the ImageJ threshold visualisation: pixels outside the
+        chosen bounds are overlaid with a semi-transparent highlight colour.
+        """
+        from PySide6.QtGui import QImage, QPixmap  # noqa: PLC0415
+
+        arr = self._arr
+        span = self._vmax - self._vmin
+        if span > 0:
+            norm = np.clip((arr - self._vmin) / span, 0.0, 1.0)
+        else:
+            norm = np.zeros_like(arr, dtype=np.float32)
+
+        # Start with greyscale RGBA
+        g = norm.astype(np.float32)
+        rgba = np.stack([g, g, g, np.ones_like(g, dtype=np.float32)], axis=-1)
+
+        r_c, g_c, b_c = self._HIGHLIGHT_COLORS.get(color, (1.0, 0.15, 0.15))
+
+        # Out-of-range mask (NaN pixels count as out-of-range)
+        finite_mask = np.isfinite(arr)
+        outside = (~finite_mask) | (arr < lo) | (arr > hi)
+
+        alpha = 0.65
+        rgba[outside, 0] = alpha * r_c + (1.0 - alpha) * rgba[outside, 0]
+        rgba[outside, 1] = alpha * g_c + (1.0 - alpha) * rgba[outside, 1]
+        rgba[outside, 2] = alpha * b_c + (1.0 - alpha) * rgba[outside, 2]
+
+        # Pure-NaN pixels → dark grey so they don't float as highlight colour
+        rgba[~finite_mask] = [0.12, 0.12, 0.12, 1.0]
+
+        img8 = np.ascontiguousarray(np.clip(rgba, 0.0, 1.0) * 255, dtype=np.uint8)
+        h, w = img8.shape[:2]
+        qimg = QImage(img8.data, w, h, 4 * w, QImage.Format_RGBA8888).copy()
+        return QPixmap.fromImage(qimg)
 
     def _do_apply(self) -> None:
         self.applied.emit(self._current_params())
@@ -211,7 +342,9 @@ class ThresholdDialog(QDialog):
     # ── Signal handlers ────────────────────────────────────────────────────────
 
     def _on_hist_range_released(self, lo: float, hi: float) -> None:
-        """Histogram drag-line released → sync spinboxes + auto-preview."""
+        """Histogram drag-line released → sync internal state, spinboxes, preview."""
+        self._lo = lo
+        self._hi = hi
         self._lower_spin.blockSignals(True)
         self._upper_spin.blockSignals(True)
         self._lower_spin.setValue(lo)
@@ -223,32 +356,33 @@ class ThresholdDialog(QDialog):
 
     def _on_min_slider_released(self, v: int) -> None:
         """Min slider released → sync lower spinbox + auto-preview."""
-        lo = self._hist.sl_to_si(v)  # scale=1.0 → SI == physical
+        lo = self._hist.sl_to_si(v)   # scale=1.0 → SI == physical
+        self._lo = lo
         self._lower_spin.blockSignals(True)
         self._lower_spin.setValue(lo)
         self._lower_spin.blockSignals(False)
-        hi = self._upper_spin.value()
-        self._update_pct_label(lo, hi)
+        self._update_pct_label(lo, self._hi)
         self._do_preview()
 
     def _on_max_slider_released(self, v: int) -> None:
         """Max slider released → sync upper spinbox + auto-preview."""
         hi = self._hist.sl_to_si(v)
+        self._hi = hi
         self._upper_spin.blockSignals(True)
         self._upper_spin.setValue(hi)
         self._upper_spin.blockSignals(False)
-        lo = self._lower_spin.value()
-        self._update_pct_label(lo, hi)
+        self._update_pct_label(self._lo, hi)
         self._do_preview()
 
     def _on_spinbox_changed(self) -> None:
-        """Spinbox editing finished → sync histogram drag lines + auto-preview."""
+        """Spinbox editing finished → sync internal state, histogram, preview."""
         lo = self._lower_spin.value()
         hi = self._upper_spin.value()
         if lo >= hi:
-            return  # ignore invalid range silently
+            return   # ignore invalid range silently
+        self._lo = lo
+        self._hi = hi
         self._hist.update_drag_lines(lo, hi)
-        # Sync Min/Max slider positions to match
         lo_sl = self._hist.si_to_sl(lo)
         hi_sl = self._hist.si_to_sl(hi)
         self._hist.set_slider_positions(
@@ -257,6 +391,10 @@ class ThresholdDialog(QDialog):
             self._hist.contrast_value,
         )
         self._update_pct_label(lo, hi)
+        self._do_preview()
+
+    def _on_highlight_changed(self) -> None:
+        """Highlight colour changed → re-fire preview with new colour."""
         self._do_preview()
 
     def closeEvent(self, event) -> None:

@@ -336,19 +336,23 @@ class ImageViewerProcessingExportMixin:
             return
 
         def _preview(result_arr):
-            # Temporarily show the thresholded result without committing it
+            # Temporarily show the clipped/binarised result without committing it.
             self._display_arr = result_arr
             self._refresh_viewer_pixmap(reset_zoom=False)
 
+        def _preview_pixmap(pixmap):
+            # Coloured highlight preview — set pixmap directly, bypass async loader.
+            self._zoom_lbl.setText("")
+            self._zoom_lbl.set_source(pixmap, reset_zoom=False)
+
         def _clear_preview():
-            # Restore the normal display
-            arr_orig = self._display_arr if self._display_arr is not None else self._raw_arr
-            if arr_orig is not None:
-                self._refresh_processing_display()
+            # Restore the full processing-pipeline display.
+            self._refresh_processing_display()
 
         dlg = ThresholdDialog(
             arr,
             preview_fn=_preview,
+            preview_pixmap_fn=_preview_pixmap,
             clear_preview_fn=_clear_preview,
             theme=getattr(self, "_t", None),
             parent=self,
