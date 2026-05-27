@@ -14,26 +14,43 @@ from probeflow.core.roi import ROI, ROISet
 
 
 def default_roi_sidecar_path(scan_path: str | Path) -> Path:
-    """Return the canonical GUI ROI sidecar path for *scan_path*."""
+    """Return the canonical GUI ROI sidecar path for *scan_path*.
+
+    Uses ``f"{path.stem}.rois.json"`` (which strips only the *last* extension)
+    so dotted filenames like ``A250320.191933.dat`` produce the per-scan
+    sidecar ``A250320.191933.rois.json`` instead of the date-prefix-collapsed
+    ``A250320.rois.json`` that the old ``with_suffix`` chain produced.  This
+    matters for Createc ``Aymmdd.HHmmss.dat`` files: the old path collided
+    across every scan saved on the same date and silently overwrote prior
+    ROIs.  (Review IO #2, fixed 2026-05-28.)
+    """
     path = Path(scan_path)
-    return path.with_suffix("").with_suffix(".rois.json")
+    return path.parent / f"{path.stem}.rois.json"
 
 
 def roi_sidecar_candidates(scan_path: str | Path) -> tuple[Path, ...]:
     """Return sidecars checked when a CLI command needs persisted ROIs.
 
-    The canonical GUI sidecar is first.  The provenance sidecar fallback keeps
-    older exports and hand-authored sidecars usable.
+    The canonical GUI sidecar (per-scan, dotted-filename-safe) is first.
+    The provenance sidecar fallback keeps older exports and hand-authored
+    sidecars usable.  Legacy ``with_suffix``-style paths are kept as final
+    fallbacks so any sidecars saved before review IO #2 was fixed remain
+    discoverable.
     """
     path = Path(scan_path)
-    stem_path = path.with_suffix("")
+    stem_legacy = path.with_suffix("")  # for legacy buggy paths
     candidates = (
-        stem_path.with_suffix(".rois.json"),
-        stem_path.with_suffix(".probeflow.json"),
-        stem_path.with_suffix(".provenance.json"),
+        # Canonical (correct) paths — preferred for new reads.
         path.parent / f"{path.stem}.rois.json",
         path.parent / f"{path.stem}.probeflow.json",
         path.parent / f"{path.stem}.provenance.json",
+        # Legacy paths from the pre-fix ``with_suffix`` chain — still
+        # discoverable for any sidecars written before 2026-05-28.  For
+        # non-dotted filenames these collapse to the canonical paths
+        # above and are removed by the dedup loop.
+        stem_legacy.with_suffix(".rois.json"),
+        stem_legacy.with_suffix(".probeflow.json"),
+        stem_legacy.with_suffix(".provenance.json"),
     )
     seen: set[Path] = set()
     out: list[Path] = []

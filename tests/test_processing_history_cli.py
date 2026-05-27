@@ -55,6 +55,57 @@ class TestCliRoiSidecarLookup:
         assert used == written
         assert loaded.get_by_name("site").id == roi.id
 
+    def test_dotted_filename_does_not_collapse_to_date_prefix(self, tmp_path):
+        """Regression for review IO #2 — Createc timestamp-style names.
+
+        Files saved by Createc use ``Aymmdd.HHmmss.dat``.  The old
+        ``with_suffix("").with_suffix(".rois.json")`` chain collapsed
+        ``A250320.191933.dat`` to ``A250320.rois.json`` — colliding across
+        every scan saved on the same date.
+        """
+        scan_path = tmp_path / "A250320.191933.dat"
+        scan_path.write_bytes(b"")
+
+        sidecar = default_roi_sidecar_path(scan_path)
+        # Per-scan sidecar, not date-prefix-collapsed:
+        assert sidecar.name == "A250320.191933.rois.json"
+        # And the second-on-the-same-day file gets a distinct path:
+        other = tmp_path / "A250320.191948.dat"
+        assert default_roi_sidecar_path(other).name == "A250320.191948.rois.json"
+        assert default_roi_sidecar_path(other) != sidecar
+
+    def test_dotted_filename_round_trip(self, tmp_path):
+        scan_path = tmp_path / "A250320.191933.dat"
+        scan_path.write_bytes(b"")
+        roi = ROI.new("point", {"x": 1.0, "y": 2.0}, name="defect")
+        roi_set = ROISet(image_id=str(scan_path))
+        roi_set.add(roi)
+
+        written = save_roi_set_sidecar(roi_set, scan_path)
+        assert written.name == "A250320.191933.rois.json"
+
+        loaded, used = load_roi_set_sidecar(scan_path)
+        assert used == written
+        assert loaded.get_by_name("defect").id == roi.id
+
+    def test_legacy_buggy_sidecar_still_loadable(self, tmp_path):
+        """Sidecars written before the IO #2 fix (at the wrong, collapsed
+        path) are still found via the candidate fallback list."""
+        from probeflow.io.roi_sidecar import roi_sidecar_candidates
+        scan_path = tmp_path / "A250320.191933.dat"
+        scan_path.write_bytes(b"")
+        # Manually place a sidecar at the LEGACY (buggy) path:
+        legacy = tmp_path / "A250320.rois.json"
+        roi = ROI.new("point", {"x": 1.0, "y": 2.0}, name="legacy")
+        roi_set = ROISet(image_id=str(scan_path))
+        roi_set.add(roi)
+        legacy.write_text(__import__("json").dumps(roi_set.to_dict()))
+
+        assert legacy in roi_sidecar_candidates(scan_path)
+        loaded, used = load_roi_set_sidecar(scan_path)
+        assert used == legacy
+        assert loaded.get_by_name("legacy").id == roi.id
+
     def test_load_named_roi_defaults_to_gui_rois_sidecar(self, tmp_path):
         scan_path = tmp_path / "scan.sxm"
         scan_path.write_bytes(b"")
