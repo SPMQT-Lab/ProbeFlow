@@ -149,17 +149,18 @@ def _smooth_profile_ignore_nan(profile: np.ndarray, sigma: float) -> np.ndarray:
     return smoothed
 
 
-def _eliminate_profile_jumps(profile: np.ndarray, threshold: float | None) -> np.ndarray:
-    if threshold is None:
-        return np.asarray(profile, dtype=np.float64).copy()
-    threshold = _positive_finite(threshold, "jump_threshold")
+def _eliminate_profile_jumps_directional(
+    profile: np.ndarray, threshold: float, *, reverse: bool
+) -> np.ndarray:
+    """One pass of jump elimination, scanning forward or backward."""
     p = np.asarray(profile, dtype=np.float64).copy()
     finite_idx = np.flatnonzero(np.isfinite(p))
     if finite_idx.size < 2:
         return p
+    if reverse:
+        finite_idx = finite_idx[::-1]
     offset = 0.0
-    prev_idx = int(finite_idx[0])
-    prev_value = float(p[prev_idx])
+    prev_value = float(p[int(finite_idx[0])])
     for idx in finite_idx[1:]:
         idx = int(idx)
         value = float(p[idx]) + offset
@@ -170,6 +171,39 @@ def _eliminate_profile_jumps(profile: np.ndarray, threshold: float | None) -> np
         p[idx] = value
         prev_value = value
     return p
+
+
+def _eliminate_profile_jumps(profile: np.ndarray, threshold: float | None) -> np.ndarray:
+    """Smooth large discontinuities in a 1-D profile.
+
+    Review numerical #8 (fixed 2026-05-28): the previous implementation
+    scanned forward once.  A single jump near the start of the profile
+    permanently shifted every subsequent value; symmetric noise spikes
+    were therefore not handled symmetrically and a transient at index
+    5 of a 100-element profile silently re-baselined indices 5..99.
+
+    Now run a forward pass and a backward pass and average them.  The
+    result is order-invariant: a noise spike near either end of the
+    profile contributes only half its bias to the rest of the profile,
+    while a genuine multi-terrace step (which both passes "see") is
+    still corrected near-fully.
+    """
+    if threshold is None:
+        return np.asarray(profile, dtype=np.float64).copy()
+    threshold = _positive_finite(threshold, "jump_threshold")
+    forward = _eliminate_profile_jumps_directional(profile, threshold, reverse=False)
+    backward = _eliminate_profile_jumps_directional(profile, threshold, reverse=True)
+    # Average the two passes; preserve NaN where the input was NaN.
+    f_fin = np.isfinite(forward)
+    b_fin = np.isfinite(backward)
+    out = np.full_like(forward, np.nan)
+    both = f_fin & b_fin
+    out[both] = 0.5 * (forward[both] + backward[both])
+    only_f = f_fin & ~b_fin
+    out[only_f] = forward[only_f]
+    only_b = b_fin & ~f_fin
+    out[only_b] = backward[only_b]
+    return out
 
 
 def _fit_scanline_background(
