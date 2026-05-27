@@ -192,12 +192,24 @@ def _autocorrelation_method(
         z_norm /= std
 
     ac_full = np.correlate(z_norm, z_norm, mode="full")
-    zero_lag_val = ac_full[n - 1]
-    if zero_lag_val > 0:
-        ac_full /= zero_lag_val
 
-    # Positive lags: ac_pos[i] corresponds to lag (i+1) * sample_spacing
-    ac_pos = ac_full[n:]
+    # Positive lags: ac_pos[i] corresponds to lag (i+1) * sample_spacing.
+    # Review physics #4 (fixed 2026-05-28): the previous implementation
+    # used the biased ACF (np.correlate / zero_lag_val), where amplitude
+    # decays linearly as ``(n - k) / n`` with lag — even for a perfectly
+    # periodic signal — so the peak finder biased toward the first
+    # (shortest-lag) peak and the ambiguity check at higher lags
+    # compared against artificially suppressed harmonics.  Use the
+    # unbiased estimator: divide each lag by its overlap count.
+    overlap_counts = n - np.arange(1, n, dtype=np.float64)
+    ac_pos = ac_full[n:] / overlap_counts
+
+    # Clip the trustworthy lag range so the noise-amplified far tail
+    # (where overlap is tiny) cannot dominate.  Lags where the overlap
+    # count is below n/8 are dropped from the search.
+    min_overlap = max(int(n / 8), 2)
+    ac_pos = np.where(overlap_counts >= min_overlap, ac_pos, -np.inf)
+
     lag_m = np.arange(1, n) * sample_spacing
 
     # Period bounds → restrict search range

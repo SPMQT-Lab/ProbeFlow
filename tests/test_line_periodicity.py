@@ -124,6 +124,37 @@ def test_two_competing_periods():
     assert result.quality in ("ambiguous", "good", "weak", "failed")
 
 
+def test_autocorrelation_uses_unbiased_estimator():
+    """Regression for review physics #4 — the unbiased ACF estimator
+    should make ACF peak heights at lag = k * period roughly equal
+    instead of decaying as (n-lag)/n with the biased estimator.  This
+    test asserts that for a clean periodic signal, the 1st-period and
+    2nd-period autocorrelation peaks have comparable heights (within
+    20%), which is only true with the unbiased normalisation."""
+    period = 0.256e-9
+    # Use enough length that the 2nd-period lag is well-supported.
+    s, z = _sine(period=period, length=20e-9, n=2000)
+    _, diag = estimate_line_periodicity(
+        s, z, method="autocorrelation", background="linear", smoothing="none"
+    )
+    lags = diag.autocorr_lag_m
+    ac = diag.autocorr
+    # Find the ACF value at lags closest to period and 2*period.
+    idx1 = int(np.argmin(np.abs(lags - period)))
+    idx2 = int(np.argmin(np.abs(lags - 2 * period)))
+    h1 = float(ac[idx1])
+    h2 = float(ac[idx2])
+    # With the biased estimator h2 ≈ h1 * (n-idx2)/(n-idx1) ≈ 0.9 * h1.
+    # With the unbiased estimator both heights should be within ~20%
+    # of each other (for a perfectly periodic signal h2 → h1 in
+    # the noise-free limit).
+    ratio = h2 / h1 if h1 > 0 else 0.0
+    assert 0.8 < ratio < 1.25, (
+        f"Unbiased ACF should give h2/h1 ≈ 1 for a periodic signal; "
+        f"got h1={h1:.3f}, h2={h2:.3f}, ratio={ratio:.3f}"
+    )
+
+
 # ── Diagnostic completeness checks ───────────────────────────────────────────
 
 def test_autocorrelation_diagnostic_populated():
