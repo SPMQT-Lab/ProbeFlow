@@ -370,6 +370,10 @@ class ImageViewerProcessingExportMixin:
             parent=self,
         )
         dlg.applied.connect(self._on_threshold_applied)
+        # Track so closeEvent can explicitly close the dialog before the viewer
+        # tears down, preventing queued HistogramPanel signals from firing into
+        # partially-destroyed viewer widgets.
+        self._threshold_dialog = dlg
         dlg.show()
 
     def _on_threshold_applied(self, params: dict) -> None:
@@ -509,4 +513,7 @@ class ImageViewerProcessingExportMixin:
         stm_dlg = getattr(self, "_stm_background_dialog", None)
         if stm_dlg is not None and stm_dlg.isVisible():
             stm_dlg.close()
+        thr_dlg = getattr(self, "_threshold_dialog", None)
+        if thr_dlg is not None and thr_dlg.isVisible():
+            thr_dlg.close()
         super().closeEvent(event)

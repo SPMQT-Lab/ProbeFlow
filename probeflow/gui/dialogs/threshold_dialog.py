@@ -50,7 +50,9 @@ class _SciSpinBox(QDoubleSpinBox):
         try:
             return float(text.strip())
         except ValueError:
-            return 0.0
+            # Return the current stored value so Qt treats the bad input as
+            # a no-op rather than silently snapping to 0.0.
+            return self.value()
 
     def validate(self, text: str, pos: int):  # type: ignore[override]
         stripped = text.strip()
