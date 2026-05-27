@@ -33,6 +33,16 @@ def _fmt_or_dash(value, fmt: str = "{}") -> str:
         return str(value)
 
 
+def _source_dtype_description(source_format: str) -> str:
+    """Return a human-readable description of the source file's native precision."""
+    _MAP = {
+        "nanonis_sxm": "32-bit float  (Nanonis SXM)",
+        "createc_dat": "16/32-bit integer, scaled  (Createc DAT)",
+        "rhk_sm4":     "16/32-bit integer, scaled  (RHK SM4)",
+    }
+    return _MAP.get(source_format, f"unknown  ({source_format})")
+
+
 def _selectable_label(text: str) -> QLabel:
     lbl = QLabel(text)
     lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
@@ -134,6 +144,12 @@ class ImageInfoDialog(QDialog):
                     for n, u in zip(metadata.plane_names, metadata.units or [""] * len(metadata.plane_names))
                 )
                 _row("Planes", planes_str)
+
+            # ── Data precision ────────────────────────────────────────────────
+            form.addRow(QLabel(""))   # visual spacer
+            _row("Data type",   "float64  (64-bit double precision)")
+            _row("Source file", _source_dtype_description(metadata.source_format))
+            _row("Display",     "8-bit per channel  (256 levels)")
         else:
             if current_shape:
                 _row("Current size", f"{current_shape[1]} × {current_shape[0]} px")
