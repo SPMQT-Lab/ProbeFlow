@@ -12,7 +12,7 @@ from typing import Callable
 
 import numpy as np
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QFont, QValidator
+from PySide6.QtGui import QFont, QImage, QPixmap, QValidator
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -297,14 +297,12 @@ class ThresholdDialog(QDialog):
 
     def _build_highlight_pixmap(
         self, lo: float, hi: float, color: str
-    ) -> "QPixmap":  # type: ignore[name-defined]
+    ) -> QPixmap:
         """Render the original image in greyscale with out-of-range pixels tinted.
 
         This mirrors the ImageJ threshold visualisation: pixels outside the
         chosen bounds are overlaid with a semi-transparent highlight colour.
         """
-        from PySide6.QtGui import QImage, QPixmap  # noqa: PLC0415
-
         arr = self._arr
         span = self._vmax - self._vmin
         if span > 0:
