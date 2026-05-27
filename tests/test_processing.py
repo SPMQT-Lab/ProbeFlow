@@ -1019,6 +1019,30 @@ class TestSetZeroPlane:
         finite = np.isfinite(out)
         np.testing.assert_allclose(out[finite], 0.0, atol=1e-12)
 
+    def test_large_image_is_well_conditioned(self):
+        """Regression for review image-proc #6 — the 3×3 solve must
+        stay accurate for large images.  With raw pixel-index design
+        matrix the condition number scales with Nx, so a 1024×1024
+        scan ended up at ~1e6 — fine in float64 but fragile, and
+        rank-checks with default tolerance can fail to catch
+        sub-pixel-close points.  After normalisation the condition
+        number is ~1 regardless of image size."""
+        N = 1024
+        yy, xx = np.mgrid[:N, :N]
+        arr = 0.3 * xx - 0.5 * yy + 7.0
+        out = set_zero_plane(arr, [(0, 0), (N - 1, 0), (0, N - 1)], patch=0)
+        # The plane should subtract to zero everywhere.
+        np.testing.assert_allclose(out, np.zeros_like(arr), atol=1e-8)
+
+    def test_subpixel_cluster_raises(self):
+        """Three click points clustered into a sub-pixel triangle must
+        be rejected with a clear error rather than producing an
+        unphysical plane."""
+        yy, xx = np.mgrid[:64, :64]
+        arr = xx + yy
+        with pytest.raises(ValueError, match=r"(sub-pixel|enclose too small)"):
+            set_zero_plane(arr, [(10, 10), (11, 10), (11, 11)], patch=0)
+
 
 # ─── CLI: plane-bg order extension ───────────────────────────────────────────
 

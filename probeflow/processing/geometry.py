@@ -221,16 +221,57 @@ def set_zero_plane(
     if len(samples) < 3:
         return a
 
-    A = np.array([[x, y, 1.0] for x, y, _z in samples], dtype=np.float64)
-    if np.linalg.matrix_rank(A) < 3:
+    # Review image-proc #6 (fixed 2026-05-28): normalise pixel
+    # coordinates to [-1, 1] before solving so the 3x3 design matrix is
+    # well-conditioned for large images (raw pixel indices give a
+    # condition number ~Nx, e.g. ~1024 on a 1024×1024 scan).  An
+    # additional triangle-area guard catches sub-pixel-close click
+    # pairs that would slip past the rank check.
+    sx = 2.0 / max(Nx - 1, 1)
+    sy = 2.0 / max(Ny - 1, 1)
+    cx = 0.5 * (Nx - 1)
+    cy = 0.5 * (Ny - 1)
+
+    # Normalised coords for the fit
+    A_norm = np.array(
+        [[(x - cx) * sx, (y - cy) * sy, 1.0] for x, y, _z in samples],
+        dtype=np.float64,
+    )
+    if np.linalg.matrix_rank(A_norm) < 3:
         raise ValueError(
             "set_zero_plane: the three reference points are collinear or coincident; "
             "choose points that form a non-degenerate triangle."
         )
+    # Signed triangle area in NORMALISED units — guards against three
+    # points that are technically non-collinear but cluster within a
+    # sub-pixel patch (where the rank-check passes but the resulting
+    # plane has a wildly amplified slope).
+    (xn0, yn0, _), (xn1, yn1, _), (xn2, yn2, _) = (
+        (A_norm[i, 0], A_norm[i, 1], A_norm[i, 2]) for i in range(3)
+    )
+    tri_area = 0.5 * abs(
+        (xn1 - xn0) * (yn2 - yn0) - (xn2 - xn0) * (yn1 - yn0)
+    )
+    # In normalised coords each pixel spans sx (or sy).  Require the
+    # triangle area to be at least 2*sx*sy — i.e. roughly 4 pixels² —
+    # so a 3-click triangle on a tight cluster of pixels is rejected
+    # with a clear error rather than producing an unphysical plane.
+    if tri_area < 2.0 * sx * sy:
+        raise ValueError(
+            "set_zero_plane: the three reference points enclose too small a "
+            "triangle (sub-pixel cluster).  Choose points spread across the "
+            "image."
+        )
     z = np.array([z for _x, _y, z in samples], dtype=np.float64)
-    coeffs = np.linalg.solve(A, z)
+    coeffs_norm = np.linalg.solve(A_norm, z)
+    # Evaluate the plane on the original pixel grid by mapping every
+    # pixel through the same normalisation used for the fit.
     yy, xx = np.mgrid[:Ny, :Nx]
-    plane = coeffs[0] * xx + coeffs[1] * yy + coeffs[2]
+    plane = (
+        coeffs_norm[0] * ((xx - cx) * sx)
+        + coeffs_norm[1] * ((yy - cy) * sy)
+        + coeffs_norm[2]
+    )
     out = a - plane
     out[~np.isfinite(a)] = np.nan
     return out
