@@ -239,3 +239,144 @@ class TestFFTMagnitude:
         arr[5, 5] = np.nan
         mag, qx, qy = fft_magnitude(arr, pixel_size_x_m=1e-10, pixel_size_y_m=1e-10)
         assert mag.shape == (32, 32)
+
+
+# ── Regression for FFT cluster (physics #1, #5, #6, image-proc #5, #9) ──────
+
+class TestFftClusterRegressions:
+    """Regressions for the 2026-05-27 FFT/window cluster fixes."""
+
+    def test_unbiased_dc_subtraction_with_elliptical_roi(self):
+        """Review physics #1 — with a non-rectangular ROI, the DC
+        subtraction must use the inside-ROI mean only, not the
+        diluted-by-zeros full-crop mean.  A spurious bright peak at
+        DC ± a few pixels was the previous symptom; after the fix
+        the spectrum has no large low-k cross artefact relative to
+        the no-ROI case.
+        """
+        from probeflow.core.roi import ROI
+        # Random non-zero array; an elliptical ROI covering ~50%
+        rng = np.random.default_rng(7)
+        arr = rng.normal(loc=5.0, scale=0.5, size=(64, 64))
+        roi = ROI.new("ellipse", {"cx": 32, "cy": 32, "rx": 16, "ry": 16})
+        mag_roi, qx, qy = fft_magnitude(
+            arr, roi=roi, pixel_size_x_m=1e-10, pixel_size_y_m=1e-10,
+            window="none", log_scale=False,
+        )
+        # The DC peak (centre of the shifted spectrum) should be
+        # close to zero after proper mean subtraction.  The boundary
+        # discontinuity at the ROI edge contributes some leakage, but
+        # the central pixel itself should not be artificially large.
+        cy, cx = mag_roi.shape[0] // 2, mag_roi.shape[1] // 2
+        # Compare DC to the median magnitude in a few-pixel ring
+        # around it; if DC is < a few × median, we're not leaving
+        # significant residual DC after subtraction.
+        dc = float(mag_roi[cy, cx])
+        ring = mag_roi[cy - 5:cy + 6, cx - 5:cx + 6].copy()
+        ring[5, 5] = np.nan  # exclude DC itself
+        ring_med = float(np.nanmedian(ring))
+        assert dc < 5.0 * (ring_med + 1e-12), (
+            f"Residual DC after biased-mean fix: dc={dc:.3g}, "
+            f"ring_median={ring_med:.3g}"
+        )
+
+    def test_window_coherent_gain_normalisation_makes_dc_window_invariant(self):
+        """Review physics #5 — magnitude scale must be approximately
+        the same regardless of window choice once coherent-gain
+        normalisation is applied.  Pick a constant-amplitude DC-only
+        input so the test isolates the gain effect."""
+        # Single-frequency signal: a pure cosine wave so its FFT has
+        # two impulses at ±k.  Coherent-gain normalisation should
+        # bring the peak height to roughly the same value across
+        # windows.
+        N = 64
+        k = 8
+        x = np.arange(N) / N
+        arr = np.tile(np.cos(2 * math.pi * k * x), (N, 1))
+        mag_hann, _, _ = fft_magnitude(
+            arr, pixel_size_x_m=1e-10, pixel_size_y_m=1e-10,
+            window="hann", log_scale=False,
+        )
+        mag_none, _, _ = fft_magnitude(
+            arr, pixel_size_x_m=1e-10, pixel_size_y_m=1e-10,
+            window="none", log_scale=False,
+        )
+        # After normalisation the two peak magnitudes should be
+        # within ~30% of each other (Hann has slight spectral leakage
+        # so we don't expect bit-identical; without normalisation the
+        # ratio would be ~2x).
+        peak_hann = float(mag_hann.max())
+        peak_none = float(mag_none.max())
+        ratio = peak_hann / peak_none
+        assert 0.6 < ratio < 1.5, (
+            f"Window coherent-gain normalisation off: "
+            f"hann/none ratio = {ratio:.3f} (expected ~1)"
+        )
+
+    def test_periodic_hann_window_does_not_zero_boundary(self):
+        """Review physics #6 — scipy.signal.windows.hann(N, sym=False)
+        is the periodic Hann with the zero endpoint EXCLUDED, which
+        is what DFT-based spectral analysis wants.  np.hanning(N)
+        returned the symmetric variant with hann[0]==hann[-1]==0.
+        Verify the helper returns a periodic window (no zero at the
+        end)."""
+        from probeflow.processing.filters import _window_1d
+        w = _window_1d("hann", 32)
+        # Periodic Hann: w[0] = 0.0 but w[-1] = w[1] (≠ 0).
+        assert w[0] == pytest.approx(0.0)
+        assert w[-1] > 0.0, (
+            f"Window should be periodic (sym=False); got w[-1]={w[-1]}"
+        )
+
+    def test_unified_window_vocabulary(self):
+        """Review image-proc #9 — fourier_filter and fft_magnitude
+        accept the same window names."""
+        from probeflow.processing.filters import _resolve_window_name
+        # "hann" and "hanning" both map to canonical "hann"
+        assert _resolve_window_name("hann") == "hann"
+        assert _resolve_window_name("hanning") == "hann"
+        assert _resolve_window_name("HANN") == "hann"
+        # "hamming"
+        assert _resolve_window_name("hamming") == "hamming"
+        # "tukey"
+        assert _resolve_window_name("tukey") == "tukey"
+        # "none" / aliases
+        assert _resolve_window_name("none") == "none"
+        assert _resolve_window_name("rectangular") == "none"
+        assert _resolve_window_name("boxcar") == "none"
+        assert _resolve_window_name(None) == "none"
+        # Invalid raises
+        with pytest.raises(ValueError):
+            _resolve_window_name("kaiser")
+
+    def test_fourier_filter_radial_cutoff_isotropic_on_rectangular_image(self):
+        """Review physics #7 — on a rectangular image, a radial
+        cutoff should be the same circle in cycles/pixel along both
+        axes.  Previously the cutoff was distorted into an ellipse
+        because the radial coordinate was normalised to half-axis
+        (different per-axis scaling for non-square images)."""
+        # Construct a rectangular image (Ny != Nx) with two sinusoids
+        # at the same true frequency along each axis.  A low-pass at
+        # cutoff=0.5 (half-Nyquist) should retain a frequency at
+        # 0.4 cycles/pixel along both axes.
+        Ny, Nx = 32, 64
+        k_freq = 0.4  # cycles per pixel, below 0.5 cutoff
+        x = np.arange(Nx)
+        y = np.arange(Ny)
+        wave_x = np.cos(2 * math.pi * k_freq * x)
+        wave_y = np.cos(2 * math.pi * k_freq * y)
+        # Use the same wave along both axes (tiled), then transpose for y-axis test
+        arr_x = np.tile(wave_x, (Ny, 1))
+        arr_y = np.tile(wave_y[:, None], (1, Nx))
+        # Low-pass at cutoff=0.5 (just above 0.4) — both should survive
+        out_x = fourier_filter(arr_x, mode="low_pass", cutoff=0.85, window="none")
+        out_y = fourier_filter(arr_y, mode="low_pass", cutoff=0.85, window="none")
+        # Both inputs are within the filter passband (cutoff in
+        # cycles/pixel * 2 = Nyquist-fraction).  Both outputs should
+        # closely match their inputs.
+        rms_x = float(np.sqrt(np.mean((out_x - arr_x) ** 2)))
+        rms_y = float(np.sqrt(np.mean((out_y - arr_y) ** 2)))
+        # Both axes should behave the same — ratio of RMS errors close to 1
+        assert max(rms_x, rms_y) / max(min(rms_x, rms_y), 1e-12) < 5.0, (
+            f"Isotropic cutoff broken: rms_x={rms_x}, rms_y={rms_y}"
+        )

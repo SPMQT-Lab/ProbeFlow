@@ -12,6 +12,7 @@ from scipy.ndimage import (
     laplace as _nd_laplace,
     maximum_filter,
 )
+from scipy.signal import windows as _sp_windows
 
 from ._image_utils import (
     _finite_mean,
@@ -20,6 +21,65 @@ from ._image_utils import (
     _positive_finite,
     _nan_normalized_gaussian,
 )
+
+
+# ─── Shared window helper ────────────────────────────────────────────────────
+#
+# Both ``fourier_filter`` and ``fft_magnitude`` previously accepted slightly
+# different window vocabularies ("hanning"/"hamming"/"none" vs "hann"/"tukey"/
+# "none") with subtly different implementations.  The 2026-05-27 deep review
+# (image-proc #9) flagged this as a reproducibility hazard — picking a window
+# in the FFT viewer and then applying a filter with the "same" window in the
+# pipeline silently used a different shape.  This helper centralises window
+# selection on the canonical periodic-by-default ``scipy.signal.windows.*``
+# vocabulary and accepts the old names as aliases for backward compatibility.
+#
+# Periodic vs symmetric windows: the DFT assumes the windowed segment is
+# periodic, so for spectral analysis we want ``sym=False`` (the periodic
+# variant).  ``np.hanning(N)`` and ``np.hamming(N)`` return the symmetric
+# variant with explicit zero endpoints, which subtly biases the bin-centre
+# frequency mapping and depresses two pixels at each boundary.  Review
+# physics #6 (fixed 2026-05-28).
+
+_WINDOW_ALIASES = {
+    "hann": "hann",
+    "hanning": "hann",       # numpy/legacy alias
+    "hamming": "hamming",
+    "tukey": "tukey",
+    "none": "none",
+    "rectangular": "none",
+    "boxcar": "none",
+}
+
+
+def _resolve_window_name(window: "str | None") -> str:
+    """Return the canonical (lower-case) window name, accepting old aliases."""
+    key = str(window or "none").lower()
+    if key not in _WINDOW_ALIASES:
+        raise ValueError(
+            f"window must be one of {sorted(set(_WINDOW_ALIASES))!r}; got {window!r}"
+        )
+    return _WINDOW_ALIASES[key]
+
+
+def _window_1d(name: str, n: int, *, alpha: float = 0.25) -> np.ndarray:
+    """Build a 1-D window of length *n*, periodic (sym=False) for DFT use.
+
+    *name* must be a canonical name from :data:`_WINDOW_ALIASES`'s values.
+    """
+    if n < 1:
+        return np.ones(max(n, 0), dtype=np.float64)
+    if name == "hann":
+        return np.asarray(_sp_windows.hann(n, sym=False), dtype=np.float64)
+    if name == "hamming":
+        return np.asarray(_sp_windows.hamming(n, sym=False), dtype=np.float64)
+    if name == "tukey":
+        return np.asarray(
+            _sp_windows.tukey(n, alpha=float(alpha), sym=False),
+            dtype=np.float64,
+        )
+    # "none" / rectangular
+    return np.ones(n, dtype=np.float64)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -35,8 +95,19 @@ def fourier_filter(
     """
     Apply a simple global radial 2-D FFT filter.
 
-    cutoff  — fraction of Nyquist [0, 1].
+    cutoff  — fraction of Nyquist [0, 1].  Defined in true cycles/pixel
+              (review physics #7): a value of ``1.0`` corresponds to the
+              Nyquist limit along either axis.  For rectangular images
+              the radial mask is isotropic in cycles/pixel — previously
+              it was normalised to half-axis, so a "circular" cutoff
+              acted as an ellipse in q-space on non-square scans.
     mode    — 'low_pass' | 'high_pass'
+
+    window  — 'hann' (alias 'hanning'), 'hamming', 'tukey', or 'none'
+              (review image-proc #9 unified the vocabulary with
+              :func:`fft_magnitude`).  Uses ``scipy.signal.windows``
+              with ``sym=False`` (periodic) so the DFT periodicity
+              assumption is satisfied (review physics #6).
 
     This is a coarse circular frequency cutoff, not an ImageJ-style periodic
     spot/vector filter.
@@ -45,9 +116,7 @@ def fourier_filter(
         raise ValueError("mode must be 'low_pass' or 'high_pass'")
     if not np.isfinite(cutoff) or not 0.0 <= float(cutoff) <= 1.0:
         raise ValueError("cutoff must be finite and in [0, 1]")
-    window_key = str(window or "none").lower()
-    if window_key not in {"hanning", "hamming", "none", "rectangular", "boxcar"}:
-        raise ValueError("window must be 'hanning', 'hamming', or 'none'")
+    window_canonical = _resolve_window_name(window)
 
     arr = arr.astype(np.float64, copy=True)
     Ny, Nx = arr.shape
@@ -69,27 +138,23 @@ def fourier_filter(
         out[nan_mask] = np.nan
         return out
 
-    if window_key == 'hanning':
-        wy = np.hanning(Ny)
-        wx = np.hanning(Nx)
-    elif window_key == 'hamming':
-        wy = np.hamming(Ny)
-        wx = np.hamming(Nx)
-    else:
-        wy = np.ones(Ny)
-        wx = np.ones(Nx)
-
+    wy = _window_1d(window_canonical, Ny)
+    wx = _window_1d(window_canonical, Nx)
     win2d = np.outer(wy, wx)
     windowed = centered * win2d
 
     F = np.fft.fft2(windowed)
     F = np.fft.fftshift(F)
 
-    cy, cx = Ny / 2.0, Nx / 2.0
-    yr = (np.arange(Ny) - cy) / max(cy, 1e-9)
-    xr = (np.arange(Nx) - cx) / max(cx, 1e-9)
-    Xr, Yr = np.meshgrid(xr, yr)
-    R = np.sqrt(Xr**2 + Yr**2)
+    # Radial mask in true frequency units (cycles/pixel), so the cutoff
+    # is isotropic in q-space regardless of image aspect ratio.  Review
+    # physics #7: the old normalisation R = sqrt((Δx/cx)² + (Δy/cy)²)
+    # was distorted into an ellipse on non-square scans.
+    qx = np.fft.fftshift(np.fft.fftfreq(Nx))
+    qy = np.fft.fftshift(np.fft.fftfreq(Ny))
+    Qx, Qy = np.meshgrid(qx, qy)
+    # fftfreq normalises so Nyquist = 0.5; scale so cutoff=1.0 maps to Nyquist.
+    R = np.sqrt(Qx ** 2 + Qy ** 2) / 0.5
 
     if mode == 'low_pass':
         mask = (R <= cutoff).astype(np.float64)
@@ -356,16 +421,26 @@ def fft_magnitude(
         the ROI crop, not the full image; pass the same pixel size as the parent
         scan (pixel size is invariant to cropping).
     window
-        Spatial-domain windowing applied before the DFT.
+        Spatial-domain windowing applied before the DFT.  Vocabulary
+        unified with :func:`fourier_filter` (review image-proc #9).
 
-        - ``"hann"`` — 2-D outer-product Hann window.  Recommended default:
-          suppresses the dominant wrap-around artefact at the price of a modest
-          spectral-resolution loss.
-        - ``"tukey"`` — 2-D Tukey window.  ``window_param`` controls the
-          plateau fraction (0 = Hann, 1 = rectangular).  Useful when the ROI
-          contains a clean periodic structure that fills most of the crop.
-        - ``"none"`` — no window.  Use only when the data is already periodic
-          across the boundary (rare) or when comparing raw amplitudes.
+        - ``"hann"`` (alias ``"hanning"``) — 2-D outer-product Hann window,
+          periodic (``scipy.signal.windows.hann(N, sym=False)``).
+          Recommended default: suppresses the dominant wrap-around
+          artefact at the price of a modest spectral-resolution loss.
+        - ``"hamming"`` — 2-D periodic Hamming window.
+        - ``"tukey"`` — 2-D periodic Tukey window.  ``window_param``
+          controls the plateau fraction (0 = Hann, 1 = rectangular).
+          Useful when the ROI contains a clean periodic structure that
+          fills most of the crop.
+        - ``"none"`` (alias ``"rectangular"``, ``"boxcar"``) — no window.
+          Use only when the data is already periodic across the boundary
+          (rare) or when comparing raw amplitudes.
+
+        The returned magnitude is window-corrected by the coherent gain
+        ``Ny * Nx / sum(win2d)`` (review physics #5) so switching window
+        does not change the absolute magnitude scale of a given physical
+        input.
 
     window_param
         Shape parameter for the Tukey window (ignored for other windows).
@@ -423,48 +498,64 @@ def fft_magnitude(
     Ny, Nx = crop.shape
 
     # ── 2. Replace NaN / Inf with the local mean ──────────────────────────────
+    # The mean is computed over FINITE pixels inside the ROI when one is set,
+    # so the DC-subtraction at step 4 only counts genuine signal — fixing the
+    # biased subtraction the previous implementation introduced (review
+    # physics #1, fixed 2026-05-28).
     nan_mask = ~np.isfinite(crop)
-    mean_val = float(np.nanmean(crop)) if (~nan_mask).any() else 0.0
-    crop = np.where(nan_mask, mean_val, crop)
-
-    # ── 3. Zero outside non-rectangular ROI ──────────────────────────────────
     if mask is not None:
-        crop = np.where(mask, crop, 0.0)
-
-    # ── 4. Remove mean ────────────────────────────────────────────────────────
-    crop = crop - crop.mean()
-
-    # ── 5. Apply spatial window ───────────────────────────────────────────────
-    wkey = str(window).lower()
-    if wkey not in {"hann", "tukey", "none"}:
-        raise ValueError(f"window must be 'hann', 'tukey', or 'none'; got {window!r}")
-
-    if wkey == "hann":
-        win2d = np.outer(np.hanning(Ny), np.hanning(Nx))
-    elif wkey == "tukey":
-        def _tukey_1d(n: int, alpha: float) -> np.ndarray:
-            if n < 2:
-                return np.ones(n)
-            w = np.ones(n)
-            edge = max(1, int(round(alpha / 2.0 * n)))
-            ramp = 0.5 * (1.0 - np.cos(np.linspace(0.0, math.pi, edge)))
-            w[:edge] = ramp
-            w[-edge:] = ramp[::-1]
-            return w
-        win2d = np.outer(_tukey_1d(Ny, window_param), _tukey_1d(Nx, window_param))
+        inside_finite = (~nan_mask) & mask
     else:
-        win2d = np.ones((Ny, Nx), dtype=np.float64)
+        inside_finite = ~nan_mask
+    if inside_finite.any():
+        inside_mean = float(crop[inside_finite].mean())
+    else:
+        inside_mean = 0.0
+    # Fill NaN inside the ROI with the inside-mean (so interpolation-style
+    # leakage from NaN pixels is minimised).  Outside the ROI we zero at
+    # step 3 anyway.
+    crop = np.where(nan_mask, inside_mean, crop)
 
+    # ── 3. Subtract the inside-ROI mean from inside-ROI pixels only ──────────
+    # Previously the code zeroed outside-ROI pixels first, then subtracted
+    # ``crop.mean()`` (averaged over the full crop *including* zeros) from
+    # every pixel.  That left a low-k cross/ring artefact in the magnitude
+    # spectrum because the boundary discontinuity grew with the ROI fill
+    # fraction.  Correct: subtract the genuine inside-mean from inside-ROI
+    # pixels and leave outside-ROI at zero (review physics #1).
+    if mask is not None:
+        crop = np.where(mask, crop - inside_mean, 0.0)
+    else:
+        crop = crop - inside_mean
+
+    # ── 4. Apply spatial window ───────────────────────────────────────────────
+    # Review image-proc #9: unified window vocabulary with fourier_filter
+    # via the shared ``_resolve_window_name`` / ``_window_1d`` helpers.
+    # Review physics #6: ``_window_1d`` uses scipy's periodic (sym=False)
+    # variants, which match the DFT periodicity assumption — the previous
+    # ``np.hanning`` produced symmetric zero-endpoint windows that subtly
+    # depressed two boundary pixels.
+    window_canonical = _resolve_window_name(window)
+    wy = _window_1d(window_canonical, Ny, alpha=float(window_param))
+    wx = _window_1d(window_canonical, Nx, alpha=float(window_param))
+    win2d = np.outer(wy, wx)
     windowed = crop * win2d
 
-    # ── 6. Compute FFT and shift DC to centre ─────────────────────────────────
-    # NOTE: Window reduces spectral leakage but suppresses apparent signal amplitude.
-    # Hann window power is ~0.375 (2D outer product); magnitude is NOT normalised by
-    # window correction. This is acceptable for qualitative display but not for
-    # quantitative spectral analysis. For calibrated measurements, divide by
-    # window_correction = 2.67 (approximate for Hann 2D).
+    # ── 5. Compute FFT and shift DC to centre ─────────────────────────────────
     F = np.fft.fftshift(np.fft.fft2(windowed))
     mag = np.abs(F)
+
+    # ── 6. Window coherent-gain normalisation ────────────────────────────────
+    # The window suppresses apparent signal amplitude by its coherent gain
+    # (mean window value).  Without correction, switching window between
+    # hann / tukey / none changes the *absolute* magnitude scale for the
+    # same physical input — the agent flagged this as a reproducibility
+    # hazard for downstream peak-finders that use absolute log-magnitude
+    # thresholds (review physics #5).  Multiply by N / sum(window) so the
+    # returned linear magnitude is window-corrected.
+    win_sum = float(win2d.sum())
+    if win_sum > 0:
+        mag = mag * (float(Ny * Nx) / win_sum)
 
     if log_scale:
         mag = np.log1p(mag)
@@ -804,7 +895,12 @@ def find_bragg_peaks_in_q_annulus(
     if footprint_size % 2 == 0:
         footprint_size += 1
     local_max_img = maximum_filter(score, size=footprint_size)
-    candidate_mask = annulus_mask & (score == local_max_img)
+    # Review numerical #5 (already fixed for find_bragg_peaks_in_annulus
+    # in commit f758802; same per-pixel relative tolerance applied here
+    # so plateau pixels at the local-maximum value aren't silently
+    # missed when ``score`` has been transformed through log1p, etc.).
+    eps_per_pixel = 1e-10 * np.abs(local_max_img)
+    candidate_mask = annulus_mask & (score >= local_max_img - eps_per_pixel)
 
     streak_angles: list[float] = []
     if suppress_origin_streaks:
