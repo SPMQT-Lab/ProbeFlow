@@ -975,7 +975,8 @@ class ProbeFlowWindow(QMainWindow):
         """Open (or raise) the floating Feature Counting window."""
         if self._fc_window is None:
             from probeflow.gui.features.window import FeatureCountingWindow
-            self._fc_window = FeatureCountingWindow(parent=None)
+            theme = THEMES["dark" if self._dark else "light"]
+            self._fc_window = FeatureCountingWindow(parent=None, theme=theme)
             self._fc_window.load_from_browse_needed.connect(
                 self._on_fc_load_from_browse)
         self._fc_window.show()
@@ -1327,6 +1328,8 @@ class ProbeFlowWindow(QMainWindow):
         self._browse_tools.apply_theme(t)
         self._browse_info.apply_theme(t)
         self._conv_panel.apply_theme(t)
+        if self._fc_window is not None:
+            self._fc_window.apply_theme(t)
         self._update_tab_styles()
 
     # ── About ──────────────────────────────────────────────────────────────────

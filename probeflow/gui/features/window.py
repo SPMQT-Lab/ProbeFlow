@@ -58,7 +58,7 @@ class FeatureCountingWindow(QMainWindow):
     # ProbeFlowWindow listens and calls load_entry() with the data.
     load_from_browse_needed = Signal()
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, theme: dict | None = None):
         # Qt.Window ensures this is an independent top-level window with its own
         # taskbar entry on Windows, not a child that hides behind the main window.
         super().__init__(parent, Qt.Window)
@@ -75,9 +75,14 @@ class FeatureCountingWindow(QMainWindow):
         self._preview_pool.setMaxThreadCount(1)
 
         # ── Widgets ──────────────────────────────────────────────────────────
-        t: dict = {}   # theme dict — window owns its own styling
-        self._panel   = FeaturesPanel(t)
-        self._sidebar = FeaturesSidebar(t)
+        # Theme dict matches the host main window so future theme-aware
+        # widgets in FeaturesPanel / FeaturesSidebar see the same palette as
+        # the in-tab Features view (review gui-arch #9).  Top-level styling
+        # still comes from the QApplication-level QSS so this window picks
+        # up Light/Dark mode without per-widget restyling.
+        self._theme: dict = dict(theme) if theme else {}
+        self._panel   = FeaturesPanel(self._theme)
+        self._sidebar = FeaturesSidebar(self._theme)
 
         # ── Status bar (created before controller so status_cb is valid) ─────
         self._status_bar = QStatusBar()
@@ -119,3 +124,17 @@ class FeatureCountingWindow(QMainWindow):
             f"Loaded {entry.stem}  (plane {plane_idx},  "
             f"px = {px_m * 1e12:.1f} pm)")
         self._status_bar.showMessage(f"Loaded {entry.stem}")
+
+    def apply_theme(self, theme: dict) -> None:
+        """Sync this window's theme with the host main window.
+
+        ``ProbeFlowWindow._apply_theme`` calls this so the floating Feature
+        Counting window stays in step with Light/Dark mode toggles.  Most
+        visible styling is driven by the QApplication-level stylesheet
+        which propagates automatically; this method updates the cached
+        theme dict on the panel and sidebar so any future theme-aware
+        widget added there reads current values.
+        """
+        self._theme = dict(theme) if theme else {}
+        self._panel._t = self._theme
+        self._sidebar._t = self._theme
