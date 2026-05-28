@@ -19,6 +19,8 @@ from typing import Any
 
 import numpy as np
 
+from probeflow.core.processing_state import ProcessingState
+
 
 PLANE_CANON_NAMES: tuple[str, ...] = (
     "Z forward", "Z backward", "Current forward", "Current backward",
@@ -113,12 +115,10 @@ class Scan:
 
     @staticmethod
     def _empty_processing_state():
-        from probeflow.processing.state import ProcessingState
         return ProcessingState()
 
     @staticmethod
     def _coerce_processing_state(value):
-        from probeflow.processing.state import ProcessingState
         if value is None:
             return ProcessingState()
         if isinstance(value, ProcessingState):
@@ -150,7 +150,6 @@ class Scan:
     ) -> None:
         """Append canonical processing steps to this scan."""
         from datetime import datetime
-        from probeflow.processing.state import ProcessingState
 
         state = self._coerce_processing_state(state)
         if not state.steps:
