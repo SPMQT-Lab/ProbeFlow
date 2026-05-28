@@ -9,7 +9,7 @@ import copy
 import json
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import numpy as np
 
@@ -194,6 +194,13 @@ class ImageViewerDialog(
         self._scan_format: str = ""
         self._scan_plane_names: list[str] = list(PLANE_NAMES)
         self._scan_plane_units: list[str] = ["m", "m", "A", "A"]
+        # Modeless child dialogs (FeatureFinder, ImageInfo, PairCorrelation,
+        # FeatureLattice, FFTViewer, PointFFT, LinePeriodicityPlot,
+        # Threshold, STMBackground, …) — tracked here so closeEvent can
+        # iterate-close them before the viewer tears down (review
+        # gui-arch #22).  Without this their signal handlers can fire on
+        # a partially-destroyed viewer (the f6aac4a class of bug).
+        self._modeless_children: list[Any] = []
         # Controllers initialised inside _build() after their dependent widgets are created.
         self._spec_overlay: "SpecOverlayController | None" = None
         self._zero_ctrl: "SetZeroPlaneController | None" = None
@@ -1830,10 +1837,11 @@ class ImageViewerDialog(
             parent=self,
         )
         dlg.applied.connect(self._on_stm_background_applied)
+        self._stm_background_dialog = dlg
+        self._track_modeless_child(dlg)
         dlg.show()
         dlg.raise_()
         dlg.activateWindow()
-        self._stm_background_dialog = dlg
 
     def _on_stm_background_applied(self, params: dict) -> None:
         self._push_proc_undo_snapshot()

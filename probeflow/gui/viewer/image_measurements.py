@@ -501,6 +501,9 @@ class ImageMeasurementController:
             parent=self._viewer,
         )
         self._periodicity_plot_dialog = dialog
+        track = getattr(self._viewer, "_track_modeless_child", None)
+        if callable(track):
+            track(dialog)
         dialog.show()
         dialog.raise_()
         dialog.activateWindow()
@@ -943,6 +946,9 @@ class ImageMeasurementController:
             parent=self._viewer,
         )
         self._point_fft_dialog = dialog
+        track = getattr(self._viewer, "_track_modeless_child", None)
+        if callable(track):
+            track(dialog)
         dialog.show()
         dialog.raise_()
         dialog.activateWindow()

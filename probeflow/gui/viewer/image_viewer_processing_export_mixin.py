@@ -424,10 +424,12 @@ class ImageViewerProcessingExportMixin:
             parent=self,
         )
         dlg.applied.connect(self._on_threshold_applied)
-        # Track so closeEvent can explicitly close the dialog before the viewer
-        # tears down, preventing queued HistogramPanel signals from firing into
+        # Track via the shared modeless-child registry (review gui-arch #22)
+        # so closeEvent closes the dialog before the viewer tears down,
+        # preventing queued HistogramPanel signals from firing into
         # partially-destroyed viewer widgets.
         self._threshold_dialog = dlg
+        self._track_modeless_child(dlg)
         dlg.show()
 
     def _on_threshold_applied(self, params: dict) -> None:
@@ -552,6 +554,66 @@ class ImageViewerProcessingExportMixin:
         if msg:
             self._status_lbl.setText(msg)
 
+    def _track_modeless_child(self, dlg) -> None:
+        """Register a modeless child dialog so :meth:`closeEvent` can close it.
+
+        Without this, child dialogs created via ``dlg.show()`` outlive the
+        viewer (Qt holds them as parented children until garbage collection)
+        and their queued signal handlers can fire on a partially-destroyed
+        viewer — the f6aac4a class of RuntimeError (review gui-arch #22).
+
+        The dialog is removed from the list automatically when Qt destroys
+        it (via the ``destroyed`` signal) so the list does not accumulate
+        dangling references over the viewer's lifetime.
+        """
+        if dlg is None:
+            return
+        try:
+            self._modeless_children.append(dlg)
+        except AttributeError:
+            self._modeless_children = [dlg]
+        try:
+            dlg.destroyed.connect(
+                lambda _obj=None, _dlg=dlg: self._untrack_modeless_child(_dlg)
+            )
+        except Exception:
+            pass
+
+    def _untrack_modeless_child(self, dlg) -> None:
+        children = getattr(self, "_modeless_children", None)
+        if not children:
+            return
+        try:
+            children.remove(dlg)
+        except ValueError:
+            pass
+
+    def _close_modeless_children(self) -> None:
+        """Close every tracked modeless child dialog.
+
+        Tolerates already-deleted C++ objects (``RuntimeError`` from PySide6
+        when the underlying QWidget was already deallocated) and dialogs
+        whose ``close()`` raises — we want best-effort teardown, not a
+        cascade of exceptions during viewer shutdown.
+        """
+        children = list(getattr(self, "_modeless_children", ()) or ())
+        for dlg in children:
+            if dlg is None:
+                continue
+            try:
+                visible = dlg.isVisible()
+            except RuntimeError:
+                # Underlying QWidget already destroyed.
+                continue
+            except Exception:
+                continue
+            if not visible:
+                continue
+            try:
+                dlg.close()
+            except Exception:
+                pass
+
     def closeEvent(self, event):
         try:
             cfg = load_config()
@@ -562,12 +624,9 @@ class ImageViewerProcessingExportMixin:
         # Invalidate the in-flight worker token so any pending loaded() signal
         # is dropped rather than delivered to widgets that are being torn down.
         self._token = object()
-        # Close any modeless child dialogs that hold a reference to self or to
-        # the currently displayed Scan.  Without this they outlive the viewer.
-        stm_dlg = getattr(self, "_stm_background_dialog", None)
-        if stm_dlg is not None and stm_dlg.isVisible():
-            stm_dlg.close()
-        thr_dlg = getattr(self, "_threshold_dialog", None)
-        if thr_dlg is not None and thr_dlg.isVisible():
-            thr_dlg.close()
+        # Close every modeless child dialog tracked via _track_modeless_child;
+        # they hold references to self / the currently displayed Scan and
+        # their queued signal handlers must not fire on partially-destroyed
+        # viewer widgets (review gui-arch #22).
+        self._close_modeless_children()
         super().closeEvent(event)

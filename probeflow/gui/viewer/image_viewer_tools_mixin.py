@@ -162,6 +162,7 @@ class ImageViewerToolsMixin:
             parent=self,
         )
         self._feature_finder_dlg = dlg
+        self._track_modeless_child(dlg)
         dlg.show()
 
     def _on_open_image_operations(self) -> None:
@@ -355,6 +356,7 @@ class ImageViewerToolsMixin:
             current_shape=current_shape,
             parent=self,
         )
+        self._track_modeless_child(dlg)
         dlg.show()
 
     def _source_label(self) -> str:
@@ -426,6 +428,7 @@ class ImageViewerToolsMixin:
             theme=self._t,
             parent=self,
         )
+        self._track_modeless_child(dlg)
         dlg.show()
         self._status_lbl.setText("FFT viewer opened.")
 
@@ -468,6 +471,7 @@ class ImageViewerToolsMixin:
             theme=self._t,
             parent=self,
         )
+        self._track_modeless_child(dlg)
         dlg.show()
 
     def _on_open_fft_viewer(self):
@@ -505,6 +509,7 @@ class ImageViewerToolsMixin:
             clear_preview_fn=_clear_fft_correction_preview,
             parent=self,
         )
+        self._track_modeless_child(dlg)
         dlg.show()
 
     def _on_periodic_filter(self):
