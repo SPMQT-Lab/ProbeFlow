@@ -3,18 +3,22 @@
 Architectural role
 ------------------
 ``processing`` contains array-in/array-out numerical transformations for scan
-images: flattening, row alignment, smoothing, FFT filters, edge detection, and
-similar kernels. In the intended provenance architecture, these functions are
-called by graph-aware adapters that record transformation operations from input
-``ImageNode`` IDs to output ``ImageNode`` recipes.
+images: flattening, row alignment, smoothing, FFT filters, edge detection,
+and similar kernels.  The canonical entry point is
+:func:`probeflow.processing.state.apply_processing_state` (or the
+calibration-aware variant
+:func:`probeflow.processing.state.apply_processing_state_with_calibration`),
+which walks a :class:`probeflow.processing.state.ProcessingState` of
+:class:`ProcessingStep` entries and dispatches each to its kernel here.
+The resulting steps are appended to the scan's
+:class:`probeflow.provenance.records.ProcessingHistory` for export.
 
 Boundary rules
 --------------
 Keep this package focused on operation functions, state adapters, and thin
-wrappers around existing kernels. Do not define ``ImageNode``,
-``MeasurementNode``, ``OperationNode``, ``ArtifactNode``, or ``ScanGraph`` here;
-those belong in ``probeflow.provenance``. Do not add GUI widgets, vendor
-parsers, or writer implementations here.
+wrappers around existing kernels.  Provenance dataclasses (linear history or
+the experimental ``ScanGraph``) belong in ``probeflow.provenance``.  Do not
+add GUI widgets, vendor parsers, or writer implementations here.
 """
 
 from probeflow.processing import image as _impl

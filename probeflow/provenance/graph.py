@@ -1,11 +1,34 @@
-"""Scan-owned provenance graph model.
+"""Scan-owned provenance graph model — **experimental, not production-wired**.
 
-Roadmap goal: every ProbeFlow operation that produces a new image
-(transformation) emits an :class:`ImageNode`; every operation that produces
-a measurement (atom count, lattice vector, line profile) emits a
-:class:`MeasurementNode`. Each node records its inputs (``parent_ids``),
-the operation that produced it, the parameters, the plugin/version that
-ran it, any warnings, and the result's units.
+Status (2026-05-28, review arch-backend #6)
+-------------------------------------------
+This module is fully implemented and unit-tested but has **no production
+callers** anywhere in ProbeFlow.  The canonical history model that every
+export sidecar, GUI History panel, and CLI provenance flag uses today is
+the linear :class:`probeflow.provenance.records.ProcessingHistory` /
+:class:`probeflow.provenance.records.ProvenanceStep` pair.  Import the graph
+types directly from ``probeflow.provenance.graph`` (they are intentionally
+not re-exported from the ``probeflow.provenance`` namespace) — that import
+path doubles as a signal that the graph is an alternate, experimental
+representation rather than the working model.
+
+We keep this module alive (tests, JSON round-trip, etc.) so that a future
+migration to a DAG-style provenance model can build on a working baseline.
+Any code that wires this in for real should also:
+  * remove the experimental note from this docstring,
+  * re-export the symbols from ``probeflow/provenance/__init__.py``,
+  * update the boundary-rules docstrings across the subpackages, and
+  * add a conversion path between ``ProcessingHistory`` and ``ScanGraph``
+    so existing scans / sidecars upgrade in place.
+
+Conceptual goal
+---------------
+Every ProbeFlow operation that produces a new image (transformation) emits
+an :class:`ImageNode`; every operation that produces a measurement
+(atom count, lattice vector, line profile) emits a :class:`MeasurementNode`.
+Each node records its inputs (``parent_ids``), the operation that produced
+it, the parameters, the plugin/version that ran it, any warnings, and the
+result's units.
 
 ImageNode arrays are virtual by default: ``array`` is ``None`` and the
 recipe (``parent_ids`` + ``operation`` + ``params``) is sufficient to

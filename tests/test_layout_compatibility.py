@@ -170,6 +170,31 @@ def test_repo_imports_use_canonical_package_paths():
     assert offenders == []
 
 
+def test_experimental_graph_not_re_exported_from_provenance_namespace():
+    """ScanGraph / ImageNode / MeasurementNode are kept under
+    ``probeflow.provenance.graph`` but intentionally not re-exported at
+    the top-level ``probeflow.provenance`` namespace (review arch-backend
+    #6).  The linear ProcessingHistory model in ``provenance.records`` is
+    the production source of truth; the graph is an experimental
+    alternate representation with no production callers.  Re-promoting it
+    to public API requires a deliberate choice and an in-tree consumer."""
+    import probeflow.provenance as prov
+
+    # Direct module access still works (tests rely on this).
+    from probeflow.provenance.graph import ImageNode, MeasurementNode, ScanGraph  # noqa: F401
+
+    for forbidden in ("ScanGraph", "ImageNode", "MeasurementNode",
+                      "graph_to_dict", "graph_from_dict",
+                      "materialize_image", "OpRegistry", "Node"):
+        assert forbidden not in getattr(prov, "__all__", []), (
+            f"{forbidden!r} re-appeared in probeflow.provenance.__all__. "
+            "If the graph is being wired in for real, update the "
+            "boundary-rules docstrings in core/processing/analysis/io/cli/"
+            "gui/__init__.py to match, and remove the experimental notes "
+            "from provenance/graph.py and provenance/__init__.py."
+        )
+
+
 def test_graph_node_types_are_reserved_for_provenance():
     root = Path(__file__).resolve().parents[1] / "probeflow"
     forbidden_defs = (

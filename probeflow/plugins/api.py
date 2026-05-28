@@ -1,18 +1,19 @@
-"""Minimal plugin-facing types.
+"""Minimal plugin-facing types — **experimental, not wired to any dispatch**.
 
 Architectural role
 ------------------
 Plugin operations map directly to the intended operation classes: parser,
-transformation, measurement, and writer. Future provenance-aware adapters can
-use these records to connect plugin callables to ``ScanGraph`` operation nodes
-without hard-coding each operation in both CLI and GUI layers.
+transformation, measurement, and writer.  See
+:mod:`probeflow.plugins` for the broader status note — these dataclasses
+are kept as a stable shape for a future extension layer; no in-tree
+caller dispatches through them today.
 
 Boundary rules
 --------------
-This cleanup pass intentionally keeps the API small and does not migrate
-existing processing functions into plugins. Do not define provenance node
-dataclasses or GUI/CLI behavior here; this package should describe operations
-and callables, not own their presentation.
+Keep the API small.  Do not migrate existing processing functions into
+plugins as part of unrelated cleanup, and do not define provenance
+dataclasses or GUI/CLI behaviour here; this module describes operations
+and callables, not their presentation.
 """
 
 from __future__ import annotations

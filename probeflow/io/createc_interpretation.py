@@ -2,7 +2,7 @@
 
 This is an IO-side parser helper. It may enrich metadata on core scan objects,
 but it should not define ``Scan``/``Spectrum`` models, processing kernels, GUI
-presentation, or provenance graph node dataclasses.
+presentation, or provenance records.
 """
 
 from __future__ import annotations

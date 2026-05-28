@@ -2,19 +2,23 @@
 
 Architectural role
 ------------------
-The GUI is an interface layer over the intended Session -> Probe ->
-Scan/Spectrum -> ScanGraph model. It should present parser results,
-transformations, measurements, writer artifacts, and provenance graphs without
-owning those domain concepts itself.
+The GUI is an interface layer over the production domain stack — parser
+results from :mod:`probeflow.io`, the :class:`Scan` / :class:`ROI` model
+in :mod:`probeflow.core`, the :func:`apply_processing_state` pipeline in
+:mod:`probeflow.processing`, measurement helpers in
+:mod:`probeflow.measurements`, and the
+:class:`probeflow.provenance.records.ProcessingHistory` /
+:class:`ExportRecord` machinery in :mod:`probeflow.provenance`.  GUI code
+should present those results, not own them.
 
 Future cleanup
 --------------
 The legacy main-window implementation still lives in
-``probeflow.gui._legacy`` so public imports remain stable while widgets and
-dialogs are transplanted into ``browse/``, ``viewer/``, ``convert/``,
-``features/``, ``terminal/``, and ``dialogs/``. Keep GUI code Qt-facing only:
-do not add graph node dataclasses, numerical kernels, measurement algorithms,
-readers, or writers here.
+``probeflow.gui._legacy`` so public imports remain stable while widgets
+and dialogs are transplanted into ``browse/``, ``viewer/``, ``convert/``,
+``features/``, ``terminal/``, and ``dialogs/``.  Keep GUI code Qt-facing
+only: do not add provenance dataclasses, numerical kernels, measurement
+algorithms, readers, or writers here.
 """
 
 from __future__ import annotations

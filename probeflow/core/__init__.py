@@ -2,18 +2,23 @@
 
 Architectural role
 ------------------
-This package is the intended home for the stable Session -> Probe ->
-Scan/Spectrum model. Today it owns ``Scan``, scan loading, metadata, validation,
-indexing, and source identity. Future ``Session``, abstract ``Probe``, and
-``Spectrum`` domain models should live here.
+``core`` owns the production domain model: :class:`Scan` (with its planes,
+header, scan_range_m, and attached :class:`ProcessingState`), scan loading,
+metadata, validation, indexing, source identity, and ROIs.  An eventual
+``Session`` / abstract ``Probe`` / ``Spectrum`` triple would also live here.
+
+Provenance attached to a ``Scan`` is the linear
+:class:`probeflow.provenance.records.ProcessingHistory` model — that's the
+representation every export sidecar writes and every reader parses.  An
+experimental DAG-style ``ScanGraph`` lives in ``probeflow.provenance.graph``
+(see arch-backend #6); core may eventually adopt it but does not today.
 
 Boundary rules
 --------------
-``core`` may attach a provenance graph to a probe object, but it must not define
-``ImageNode``, ``MeasurementNode``, ``OperationNode``, ``ArtifactNode``, or
-``ScanGraph``. Those graph dataclasses belong in ``probeflow.provenance``.
-Keep parser/writer implementations in ``probeflow.io`` and array algorithms in
-``probeflow.processing`` / ``probeflow.analysis``.
+Keep parser/writer implementations in ``probeflow.io`` and array algorithms
+in ``probeflow.processing`` / ``probeflow.analysis``.  Provenance records
+(linear or graph-shaped) live in ``probeflow.provenance``; ``core`` does
+not define them.
 """
 
 from probeflow.core.scan_model import PLANE_CANON_NAMES, PLANE_CANON_UNITS, Scan

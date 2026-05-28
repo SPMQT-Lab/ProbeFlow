@@ -2,20 +2,24 @@
 
 Architectural role
 ------------------
-The CLI is an orchestration layer over the intended Session -> Probe ->
-Scan/Spectrum -> ScanGraph architecture. Commands should call parser,
-transformation, measurement, writer, provenance, and future plugin-registry
-services without owning those concepts themselves.
+The CLI is an orchestration layer.  Commands compose the production
+domain stack — parsers in :mod:`probeflow.io`, the :class:`Scan` /
+:class:`ROI` model in :mod:`probeflow.core`, the
+:func:`apply_processing_state` pipeline in :mod:`probeflow.processing`,
+measurement helpers in :mod:`probeflow.measurements` /
+:mod:`probeflow.analysis`, and the
+:class:`probeflow.provenance.records.ProcessingHistory` /
+:class:`ExportRecord` sidecar machinery in :mod:`probeflow.provenance` —
+without owning those concepts themselves.
 
 Future cleanup
 --------------
 The current command implementation is parked in :mod:`probeflow.cli._legacy`
-for compatibility with existing private imports. Continue moving command
+for compatibility with existing private imports.  Continue moving command
 runners into ``commands/`` and shared processing wrappers into
-``processing_ops.py``. New commands should call canonical package APIs or the
-future plugin registry rather than reaching into GUI modules.
+``processing_ops.py``.
 
-Do not add ``Scan``/``Spectrum`` model definitions, graph node dataclasses,
+Do not add :class:`Scan` / spectrum model definitions, provenance records,
 numerical kernels, vendor parser logic, or GUI widgets here.
 """
 
