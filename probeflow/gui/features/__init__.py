@@ -1061,7 +1061,8 @@ class FeaturesSidebar(QWidget):
 
     mode_changed               = Signal(str)   # "particles"/"template"/"lattice"/"classify"
     classify_params_changed    = Signal()      # Phase-1 segmentation params changed
-    segment_requested          = Signal()      # "Apply Settings" button clicked
+    segment_requested          = Signal()      # "Apply Segmentation" — run + stay in Phase 1
+    advance_phase2_requested   = Signal()      # "Move to Phase 2" — advance using found particles
     preview_requested          = Signal()      # debounced live preview (slider drag)
     undo_label_requested       = Signal()
     load_from_browse_requested = Signal()
@@ -1294,7 +1295,7 @@ class FeaturesSidebar(QWidget):
         self._max_area_slider.valueChanged.connect(lambda _: self._schedule_preview())
         self._invert_cb.stateChanged.connect(lambda _: self._schedule_preview())
 
-        # ── Apply Segmentation button ─────────────────────────────────────────
+        # ── Phase 1 action buttons ─────────────────────────────────────────────
         lay.addWidget(_sep())
         self._segment_btn = QPushButton("Apply Segmentation")
         self._segment_btn.setFont(QFont("Helvetica", 10, QFont.Bold))
@@ -1302,10 +1303,20 @@ class FeaturesSidebar(QWidget):
         self._segment_btn.setObjectName("accentBtn")
         self._segment_btn.setCursor(QCursor(Qt.PointingHandCursor))
         self._segment_btn.setToolTip(
-            "Segment the image with the current threshold and area settings.\n"
-            "The Analysis phase opens automatically when segmentation completes.")
+            "Run segmentation with the current settings and show the contour\n"
+            "overlay — stays in Phase 1 so you can keep adjusting.")
         self._segment_btn.clicked.connect(self.segment_requested.emit)
         lay.addWidget(self._segment_btn)
+
+        self._advance_btn = QPushButton("Move to Phase 2 →")
+        self._advance_btn.setFont(QFont("Helvetica", 10))
+        self._advance_btn.setFixedHeight(30)
+        self._advance_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self._advance_btn.setToolTip(
+            "Advance to the Analysis phase using the particles found by\n"
+            "'Apply Segmentation'.  Run 'Apply Segmentation' at least once first.")
+        self._advance_btn.clicked.connect(self.advance_phase2_requested.emit)
+        lay.addWidget(self._advance_btn)
 
         lay.addStretch(1)
         return page
@@ -1334,19 +1345,6 @@ class FeaturesSidebar(QWidget):
         self._segment_count_lbl.setFont(QFont("Helvetica", 9, QFont.Bold))
         self._segment_count_lbl.setWordWrap(True)
         lay.addWidget(self._segment_count_lbl)
-
-        # Re-segment shortcut — same action as Phase 1's "Apply Segmentation"
-        # but visible here so you can change threshold and re-run without
-        # navigating back to Phase 1 first.
-        reseg_btn = QPushButton("Apply Segmentation")
-        reseg_btn.setFont(QFont("Helvetica", 9))
-        reseg_btn.setFixedHeight(28)
-        reseg_btn.setCursor(QCursor(Qt.PointingHandCursor))
-        reseg_btn.setToolTip(
-            "Re-run segmentation with the current threshold and area settings\n"
-            "without leaving the Analysis phase.")
-        reseg_btn.clicked.connect(self.segment_requested.emit)
-        lay.addWidget(reseg_btn)
 
         lay.addWidget(_sep())
 
@@ -1700,6 +1698,16 @@ class FeaturesSidebar(QWidget):
 
     def brush_size(self) -> int:
         return int(self._brush_spin.value())
+
+    def stop_mask_painting(self) -> None:
+        """Uncheck the mask-draw button, stopping paint mode if it is active.
+
+        Called automatically when advancing to Phase 2 so that mouse clicks
+        on the image land on particles (for Classify labelling) rather than
+        painting the exclusion mask.
+        """
+        if self._mask_btn.isChecked():
+            self._mask_btn.setChecked(False)   # triggers _on_mask_btn_toggled(False)
 
     def set_status(self, text: str) -> None:
         self._status_lbl.setText(text)
