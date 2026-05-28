@@ -323,6 +323,20 @@ class HistogramPanel(QWidget):
             self._high_line.set_xdata([hi_phys, hi_phys])
         self._canvas.draw_idle()
 
+    def set_threshold_mode(self, enabled: bool) -> None:
+        """Hide brightness/contrast/auto/reset controls in threshold mode.
+
+        ``ThresholdDialog`` reuses ``HistogramPanel`` to pick low/high clip
+        values; the brightness/contrast sliders and the Auto/Reset buttons
+        are not meaningful in that context.  Call ``set_threshold_mode(True)``
+        right after construction to hide them.
+        """
+        visible = not enabled
+        self._brightness_w.setVisible(visible)
+        self._contrast_w.setVisible(visible)
+        self._auto_btn.setVisible(visible)
+        self._reset_btn.setVisible(visible)
+
     # ── Slider value accessors ─────────────────────────────────────────────────
 
     @property

@@ -163,11 +163,7 @@ class ThresholdDialog(QDialog):
         # ── Histogram panel ───────────────────────────────────────────────────
         from probeflow.gui.viewer.histogram import HistogramPanel
         self._hist = HistogramPanel(parent=self)
-        # Hide controls not relevant to thresholding
-        self._hist._brightness_w.hide()
-        self._hist._contrast_w.hide()
-        self._hist._auto_btn.hide()
-        self._hist._reset_btn.hide()
+        self._hist.set_threshold_mode(True)
 
         self._hist.render(
             flat_phys=self._finite,
