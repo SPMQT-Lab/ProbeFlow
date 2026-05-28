@@ -83,6 +83,13 @@ def test_numeric_derivative_rejects_duplicate_or_non_monotonic_x_values():
             numeric_derivative(x, y)
 
 
+def test_numeric_derivative_validates_shape_and_sample_count():
+    with pytest.raises(ValueError, match="matching shape"):
+        numeric_derivative(np.array([0.0, 1.0]), np.array([0.0]))
+    with pytest.raises(ValueError, match="at least two"):
+        numeric_derivative(np.array([0.0]), np.array([0.0]))
+
+
 def test_normalize_methods_enforce_expected_scale_contracts():
     assert normalize(np.array([0.0, 3.0, -1.0, 2.0]), method="max").max() == pytest.approx(1.0)
 

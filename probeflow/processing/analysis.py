@@ -203,9 +203,14 @@ def measure_periodicity(
         {'period_m': float, 'angle_deg': float, 'strength': float}
     """
     arr = arr.astype(np.float64, copy=True)
+    if arr.ndim != 2 or arr.size == 0:
+        return []
+    finite_values = arr[np.isfinite(arr)]
+    if finite_values.size == 0:
+        return []
     Ny, Nx = arr.shape
 
-    mean_val = float(np.nanmean(arr))
+    mean_val = float(np.mean(finite_values))
     arr[~np.isfinite(arr)] = mean_val
 
     wy = np.hanning(Ny)

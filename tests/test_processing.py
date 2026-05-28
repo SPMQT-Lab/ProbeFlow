@@ -1010,6 +1010,12 @@ class TestMeasurePeriodicity:
         for p in peaks:
             assert p["strength"] >= 0.0
 
+    def test_all_nan_image_returns_no_peaks(self):
+        peaks = measure_periodicity(np.full((16, 16), np.nan),
+                                    pixel_size_x_m=1e-9,
+                                    pixel_size_y_m=1e-9)
+        assert peaks == []
+
 
 # ─── export_png ──────────────────────────────────────────────────────────────
 

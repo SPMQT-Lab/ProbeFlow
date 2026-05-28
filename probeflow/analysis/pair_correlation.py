@@ -54,6 +54,7 @@ def compute_pair_correlation(
         raise ValueError("points_xy_m must be an (N, 2) array.")
 
     n = len(pts)
+    density = float(n) / float(roi_area_m2) if (roi_area_m2 and roi_area_m2 > 0) else None
     if n < 3:
         return PairCorrelationResult(
             n_points=n,
@@ -78,6 +79,20 @@ def compute_pair_correlation(
     # Upper triangular → unique pairs.
     i_upper, j_upper = np.triu_indices(n, k=1)
     all_dists = dist_mat[i_upper, j_upper]
+    positive_dists = all_dists[np.isfinite(all_dists) & (all_dists > 0)]
+    if positive_dists.size == 0:
+        return PairCorrelationResult(
+            n_points=n,
+            density_m2=density,
+            r_m=np.array([]),
+            g_r=np.array([]),
+            nearest_neighbour_median_m=None,
+            first_peak_m=None,
+            quality="failed",
+            message="All pair distances are zero; pair correlation is undefined.",
+        )
+    if nn_median <= 0.0:
+        nn_median = float(np.median(positive_dists))
 
     # Resolve r_max and bin_width.
     if r_max_m is None:
@@ -90,6 +105,17 @@ def compute_pair_correlation(
     if bin_width_m is None:
         bin_width_m = r_max_m / 50.0
     bin_width_m = max(float(bin_width_m), r_max_m / 1000.0)
+    if r_max_m <= 0.0 or bin_width_m <= 0.0:
+        return PairCorrelationResult(
+            n_points=n,
+            density_m2=density,
+            r_m=np.array([]),
+            g_r=np.array([]),
+            nearest_neighbour_median_m=nn_median,
+            first_peak_m=None,
+            quality="failed",
+            message="Pair-correlation radius is zero; result is undefined.",
+        )
 
     edges = np.arange(0.0, r_max_m + bin_width_m, bin_width_m)
     if len(edges) < 2:
@@ -98,7 +124,6 @@ def compute_pair_correlation(
     r_centres = 0.5 * (edges[:-1] + edges[1:])
 
     # Normalise to g(r) when area is known.
-    density = float(n) / float(roi_area_m2) if (roi_area_m2 and roi_area_m2 > 0) else None
     n_pairs = n * (n - 1)           # = 2 × unique pairs (pdist convention)
 
     if roi_area_m2 and roi_area_m2 > 0:

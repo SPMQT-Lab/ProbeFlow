@@ -165,3 +165,15 @@ def test_dialog_measurement_context_preserves_bins_area_and_warning(qapp):
 def test_invalid_array_raises():
     with pytest.raises(ValueError):
         compute_pair_correlation(np.array([1.0, 2.0, 3.0]))
+
+
+def test_coincident_points_return_failed_empty_result():
+    pts = np.zeros((5, 2), dtype=float)
+
+    result = compute_pair_correlation(pts)
+
+    assert result.quality == "failed"
+    assert result.r_m.size == 0
+    assert result.g_r.size == 0
+    assert result.first_peak_m is None
+    assert "zero" in result.message.lower()

@@ -205,3 +205,26 @@ def test_point_mask_and_fft_exports_are_self_describing():
     assert summary.values["n_points"] == 2
     assert summary.values["n_mask_pixels"] == int(mask.sum())
     assert summary.context["shape_mode"] == "square"
+
+
+def test_empty_point_mask_fft_reports_no_dominant_frequency():
+    result = fft_from_point_mask(
+        np.zeros((8, 8), dtype=bool),
+        pixel_size_x=0.5,
+        pixel_size_y=0.5,
+        spatial_unit="nm",
+        n_points=0,
+    )
+    summary = point_fft_summary_result(
+        result,
+        measurement_id="M-empty",
+        source_label="scan:Z",
+        channel="Z",
+        mask_pixels=0,
+    )
+
+    assert summary.values["n_points"] == 0
+    assert summary.values["dominant_frequency"] is None
+    assert summary.values["dominant_qx"] is None
+    assert summary.values["dominant_qy"] is None
+    assert summary.values["peak_magnitude"] is None

@@ -186,6 +186,8 @@ def point_fft_summary_result(
 
 
 def _dominant_fft_peak(result: PointFFTResult) -> tuple[float | None, float | None, float | None, float | None]:
+    if result.n_points <= 0:
+        return None, None, None, None
     mag = np.asarray(result.fft_magnitude, dtype=np.float64)
     if mag.ndim != 2 or mag.size == 0:
         return None, None, None, None
@@ -197,6 +199,9 @@ def _dominant_fft_peak(result: PointFFTResult) -> tuple[float | None, float | No
     if not np.any(finite):
         return None, None, None, None
     row, col = np.unravel_index(int(np.nanargmax(work)), work.shape)
+    peak_magnitude = float(mag[row, col])
+    if peak_magnitude <= 0.0:
+        return None, None, None, None
     qx = result.qx if result.qx is not None else np.arange(mag.shape[1], dtype=float)
     qy = result.qy if result.qy is not None else np.arange(mag.shape[0], dtype=float)
     qx_value = float(qx[col])
@@ -205,7 +210,7 @@ def _dominant_fft_peak(result: PointFFTResult) -> tuple[float | None, float | No
         qx_value,
         qy_value,
         float(np.hypot(qx_value, qy_value)),
-        float(mag[row, col]),
+        peak_magnitude,
     )
 
 

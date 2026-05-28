@@ -90,6 +90,12 @@ def numeric_derivative(x: np.ndarray, y: np.ndarray) -> np.ndarray:
     """
     x = np.asarray(x, dtype=np.float64)
     y = np.asarray(y, dtype=np.float64)
+    if x.shape != y.shape:
+        raise ValueError("numeric_derivative: x and y must have matching shape.")
+    if x.ndim != 1:
+        raise ValueError("numeric_derivative: x and y must be 1-D arrays.")
+    if x.size < 2:
+        raise ValueError("numeric_derivative: at least two samples are required.")
     diffs = np.diff(x)
     if not (np.all(diffs > 0) or np.all(diffs < 0)):
         raise ValueError(
