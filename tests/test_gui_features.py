@@ -127,7 +127,13 @@ def test_features_window_segmentation_change_clears_labels(qapp, monkeypatch):
     win._features_panel._edit_sample_label(parts[0])
 
     assert win._features_panel.has_sample_labels() is True
-    win._features_sidebar._cls_min_area_spin.setValue(2.0)
+    # The classify-segmentation sidebar shares its widgets with Particles
+    # mode after the UniMR-style refactor, so the "min area" knob is now the
+    # integer-valued `_min_area_slider` (units of 0.001% of image area), not
+    # the legacy `_cls_min_area_spin` nm² double-spin.  Bump from the default
+    # (1) to 50 so `classify_params_changed` fires with a clearly different
+    # value and the controller clears sample labels.
+    win._features_sidebar._min_area_slider.setValue(50)
 
     assert win._features_panel.has_sample_labels() is False
     assert "cleared" in win._features_sidebar._status_lbl.text().lower()
