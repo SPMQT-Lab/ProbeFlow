@@ -119,10 +119,6 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
             ),
         }))
 
-    align = gui_state.get("align_rows")
-    if align:
-        _append_step(ProcessingStep("align_rows", {"method": str(align)}))
-
     plane_bg = gui_state.get("plane_bg")
     if isinstance(plane_bg, dict):
         _append_step(ProcessingStep("plane_bg", {
@@ -146,6 +142,14 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
             params["fit_roi_id"] = str(stm_bg["fit_roi_id"])
             params["applied_to"] = "whole_image"
         _append_step(ProcessingStep("stm_background", params))
+
+    # Review image-proc #3: row alignment must not precede background fitting.
+    # Aligning rows first removes row medians/means that the background model
+    # needs in order to fit the original surface, especially when features
+    # occupy only some scan lines.
+    align = gui_state.get("align_rows")
+    if align:
+        _append_step(ProcessingStep("align_rows", {"method": str(align)}))
 
     smooth_sigma = gui_state.get("smooth_sigma")
     if smooth_sigma:

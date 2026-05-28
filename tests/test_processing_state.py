@@ -433,7 +433,7 @@ def test_gui_conversion_emits_ordered_processing_steps_and_parameters():
 
     state = processing_state_from_gui(gui)
 
-    assert _ops(state) == ["remove_bad_lines", "align_rows", "stm_background", "smooth"]
+    assert _ops(state) == ["remove_bad_lines", "stm_background", "align_rows", "smooth"]
     assert state.steps[0].params == {
         "threshold_mad": 7.5,
         "method": "step",
@@ -441,8 +441,7 @@ def test_gui_conversion_emits_ordered_processing_steps_and_parameters():
         "min_segment_length_px": 8,
         "max_adjacent_bad_lines": 2,
     }
-    assert state.steps[1].params == {"method": "mean"}
-    assert state.steps[2].params == {
+    assert state.steps[1].params == {
         "fit_region": "active_roi",
         "line_statistic": "mean",
         "model": "poly2",
@@ -453,6 +452,7 @@ def test_gui_conversion_emits_ordered_processing_steps_and_parameters():
         "fit_roi_id": "terrace-1",
         "applied_to": "whole_image",
     }
+    assert state.steps[2].params == {"method": "mean"}
     assert state.steps[3].params == {"sigma_px": 1.5}
 
 
@@ -550,7 +550,7 @@ def test_gui_conversion_roi_scope_wraps_local_steps_and_keeps_global_steps_globa
         },
     )
 
-    assert _ops(state) == ["align_rows", "stm_background", "roi", "roi"]
+    assert _ops(state) == ["stm_background", "align_rows", "roi", "roi"]
     local_steps = [step.params["step"] for step in state.steps if step.op == "roi"]
     assert [step["op"] for step in local_steps] == ["smooth", "fft_soft_border"]
     assert [step.params["roi_id"] for step in state.steps if step.op == "roi"] == [
@@ -560,6 +560,34 @@ def test_gui_conversion_roi_scope_wraps_local_steps_and_keeps_global_steps_globa
 
     with pytest.warns(UserWarning, match="ROI-scoped processing"):
         assert processing_state_from_gui({"processing_scope": "roi", "smooth_sigma": 1.0}).steps == []
+
+
+def test_gui_conversion_runs_background_before_row_alignment():
+    from probeflow.processing import align_rows, subtract_background
+
+    yy, xx = np.mgrid[:64, :64]
+    arr = 5.0 + 0.03 * xx + 0.2 * yy
+    arr = arr.astype(np.float64)
+    arr[24:40, 24:40] += 4.0
+
+    state = processing_state_from_gui({
+        "align_rows": "median",
+        "plane_bg": {"order": 1},
+    })
+
+    result = apply_processing_state(arr, state)
+    background_first = align_rows(
+        subtract_background(arr, order=1),
+        method="median",
+    )
+    legacy_align_first = subtract_background(
+        align_rows(arr, method="median"),
+        order=1,
+    )
+
+    assert _ops(state) == ["plane_bg", "align_rows"]
+    np.testing.assert_allclose(result, background_first, atol=1e-12)
+    assert np.nanmax(np.abs(result - legacy_align_first)) > 0.1
 
 
 def test_gui_preview_export_and_scan_paths_share_processing_state_results():

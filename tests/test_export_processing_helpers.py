@@ -354,11 +354,11 @@ class TestApplyProcessingStateMultipleOps:
             },
         })
         assert len(scan.processing_history) == 2
-        assert scan.processing_history[0]["op"] == "align_rows"
-        assert scan.processing_history[1]["op"] == "stm_background"
+        assert scan.processing_history[0]["op"] == "stm_background"
+        assert scan.processing_history[1]["op"] == "align_rows"
         assert [step.op for step in scan.processing_state.steps] == [
-            "align_rows",
             "stm_background",
+            "align_rows",
         ]
 
     def test_three_ops_in_correct_pipeline_order(self):
