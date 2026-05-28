@@ -13,6 +13,7 @@ ProbeFlowItem
 from __future__ import annotations
 
 import os
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
@@ -92,17 +93,23 @@ def index_folder(
     if not folder.is_dir():
         raise ValueError(f"Path is not a directory: {folder}")
 
-    items: list[ProbeFlowItem] = []
-
-    for path in _iter_files(folder, recursive=recursive):
+    def _process(path: Path) -> "Optional[ProbeFlowItem]":
         ft = sniff_file_type(path)
         if ft not in _FORMAT_MAP:
-            continue
+            return None
         source_format, item_type = _FORMAT_MAP[ft]
         item = _build_item(path, source_format, item_type)
         if item.load_error is not None and not include_errors:
-            continue
-        items.append(item)
+            return None
+        return item
+
+    all_paths = list(_iter_files(folder, recursive=recursive))
+    if not all_paths:
+        return []
+
+    n_workers = min(32, len(all_paths))
+    with ThreadPoolExecutor(max_workers=n_workers) as executor:
+        items = [it for it in executor.map(_process, all_paths) if it is not None]
 
     items.sort(key=lambda it: (it.acquisition_datetime or "", it.path.name))
     return items
@@ -347,14 +354,13 @@ def index_folder_shallow(
     if not folder.is_dir():
         raise ValueError(f"Path is not a directory: {folder}")
 
-    files: list[ProbeFlowItem] = []
-    subfolders: list[SubfolderEntry] = []
-
     try:
         entries = sorted(folder.iterdir())
     except (OSError, PermissionError):
         entries = []
 
+    file_paths: list[Path] = []
+    subdir_paths: list[Path] = []
     for p in entries:
         if p.name.startswith(".") or p.name in _SKIP_DIRS:
             continue
@@ -364,16 +370,29 @@ def index_folder_shallow(
         except OSError:
             continue
         if is_file:
-            ft = sniff_file_type(p)
-            if ft not in _FORMAT_MAP:
-                continue
-            source_format, item_type = _FORMAT_MAP[ft]
-            item = _build_item(p, source_format, item_type)
-            if item.load_error is not None and not include_errors:
-                continue
-            files.append(item)
+            file_paths.append(p)
         elif is_dir:
-            subfolders.append(_peek_subfolder(p))
+            subdir_paths.append(p)
+
+    def _process_file(p: Path) -> "Optional[ProbeFlowItem]":
+        ft = sniff_file_type(p)
+        if ft not in _FORMAT_MAP:
+            return None
+        source_format, item_type = _FORMAT_MAP[ft]
+        item = _build_item(p, source_format, item_type)
+        if item.load_error is not None and not include_errors:
+            return None
+        return item
+
+    n_workers = min(32, max(1, len(file_paths) + len(subdir_paths)))
+    with ThreadPoolExecutor(max_workers=n_workers) as executor:
+        # Submit file processing and subfolder peeking concurrently so both
+        # classes of I/O-bound work run in parallel (helpful on network drives).
+        file_futs    = [executor.submit(_process_file, p)   for p in file_paths]
+        subfolder_futs = [executor.submit(_peek_subfolder, p) for p in subdir_paths]
+
+    files     = [it for f in file_futs    for it in (f.result(),) if it is not None]
+    subfolders = [f.result() for f in subfolder_futs]
 
     files.sort(key=lambda it: (it.acquisition_datetime or "", it.path.name))
     subfolders.sort(key=lambda s: s.name.lower())

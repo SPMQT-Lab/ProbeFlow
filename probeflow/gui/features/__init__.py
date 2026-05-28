@@ -24,7 +24,7 @@ import numpy as np
 import os as _os
 _os.environ.setdefault("QT_API", "pyside6")
 
-from PySide6.QtCore import QObject, QPointF, QRectF, QRunnable, Qt, Signal, Slot
+from PySide6.QtCore import QObject, QPointF, QRectF, QRunnable, Qt, QTimer, Signal, Slot
 from PySide6.QtGui import (
     QBrush, QColor, QCursor, QFont, QImage, QPainterPath, QPen, QPixmap,
 )
@@ -1062,6 +1062,7 @@ class FeaturesSidebar(QWidget):
     mode_changed               = Signal(str)   # "particles"/"template"/"lattice"/"classify"
     classify_params_changed    = Signal()      # Phase-1 segmentation params changed
     segment_requested          = Signal()      # "Apply Settings" button clicked
+    preview_requested          = Signal()      # debounced live preview (slider drag)
     undo_label_requested       = Signal()
     load_from_browse_requested = Signal()
     run_requested              = Signal(str)   # mode
@@ -1276,9 +1277,26 @@ class FeaturesSidebar(QWidget):
         self._clear_mask_btn.clicked.connect(self.mask_clear_requested.emit)
         lay.addWidget(self._clear_mask_btn)
 
-        # ── Apply Settings button ──────────────────────────────────────────────
+        # ── Live-preview debounce timer ────────────────────────────────────────
+        # Fires preview_requested 300 ms after the last slider/checkbox change.
+        # Using a single-shot QTimer means rapid dragging only triggers one
+        # background segmentation, not one per slider tick.
+        self._preview_timer = QTimer(self)
+        self._preview_timer.setSingleShot(True)
+        self._preview_timer.setInterval(300)
+        self._preview_timer.timeout.connect(self.preview_requested.emit)
+
+        # Hook sliders and invert checkbox to the debounce timer.
+        # (classify_params_changed connections are kept separately so they still
+        # clear sample labels when segmentation params change.)
+        self._thr_slider.valueChanged.connect(lambda _: self._schedule_preview())
+        self._min_area_slider.valueChanged.connect(lambda _: self._schedule_preview())
+        self._max_area_slider.valueChanged.connect(lambda _: self._schedule_preview())
+        self._invert_cb.stateChanged.connect(lambda _: self._schedule_preview())
+
+        # ── Apply Segmentation button ─────────────────────────────────────────
         lay.addWidget(_sep())
-        self._segment_btn = QPushButton("Apply Settings")
+        self._segment_btn = QPushButton("Apply Segmentation")
         self._segment_btn.setFont(QFont("Helvetica", 10, QFont.Bold))
         self._segment_btn.setFixedHeight(34)
         self._segment_btn.setObjectName("accentBtn")
@@ -1316,6 +1334,19 @@ class FeaturesSidebar(QWidget):
         self._segment_count_lbl.setFont(QFont("Helvetica", 9, QFont.Bold))
         self._segment_count_lbl.setWordWrap(True)
         lay.addWidget(self._segment_count_lbl)
+
+        # Re-segment shortcut — same action as Phase 1's "Apply Segmentation"
+        # but visible here so you can change threshold and re-run without
+        # navigating back to Phase 1 first.
+        reseg_btn = QPushButton("Apply Segmentation")
+        reseg_btn.setFont(QFont("Helvetica", 9))
+        reseg_btn.setFixedHeight(28)
+        reseg_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        reseg_btn.setToolTip(
+            "Re-run segmentation with the current threshold and area settings\n"
+            "without leaving the Analysis phase.")
+        reseg_btn.clicked.connect(self.segment_requested.emit)
+        lay.addWidget(reseg_btn)
 
         lay.addWidget(_sep())
 
@@ -1579,6 +1610,12 @@ class FeaturesSidebar(QWidget):
 
     def current_mode(self) -> str:
         return self._current_mode()
+
+    # ── Live-preview scheduling ───────────────────────────────────────────────
+
+    def _schedule_preview(self) -> None:
+        """Restart the debounce timer — emits preview_requested after 300 ms idle."""
+        self._preview_timer.start()   # calling start() on a running timer resets it
 
     # ── Slider value display handlers ─────────────────────────────────────────
 

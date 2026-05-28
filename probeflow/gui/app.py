@@ -103,7 +103,8 @@ class ProbeFlowWindow(QMainWindow):
     RIGHT_INSPECTOR_MIN_W = 300
     CENTRAL_BROWSER_MIN_W = 500
 
-    def __init__(self, *, open_survey: Optional[Path] = None):
+    def __init__(self, *, open_survey: Optional[Path] = None,
+                 browse_folder: Optional[Path] = None):
         super().__init__()
         self.setWindowTitle("ProbeFlow")
         self.setMinimumSize(1100, 720)
@@ -117,6 +118,7 @@ class ProbeFlowWindow(QMainWindow):
         self._running  = False
         self._n_loaded = 0
         self._pending_survey = Path(open_survey) if open_survey else None
+        self._pending_browse = Path(browse_folder) if browse_folder else None
         # Spec → image mapping (populated by user via "Map spectra…" dialogs;
         # kept empty by default so we never auto-attach spectra to the wrong
         # image based on coordinate guesses alone). Keys are spec stems,
@@ -135,6 +137,15 @@ class ProbeFlowWindow(QMainWindow):
         self._build_ui()
         self._apply_theme()
         self._restore_desktop_layout()
+
+        # If launched with --browse (e.g. via the Restart action), open that
+        # folder immediately so the user lands back where they were.
+        if self._pending_browse is not None:
+            try:
+                self._grid.set_root(self._pending_browse)
+                self._update_browse_status()
+            except Exception:
+                pass   # non-fatal: bad path just opens to an empty Browse
 
         # If launched with --open-survey, jump straight into Survey mode with
         # the manifest pre-loaded. Wire the panel's log_message into status bar.
@@ -238,7 +249,14 @@ class ProbeFlowWindow(QMainWindow):
         # each spawned _FeaturesWorker now owns its own signals; we
         # connect ``worker.signals.finished`` at spawn time so concurrent
         # runs cannot cross-talk via a shared signal instance.
-        self._features_pool    = QThreadPool.globalInstance()
+        self._features_pool            = QThreadPool.globalInstance()
+        self._features_preview_gen     = 0   # stale-result guard for live preview
+
+        # Dedicated 1-thread pool for live slider previews (see window.py for
+        # full rationale). Keeps stale preview workers from piling up.
+        self._features_preview_pool = QThreadPool()
+        self._features_preview_pool.setMaxThreadCount(1)
+        self._pending_features_preview_worker = None  # type: _FeaturesWorker | None
 
         # Floating Feature Counting window (lazy-created on first open)
         self._fc_window = None
@@ -290,6 +308,8 @@ class ProbeFlowWindow(QMainWindow):
             self._on_classify_params_changed)
         self._features_sidebar.segment_requested.connect(
             self._on_features_segment_requested)
+        self._features_sidebar.preview_requested.connect(
+            self._on_features_preview)
         self._features_sidebar.undo_label_requested.connect(
             self._features_panel.undo_last_label)
         self._features_sidebar.mode_changed.connect(
@@ -357,6 +377,14 @@ class ProbeFlowWindow(QMainWindow):
         export_processed_action = QAction("Export processed image...", self)
         export_processed_action.setEnabled(False)
         file_menu.addAction(export_processed_action)
+        file_menu.addSeparator()
+        restart_action = QAction("Restart ProbeFlow", self)
+        restart_action.setShortcut(QKeySequence("Ctrl+Shift+R"))
+        restart_action.setToolTip(
+            "Relaunch ProbeFlow — picks up any code changes immediately "
+            "(useful during development with an editable pip install)")
+        restart_action.triggered.connect(self._restart_app)
+        file_menu.addAction(restart_action)
         file_menu.addSeparator()
         quit_action = QAction("Quit", self)
         quit_action.setShortcut(QKeySequence.Quit)
@@ -1201,6 +1229,72 @@ class ProbeFlowWindow(QMainWindow):
         Ny, Nx = arr.shape
         return (pct / 100.0) * float(Nx) * float(Ny) * px_x_m * px_y_m * 1e18
 
+    # ── Live preview (slider drag) ────────────────────────────────────────────
+
+    def _on_features_preview(self) -> None:
+        """Live preview — runs segmentation silently while sliders are dragged.
+
+        Mirrors _on_features_segment_requested but does NOT advance the sidebar
+        to Phase 2 and does NOT update the particle-count label.
+
+        Performance strategy: step-slice the array to ≤512 px on its longest
+        axis (preserves physical nm² coordinates), use a dedicated 1-thread pool,
+        and cancel the pending-but-not-started worker via ``tryTake`` on every
+        new tick so only the most recent slider position is ever processed.
+        """
+        arr = self._features_panel.get_analysis_array()
+        if arr is None:
+            return
+        px_m = self._features_panel.current_pixel_size()
+        px_x_m, px_y_m = self._features_panel.current_pixel_sizes()
+        if px_m <= 0:
+            return
+        params = self._features_sidebar.particles_params()
+        min_pct = params.pop("min_area_pct", 0.001)
+        max_pct = params.pop("max_area_pct", 0.0)
+        # Area thresholds are in nm² — scale-invariant, safe to reuse on
+        # the downscaled array (physical area is preserved by step-slicing).
+        params["min_area_nm2"] = self._features_pct_to_nm2(
+            min_pct, arr, px_x_m, px_y_m)
+        params["max_area_nm2"] = (
+            self._features_pct_to_nm2(max_pct, arr, px_x_m, px_y_m)
+            if max_pct > 0 else None
+        )
+
+        # Downscale: step-slice so the longest axis is ≤ 512 px.
+        step = max(1, max(arr.shape) // 512)
+        if step > 1:
+            arr_prev  = arr[::step, ::step]
+            px_x_prev = px_x_m * step
+            px_y_prev = px_y_m * step
+            px_prev   = float(np.sqrt(px_x_prev * px_y_prev))
+        else:
+            arr_prev, px_x_prev, px_y_prev, px_prev = arr, px_x_m, px_y_m, px_m
+
+        self._features_preview_gen += 1
+        gen = self._features_preview_gen
+
+        # Cancel the pending (not-yet-started) preview worker if present.
+        if self._pending_features_preview_worker is not None:
+            self._features_preview_pool.tryTake(self._pending_features_preview_worker)
+            self._pending_features_preview_worker = None
+
+        worker = _FeaturesWorker("particles", arr_prev, px_prev, px_x_prev, px_y_prev, params)
+        worker.signals.finished.connect(
+            lambda mode, result, error, g=gen:
+                self._on_features_preview_finished(mode, result, error, g))
+        self._pending_features_preview_worker = worker
+        self._features_preview_pool.start(worker)
+
+    def _on_features_preview_finished(self, mode: str, result, error: str,
+                                      gen: int) -> None:
+        """Handle live-preview result — discard if a newer preview has started."""
+        if gen != self._features_preview_gen or mode != "particles" or error:
+            return
+        self._features_panel.set_particles(result)
+        self._features_sidebar.set_status(
+            f"Preview: {len(result)} particle(s) — press 'Apply Settings' to confirm.")
+
     def _on_features_segment_requested(self) -> None:
         """Phase 1 — segment particles with current threshold + exclusion mask.
 
@@ -1527,6 +1621,32 @@ class ProbeFlowWindow(QMainWindow):
         dlg = AboutDialog(t, self)
         dlg.exec()
 
+    # ── Restart ────────────────────────────────────────────────────────────────
+    def _restart_app(self) -> None:
+        """Relaunch ProbeFlow in a fresh process and close this window.
+
+        Because ProbeFlow is installed with ``pip install -e .``, the new
+        process picks up any source-file edits you made since the last launch —
+        no reinstall step needed.  The new window appears before this one
+        closes so there is no gap in the taskbar.
+
+        The current folder is passed via ``--browse`` so you land back where
+        you were automatically.
+        """
+        import subprocess
+
+        # Always use ``python -m probeflow gui`` rather than sys.argv so this
+        # works identically whether ProbeFlow was started as ``probeflow gui``,
+        # ``python -m probeflow gui``, or from an IDE.
+        args = [sys.executable, "-m", "probeflow", "gui"]
+
+        cur = self._grid.current_dir()
+        if cur:
+            args += ["--browse", str(cur)]
+
+        subprocess.Popen(args)
+        QApplication.instance().quit()
+
     # ── Close ──────────────────────────────────────────────────────────────────
     def closeEvent(self, event):
         cfg = load_config()
@@ -1550,10 +1670,11 @@ class ProbeFlowWindow(QMainWindow):
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────
-def main(*, open_survey: "Optional[Path]" = None) -> None:
+def main(*, open_survey: "Optional[Path]" = None,
+         browse_folder: "Optional[Path]" = None) -> None:
     app    = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("ProbeFlow")
-    window = ProbeFlowWindow(open_survey=open_survey)
+    window = ProbeFlowWindow(open_survey=open_survey, browse_folder=browse_folder)
     if getattr(window, "_show_maximized_on_start", False):
         window.showMaximized()
     else:

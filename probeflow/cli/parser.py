@@ -527,6 +527,9 @@ def _build_parser() -> argparse.ArgumentParser:
     gui = sub.add_parser("gui", help="Launch the ProbeFlow graphical interface")
     gui.add_argument("--open-survey", type=Path, default=None, metavar="SURVEY_JSON",
                      help="Pre-load a ScanFlow survey manifest into Survey mode")
+    gui.add_argument("--browse", type=Path, default=None, metavar="FOLDER",
+                     help="Open this folder in the Browse tab on startup "
+                          "(used internally by the Restart action)")
     gui.set_defaults(func=_cmd_gui)
 
     # ── any-in/any-out convert ──
