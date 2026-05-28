@@ -187,24 +187,24 @@ def feature_points_to_image(
         Optional Gaussian smoothing applied after dilation.
     value
         Pixel value written inside each feature disk.
+
+    The inner disk-rasterization loop is shared with
+    :func:`probeflow.measurements.fft_points.points_to_mask` via
+    :func:`probeflow.measurements.raster.paint_point` (review
+    arch-backend #10).
     """
+    from probeflow.measurements.raster import paint_point
+
     ny, nx = int(shape[0]), int(shape[1])
     out = np.zeros((ny, nx), dtype=np.float64)
-    r = float(radius_px)
     v = float(value)
+    r = float(radius_px)
 
     for pt in points:
-        cx = int(round(pt.x_px))
-        cy = int(round(pt.y_px))
-        if r <= 0.0:
-            if 0 <= cy < ny and 0 <= cx < nx:
-                out[cy, cx] = v
-            continue
-        r_int = int(r) + 1
-        for row in range(max(0, cy - r_int), min(ny, cy + r_int + 1)):
-            for col in range(max(0, cx - r_int), min(nx, cx + r_int + 1)):
-                if (row - cy) ** 2 + (col - cx) ** 2 <= r ** 2:
-                    out[row, col] = v
+        paint_point(
+            out, pt.x_px, pt.y_px,
+            radius_px=r, shape_mode="disk", value=v,
+        )
 
     sigma = float(smoothing_sigma_px)
     if sigma > 0.0:

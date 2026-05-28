@@ -30,24 +30,26 @@ def points_to_mask(
     radius_px: int = 0,
     shape_mode: str = "disk",
 ) -> np.ndarray:
-    """Rasterize feature points to a binary mask, optionally dilated."""
+    """Rasterize feature points to a binary mask, optionally dilated.
+
+    Inner rasterization loop is shared with
+    :func:`probeflow.analysis.feature_finder.feature_points_to_image`
+    via :func:`probeflow.measurements.raster.paint_point`
+    (review arch-backend #10).
+    """
+    from probeflow.measurements.raster import paint_point
     mask = np.zeros(shape, dtype=bool)
-    radius = int(max(0, radius_px))
     mode = (shape_mode or "disk").strip().lower()
-    for point in points:
-        x_px, y_px = _point_xy(point)
-        cx = int(round(x_px))
-        cy = int(round(y_px))
-        if radius == 0:
-            if 0 <= cy < shape[0] and 0 <= cx < shape[1]:
-                mask[cy, cx] = True
-            continue
-        for row in range(max(0, cy - radius), min(shape[0], cy + radius + 1)):
-            for col in range(max(0, cx - radius), min(shape[1], cx + radius + 1)):
-                if mode == "square" or (row - cy) ** 2 + (col - cx) ** 2 <= radius ** 2:
-                    mask[row, col] = True
     if mode not in {"disk", "square"}:
         raise ValueError("shape_mode must be 'disk' or 'square'")
+    for point in points:
+        x_px, y_px = _point_xy(point)
+        paint_point(
+            mask, x_px, y_px,
+            radius_px=max(0, int(radius_px)),
+            shape_mode=mode,
+            value=True,
+        )
     return mask
 
 
