@@ -11,7 +11,16 @@ def legacy_measurement_to_result(
     legacy_result: Any,
     measurement_id: str,
 ) -> MeasurementResult:
-    """Convert an analysis.measurements result into the canonical model."""
+    """Convert a duck-typed legacy measurement result into the canonical model.
+
+    The legacy ``probeflow.analysis.measurements.MeasurementResult`` dataclass
+    was removed in arch-backend #1 (2026-05-28).  This adapter is kept as a
+    safety net for any future dialog that emits an object with the legacy
+    duck-typed attributes (``values``, ``units``, ``kind``, ``summary``,
+    ``roi_id``, ``source``, ``channel``, ``context``, ``notes``).  All
+    in-tree dialogs now emit the canonical
+    :class:`probeflow.measurements.models.MeasurementResult` directly.
+    """
     units = dict(getattr(legacy_result, "units", {}) or {})
     values = dict(getattr(legacy_result, "values", {}) or {})
     kind = str(getattr(legacy_result, "kind", "") or "")

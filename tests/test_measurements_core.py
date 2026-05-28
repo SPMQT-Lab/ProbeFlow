@@ -50,9 +50,13 @@ def test_measurement_export_flattens_values_and_context():
 
 
 def test_legacy_measurement_adapter_preserves_context_and_units():
-    from probeflow.analysis.measurements import MeasurementResult as LegacyResult
+    # The legacy ``probeflow.analysis.measurements.MeasurementResult``
+    # dataclass was removed in arch-backend #1 (2026-05-28).  The adapter
+    # is duck-typed, so a small local stub providing the legacy attrs
+    # exercises the same code path.
+    from types import SimpleNamespace
 
-    legacy = LegacyResult(
+    legacy = SimpleNamespace(
         id="M?",
         kind="roi_stats",
         source="scan:Height",
@@ -62,6 +66,7 @@ def test_legacy_measurement_adapter_preserves_context_and_units():
         values={"mean": 2.5, "n_pixels": 4},
         units={"mean": "nm"},
         context={"source_path": "/tmp/scan.sxm", "roi_name": "terrace"},
+        notes="",
     )
 
     result = legacy_measurement_to_result(legacy, "M0009")

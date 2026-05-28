@@ -1223,10 +1223,13 @@ def test_feature_finder_receives_active_area_roi_mask(qapp, monkeypatch):
 
 
 def test_legacy_measurement_context_survives_dock_conversion(qapp):
-    from probeflow.analysis.measurements import MeasurementResult as LegacyResult
+    # The legacy ``probeflow.analysis.measurements.MeasurementResult``
+    # dataclass was removed in arch-backend #1 (2026-05-28); a
+    # SimpleNamespace stub exercises the duck-typed adapter path.
+    from types import SimpleNamespace
     from probeflow.gui import ImageViewerDialog
 
-    legacy = LegacyResult(
+    legacy = SimpleNamespace(
         id="M?",
         kind="pair_corr",
         source="scan:Height",
@@ -1234,6 +1237,8 @@ def test_legacy_measurement_context_survives_dock_conversion(qapp):
         roi_id=None,
         summary="Points: 25",
         values={"n_points": 25, "quality": "good"},
+        units={},
+        notes="",
         context={
             "source_path": "/tmp/scan.sxm",
             "point_source": "Detected feature maxima",
