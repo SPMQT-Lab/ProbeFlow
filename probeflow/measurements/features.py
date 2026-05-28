@@ -149,17 +149,12 @@ def _roi_mask(
     roi: Any | None,
     roi_mask: np.ndarray | None,
 ) -> np.ndarray:
-    if roi_mask is not None:
-        mask = np.asarray(roi_mask, dtype=bool)
-        if mask.shape != shape:
-            raise ValueError("roi_mask shape must match image shape")
-        return mask.copy()
-    if roi is not None:
-        mask = np.asarray(roi.to_mask(shape), dtype=bool)
-        if mask.shape != shape:
-            raise ValueError("ROI mask shape must match image shape")
-        return mask
-    return np.ones(shape, dtype=bool)
+    """Thin wrapper around the canonical
+    :func:`probeflow.measurements.roi_resolve.resolve_roi_to_mask`
+    (review arch-backend #11).  ``roi_mask`` keyword is preserved
+    here for backward compatibility with the local call sites."""
+    from probeflow.measurements.roi_resolve import resolve_roi_to_mask
+    return resolve_roi_to_mask(shape, roi=roi, mask=roi_mask)
 
 
 def _threshold_value(values: np.ndarray, mode: str, value: float) -> float:

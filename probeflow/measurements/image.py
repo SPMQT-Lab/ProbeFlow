@@ -294,18 +294,11 @@ def _mask_from_roi_or_mask(
     roi: Any | None = None,
     mask: np.ndarray | None = None,
 ) -> np.ndarray:
-    image_shape = tuple(shape[:2])
-    if mask is not None:
-        selected = np.asarray(mask, dtype=bool)
-        if selected.shape != image_shape:
-            raise ValueError("mask shape must match image shape")
-        return selected.copy()
-    if roi is not None:
-        selected = np.asarray(roi.to_mask(image_shape), dtype=bool)
-        if selected.shape != image_shape:
-            raise ValueError("ROI mask shape must match image shape")
-        return selected
-    return np.ones(image_shape, dtype=bool)
+    """Thin wrapper around the canonical
+    :func:`probeflow.measurements.roi_resolve.resolve_roi_to_mask`
+    (review arch-backend #11)."""
+    from probeflow.measurements.roi_resolve import resolve_roi_to_mask
+    return resolve_roi_to_mask(tuple(shape[:2]), roi=roi, mask=mask)
 
 
 def _area_from_mask(
