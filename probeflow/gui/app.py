@@ -288,8 +288,8 @@ class ProbeFlowWindow(QMainWindow):
             self._features_panel.begin_template_crop)
         self._features_sidebar.classify_params_changed.connect(
             self._on_classify_params_changed)
-        self._features_sidebar.segment_for_classify_requested.connect(
-            self._on_features_segment_for_classify)
+        self._features_sidebar.segment_requested.connect(
+            self._on_features_segment_requested)
         self._features_sidebar.undo_label_requested.connect(
             self._features_panel.undo_last_label)
         self._features_sidebar.mode_changed.connect(
@@ -300,8 +300,6 @@ class ProbeFlowWindow(QMainWindow):
             self._features_panel.clear_exclusion_mask)
         self._features_sidebar.mask_color_changed.connect(
             self._features_panel.set_mask_color)
-
-        self._pending_classify_segment: bool = False
 
         # Status bar
         self._status_bar = QStatusBar()
@@ -1079,7 +1077,7 @@ class ProbeFlowWindow(QMainWindow):
             particles = self._features_panel.get_particles()
             if not particles:
                 self._features_sidebar.set_status(
-                    "Segment particles first — click '① Segment particles'.")
+                    "Press '① Segment' first to find particles.")
                 return
             if not self._features_panel.has_sample_labels():
                 self._features_sidebar.set_status(
@@ -1112,15 +1110,16 @@ class ProbeFlowWindow(QMainWindow):
             return
         if mode == "particles":
             self._features_panel.set_particles(result)
-            if self._pending_classify_segment:
-                self._pending_classify_segment = False
+            current_mode = self._features_sidebar.current_mode()
+            if current_mode == "classify":
                 self._features_panel.set_mode("classify")
                 self._features_panel.set_sample_selection_armed(True)
                 self._features_sidebar.set_status(
                     f"Found {len(result)} particle(s). "
-                    "Click any particle to label it, then press Run.")
+                    "Click any particle to label it, then press ② Run.")
             else:
                 self._features_sidebar.set_status(f"Found {len(result)} particle(s).")
+            self._status_bar.showMessage(f"Segmentation: {len(result)} particle(s)")
         elif mode == "template":
             self._features_panel.set_detections(result)
             self._features_sidebar.set_status(
@@ -1178,8 +1177,14 @@ class ProbeFlowWindow(QMainWindow):
         elif mode != "classify":
             self._features_panel.set_sample_selection_armed(False)
 
-    def _on_features_segment_for_classify(self) -> None:
-        """Segment particles using the Classify tab's params, then arm clicking."""
+    def _on_features_segment_requested(self) -> None:
+        """Step 1 — segment particles with current threshold + exclusion mask.
+
+        Covers both the Particles and Classify analysis modes:
+        * In Particles mode the contours are the final result.
+        * In Classify mode sample-selection clicking is auto-armed after
+          segmentation so the user can immediately start labeling particles.
+        """
         arr = self._features_panel.get_analysis_array()   # applies exclusion mask
         if arr is None:
             self._features_sidebar.set_status("Load a scan first.")
@@ -1189,9 +1194,8 @@ class ProbeFlowWindow(QMainWindow):
         if px_m <= 0:
             self._features_sidebar.set_status("Scan has no physical pixel size.")
             return
-        params = self._features_sidebar.classify_segmentation_params()
-        self._features_sidebar.set_status("Segmenting particles for labeling…")
-        self._pending_classify_segment = True
+        params = self._features_sidebar.particles_params()
+        self._features_sidebar.set_status("Segmenting…")
         worker = _FeaturesWorker(
             "particles", arr, px_m, px_x_m, px_y_m, params,
         )

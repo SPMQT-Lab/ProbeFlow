@@ -1040,11 +1040,11 @@ class FeaturesSidebar(QWidget):
     """Right sidebar for Features-tab analysis parameters."""
 
     mode_changed                    = Signal(str)   # "particles" / "template" / "lattice" / "classify"
-    classify_params_changed         = Signal()
-    segment_for_classify_requested  = Signal()
+    classify_params_changed         = Signal()      # emitted when Step-1 segmentation params change
+    segment_requested               = Signal()      # Step-1 "Segment" button clicked
     undo_label_requested            = Signal()
     load_from_browse_requested      = Signal()
-    run_requested                   = Signal(str)   # mode
+    run_requested                   = Signal(str)   # Step-2 Run button — mode
     export_requested                = Signal(str)   # mode
     crop_template_requested         = Signal()
     mask_paint_toggled              = Signal(bool)  # True = start painting, False = stop
@@ -1081,6 +1081,7 @@ class FeaturesSidebar(QWidget):
         lay.setContentsMargins(10, 10, 10, 6)
         lay.setSpacing(6)
 
+        # ── Load & plane ──────────────────────────────────────────────────────
         load_btn = QPushButton("Load primary scan from Browse")
         load_btn.setFont(QFont("Helvetica", 10))
         load_btn.setFixedHeight(30)
@@ -1098,46 +1099,80 @@ class FeaturesSidebar(QWidget):
         lay.addLayout(plane_row)
         lay.addWidget(_sep())
 
-        mode_lbl = QLabel("Analysis mode")
-        mode_lbl.setFont(QFont("Helvetica", 11, QFont.Bold))
-        lay.addWidget(mode_lbl)
+        # ════════════════════════════════════════════════════════════════
+        # STEP 1 — Segmentation
+        # ════════════════════════════════════════════════════════════════
+        step1_lbl = QLabel("① Segmentation")
+        step1_lbl.setFont(QFont("Helvetica", 11, QFont.Bold))
+        lay.addWidget(step1_lbl)
 
-        mode_row = QHBoxLayout()
-        mode_row.setSpacing(4)
-        self._mode_group = QButtonGroup(self)
-        self._mode_group.setExclusive(True)
-        self._mode_btns = {}
-        for key, label in [("particles", "Particles"),
-                           ("template",  "Template"),
-                           ("lattice",   "Lattice"),
-                           ("classify",  "Classify")]:
-            b = QPushButton(label)
-            b.setCheckable(True)
-            b.setFont(QFont("Helvetica", 9))
-            b.setFixedHeight(26)
-            b.setCursor(QCursor(Qt.PointingHandCursor))
-            b.clicked.connect(lambda _=False, k=key: self._select_mode(k))
-            self._mode_group.addButton(b)
-            mode_row.addWidget(b)
-            self._mode_btns[key] = b
-        lay.addLayout(mode_row)
+        step1_hint = QLabel(
+            "Set threshold, paint exclusion zones, then press Segment.")
+        step1_hint.setFont(QFont("Helvetica", 8))
+        step1_hint.setWordWrap(True)
+        step1_hint.setStyleSheet("color: #888;")
+        lay.addWidget(step1_hint)
 
-        self._mode_stack = QStackedWidget()
-        self._mode_stack.addWidget(self._build_particles_tab())
-        self._mode_stack.addWidget(self._build_template_tab())
-        self._mode_stack.addWidget(self._build_lattice_tab())
-        self._mode_stack.addWidget(self._build_classify_tab())
-        lay.addWidget(self._mode_stack)
+        # ── Threshold ─────────────────────────────────────────────────────────
+        lay.addWidget(QLabel("Threshold"))
+        self._thr_cb = QComboBox()
+        self._thr_cb.addItems(["otsu", "manual", "adaptive"])
+        lay.addWidget(self._thr_cb)
+        self._thr_cb.currentTextChanged.connect(self._on_thr_mode_changed)
+        self._thr_cb.currentTextChanged.connect(lambda _: self.classify_params_changed.emit())
 
-        lay.addWidget(_sep())
+        manual_row = QHBoxLayout()
+        manual_row.setContentsMargins(0, 0, 0, 0)
+        manual_row.addWidget(QLabel("Manual (0-255):"))
+        self._manual_spin = QDoubleSpinBox()
+        self._manual_spin.setRange(0.0, 255.0)
+        self._manual_spin.setValue(128.0)
+        self._manual_spin.setDecimals(0)
+        self._manual_spin.setEnabled(False)   # greyed out until "manual" selected
+        self._manual_spin.valueChanged.connect(lambda _: self.classify_params_changed.emit())
+        manual_row.addWidget(self._manual_spin)
+        lay.addLayout(manual_row)
+
+        self._invert_cb = QCheckBox("Invert (segment dark features)")
+        self._invert_cb.stateChanged.connect(lambda _: self.classify_params_changed.emit())
+        lay.addWidget(self._invert_cb)
+
+        # ── Area filters ──────────────────────────────────────────────────────
+        row2 = QHBoxLayout()
+        row2.addWidget(QLabel("min area (nm²):"))
+        self._min_area_spin = QDoubleSpinBox()
+        self._min_area_spin.setRange(0.0, 1e6)
+        self._min_area_spin.setDecimals(2)
+        self._min_area_spin.setValue(0.5)
+        self._min_area_spin.valueChanged.connect(lambda _: self.classify_params_changed.emit())
+        row2.addWidget(self._min_area_spin)
+        lay.addLayout(row2)
+
+        row3 = QHBoxLayout()
+        row3.addWidget(QLabel("max area (nm²):"))
+        self._max_area_spin = QDoubleSpinBox()
+        self._max_area_spin.setRange(0.0, 1e9)
+        self._max_area_spin.setDecimals(2)
+        self._max_area_spin.setValue(0.0)   # 0 → disabled
+        row3.addWidget(self._max_area_spin)
+        lay.addLayout(row3)
+
+        row4 = QHBoxLayout()
+        row4.addWidget(QLabel("sigma-clip:"))
+        self._sigma_spin = QDoubleSpinBox()
+        self._sigma_spin.setRange(0.0, 10.0)
+        self._sigma_spin.setDecimals(1)
+        self._sigma_spin.setValue(2.0)
+        row4.addWidget(self._sigma_spin)
+        lay.addLayout(row4)
 
         # ── Exclusion mask ────────────────────────────────────────────────────
+        lay.addWidget(_sep())
         mask_lbl = QLabel("Exclusion mask")
         mask_lbl.setFont(QFont("Helvetica", 10, QFont.Bold))
         lay.addWidget(mask_lbl)
 
-        mask_hint = QLabel(
-            "Paint over step edges or any region you want to ignore before running.")
+        mask_hint = QLabel("Paint step edges or any region to exclude from segmentation.")
         mask_hint.setFont(QFont("Helvetica", 8))
         mask_hint.setWordWrap(True)
         mask_hint.setStyleSheet("color: #888;")
@@ -1178,9 +1213,58 @@ class FeaturesSidebar(QWidget):
         self._clear_mask_btn.clicked.connect(self.mask_clear_requested.emit)
         lay.addWidget(self._clear_mask_btn)
 
+        # ── Step 1 action ─────────────────────────────────────────────────────
+        lay.addWidget(_sep())
+        self._segment_btn = QPushButton("① Segment")
+        self._segment_btn.setFont(QFont("Helvetica", 10, QFont.Bold))
+        self._segment_btn.setFixedHeight(32)
+        self._segment_btn.setObjectName("accentBtn")
+        self._segment_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self._segment_btn.setToolTip(
+            "Apply threshold and exclusion mask, then find all particles.\n"
+            "Results are shown as contour overlays on the image.")
+        self._segment_btn.clicked.connect(self.segment_requested.emit)
+        lay.addWidget(self._segment_btn)
+
         lay.addWidget(_sep())
 
-        self._run_btn = QPushButton("Run")
+        # ════════════════════════════════════════════════════════════════
+        # STEP 2 — Analysis
+        # ════════════════════════════════════════════════════════════════
+        step2_lbl = QLabel("② Analysis")
+        step2_lbl.setFont(QFont("Helvetica", 11, QFont.Bold))
+        lay.addWidget(step2_lbl)
+
+        mode_row = QHBoxLayout()
+        mode_row.setSpacing(4)
+        self._mode_group = QButtonGroup(self)
+        self._mode_group.setExclusive(True)
+        self._mode_btns = {}
+        for key, label in [("particles", "Particles"),
+                           ("template",  "Template"),
+                           ("lattice",   "Lattice"),
+                           ("classify",  "Classify")]:
+            b = QPushButton(label)
+            b.setCheckable(True)
+            b.setFont(QFont("Helvetica", 9))
+            b.setFixedHeight(26)
+            b.setCursor(QCursor(Qt.PointingHandCursor))
+            b.clicked.connect(lambda _=False, k=key: self._select_mode(k))
+            self._mode_group.addButton(b)
+            mode_row.addWidget(b)
+            self._mode_btns[key] = b
+        lay.addLayout(mode_row)
+
+        self._mode_stack = QStackedWidget()
+        self._mode_stack.addWidget(self._build_particles_tab())
+        self._mode_stack.addWidget(self._build_template_tab())
+        self._mode_stack.addWidget(self._build_lattice_tab())
+        self._mode_stack.addWidget(self._build_classify_tab())
+        lay.addWidget(self._mode_stack)
+
+        lay.addWidget(_sep())
+
+        self._run_btn = QPushButton("② Run")
         self._run_btn.setFont(QFont("Helvetica", 10, QFont.Bold))
         self._run_btn.setFixedHeight(32)
         self._run_btn.setObjectName("accentBtn")
@@ -1212,54 +1296,15 @@ class FeaturesSidebar(QWidget):
         l = QVBoxLayout(w)
         l.setContentsMargins(0, 4, 0, 4)
         l.setSpacing(4)
-
-        l.addWidget(QLabel("Threshold"))
-        self._thr_cb = QComboBox()
-        self._thr_cb.addItems(["otsu", "manual", "adaptive"])
-        l.addWidget(self._thr_cb)
-
-        manual_row = QHBoxLayout()
-        manual_row.setContentsMargins(0, 0, 0, 0)
-        manual_row.addWidget(QLabel("Manual (0-255):"))
-        self._manual_spin = QDoubleSpinBox()
-        self._manual_spin.setRange(0.0, 255.0)
-        self._manual_spin.setValue(128.0)
-        self._manual_spin.setDecimals(0)
-        self._manual_spin.setEnabled(False)   # greyed out until "manual" mode is selected
-        manual_row.addWidget(self._manual_spin)
-        l.addLayout(manual_row)
-        self._thr_cb.currentTextChanged.connect(self._on_thr_mode_changed)
-
-        self._invert_cb = QCheckBox("Invert (segment dark features)")
-        l.addWidget(self._invert_cb)
-
-        row2 = QHBoxLayout()
-        row2.addWidget(QLabel("min area (nm^2):"))
-        self._min_area_spin = QDoubleSpinBox()
-        self._min_area_spin.setRange(0.0, 1e6)
-        self._min_area_spin.setDecimals(2)
-        self._min_area_spin.setValue(0.5)
-        row2.addWidget(self._min_area_spin)
-        l.addLayout(row2)
-
-        row3 = QHBoxLayout()
-        row3.addWidget(QLabel("max area (nm^2):"))
-        self._max_area_spin = QDoubleSpinBox()
-        self._max_area_spin.setRange(0.0, 1e9)
-        self._max_area_spin.setDecimals(2)
-        self._max_area_spin.setValue(0.0)  # 0 -> None
-        row3.addWidget(self._max_area_spin)
-        l.addLayout(row3)
-
-        row4 = QHBoxLayout()
-        row4.addWidget(QLabel("sigma-clip:"))
-        self._sigma_spin = QDoubleSpinBox()
-        self._sigma_spin.setRange(0.0, 10.0)
-        self._sigma_spin.setDecimals(1)
-        self._sigma_spin.setValue(2.0)
-        row4.addWidget(self._sigma_spin)
-        l.addLayout(row4)
-
+        info = QLabel(
+            "Press ① Segment above to find and count particles.\n\n"
+            "The segmentation parameters (threshold, area filters, "
+            "exclusion mask) are all configured in the Step 1 section.\n\n"
+            "Press ② Run to re-run segmentation with the current settings.")
+        info.setFont(QFont("Helvetica", 9))
+        info.setWordWrap(True)
+        info.setStyleSheet("color: #888;")
+        l.addWidget(info)
         return w
 
     def _build_template_tab(self) -> QWidget:
@@ -1307,54 +1352,14 @@ class FeaturesSidebar(QWidget):
         l.setSpacing(4)
 
         info = QLabel(
-            "① Set threshold below and click\n"
-            "    'Segment particles'.\n"
-            "② Click any particle on the image\n"
-            "    to assign it a class label.\n"
-            "③ Press Run to classify all.")
+            "① Press 'Segment' (Step 1 above) to find particles.\n"
+            "② Click any particle on the image to assign a class label.\n"
+            "③ Press '② Run' to classify all particles.")
         info.setFont(QFont("Helvetica", 9))
         info.setWordWrap(True)
         l.addWidget(info)
 
         l.addWidget(_sep())
-
-        l.addWidget(QLabel("Threshold"))
-        self._cls_thr_cb = QComboBox()
-        self._cls_thr_cb.addItems(["otsu", "manual", "adaptive"])
-        l.addWidget(self._cls_thr_cb)
-
-        cls_manual_row = QHBoxLayout()
-        cls_manual_row.setContentsMargins(0, 0, 0, 0)
-        cls_manual_row.addWidget(QLabel("Manual (0-255):"))
-        self._cls_manual_spin = QDoubleSpinBox()
-        self._cls_manual_spin.setRange(0.0, 255.0)
-        self._cls_manual_spin.setValue(128.0)
-        self._cls_manual_spin.setDecimals(0)
-        self._cls_manual_spin.setEnabled(False)   # greyed out until "manual" mode is selected
-        self._cls_manual_spin.valueChanged.connect(lambda _: self.classify_params_changed.emit())
-        cls_manual_row.addWidget(self._cls_manual_spin)
-        l.addLayout(cls_manual_row)
-        self._cls_thr_cb.currentTextChanged.connect(self._on_cls_thr_mode_changed)
-
-        self._cls_invert_cb = QCheckBox("Invert (segment dark features)")
-        l.addWidget(self._cls_invert_cb)
-
-        row = QHBoxLayout()
-        row.addWidget(QLabel("min area (nm²):"))
-        self._cls_min_area_spin = QDoubleSpinBox()
-        self._cls_min_area_spin.setRange(0.0, 1e6)
-        self._cls_min_area_spin.setDecimals(2)
-        self._cls_min_area_spin.setValue(0.5)
-        self._cls_min_area_spin.valueChanged.connect(lambda _: self.classify_params_changed.emit())
-        row.addWidget(self._cls_min_area_spin)
-        l.addLayout(row)
-
-        seg_btn = QPushButton("① Segment particles")
-        seg_btn.setFont(QFont("Helvetica", 9, QFont.Bold))
-        seg_btn.setFixedHeight(28)
-        seg_btn.setCursor(QCursor(Qt.PointingHandCursor))
-        seg_btn.clicked.connect(self.segment_for_classify_requested.emit)
-        l.addWidget(seg_btn)
 
         undo_btn = QPushButton("↩ Undo last label")
         undo_btn.setFont(QFont("Helvetica", 9))
@@ -1373,7 +1378,7 @@ class FeaturesSidebar(QWidget):
             "of each particle as an extra classification feature.")
         l.addWidget(self._sharpness_cb)
 
-        sharp_hint = QLabel("Use when one class is fuzzy,\nthe other is sharp.")
+        sharp_hint = QLabel("Use when one class is fuzzy, the other is sharp.")
         sharp_hint.setFont(QFont("Helvetica", 8))
         sharp_hint.setStyleSheet("color: #888;")
         sharp_hint.setWordWrap(True)
@@ -1434,14 +1439,12 @@ class FeaturesSidebar(QWidget):
         }
 
     def classify_segmentation_params(self) -> dict:
-        return {
-            "threshold":    self._cls_thr_cb.currentText(),
-            "manual_value": self._cls_manual_spin.value()
-                            if self._cls_thr_cb.currentText() == "manual"
-                            else None,
-            "invert":       self._cls_invert_cb.isChecked(),
-            "min_area_nm2": self._cls_min_area_spin.value(),
-        }
+        """Return segmentation params for the classify workflow.
+
+        Now proxies to :meth:`particles_params` — Step 1 controls are shared
+        between the Particles and Classify analysis modes.
+        """
+        return self.particles_params()
 
     def classify_run_params(self) -> dict:
         """Extra parameters forwarded to classify_particles() at run time."""
@@ -1461,10 +1464,6 @@ class FeaturesSidebar(QWidget):
     def _on_thr_mode_changed(self, text: str) -> None:
         """Enable the manual-value spinbox only when 'manual' threshold is selected."""
         self._manual_spin.setEnabled(text == "manual")
-
-    def _on_cls_thr_mode_changed(self, text: str) -> None:
-        """Same as above for the classify-tab threshold."""
-        self._cls_manual_spin.setEnabled(text == "manual")
 
     def brush_size(self) -> int:
         """Current brush radius in image pixels."""

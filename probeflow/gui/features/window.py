@@ -41,6 +41,18 @@ class FeatureCountingWindow(QMainWindow):
     The main :class:`ProbeFlowWindow` owns this object and bridges the
     ``load_from_browse_needed`` signal so that the selected Browse scan is
     loaded here without switching tabs.
+
+    Two-step workflow (mirrors UniMR)
+    ----------------------------------
+    Step 1 — Segmentation:
+        Set threshold, paint exclusion zones (mask), then click "① Segment"
+        in the sidebar.  This populates ``_panel._particles`` and shows
+        contour overlays on the image.
+
+    Step 2 — Analysis:
+        Choose a mode (Particles / Template / Lattice / Classify) and click
+        "② Run".  For Classify, first label a few particles by clicking them
+        after Step 1, then Run classifies all remaining particles.
     """
 
     # Emitted when the user clicks "Load primary scan from Browse".
@@ -54,12 +66,9 @@ class FeatureCountingWindow(QMainWindow):
         self.setWindowTitle("ProbeFlow — Feature Counting")
         self.resize(1200, 760)
 
-        self._pool    = QThreadPool.globalInstance()
-        # Review gui-arch #2: per-worker signals (each spawn connects its
-        # own ``worker.signals.finished`` to ``_on_finished`` so two
-        # concurrent workers cannot cross-talk via a shared signal
-        # instance).
-        self._pending_classify_segment: bool = False
+        self._pool = QThreadPool.globalInstance()
+        # Each spawned _FeaturesWorker owns its own signals so two concurrent
+        # (or rapidly back-to-back) workers cannot cross-talk.
 
         # ── Widgets ──────────────────────────────────────────────────────────
         t: dict = {}   # theme dict — window owns its own styling
@@ -69,14 +78,13 @@ class FeatureCountingWindow(QMainWindow):
         # ── Internal signal wiring ────────────────────────────────────────────
         self._sidebar.load_from_browse_requested.connect(
             self.load_from_browse_needed.emit)
+        self._sidebar.segment_requested.connect(self._on_segment_requested)
         self._sidebar.run_requested.connect(self._on_run)
         self._sidebar.export_requested.connect(self._on_export)
         self._sidebar.crop_template_requested.connect(
             self._panel.begin_template_crop)
         self._sidebar.classify_params_changed.connect(
             self._on_classify_params_changed)
-        self._sidebar.segment_for_classify_requested.connect(
-            self._on_segment_for_classify)
         self._sidebar.undo_label_requested.connect(
             self._panel.undo_last_label)
         self._sidebar.mode_changed.connect(self._on_mode_changed)
@@ -117,7 +125,7 @@ class FeatureCountingWindow(QMainWindow):
         if mode == "classify" and self._panel.get_particles():
             self._panel.set_sample_selection_armed(True)
             self._sidebar.set_status(
-                "Click any particle on the image to label it, then press Run.")
+                "Click any particle on the image to label it, then press ② Run.")
         elif mode != "classify":
             self._panel.set_sample_selection_armed(False)
 
@@ -126,7 +134,7 @@ class FeatureCountingWindow(QMainWindow):
         self._sidebar.set_status(
             "Segmentation parameters changed — sample labels cleared.")
 
-    # ── Segment for classify ──────────────────────────────────────────────────
+    # ── Mask handlers ─────────────────────────────────────────────────────────
 
     def _on_mask_paint_toggled(self, painting: bool) -> None:
         self._panel.set_mask_painting(painting, self._sidebar.brush_size())
@@ -134,7 +142,7 @@ class FeatureCountingWindow(QMainWindow):
             self._sidebar.set_status(
                 "Mask mode — click or drag on the image to paint exclusion zones.")
         else:
-            status = ("Mask active — excluded regions shown in red."
+            status = ("Mask active — excluded regions shown in colour."
                       if self._panel.has_exclusion_mask()
                       else "Mask drawing stopped.")
             self._sidebar.set_status(status)
@@ -143,8 +151,16 @@ class FeatureCountingWindow(QMainWindow):
         self._panel.clear_exclusion_mask()
         self._sidebar.set_status("Exclusion mask cleared.")
 
-    def _on_segment_for_classify(self) -> None:
-        arr = self._panel.get_analysis_array()
+    # ── Step 1: Segment ───────────────────────────────────────────────────────
+
+    def _on_segment_requested(self) -> None:
+        """Step 1 — run segmentation with current threshold + exclusion mask.
+
+        After particles are found the image shows contour overlays.  If the
+        current analysis mode is 'classify', sample-selection clicking is
+        automatically armed so the user can immediately start labeling.
+        """
+        arr = self._panel.get_analysis_array()   # applies exclusion mask
         if arr is None:
             self._sidebar.set_status("Load a scan first.")
             return
@@ -153,18 +169,18 @@ class FeatureCountingWindow(QMainWindow):
         if px_m <= 0:
             self._sidebar.set_status("Scan has no physical pixel size.")
             return
-        params = self._sidebar.classify_segmentation_params()
-        self._sidebar.set_status("Segmenting particles for labeling…")
-        self._pending_classify_segment = True
+        params = self._sidebar.particles_params()
+        self._sidebar.set_status("Segmenting…")
         worker = _FeaturesWorker(
             "particles", arr, px_m, px_x_m, px_y_m, params,
         )
         worker.signals.finished.connect(self._on_finished)
         self._pool.start(worker)
 
-    # ── Run ───────────────────────────────────────────────────────────────────
+    # ── Step 2: Run ───────────────────────────────────────────────────────────
 
     def _on_run(self, mode: str) -> None:
+        """Step 2 — run the selected analysis mode."""
         arr = self._panel.get_analysis_array()   # applies exclusion mask if present
         if arr is None:
             self._sidebar.set_status("Load a scan first.")
@@ -191,7 +207,7 @@ class FeatureCountingWindow(QMainWindow):
             particles = self._panel.get_particles()
             if not particles:
                 self._sidebar.set_status(
-                    "Segment particles first — click '① Segment particles'.")
+                    "Press '① Segment' first to find particles.")
                 return
             if not self._panel.has_sample_labels():
                 self._sidebar.set_status(
@@ -227,15 +243,18 @@ class FeatureCountingWindow(QMainWindow):
 
         if mode == "particles":
             self._panel.set_particles(result)
-            if self._pending_classify_segment:
-                self._pending_classify_segment = False
+            # If the user is in classify mode, auto-arm sample-label clicking
+            # so they can immediately click particles to label them.
+            current_mode = self._sidebar.current_mode()
+            if current_mode == "classify":
                 self._panel.set_mode("classify")
                 self._panel.set_sample_selection_armed(True)
                 self._sidebar.set_status(
                     f"Found {len(result)} particle(s). "
-                    "Click any particle to label it, then press Run.")
+                    "Click any particle to label it, then press ② Run.")
             else:
                 self._sidebar.set_status(f"Found {len(result)} particle(s).")
+            self._status_bar.showMessage(f"Segmentation: {len(result)} particle(s)")
 
         elif mode == "template":
             self._panel.set_detections(result)
