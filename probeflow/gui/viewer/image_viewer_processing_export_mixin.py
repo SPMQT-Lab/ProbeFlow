@@ -239,9 +239,45 @@ class ImageViewerProcessingExportMixin:
     def _processed_scan_for_export(self):
         entry = self._entries[self._idx]
         arr = self._display_arr if self._display_arr is not None else self._raw_arr
+        # Post-processing scan_range_m must reflect any shape-changing step
+        # (rotate_arbitrary / shear / affine_lattice_correction expand the
+        # canvas; without this the exported PNG scale bar and FFT k-axes
+        # silently use the raw scan_range_m on a now-larger array — review
+        # image-proc #4).
         return build_processed_scan_for_export(
             entry.path, self._ch_cb.currentIndex(), arr, self._processing or {},
+            scan_range_m=self._processed_scan_range_m(),
         )
+
+    def _processed_scan_range_m(self) -> tuple[float, float] | None:
+        """Walk the current processing state to compute post-processing scan_range_m.
+
+        Returns ``None`` if the raw scan calibration is unknown or there is no
+        raw array to walk.  When the pipeline contains no shape-changing step
+        the returned value equals the raw ``self._scan_range_m`` (modulo float
+        coercion).
+        """
+        from probeflow.processing.state import (
+            apply_processing_state_with_calibration,
+        )
+
+        raw_range = getattr(self, "_scan_range_m", None)
+        if raw_range is None or self._raw_arr is None:
+            return None
+        try:
+            state = processing_state_from_gui(self._processing or {})
+        except Exception:
+            return (float(raw_range[0]), float(raw_range[1]))
+        if not state.steps:
+            return (float(raw_range[0]), float(raw_range[1]))
+        try:
+            _, new_range = apply_processing_state_with_calibration(
+                self._raw_arr, state, self._image_roi_set,
+                scan_range_m=(float(raw_range[0]), float(raw_range[1])),
+            )
+        except Exception:
+            return (float(raw_range[0]), float(raw_range[1]))
+        return new_range
 
     def _on_save_processed_image(self):
         if not self._assert_exportable_processing():

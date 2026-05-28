@@ -28,6 +28,8 @@ def build_processed_scan_for_export(
     channel_idx: int,
     display_arr: Optional[np.ndarray],
     processing_gui_state: dict,
+    *,
+    scan_range_m: Optional[tuple[float, float]] = None,
 ) -> tuple["Scan", int]:
     """Load scan from *path*, inject *display_arr*, record processing state.
 
@@ -35,6 +37,16 @@ def build_processed_scan_for_export(
     ``None``, the raw plane from disk is used.  The returned Scan has the
     caller-supplied array in its plane slot and the canonical processing state
     recorded on it — ready for ``scan.save_*()``.
+
+    ``scan_range_m`` is the post-processing physical extent.  When the
+    processing pipeline includes a shape-changing step (``rotate_arbitrary``,
+    ``shear``, ``affine_lattice_correction`` with canvas expansion), the raw
+    scan's ``scan_range_m`` no longer matches the injected array's shape and
+    must be updated so PNG scale bars, FFT k-axes, and feature pixel→nm
+    conversions stay correct (review image-proc #4).  Compute this via
+    :func:`probeflow.processing.state.apply_processing_state_with_calibration`.
+    When omitted, the raw scan's ``scan_range_m`` is preserved — safe only
+    when the pipeline did not change the array shape.
 
     Raises ``ValueError`` if there is no image data and ``display_arr`` is
     also ``None``.
@@ -53,6 +65,8 @@ def build_processed_scan_for_export(
         arr = display_arr
 
     scan.planes[idx] = np.asarray(arr, dtype=np.float64).copy()
+    if scan_range_m is not None:
+        scan.scan_range_m = (float(scan_range_m[0]), float(scan_range_m[1]))
     state = processing_state_from_gui(processing_gui_state or {})
     if state.steps:
         scan.record_processing_state(state)

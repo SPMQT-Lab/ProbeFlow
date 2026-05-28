@@ -71,22 +71,29 @@ def _cmd_prepare_png(args) -> int:
 
     state = _processing_state_from_ops(ops)
     if state.steps:
-        from probeflow.processing.state import apply_processing_state
-        # Forward calibration so step-tolerance / facet operations
-        # interpret step_threshold_deg as a real surface slope
-        # (review image-proc #1).
-        psx = psy = None
+        from probeflow.processing.state import (
+            apply_processing_state_with_calibration,
+        )
+        # Forward calibration so step-tolerance / facet operations interpret
+        # step_threshold_deg as a real surface slope (review image-proc #1),
+        # and update scan_range_m if a shape-changing step grows the canvas
+        # (rotate_arbitrary / shear / affine_lattice_correction) so the
+        # exported PNG scale bar and FFT k-axes stay consistent with the
+        # post-processing shape (review image-proc #4).
         plane = scan.planes[args.plane]
+        raw_range = None
         try:
             w_m, h_m = float(scan.scan_range_m[0]), float(scan.scan_range_m[1])
-            Ny, Nx = int(plane.shape[0]), int(plane.shape[1])
-            if Nx > 0 and Ny > 0 and w_m > 0 and h_m > 0:
-                psx, psy = w_m / Nx, h_m / Ny
+            if w_m > 0 and h_m > 0:
+                raw_range = (w_m, h_m)
         except (TypeError, ValueError, IndexError, AttributeError):
             pass
-        scan.planes[args.plane] = apply_processing_state(
-            plane, state, pixel_size_x_m=psx, pixel_size_y_m=psy
+        new_plane, new_range = apply_processing_state_with_calibration(
+            plane, state, scan_range_m=raw_range,
         )
+        scan.planes[args.plane] = new_plane
+        if new_range is not None:
+            scan.scan_range_m = new_range
         scan.record_processing_state(state)
 
     from probeflow.provenance.prepared_export import write_prepared_png

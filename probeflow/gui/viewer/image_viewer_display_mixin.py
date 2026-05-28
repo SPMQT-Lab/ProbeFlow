@@ -173,12 +173,25 @@ class ImageViewerDisplayMixin:
             self._status_lbl.setText(message)
 
     def _scan_extent_nm(self) -> tuple[float, float]:
-        """Return (width_nm, height_nm) for the current scan, or (0,0)."""
-        if self._scan_range_m is None:
+        """Return (width_nm, height_nm) for the *displayed* scan, or (0,0).
+
+        When the processing pipeline contains a shape-changing step that
+        expanded the canvas (``rotate_arbitrary``, ``shear``, or
+        ``affine_lattice_correction`` with canvas expansion), the displayed
+        array is larger than the raw plane; the displayed scan_range must
+        grow with it so the scale bar and rulers stay calibrated (review
+        image-proc #4).  ``_display_scan_range_m`` is the post-processing
+        extent (set by :meth:`_refresh_display_array`); fall back to
+        ``_scan_range_m`` when unset.
+        """
+        scan_range = getattr(self, "_display_scan_range_m", None)
+        if scan_range is None:
+            scan_range = self._scan_range_m
+        if scan_range is None:
             return 0.0, 0.0
         try:
-            w_nm = float(self._scan_range_m[0]) * 1e9
-            h_nm = float(self._scan_range_m[1]) * 1e9
+            w_nm = float(scan_range[0]) * 1e9
+            h_nm = float(scan_range[1]) * 1e9
         except (TypeError, ValueError, IndexError):
             return 0.0, 0.0
         return max(0.0, w_nm), max(0.0, h_nm)

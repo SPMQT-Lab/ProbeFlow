@@ -793,6 +793,128 @@ def apply_processing_state(
     return a
 
 
+# ── Shape-changing ops: scan_range_m bookkeeping ──────────────────────────────
+
+# Per-op rules for updating scan_range_m when a step changes the array shape.
+# The two conventions:
+#   * ``preserve_pixel_size``: rotate_arbitrary / shear / affine_lattice_correction
+#     with expand_canvas=True grow the bounding canvas while keeping each pixel's
+#     physical size unchanged.  scan_range_m must grow proportionally with the
+#     new shape so that ``pixel_size = scan_range_m / shape`` stays correct.
+#   * ``preserve_extent``: scale_image resamples to a new pixel density while
+#     the physical extent is preserved.  scan_range_m stays fixed; pixel_size
+#     scales inversely with the new shape.
+_SHAPE_CHANGING_PIXEL_SIZE_PRESERVING: frozenset[str] = frozenset({
+    "rotate_arbitrary",
+    "shear",
+    "affine_lattice_correction",
+})
+
+_SHAPE_CHANGING_EXTENT_PRESERVING: frozenset[str] = frozenset({
+    "scale_image",
+})
+
+
+def _update_scan_range_for_op(
+    op: str,
+    scan_range_m: tuple[float, float] | None,
+    old_shape: tuple[int, int],
+    new_shape: tuple[int, int],
+) -> tuple[float, float] | None:
+    """Return updated ``scan_range_m`` after a step changed the array shape.
+
+    See :data:`_SHAPE_CHANGING_PIXEL_SIZE_PRESERVING` and
+    :data:`_SHAPE_CHANGING_EXTENT_PRESERVING` for the per-op semantics.
+    Returns ``None`` if the input was ``None``; otherwise always returns a
+    ``(float, float)`` tuple.
+    """
+    if scan_range_m is None:
+        return None
+    old_h, old_w = old_shape
+    new_h, new_w = new_shape
+    if op in _SHAPE_CHANGING_PIXEL_SIZE_PRESERVING:
+        if old_w <= 0 or old_h <= 0:
+            return (float(scan_range_m[0]), float(scan_range_m[1]))
+        w_m = float(scan_range_m[0]) * new_w / old_w
+        h_m = float(scan_range_m[1]) * new_h / old_h
+        return (w_m, h_m)
+    # scale_image, or any other op that changed shape unexpectedly: leave the
+    # physical extent untouched (the safer default — pixel_size adjusts via
+    # the new shape).
+    return (float(scan_range_m[0]), float(scan_range_m[1]))
+
+
+def apply_processing_state_with_calibration(
+    arr: np.ndarray,
+    state: "ProcessingState",
+    roi_set: "Any | None" = None,
+    *,
+    scan_range_m: tuple[float, float] | None,
+) -> tuple[np.ndarray, tuple[float, float] | None]:
+    """Apply *state* to *arr* and return the post-processing scan_range.
+
+    Threads pixel calibration through the pipeline two ways:
+
+    1. For each step, the *current* pixel size (``scan_range_m / shape``) is
+       forwarded as ``pixel_size_x_m`` / ``pixel_size_y_m`` to
+       :func:`apply_processing_state`, so step-tolerance and facet-level ops
+       interpret their slope thresholds against real surface geometry
+       (review image-proc #1).
+    2. When a step changes the array shape (``rotate_arbitrary``, ``shear``,
+       ``affine_lattice_correction``, ``scale_image``), ``scan_range_m`` is
+       updated per :func:`_update_scan_range_for_op` so that downstream
+       consumers — PNG scale bars, FFT k-axes, feature pixel→nm conversions,
+       saved provenance — see a calibration consistent with the new array
+       shape (review image-proc #4).
+
+    Parameters
+    ----------
+    arr
+        Input 2-D array.
+    state, roi_set
+        Forwarded to :func:`apply_processing_state`.
+    scan_range_m
+        ``(width_m, height_m)`` for *arr* as captured at the source.  Pass the
+        scan's current ``scan_range_m`` here.  May be ``None`` if calibration
+        is unknown — pixel-size kwargs are then omitted from the kernel calls
+        and the returned ``new_scan_range_m`` will also be ``None``.
+
+    Returns
+    -------
+    (new_arr, new_scan_range_m)
+        ``new_arr`` is the processed array (float64).  ``new_scan_range_m``
+        is the updated ``(width_m, height_m)`` reflecting any shape-changing
+        steps, or ``None`` if the input was ``None``.
+    """
+    current_range = (
+        (float(scan_range_m[0]), float(scan_range_m[1]))
+        if scan_range_m is not None else None
+    )
+    a = arr.astype(np.float64, copy=True)
+    if not state.steps:
+        return a, current_range
+
+    for step in state.steps:
+        h_in, w_in = a.shape
+        psx = psy = None
+        if current_range is not None and w_in > 0 and h_in > 0:
+            psx = current_range[0] / w_in
+            psy = current_range[1] / h_in
+        a = apply_processing_state(
+            a,
+            ProcessingState(steps=[step]),
+            roi_set=roi_set,
+            pixel_size_x_m=psx,
+            pixel_size_y_m=psy,
+        )
+        h_out, w_out = a.shape
+        if (h_out, w_out) != (h_in, w_in):
+            current_range = _update_scan_range_for_op(
+                step.op, current_range, (h_in, w_in), (h_out, w_out),
+            )
+    return a, current_range
+
+
 # ── Geometric transform + ROISet update ───────────────────────────────────────
 
 def apply_geometric_op_to_scan(

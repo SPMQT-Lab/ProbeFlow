@@ -132,14 +132,28 @@ def _apply_to_plane(
     """Load a scan, apply ``op`` to one plane in place, return the Scan.
 
     Accepts ``.sxm`` *or* ``.dat`` input — dispatch happens in ``load_scan``.
+    Updates ``scan.scan_range_m`` when ``op`` is a canvas-expanding step
+    (rotate_arbitrary / shear / affine_lattice_correction), so the exported
+    PNG scale bar and SXM scan range match the post-op array shape (review
+    image-proc #4).
     """
+    from probeflow.processing.state import _update_scan_range_for_op
+
     scan = load_scan(input_path)
     if plane_idx >= scan.n_planes:
         raise ValueError(
             f"Plane {plane_idx} not present — file has {scan.n_planes} plane(s)"
         )
+    old_shape = scan.planes[plane_idx].shape
     scan.planes[plane_idx] = op(scan.planes[plane_idx])
+    new_shape = scan.planes[plane_idx].shape
     if isinstance(op, _Op):
+        if new_shape != old_shape:
+            new_range = _update_scan_range_for_op(
+                op.name, scan.scan_range_m, old_shape, new_shape,
+            )
+            if new_range is not None:
+                scan.scan_range_m = new_range
         _record_op(scan, op.name, op.params)
     return scan
 

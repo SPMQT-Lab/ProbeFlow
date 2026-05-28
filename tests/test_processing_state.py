@@ -862,3 +862,138 @@ def test_zero_reference_processing_contract():
         ),
     )
     np.testing.assert_allclose(plane, np.zeros_like(plane_source), atol=1e-12)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# scan_range_m bookkeeping through shape-changing steps (review image-proc #4)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestApplyProcessingStateWithCalibration:
+    """``apply_processing_state_with_calibration`` must keep
+    ``scan_range_m / shape`` consistent across shape-changing steps."""
+
+    def test_no_steps_passes_scan_range_through(self):
+        from probeflow.processing.state import apply_processing_state_with_calibration
+
+        arr = np.ones((8, 8), dtype=np.float64)
+        out, new_range = apply_processing_state_with_calibration(
+            arr, ProcessingState(), scan_range_m=(2e-9, 4e-9),
+        )
+        assert out.shape == (8, 8)
+        assert new_range == (2e-9, 4e-9)
+
+    def test_scale_image_preserves_extent(self):
+        """scale_image keeps the physical extent fixed; pixel size scales."""
+        from probeflow.processing.state import apply_processing_state_with_calibration
+
+        arr = np.ones((4, 4), dtype=np.float64)
+        state = ProcessingState(steps=[
+            ProcessingStep("scale_image", {"new_height": 8, "new_width": 12}),
+        ])
+        out, new_range = apply_processing_state_with_calibration(
+            arr, state, scan_range_m=(3e-9, 5e-9),
+        )
+        # New shape must be (8, 12); scan_range_m must be unchanged so the
+        # downstream pixel_size = scan_range_m / shape halves correctly.
+        assert out.shape == (8, 12)
+        np.testing.assert_allclose(new_range, (3e-9, 5e-9))
+
+    def test_rotate_arbitrary_grows_canvas_and_extent(self):
+        """rotate_arbitrary preserves pixel size; scan_range_m must grow."""
+        from probeflow.processing.state import apply_processing_state_with_calibration
+
+        rng = np.random.default_rng(0)
+        arr = rng.normal(size=(32, 32))
+        state = ProcessingState(steps=[
+            ProcessingStep("rotate_arbitrary", {"angle_degrees": 30.0, "order": 1}),
+        ])
+        psx_in = 1e-9 / 32  # pixel size before
+        psy_in = 1e-9 / 32
+        out, new_range = apply_processing_state_with_calibration(
+            arr, state, scan_range_m=(1e-9, 1e-9),
+        )
+        h_out, w_out = out.shape
+        assert (h_out, w_out) != (32, 32)
+        # The post-processing pixel size derived from the returned scan_range
+        # must equal the pre-processing pixel size (canvas expanded by exactly
+        # the new shape factor).
+        psx_out = new_range[0] / w_out
+        psy_out = new_range[1] / h_out
+        np.testing.assert_allclose(psx_out, psx_in, rtol=1e-12)
+        np.testing.assert_allclose(psy_out, psy_in, rtol=1e-12)
+
+    def test_shear_with_canvas_expansion_grows_extent(self):
+        from probeflow.processing.state import apply_processing_state_with_calibration
+
+        arr = np.zeros((20, 20), dtype=np.float64)
+        state = ProcessingState(steps=[
+            ProcessingStep("shear", {"shear_x": 0.5, "shear_y": 0.0}),
+        ])
+        psx_in = 2e-9 / 20
+        out, new_range = apply_processing_state_with_calibration(
+            arr, state, scan_range_m=(2e-9, 2e-9),
+        )
+        assert out.shape[1] > 20  # canvas expanded along x
+        np.testing.assert_allclose(new_range[0] / out.shape[1], psx_in, rtol=1e-12)
+
+    def test_non_shape_changing_steps_leave_extent_alone(self):
+        from probeflow.processing.state import apply_processing_state_with_calibration
+
+        arr = np.linspace(0.0, 1.0, 100, dtype=np.float64).reshape(10, 10)
+        state = ProcessingState(steps=[
+            ProcessingStep("align_rows", {"method": "median"}),
+            ProcessingStep("plane_bg", {"order": 1}),
+        ])
+        out, new_range = apply_processing_state_with_calibration(
+            arr, state, scan_range_m=(7e-9, 9e-9),
+        )
+        assert out.shape == (10, 10)
+        np.testing.assert_allclose(new_range, (7e-9, 9e-9))
+
+    def test_none_scan_range_propagates(self):
+        from probeflow.processing.state import apply_processing_state_with_calibration
+
+        arr = np.ones((6, 6), dtype=np.float64)
+        state = ProcessingState(steps=[
+            ProcessingStep("rotate_arbitrary", {"angle_degrees": 45.0, "order": 1}),
+        ])
+        out, new_range = apply_processing_state_with_calibration(
+            arr, state, scan_range_m=None,
+        )
+        assert out.shape != (6, 6)
+        assert new_range is None
+
+    def test_apply_processing_state_to_scan_updates_scan_range_after_rotate(self):
+        """The GUI-export entry point must update scan.scan_range_m too."""
+
+        arr = np.ones((16, 16), dtype=np.float64)
+        scan = _scan_with_plane(arr)
+        scan.scan_range_m = (4e-9, 4e-9)
+        psx_in = 4e-9 / 16
+        apply_processing_state_to_scan(
+            scan,
+            {"geometric_ops": [
+                {"op": "rotate_arbitrary",
+                 "params": {"angle_degrees": 30.0, "order": 1}},
+            ]},
+        )
+        h_out, w_out = scan.planes[0].shape
+        assert (h_out, w_out) != (16, 16)
+        np.testing.assert_allclose(scan.scan_range_m[0] / w_out, psx_in, rtol=1e-12)
+        np.testing.assert_allclose(scan.scan_range_m[1] / h_out, psx_in, rtol=1e-12)
+
+    def test_apply_processing_state_to_scan_preserves_extent_after_scale(self):
+        """scale_image must leave scan_range_m unchanged."""
+
+        arr = np.ones((8, 8), dtype=np.float64)
+        scan = _scan_with_plane(arr)
+        scan.scan_range_m = (3e-9, 5e-9)
+        apply_processing_state_to_scan(
+            scan,
+            {"geometric_ops": [
+                {"op": "scale_image", "params": {"new_height": 32, "new_width": 24}},
+            ]},
+        )
+        assert scan.planes[0].shape == (32, 24)
+        np.testing.assert_allclose(scan.scan_range_m, (3e-9, 5e-9))

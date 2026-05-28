@@ -58,7 +58,6 @@ from probeflow.gui.rendering import (
     DEFAULT_CMAP_KEY,
     DEFAULT_CMAP_LABEL,
     STM_COLORMAPS,
-    _apply_processing,
 )
 from probeflow.gui.workers import ViewerLoader
 from probeflow.gui.viewer.display_range import DisplayRangeController
@@ -79,6 +78,7 @@ from probeflow.gui.image_canvas import ImageCanvas
 from probeflow.gui.roi_manager_dock import ROIManagerDock
 from probeflow.processing.gui_adapter import processing_state_from_gui
 from probeflow.processing.state import (
+    apply_processing_state_with_calibration,
     assert_roi_references_resolved,
     missing_roi_references,
 )
@@ -186,6 +186,10 @@ class ImageViewerDialog(
         # Data range for sliders lives in self._hist_panel.data_min_si / data_max_si
         self._scan_header: dict = {}
         self._scan_range_m: Optional[tuple] = None
+        # Post-processing scan_range_m; tracks shape-changing steps so the
+        # scale bar stays calibrated against the displayed array shape
+        # (review image-proc #4).  Updated by _refresh_display_array.
+        self._display_scan_range_m: Optional[tuple] = None
         self._scan_shape: Optional[tuple] = None
         self._scan_format: str = ""
         self._scan_plane_names: list[str] = list(PLANE_NAMES)
@@ -1625,6 +1629,11 @@ class ImageViewerDialog(
         self._raw_arr          = data.raw_arr
         self._scan_header      = data.scan_header
         self._scan_range_m     = data.scan_range_m
+        # Updated by _refresh_display_array to reflect any shape-changing
+        # processing step (review image-proc #4); used by _scan_extent_nm
+        # so the scale bar and rulers stay calibrated against the display
+        # array's actual physical extent.
+        self._display_scan_range_m = data.scan_range_m
         self._scan_shape       = data.scan_shape
         self._scan_format      = data.source_format
         self._scan_plane_names = data.plane_names
@@ -1698,33 +1707,36 @@ class ImageViewerDialog(
                     if hasattr(self, "_status_lbl"):
                         self._status_lbl.setText(self._processing_roi_error)
                     self._display_arr = self._raw_arr
+                    self._display_scan_range_m = self._scan_range_m
                     return
-                # Compute physical pixel sizes for step-tolerance / facet
-                # operations so step_threshold_deg is a real surface slope
-                # (review image-proc #1).  When scan_range_m is unknown we
-                # fall back to the kernel default (1.0 m/pixel).
-                psx, psy = self._processing_pixel_sizes_m()
+                # Forward calibration through the pipeline so:
+                #   (a) step-tolerance / facet ops interpret step_threshold_deg
+                #       as a real surface slope (review image-proc #1), and
+                #   (b) scan_range_m grows with the canvas for canvas-expanding
+                #       ops (rotate_arbitrary / shear / affine_lattice_correction),
+                #       keeping the scale bar / FFT k-axes consistent with the
+                #       displayed array shape (review image-proc #4).
+                raw_range = self._scan_range_m
                 try:
-                    self._display_arr = _apply_processing(
-                        self._raw_arr,
-                        self._processing,
-                        roi_set=self._image_roi_set,
-                        pixel_size_x_m=psx,
-                        pixel_size_y_m=psy,
+                    self._display_arr, self._display_scan_range_m = (
+                        apply_processing_state_with_calibration(
+                            self._raw_arr, state, self._image_roi_set,
+                            scan_range_m=raw_range,
+                        )
                     )
-                except TypeError as exc:
-                    if "roi_set" not in str(exc):
-                        raise
-                    self._display_arr = _apply_processing(self._raw_arr, self._processing)
+                except Exception:
+                    raise
             except Exception as exc:
                 self._processing_error = f"Processing failed: {exc}"
                 if hasattr(self, "_status_lbl"):
                     self._status_lbl.setText(self._processing_error)
                 self._display_arr = self._raw_arr
+                self._display_scan_range_m = self._scan_range_m
         else:
             self._processing_roi_error = ""
             self._processing_error = ""
             self._display_arr = self._raw_arr
+            self._display_scan_range_m = self._scan_range_m
         new_shape = self._display_arr.shape if self._display_arr is not None else None
         if reset_zoom_if_shape_changed and old_shape is not None and new_shape != old_shape:
             self._reset_zoom_on_next_pixmap = True

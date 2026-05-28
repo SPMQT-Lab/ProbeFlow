@@ -385,13 +385,17 @@ def apply_processing_state_to_scan(
     """Apply GUI processing state to a Scan before export.
 
     Converts *proc_state* to a canonical :class:`ProcessingState`, applies it
-    via :func:`~probeflow.processing.state.apply_processing_state`, and
-    records each step on ``scan.processing_state``.
+    via :func:`~probeflow.processing.state.apply_processing_state_with_calibration`,
+    and records each step on ``scan.processing_state``.  When a shape-changing
+    step grew the canvas (``rotate_arbitrary``, ``shear``, or
+    ``affine_lattice_correction`` with canvas expansion), ``scan.scan_range_m``
+    is updated to match the new array shape so PNG scale bars, FFT k-axes,
+    and feature pixel→nm conversions stay correct (review image-proc #4).
 
     Updates ``scan.planes[plane_idx]`` in place and returns *scan*.
     Display-only settings (grain overlay, colormap, clip percentiles) are ignored.
     """
-    from probeflow.processing.state import apply_processing_state
+    from probeflow.processing.state import apply_processing_state_with_calibration
 
     if plane_idx < 0 or plane_idx >= len(scan.planes):
         raise ValueError(
@@ -399,10 +403,21 @@ def apply_processing_state_to_scan(
             f"{len(scan.planes)} plane(s)"
         )
 
-    state    = processing_state_from_gui(proc_state)
-    a        = apply_processing_state(scan.planes[plane_idx], state)
+    state = processing_state_from_gui(proc_state)
+    raw_range: tuple[float, float] | None = None
+    try:
+        w_m, h_m = float(scan.scan_range_m[0]), float(scan.scan_range_m[1])
+        if w_m > 0 and h_m > 0:
+            raw_range = (w_m, h_m)
+    except (TypeError, ValueError, IndexError, AttributeError):
+        pass
+    a, new_range = apply_processing_state_with_calibration(
+        scan.planes[plane_idx], state, scan_range_m=raw_range,
+    )
 
     scan.planes[plane_idx] = a
+    if new_range is not None:
+        scan.scan_range_m = new_range
     scan.record_processing_state(state)
 
     return scan
