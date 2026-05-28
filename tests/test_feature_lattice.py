@@ -64,6 +64,16 @@ def test_perfect_points_zero_rms():
     assert result.rms_displacement_px < 1e-10
 
 
+def test_half_site_ties_do_not_use_bankers_rounding():
+    pts = np.array([[5.0, 0.0], [15.0, 0.0], [-5.0, 0.0]])
+
+    result = compare_features_to_lattice(
+        pts, (0.0, 0.0), (10.0, 0.0), (0.0, 10.0), match_radius_px=6.0,
+    )
+
+    assert [a.site_ij for a in result.assignments] == [(1, 0), (2, 0), (-1, 0)]
+
+
 # ── noisy points ──────────────────────────────────────────────────────────────
 
 def test_noisy_points_rms_matches_noise():

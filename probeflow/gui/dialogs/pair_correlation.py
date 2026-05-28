@@ -301,7 +301,7 @@ class PairCorrelationDialog(QDialog):
             "bin_width_mode": "manual" if self._bw_sb.value() > 0 else "auto",
             "pixel_size_x_m": self._px_x_m,
             "pixel_size_y_m": self._px_y_m,
-            "edge_correction": "not_applied",
+            "edge_correction": r.edge_correction,
             "message": r.message,
             "data_basis": "feature_points_physical",
             "summary": summary,

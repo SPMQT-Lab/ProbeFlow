@@ -99,8 +99,8 @@ def compare_features_to_lattice(
         dx, dy = x - ox, y - oy
         u = inv_ax * dx + inv_bx * dy
         v = inv_ay * dx + inv_by * dy
-        i = int(round(u))
-        j = int(round(v))
+        i = _round_half_away_from_zero(u)
+        j = _round_half_away_from_zero(v)
         sx = ox + i * ax + j * bx
         sy = oy + i * ay + j * by
         dx_px = x - sx
@@ -197,6 +197,13 @@ def _physical_pixel_sizes(
     if not (math.isfinite(px_x) and math.isfinite(px_y) and px_x > 0.0 and px_y > 0.0):
         raise ValueError("pixel sizes must be finite positive values.")
     return px_x, px_y
+
+
+def _round_half_away_from_zero(value: float) -> int:
+    value = float(value)
+    if value >= 0.0:
+        return int(math.floor(value + 0.5))
+    return int(math.ceil(value - 0.5))
 
 
 def _count_sites_in_bounds(

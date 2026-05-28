@@ -1001,6 +1001,7 @@ class TestMeasurePeriodicity:
         # Dominant period should be close to 8 nm
         dominant = peaks[0]["period_m"]
         assert abs(dominant - 8e-9) / 8e-9 < 0.2
+        assert 0.0 < peaks[0]["strength"] <= 1.0
 
     def test_flat_image_empty_or_weak(self, flat_image):
         peaks = measure_periodicity(flat_image,
@@ -1015,6 +1016,18 @@ class TestMeasurePeriodicity:
                                     pixel_size_x_m=1e-9,
                                     pixel_size_y_m=1e-9)
         assert peaks == []
+
+    def test_strength_is_normalised(self):
+        y, x = np.indices((65, 65))
+        arr = 10.0 * np.sin(2 * np.pi * (5 * x / 65 + 7 * y / 65))
+
+        peaks = measure_periodicity(arr,
+                                    pixel_size_x_m=1e-9,
+                                    pixel_size_y_m=1e-9,
+                                    n_peaks=3)
+
+        assert peaks
+        assert all(0.0 < p["strength"] <= 1.0 for p in peaks)
 
 
 # ─── export_png ──────────────────────────────────────────────────────────────

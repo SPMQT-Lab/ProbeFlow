@@ -89,6 +89,9 @@ def test_fft_finds_known_period():
     assert abs(result.period_m - period) / period < 0.05
     assert diag.fft_freq_m_inv is not None
     assert diag.fft_power is not None
+    assert result.uncertainty_m is None
+    assert diag.fft_period_bin_width_m is not None
+    assert "bin width" in result.message
 
 
 # ── 6. Too-short profile returns weak or failed ───────────────────────────────

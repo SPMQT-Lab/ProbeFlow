@@ -117,6 +117,20 @@ def test_message_contains_edge_correction_note():
     pts = _square_lattice(6, 1e-9)
     result = compute_pair_correlation(pts)
     assert "edge correction" in result.message.lower()
+    assert result.edge_correction == "not_applied"
+
+
+def test_area_normalisation_applies_square_window_edge_correction():
+    rng = np.random.default_rng(1234)
+    side = 8e-8
+    pts = rng.uniform(0.0, side, size=(300, 2))
+
+    result = compute_pair_correlation(pts, roi_area_m2=side * side)
+
+    assert result.edge_correction == "square_window_translational"
+    assert "square-window" in result.message
+    tail = result.g_r[-10:]
+    assert 0.5 < float(np.mean(tail)) < 2.0
 
 
 def test_dialog_measurement_context_preserves_bins_area_and_warning(qapp):
@@ -152,7 +166,7 @@ def test_dialog_measurement_context_preserves_bins_area_and_warning(qapp):
     assert result.context["roi_area_m2"] == pytest.approx(25e-18)
     assert result.context["r_max_m"] == pytest.approx(4e-9)
     assert result.context["bin_width_m"] == pytest.approx(0.5e-9)
-    assert result.context["edge_correction"] == "not_applied"
+    assert result.context["edge_correction"] == "square_window_translational"
     assert "edge correction" in result.context["message"].lower()
     assert result.context["pixel_size_y_m"] == pytest.approx(2e-9)
     assert result.context["point_source_type"] == "feature_maxima"

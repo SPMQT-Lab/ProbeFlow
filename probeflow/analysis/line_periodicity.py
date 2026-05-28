@@ -35,6 +35,7 @@ class PeriodicityDiagnostic:
     peak_positions_m: np.ndarray | None = None
     fft_freq_m_inv: np.ndarray | None = None
     fft_power: np.ndarray | None = None
+    fft_period_bin_width_m: float | None = None
 
 
 def estimate_line_periodicity(
@@ -239,9 +240,7 @@ def _autocorrelation_method(
     delta = 0.0
     if 0 < first_idx < len(ac_pos) - 1:
         y0, y1, y2 = ac_pos[first_idx - 1], ac_pos[first_idx], ac_pos[first_idx + 1]
-        denom = 2 * y1 - y0 - y2
-        if denom > 0:
-            delta = 0.5 * (y0 - y2) / denom
+        delta = _bounded_parabolic_delta(y0, y1, y2)
 
     period_m = lag_m[first_idx] + delta * sample_spacing
 
@@ -336,10 +335,14 @@ def _fft_method(
     s_m, z_proc, sample_spacing, line_length_m, n, *, min_period_m, max_period_m
 ) -> tuple[PeriodicityResult, dict]:
     z_dt = signal.detrend(z_proc, type="linear")
-    z_windowed = z_dt * np.hanning(n)
+    window = _periodic_hann(n)
+    z_windowed = z_dt * window
 
     fft_vals = np.fft.rfft(z_windowed)
     power = np.abs(fft_vals) ** 2
+    gain = float(np.sum(window))
+    if gain > 0.0:
+        power = power / (gain * gain)
     freqs = np.fft.rfftfreq(n, d=sample_spacing)
 
     # Exclude DC; apply period bounds as frequency bounds
@@ -364,7 +367,8 @@ def _fft_method(
 
     period_m = 1.0 / dom_freq
     freq_res = 1.0 / line_length_m if line_length_m > 0 else 0.0
-    uncertainty_m = (period_m ** 2) * freq_res
+    period_bin_width_m = (period_m ** 2) * freq_res
+    extra["fft_period_bin_width_m"] = period_bin_width_m
 
     n_periods = line_length_m / period_m if period_m > 0 else 0.0
     mean_power = float(np.mean(power[valid]))
@@ -374,18 +378,28 @@ def _fft_method(
         quality, message = "weak", f"Short profile; ~{n_periods:.1f} periods sampled."
     elif snr > 10:
         quality = "good"
-        message = f"Dominant FFT peak at {_fmt_m(period_m)} (SNR={snr:.0f})."
+        message = (
+            f"Dominant FFT peak at {_fmt_m(period_m)} "
+            f"(SNR={snr:.0f}; bin width {_fmt_m(period_bin_width_m)})."
+        )
     elif snr > 3:
         quality = "weak"
-        message = f"Moderate FFT peak at {_fmt_m(period_m)} (SNR={snr:.0f})."
+        message = (
+            f"Moderate FFT peak at {_fmt_m(period_m)} "
+            f"(SNR={snr:.0f}; bin width {_fmt_m(period_bin_width_m)})."
+        )
     else:
         quality = "ambiguous"
-        message = f"Weak FFT peak at {_fmt_m(period_m)} (SNR={snr:.1f}); no dominant period."
+        message = (
+            f"Weak FFT peak at {_fmt_m(period_m)} "
+            f"(SNR={snr:.1f}; bin width {_fmt_m(period_bin_width_m)}); "
+            "no dominant period."
+        )
 
     return PeriodicityResult(
         method="fft",
         period_m=period_m,
-        uncertainty_m=uncertainty_m,
+        uncertainty_m=None,
         line_length_m=line_length_m,
         n_periods=n_periods,
         n_samples=n,
@@ -407,6 +421,25 @@ def _make_failed(method: str, line_length_m: float, n: int, message: str) -> Per
         quality="failed",
         message=message,
     )
+
+
+def _bounded_parabolic_delta(y0: float, y1: float, y2: float) -> float:
+    vals = (float(y0), float(y1), float(y2))
+    if not all(math.isfinite(v) for v in vals):
+        return 0.0
+    denom = 2.0 * vals[1] - vals[0] - vals[2]
+    if denom <= 0.0:
+        return 0.0
+    delta = 0.5 * (vals[0] - vals[2]) / denom
+    if not math.isfinite(delta) or abs(delta) > 0.5:
+        return 0.0
+    return float(delta)
+
+
+def _periodic_hann(n: int) -> np.ndarray:
+    if n <= 1:
+        return np.ones(n, dtype=np.float64)
+    return np.hanning(n + 1)[:-1]
 
 
 def _quality_from_n_periods(n_periods: float, prominence: float) -> tuple[str, str]:

@@ -1,8 +1,8 @@
 """Pair-correlation (radial distribution) from detected feature points.
 
 GUI-free. Accepts physical-space (x, y) coordinates in metres and returns a
-PairCorrelationResult. Edge correction is *not* applied; a note is included
-in the result message.
+PairCorrelationResult. When only a scalar ROI area is available, normalization
+uses a square-window translational edge-correction approximation.
 """
 
 from __future__ import annotations
@@ -25,6 +25,7 @@ class PairCorrelationResult:
     first_peak_m: float | None
     quality: str             # "good" | "weak" | "failed"
     message: str
+    edge_correction: str = "not_applied"
 
 
 def compute_pair_correlation(
@@ -129,12 +130,18 @@ def compute_pair_correlation(
     if roi_area_m2 and roi_area_m2 > 0:
         # g(r) = count * 2*A / (n*(n-1) * 2π*r*dr)
         annulus = 2.0 * math.pi * r_centres * bin_width_m
-        annulus = np.where(annulus > 0, annulus, np.nan)
-        normalised = (counts * 2.0 * float(roi_area_m2)) / (float(n_pairs) * annulus)
+        edge_fraction = _square_window_edge_fraction(r_centres, float(roi_area_m2))
+        effective_annulus = annulus * edge_fraction
+        effective_annulus = np.where(effective_annulus > 0, effective_annulus, np.nan)
+        normalised = (counts * 2.0 * float(roi_area_m2)) / (
+            float(n_pairs) * effective_annulus
+        )
         g_r = np.where(np.isfinite(normalised), normalised, 0.0)
+        edge_correction = "square_window_translational"
     else:
         # Raw pair counts.
         g_r = counts.astype(float)
+        edge_correction = "not_applied"
 
     # First peak: highest bin above the NN scale.
     peak_mask = (r_centres > nn_median * 0.3) & (counts > 0)
@@ -144,7 +151,13 @@ def compute_pair_correlation(
         first_peak = None
 
     quality = "good" if n >= 20 else ("weak" if n >= 5 else "failed")
-    msg = "Pair correlation is approximate; edge correction is not yet applied."
+    if edge_correction == "square_window_translational":
+        msg = (
+            "Pair correlation uses square-window translational edge correction "
+            "estimated from ROI area."
+        )
+    else:
+        msg = "Pair correlation is approximate; edge correction is not applied."
     if quality == "weak":
         msg = f"Only {n} points — result may be unreliable. " + msg
 
@@ -157,4 +170,19 @@ def compute_pair_correlation(
         first_peak_m=first_peak,
         quality=quality,
         message=msg,
+        edge_correction=edge_correction,
     )
+
+
+def _square_window_edge_fraction(r_m: np.ndarray, area_m2: float) -> np.ndarray:
+    """Mean pair-vector support for a square window with matching area."""
+    side_m = math.sqrt(area_m2)
+    if not math.isfinite(side_m) or side_m <= 0.0:
+        return np.ones_like(r_m, dtype=float)
+    theta = np.linspace(0.0, 2.0 * math.pi, 720, endpoint=False)
+    cos_t = np.abs(np.cos(theta))
+    sin_t = np.abs(np.sin(theta))
+    r = np.asarray(r_m, dtype=np.float64)[:, None]
+    fx = np.clip(1.0 - (r * cos_t[None, :] / side_m), 0.0, 1.0)
+    fy = np.clip(1.0 - (r * sin_t[None, :] / side_m), 0.0, 1.0)
+    return np.mean(fx * fy, axis=1)

@@ -213,11 +213,12 @@ def measure_periodicity(
     mean_val = float(np.mean(finite_values))
     arr[~np.isfinite(arr)] = mean_val
 
-    wy = np.hanning(Ny)
-    wx = np.hanning(Nx)
+    wy = _periodic_hann(Ny)
+    wx = _periodic_hann(Nx)
     win2d = np.outer(wy, wx)
 
-    F = np.fft.fft2(arr * win2d)
+    windowed = (arr - mean_val) * win2d
+    F = np.fft.fft2(windowed)
     F = np.fft.fftshift(F)
     power = np.abs(F) ** 2
 
@@ -236,6 +237,10 @@ def measure_periodicity(
 
     search_power = power.copy()
     search_power[~half_mask] = 0.0
+    total_search_power = float(np.sum(search_power))
+    if not math.isfinite(total_search_power) or total_search_power <= 0.0:
+        return []
+    search_power /= total_search_power
 
     results = []
     suppress_r = max(3, min(Ny, Nx) // 20)
@@ -269,7 +274,9 @@ def measure_periodicity(
             'strength':  peak_val,
         })
 
-        for (rpy, rpx) in [(py, px), (Ny - py, Nx - px)]:
+        mirror_py = (2 * cy - py) % Ny
+        mirror_px = (2 * cx - px) % Nx
+        for (rpy, rpx) in [(py, px), (mirror_py, mirror_px)]:
             for dy in range(-suppress_r, suppress_r + 1):
                 for dx in range(-suppress_r, suppress_r + 1):
                     ny_ = int(rpy) + dy
@@ -278,3 +285,9 @@ def measure_periodicity(
                         search_power[ny_, nx_] = 0.0
 
     return results
+
+
+def _periodic_hann(n: int) -> np.ndarray:
+    if n <= 1:
+        return np.ones(n, dtype=np.float64)
+    return np.hanning(n + 1)[:-1]
