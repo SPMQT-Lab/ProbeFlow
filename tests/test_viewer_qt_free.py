@@ -97,9 +97,19 @@ def test_save_processed_image_png(tmp_path):
     scan = _make_fake_scan()
     out = tmp_path / "result.png"
 
-    msg = save_processed_image(scan, 0, out)
+    with patch(
+        "probeflow.provenance.export.build_scan_export_provenance",
+        return_value="prov",
+    ):
+        msg = save_processed_image(
+            scan, 0, out, display_settings={"colormap": "gray"}
+        )
 
-    scan.save_png.assert_called_once()
+    scan.save_png.assert_called_once_with(
+        out, plane_idx=0,
+        colormap="gray", clip_low=1.0, clip_high=99.0,
+        add_scalebar=True, provenance="prov",
+    )
     assert "Saved processed image" in msg
 
 

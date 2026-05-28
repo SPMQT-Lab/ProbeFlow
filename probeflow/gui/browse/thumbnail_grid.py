@@ -10,7 +10,7 @@ from PySide6.QtGui import QFont, QPixmap
 from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QScrollArea, QVBoxLayout, QWidget
 
 from probeflow.core.scan_loader import load_scan as _default_load_scan
-from probeflow.gui.models import FolderEntry, SxmFile, VertFile
+from probeflow.gui.models import FolderEntry, SxmFile, VertFile, browse_entry_key
 from probeflow.gui.rendering import (
     DEFAULT_CMAP_KEY,
     THUMBNAIL_CHANNEL_DEFAULT,
@@ -271,12 +271,10 @@ class ThumbnailGrid(QWidget):
     def _key_for(entry) -> str:
         """Stable per-entry key for the _cards dict.
 
-        Folders use ``folder:<path>`` so a subfolder named the same as a sibling
-        scan stem can never collide.
+        File cards include entry type and path so same-stem scan/spectrum files
+        can never collide.
         """
-        if isinstance(entry, FolderEntry):
-            return f"folder:{entry.path}"
-        return entry.stem
+        return browse_entry_key(entry)
 
     def _on_breadcrumb_clicked(self, path: Path):
         if self._current_dir is not None and path != self._current_dir:
@@ -323,7 +321,7 @@ class ThumbnailGrid(QWidget):
         count = 0
         for entry in self._entries:
             if isinstance(entry, SxmFile):
-                if entry.stem not in self._cards:
+                if self._key_for(entry) not in self._cards:
                     continue
                 loader = self._make_thumbnail_loader(entry, token)
                 loader.signals.loaded.connect(self._on_thumb)
@@ -392,7 +390,7 @@ class ThumbnailGrid(QWidget):
         token = self._load_token
         for entry in self._entries:
             if isinstance(entry, SxmFile) and str(entry.path) == path_str:
-                if entry.stem in self._cards:
+                if self._key_for(entry) in self._cards:
                     loader = self._make_thumbnail_loader(entry, token)
                     loader.signals.loaded.connect(self._on_thumb)
                     self._pool.start(loader)
@@ -405,8 +403,8 @@ class ThumbnailGrid(QWidget):
         except Exception:
             return 0
 
-    def get_card_state(self, stem: str) -> tuple[str, tuple[float, float], dict]:
-        """Return viewer-opening state for a stem.
+    def get_card_state(self, entry_or_key) -> tuple[str, tuple[float, float], dict]:
+        """Return viewer-opening state for a browse entry.
 
         Browse align-row correction is only a thumbnail preview aid, so the
         full viewer opens raw unless the user applies processing there.
@@ -421,6 +419,21 @@ class ThumbnailGrid(QWidget):
 
     def get_primary(self) -> Optional[str]:
         return self._primary
+
+    def get_primary_entry(self):
+        if self._primary is None:
+            return None
+        return next(
+            (e for e in self._entries
+             if not isinstance(e, FolderEntry) and self._key_for(e) == self._primary),
+            None,
+        )
+
+    def get_selected_entries(self) -> list[Union[SxmFile, VertFile]]:
+        return [
+            e for e in self._entries
+            if not isinstance(e, FolderEntry) and self._key_for(e) in self._selected
+        ]
 
     def apply_theme(self, t: dict):
         self._t = t
@@ -442,10 +455,10 @@ class ThumbnailGrid(QWidget):
 
     # ── Slots ──────────────────────────────────────────────────────────────────
     @Slot(str, QPixmap, object)
-    def _on_thumb(self, stem: str, pixmap: QPixmap, token):
+    def _on_thumb(self, key: str, pixmap: QPixmap, token):
         if token is not self._load_token:
             return
-        card = self._cards.get(stem)
+        card = self._cards.get(key)
         if card:
             card.set_pixmap(pixmap)
 
@@ -463,33 +476,30 @@ class ThumbnailGrid(QWidget):
         # the info panel and would just confuse the file selection state.
         if isinstance(entry, FolderEntry):
             return
-        stem = entry.stem
+        key = self._key_for(entry)
         if ctrl:
             # toggle this card in/out of selection
-            if stem in self._selected:
-                self._selected.discard(stem)
-                self._cards[stem].set_selected(False)
+            if key in self._selected:
+                self._selected.discard(key)
+                self._cards[key].set_selected(False)
                 self._primary = next(iter(self._selected), None) if self._selected else None
             else:
-                self._selected.add(stem)
-                self._cards[stem].set_selected(True)
-                self._primary = stem
+                self._selected.add(key)
+                self._cards[key].set_selected(True)
+                self._primary = key
         else:
             # single select: deselect all others
             for s in list(self._selected):
                 c = self._cards.get(s)
                 if c:
                     c.set_selected(False)
-            self._selected = {stem}
-            self._primary  = stem
-            self._cards[stem].set_selected(True)
+            self._selected = {key}
+            self._primary  = key
+            self._cards[key].set_selected(True)
 
         self.selection_changed.emit(len(self._selected))
         if self._primary:
-            primary_entry = next(
-                (e for e in self._entries
-                 if not isinstance(e, FolderEntry) and e.stem == self._primary),
-                None)
+            primary_entry = self.get_primary_entry()
             if primary_entry:
                 self.entry_selected.emit(primary_entry)
 

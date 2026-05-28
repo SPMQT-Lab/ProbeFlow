@@ -131,6 +131,17 @@ def _card_meta_str(entry: SxmFile) -> str:
     return "\n".join(filter(None, [line1, entry.acquisition_label, line2]))
 
 
+def browse_entry_key(entry) -> str:
+    """Return a stable browse-grid key that cannot collide on filename stem."""
+    if isinstance(entry, FolderEntry):
+        return f"folder:{Path(entry.path)}"
+    if isinstance(entry, SxmFile):
+        return f"scan:{Path(entry.path)}"
+    if isinstance(entry, VertFile):
+        return f"spectrum:{Path(entry.path)}"
+    return f"entry:{Path(getattr(entry, 'path', getattr(entry, 'stem', '')))}"
+
+
 def _scan_items_to_sxm(items) -> list[SxmFile]:
     """Convert ProbeFlowItem scan entries to SxmFile for the existing GUI.
 

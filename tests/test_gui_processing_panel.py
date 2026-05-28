@@ -1709,3 +1709,54 @@ def test_viewer_save_processed_image_action_dispatches_writer(qapp, monkeypatch,
 
     dlg.close()
     dlg.deleteLater()
+
+
+def test_tv_load_from_browse_reuses_processed_scan_helper(qapp, monkeypatch):
+    from probeflow.gui import SxmFile
+    from probeflow.gui.app import ProbeFlowWindow
+
+    entry = SxmFile(path=Path("/tmp/example.sxm"), stem="example", Nx=8, Ny=8)
+    processed = np.ones((4, 4), dtype=float) * 7.0
+    statuses = []
+    loaded = []
+
+    class FakeGrid:
+        def get_primary_entry(self):
+            return entry
+
+    class FakeSidebar:
+        def plane_index(self):
+            return 3
+
+        def set_status(self, text):
+            statuses.append(text)
+
+    class FakePanel:
+        def load_entry(self, *args):
+            loaded.append(args)
+
+    win = ProbeFlowWindow.__new__(ProbeFlowWindow)
+    win._grid = FakeGrid()
+    win._tv_sidebar = FakeSidebar()
+    win._tv_panel = FakePanel()
+    win._status_bar = type("Status", (), {"showMessage": lambda self, text: None})()
+
+    def fake_load_scan_plane_for_analysis(self, got_entry, plane_idx):
+        assert got_entry is entry
+        assert plane_idx == 3
+        return processed, 2.5e-10, 2.0e-10, 3.0e-10, 1
+
+    monkeypatch.setattr(
+        ProbeFlowWindow,
+        "_load_scan_plane_for_analysis",
+        fake_load_scan_plane_for_analysis,
+    )
+
+    ProbeFlowWindow._on_tv_load_from_browse(win)
+
+    assert len(loaded) == 1
+    assert loaded[0][0] is entry
+    assert loaded[0][1] == 1
+    assert loaded[0][2] is processed
+    assert loaded[0][3] == 2.5e-10
+    assert "Loaded example" in statuses[-1]

@@ -117,7 +117,7 @@ class TestGuiWorkers:
         assert calls["size"] == (148, 116)
         assert calls["processing"] == {"align_rows": "median"}
         assert len(emitted) == 1
-        assert emitted[0][0] == "scan"
+        assert emitted[0][0] == "scan:scan.dat"
         assert emitted[0][2] is token
 
     def test_thumbnail_loader_suppresses_emit_when_render_fails(
@@ -271,7 +271,7 @@ class TestGuiWorkers:
 
         assert calls[0][0] == (entry.path,)
         assert calls[0][1] == {"size": (120, 80), "dark": False}
-        assert emitted[0][0] == "spec"
+        assert emitted[0][0] == "spectrum:spec.VERT"
         assert emitted[0][2] == "token"
 
         monkeypatch.setattr(worker_mod, "render_spec_thumbnail", lambda *_a, **_k: None)
@@ -370,6 +370,28 @@ class TestGuiWorkers:
         assert any(tag == "err" and "FAILED bad.dat" in msg for msg, tag in logs)
         assert any(tag == "warn" and "1 file(s) failed" in msg for msg, tag in logs)
         assert finished == [str(out_dir)]
+
+
+def test_thumbnail_grid_keys_same_stem_scan_and_spectrum_by_type_and_path(qapp):
+    from types import SimpleNamespace
+
+    from probeflow.gui.browse import ThumbnailGrid
+    from probeflow.gui.models import SxmFile, VertFile, browse_entry_key
+    from probeflow.gui import THEMES
+
+    grid = ThumbnailGrid(THEMES["dark"])
+    grid._pool = SimpleNamespace(start=lambda _loader: None)
+    scan = SxmFile(path=Path("/tmp/sample.sxm"), stem="sample")
+    spec = VertFile(path=Path("/tmp/sample.VERT"), stem="sample")
+
+    grid.load([scan, spec])
+
+    assert set(grid._cards) == {browse_entry_key(scan), browse_entry_key(spec)}
+    grid._on_card_click(scan, ctrl=False)
+    assert grid.get_primary_entry() is scan
+    grid._on_card_click(spec, ctrl=False)
+    assert grid.get_primary_entry() is spec
+
 
 TESTDATA = Path(__file__).resolve().parents[1] / "test_data"
 

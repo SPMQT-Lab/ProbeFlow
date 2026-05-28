@@ -784,7 +784,7 @@ class ProbeFlowWindow(QMainWindow):
                 f"{entry.stem}  |  {sweep}  |  {entry.n_points} pts  |  "
                 f"{n_sel} selected / {self._n_loaded} total  |  Double-click to view")
         else:
-            cmap_key, _, proc = self._grid.get_card_state(entry.stem)
+            cmap_key, _, proc = self._grid.get_card_state(entry)
             self._browse_info.show_entry(entry, cmap_key, proc)
             n_sel = len(self._grid.get_selected())
             self._status_bar.showMessage(
@@ -846,13 +846,10 @@ class ProbeFlowWindow(QMainWindow):
         self._grid.set_thumbnail_size(name)
 
     def _refresh_primary_channel_previews(self):
-        primary = self._grid.get_primary()
-        if primary:
-            entry = next((e for e in self._grid.get_entries()
-                          if e.stem == primary), None)
-            if entry and isinstance(entry, SxmFile):
-                self._browse_info.load_channels(
-                    entry, self._grid.thumbnail_colormap(), processing=None)
+        entry = self._grid.get_primary_entry()
+        if entry and isinstance(entry, SxmFile):
+            self._browse_info.load_channels(
+                entry, self._grid.thumbnail_colormap(), processing=None)
 
     def _on_map_spectra(self):
         """Open the folder-level spec→image mapping dialog."""
@@ -875,10 +872,9 @@ class ProbeFlowWindow(QMainWindow):
                 f"{len(vert_entries)} spectra assigned.")
 
     def _on_overlay_selected_spectra(self):
-        selected = self._grid.get_selected()
         entries = [
-            e for e in self._grid.get_entries()
-            if isinstance(e, VertFile) and e.stem in selected
+            e for e in self._grid.get_selected_entries()
+            if isinstance(e, VertFile)
         ]
         if len(entries) < 2:
             self._status_bar.showMessage(
@@ -1025,12 +1021,11 @@ class ProbeFlowWindow(QMainWindow):
         from probeflow.gui.models import VertFile
         if self._fc_window is None:
             return
-        primary = self._grid.get_primary()
-        if not primary:
+        entry = self._grid.get_primary_entry()
+        if not entry:
             self._fc_window._sidebar.set_status(
                 "Select a scan in the Browse tab first.")
             return
-        entry = next((e for e in self._grid.get_entries() if e.stem == primary), None)
         if not entry or isinstance(entry, VertFile):
             self._fc_window._sidebar.set_status(
                 "Selected entry is not a topography scan.")
@@ -1046,12 +1041,11 @@ class ProbeFlowWindow(QMainWindow):
 
     # ── Features tab handlers ──────────────────────────────────────────────────
     def _on_features_load_from_browse(self):
-        primary = self._grid.get_primary()
-        if not primary:
+        entry = self._grid.get_primary_entry()
+        if not entry:
             self._features_sidebar.set_status("Select a scan in the Browse tab first.")
             self._status_bar.showMessage("Pick a scan in Browse to load it into FeatureCounting")
             return
-        entry = next((e for e in self._grid.get_entries() if e.stem == primary), None)
         if not entry or isinstance(entry, VertFile):
             self._features_sidebar.set_status("Selected entry is not a topography scan.")
             return
@@ -1372,33 +1366,21 @@ class ProbeFlowWindow(QMainWindow):
 
     # ── TV-denoise tab handlers ────────────────────────────────────────────────
     def _on_tv_load_from_browse(self):
-        primary = self._grid.get_primary()
-        if not primary:
+        entry = self._grid.get_primary_entry()
+        if not entry:
             self._tv_sidebar.set_status("Select a scan in the Browse tab first.")
             self._status_bar.showMessage("Pick a scan in Browse to load it into TV-denoise")
             return
-        entry = next((e for e in self._grid.get_entries() if e.stem == primary), None)
         if not entry or isinstance(entry, VertFile):
             self._tv_sidebar.set_status("Selected entry is not a topography scan.")
             return
         plane_idx = self._tv_sidebar.plane_index()
         try:
-            _scan = load_scan(entry.path)
-            if plane_idx >= _scan.n_planes:
-                plane_idx = 0
-            arr = _scan.planes[plane_idx]
-            w_m, h_m = _scan.scan_range_m
+            arr, px_m, _px_x_m, _px_y_m, plane_idx = \
+                self._load_scan_plane_for_analysis(entry, plane_idx)
         except Exception as exc:
             self._tv_sidebar.set_status(f"Could not read scan: {exc}")
             return
-        if arr is None:
-            self._tv_sidebar.set_status("Could not read scan plane.")
-            return
-        Ny, Nx = arr.shape
-        if Nx <= 0 or Ny <= 0 or w_m <= 0 or h_m <= 0:
-            px_m = 1e-10
-        else:
-            px_m = float(np.sqrt((w_m / Nx) * (h_m / Ny)))
         self._tv_panel.load_entry(entry, plane_idx, arr, px_m)
         self._tv_sidebar.set_status(
             f"Loaded {entry.stem} (plane {plane_idx}). Adjust parameters and Run.")
@@ -1465,7 +1447,7 @@ class ProbeFlowWindow(QMainWindow):
         if is_spec:
             dlg = SpecViewerDialog(entry, t, self)
         else:
-            cmap_key, clip, proc = self._grid.get_card_state(entry.stem)
+            cmap_key, clip, proc = self._grid.get_card_state(entry)
             # Restore any processing the user applied last time this scan was open.
             saved = self._saved_processing.get(str(entry.path))
             if saved:

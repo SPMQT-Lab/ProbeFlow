@@ -142,7 +142,7 @@ def save_processed_image(
     suffix = out_path.suffix.lower()
     try:
         provenance = None
-        if suffix not in {".png", ".sxm"} and display_settings is not None:
+        if suffix != ".sxm" and display_settings is not None:
             provenance = build_processed_export_provenance(
                 scan, out_path, plane_idx, display_settings,
                 roi_set=roi_set, processing_history=processing_history,
@@ -157,6 +157,7 @@ def save_processed_image(
                 out_path, plane_idx=plane_idx,
                 colormap=colormap, clip_low=clip_low, clip_high=clip_high,
                 add_scalebar=True,
+                provenance=provenance,
             )
         elif suffix == ".pdf":
             scan.save_pdf(

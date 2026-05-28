@@ -12,7 +12,7 @@ import numpy as np
 from PySide6.QtCore import QObject, QRunnable, Signal
 from PySide6.QtGui import QPixmap
 
-from probeflow.gui.models import SxmFile, VertFile
+from probeflow.gui.models import SxmFile, VertFile, browse_entry_key
 from probeflow.core.resources import FILE_CUSHIONS_DIR
 from probeflow.core.scan_loader import SUPPORTED_SUFFIXES as _SCAN_SUFFIXES
 from probeflow.gui.rendering import (
@@ -81,7 +81,7 @@ class ThumbnailLoader(QRunnable):
             processing=self.processing or None,
         )
         if img is not None:
-            self.signals.loaded.emit(self.entry.stem, pil_to_pixmap(img), self.token)
+            self.signals.loaded.emit(browse_entry_key(self.entry), pil_to_pixmap(img), self.token)
 
 
 # ── Worker: folder preview thumbnails ─────────────────────────────────────────
@@ -157,7 +157,7 @@ class SpecThumbnailLoader(QRunnable):
             _log_preview_failure("SpecThumbnailLoader", "render", self.entry.path, exc)
             img = None
         if img is not None:
-            self.signals.loaded.emit(self.entry.stem, pil_to_pixmap(img), self.token)
+            self.signals.loaded.emit(browse_entry_key(self.entry), pil_to_pixmap(img), self.token)
 
 
 # ── Worker: channel thumbnails ────────────────────────────────────────────────
