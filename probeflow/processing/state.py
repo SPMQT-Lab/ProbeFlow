@@ -1014,6 +1014,11 @@ def apply_geometric_op_to_scan(
     if canonical_op in ("rot90_cw", "rot270_cw"):
         w, h = scan.scan_range_m
         scan.scan_range_m = (h, w)
+    elif canonical_op == "flip_horizontal" and hasattr(scan, "plane_names"):
+        scan.plane_names = [
+            _swap_forward_backward_label(name)
+            for name in getattr(scan, "plane_names", [])
+        ]
 
     if roi_set is not None:
         # transform_all accepts both vocabularies via its own alias map.
@@ -1035,3 +1040,33 @@ def apply_geometric_op_to_scan(
             )
 
     return scan, roi_set
+
+
+def _swap_forward_backward_label(label: str) -> str:
+    """Swap scan-direction words in a plane label after horizontal mirroring."""
+    import re
+
+    placeholders = {
+        "forward": "__PROBEFLOW_DIR_FORWARD__",
+        "backward": "__PROBEFLOW_DIR_BACKWARD__",
+        "fwd": "__PROBEFLOW_DIR_FWD__",
+        "bwd": "__PROBEFLOW_DIR_BWD__",
+    }
+    replacements = {
+        "__PROBEFLOW_DIR_FORWARD__": "backward",
+        "__PROBEFLOW_DIR_BACKWARD__": "forward",
+        "__PROBEFLOW_DIR_FWD__": "bwd",
+        "__PROBEFLOW_DIR_BWD__": "fwd",
+    }
+
+    out = str(label)
+    for word, placeholder in placeholders.items():
+        out = re.sub(
+            rf"\b{word}\b",
+            lambda _match, placeholder=placeholder: placeholder,
+            out,
+            flags=re.IGNORECASE,
+        )
+    for placeholder, replacement in replacements.items():
+        out = out.replace(placeholder, replacement)
+    return out

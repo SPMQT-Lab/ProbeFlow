@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import warnings
 
 import numpy as np
 
@@ -19,7 +20,9 @@ from probeflow.io.sxm_io import (
 def read_sxm(path) -> Scan:
     """Load a Nanonis ``.sxm`` into a Scan (display-oriented, SI units)."""
     path = Path(path)
-    hdr, planes = read_all_sxm_planes(path, orient=True)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", UserWarning)
+        hdr, planes = read_all_sxm_planes(path, orient=True)
     if not planes:
         raise ValueError(f"{path}: no data planes could be read")
 
@@ -36,6 +39,11 @@ def read_sxm(path) -> Scan:
         scan_range_m=scan_range_m,
         source_path=path,
         source_format="sxm",
+        warnings=[
+            str(w.message)
+            for w in caught
+            if issubclass(w.category, UserWarning)
+        ],
     )
 
 

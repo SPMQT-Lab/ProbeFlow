@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 
 from probeflow.io.converters.createc_dat_to_sxm import convert_dat_to_sxm
+from probeflow.io.readers.nanonis_sxm import read_sxm
 from probeflow.io.sxm_io import (
     _cushion_tail_lens,
     parse_sxm_header,
@@ -156,6 +157,31 @@ def test_read_all_sxm_planes_warns_on_truncated_payload(tmp_path):
     assert "truncated.sxm" in msg
     assert len(planes) == 1
     assert len(planes) < len(sxm_data_info(hdr_out))
+
+
+def test_read_sxm_records_truncated_payload_warning_on_scan(tmp_path):
+    post_len, pre_len = _cushion_tail_lens()
+    header = (
+        b":NANONIS_VERSION:\n2\n"
+        b":SCAN_PIXELS:\n4 4\n"
+        b":SCAN_RANGE:\n1.0E-9 1.0E-9\n"
+        b":SCAN_DIR:\ndown\n"
+        b":DATA_INFO:\n"
+        b"\tChannel\tName\tUnit\tDirection\tCalibration\tOffset\n"
+        b"\t14\tZ\tm\tforward\t1.0E-9\t0.0\n"
+        b"\t0\tCurrent\tA\tforward\t1.0E-9\t0.0\n"
+        b":SCANIT_END:\n"
+    )
+    cushion = b"\x00" * (post_len + pre_len)
+    payload_one_plane = np.ones((4, 4), dtype=">f4").tobytes()
+    truncated = tmp_path / "truncated.sxm"
+    truncated.write_bytes(header + cushion + payload_one_plane)
+
+    scan = read_sxm(truncated)
+
+    assert scan.warnings
+    assert "incompletely written" in scan.warnings[0]
+    assert scan.n_planes == 1
 
 
 class TestRoundTrip:

@@ -208,9 +208,13 @@ def read_sm4(path) -> Scan:
             )
             continue
         pages.append(page)
-    planes = [np.asarray(page.physical_data, dtype=np.float64) for page in pages]
+    unit_conversions = [_normalise_z_unit_for_scan(page.z_unit) for page in pages]
+    planes = [
+        np.asarray(page.physical_data, dtype=np.float64) * scale
+        for page, (scale, _unit) in zip(pages, unit_conversions)
+    ]
     names = [_page_name(page) for page in pages]
-    units = [page.z_unit or "" for page in pages]
+    units = [unit for _scale, unit in unit_conversions]
     scan_range_m = _scan_range_m(first)
     header = {
         "RHK_SM4": True,
@@ -227,6 +231,7 @@ def read_sm4(path) -> Scan:
         scan_range_m=scan_range_m,
         source_path=Path(path),
         source_format="sm4",
+        warnings=sm4.parser_notes,
     )
 
 
@@ -591,6 +596,41 @@ def _page_metadata(page: RHKSM4Page) -> dict[str, Any]:
         "z_unit": page.z_unit,
     })
     return data
+
+
+def _normalise_z_unit_for_scan(unit: str | None) -> tuple[float, str]:
+    """Return ``(scale_to_si, canonical_unit)`` for RHK page data."""
+    if not unit:
+        return 1.0, ""
+    cleaned = unit.strip()
+    key = cleaned.lower().replace("µ", "u").replace("μ", "u")
+    length_units = {
+        "m": (1.0, "m"),
+        "meter": (1.0, "m"),
+        "meters": (1.0, "m"),
+        "metre": (1.0, "m"),
+        "metres": (1.0, "m"),
+        "nm": (1e-9, "m"),
+        "nanometer": (1e-9, "m"),
+        "nanometers": (1e-9, "m"),
+        "nanometre": (1e-9, "m"),
+        "nanometres": (1e-9, "m"),
+        "pm": (1e-12, "m"),
+        "picometer": (1e-12, "m"),
+        "picometers": (1e-12, "m"),
+        "picometre": (1e-12, "m"),
+        "picometres": (1e-12, "m"),
+        "um": (1e-6, "m"),
+        "micrometer": (1e-6, "m"),
+        "micrometers": (1e-6, "m"),
+        "micrometre": (1e-6, "m"),
+        "micrometres": (1e-6, "m"),
+        "å": (1e-10, "m"),
+        "ang": (1e-10, "m"),
+        "angstrom": (1e-10, "m"),
+        "angstroms": (1e-10, "m"),
+    }
+    return length_units.get(key, (1.0, cleaned))
 
 
 def _scan_range_m(page: RHKSM4Page) -> tuple[float, float]:

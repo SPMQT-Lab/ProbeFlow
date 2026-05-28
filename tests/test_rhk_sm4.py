@@ -108,7 +108,7 @@ def _append(buf: bytearray, payload: bytes) -> int:
     return offset
 
 
-def _synthetic_sm4(path: Path) -> Path:
+def _synthetic_sm4(path: Path, *, z_units: str = "m") -> Path:
     """Write a minimal but correctly-formatted SM4 file to *path*.
 
     File layout:
@@ -147,7 +147,7 @@ def _synthetic_sm4(path: Path) -> Path:
 
     string_data = _strings(
         "Topo page", "system", "session", "user", "path",
-        "2026-05-14", "12:00:00", "m", "m", "m",
+        "2026-05-14", "12:00:00", "m", "m", z_units,
     )
     strings_pos = _append(buf, string_data)
 
@@ -239,6 +239,14 @@ def test_load_scan_exposes_sm4_image_pages(tmp_path):
     assert scan.plane_units == ["m"]
     assert scan.scan_range_m[0] == pytest.approx(4e-9, rel=1e-4)
     assert scan.scan_range_m[1] == pytest.approx(6e-9, rel=1e-4)
+
+
+def test_sm4_scan_conversion_normalises_length_z_units(tmp_path):
+    path = _synthetic_sm4(tmp_path / "image.sm4", z_units="nm")
+    scan = load_scan(path)
+
+    assert scan.plane_units == ["m"]
+    np.testing.assert_allclose(scan.planes[0].ravel()[:3], [1.0e-9, 1.5e-9, 2.0e-9])
 
 
 def test_index_and_gui_entry_include_sm4(tmp_path):

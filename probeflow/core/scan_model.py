@@ -54,6 +54,9 @@ class Scan:
     source_format
         ``"sxm"`` | ``"dat"`` | ``"sm4"`` identifies the reader that produced
         this Scan.
+    warnings
+        Reader or conversion warnings that should stay attached to the loaded
+        scan for provenance and GUI surfacing.
     """
 
     planes: list[np.ndarray]
@@ -65,6 +68,7 @@ class Scan:
     source_path: Path
     source_format: str
     experiment_metadata: dict[str, Any] = field(default_factory=dict)
+    warnings: tuple[str, ...] = field(default_factory=tuple)
     _processing_state: Any = field(default=None, init=False, repr=False)
     _processing_history_timestamps: list[str | None] = field(
         default_factory=list,
@@ -85,6 +89,7 @@ class Scan:
         processing_state: Any | None = None,
         processing_history: list[dict] | None = None,
         experiment_metadata: dict[str, Any] | None = None,
+        warnings: list[str] | tuple[str, ...] | None = None,
     ) -> None:
         self.planes = planes
         self.plane_names = plane_names
@@ -95,6 +100,7 @@ class Scan:
         self.source_path = source_path
         self.source_format = source_format
         self.experiment_metadata = dict(experiment_metadata or {})
+        self.warnings = tuple(str(w) for w in warnings or ())
         self._processing_state = None
         self._processing_history_timestamps = []
         if processing_state is not None and processing_history is not None:

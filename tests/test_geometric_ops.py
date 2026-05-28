@@ -378,6 +378,21 @@ class TestApplyGeometricOpToScanRangeSwap:
         scan, _ = apply_geometric_op_to_scan(scan, "flip_horizontal")
         assert scan.scan_range_m == (100e-9, 60e-9)
 
+    def test_flip_horizontal_swaps_forward_backward_plane_labels(self):
+        scan = _make_asymmetric_scan(width_m=100e-9, height_m=60e-9)
+        scan.planes = [
+            np.array([[1.0, 2.0]]),
+            np.array([[3.0, 4.0]]),
+            np.array([[5.0, 6.0]]),
+        ]
+        scan.plane_names = ["Z forward", "Z backward", "Aux channel"]
+        scan.plane_units = ["m", "m", "V"]
+        scan.plane_synthetic = [False, False, False]
+
+        scan, _ = apply_geometric_op_to_scan(scan, "flip_horizontal")
+
+        assert scan.plane_names == ["Z backward", "Z forward", "Aux channel"]
+
     def test_flip_vertical_does_not_swap_scan_range(self):
         scan = _make_asymmetric_scan(width_m=100e-9, height_m=60e-9)
         scan, _ = apply_geometric_op_to_scan(scan, "flip_vertical")

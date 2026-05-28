@@ -97,6 +97,7 @@ def read_dat(path) -> Scan:
         source_path=path,
         source_format="dat",
         experiment_metadata=createc_dat_experiment_metadata(hdr),
+        warnings=report.warnings,
     )
 
 

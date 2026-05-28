@@ -395,6 +395,24 @@ def test_image_y_pos_max_records_partial_scan_without_guessing_full_height(tmp_p
     assert report.decoded_channels_dac.shape == (1, 3, 2)
 
 
+def test_read_dat_preserves_decode_warnings_on_scan(tmp_path):
+    dat = tmp_path / "partial.dat"
+    header = (
+        b"[Paramco32]\n"
+        b"Num.X=3\n"
+        b"Num.Y=5\n"
+        b"Channels=1\n"
+        b"ImageYPosMax=4\n"
+    )
+    payload = np.arange(1, 16, dtype="<f4").tobytes()
+    dat.write_bytes(header + b"DATA" + zlib.compress(payload))
+
+    scan = load_scan(dat)
+
+    assert scan.warnings
+    assert any("trimmed image height from 5 to 3" in msg for msg in scan.warnings)
+
+
 def test_createc_qplus_header_infers_afm_topography():
     meta = createc_dat_experiment_metadata(
         {
