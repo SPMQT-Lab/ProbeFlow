@@ -9,9 +9,6 @@ from PySide6.QtWidgets import (
     QSizePolicy, QSlider, QVBoxLayout, QWidget,
 )
 
-from probeflow.processing.gui_adapter import *
-
-
 class ProcessingControlPanel(QWidget):
     """Internal processing controls shared by Browse and Viewer."""
 
