@@ -582,26 +582,48 @@ class ProbeFlowWindow(QMainWindow):
         self._navbar.set_dark(self._dark)
         self._apply_theme()
 
-    def _set_thumbnail_colormap(self, label: str) -> None:
-        if hasattr(self, "_browse_tools") and self._browse_tools.cmap_cb.currentText() != label:
-            self._browse_tools.cmap_cb.setCurrentText(label)
+    def _apply_thumbnail_setting(
+        self, combo_attr: str, handler, value, transform=None
+    ) -> None:
+        """Sync a Browse-tools combo to ``value`` and invoke ``handler``.
+
+        ``combo_attr`` is the attribute name on ``self._browse_tools``.
+        If the combo's current text already matches ``value``, the menu
+        triggered this update directly, so we run ``handler`` ourselves
+        (optionally piping the value through ``transform`` first).  If
+        the combo differs, ``setCurrentText`` triggers the combo's own
+        signal — which already calls ``handler`` — so we skip the manual
+        call here to avoid double-dispatch.
+        """
+        combo = getattr(self._browse_tools, combo_attr, None) \
+            if hasattr(self, "_browse_tools") else None
+        if combo is not None and combo.currentText() != value:
+            combo.setCurrentText(value)
         else:
-            self._on_thumbnail_colormap_changed(CMAP_KEY.get(label, DEFAULT_CMAP_KEY))
+            handler(transform(value) if transform is not None else value)
         self._sync_menu_actions()
+
+    def _set_thumbnail_colormap(self, label: str) -> None:
+        self._apply_thumbnail_setting(
+            "cmap_cb",
+            self._on_thumbnail_colormap_changed,
+            label,
+            transform=lambda lbl: CMAP_KEY.get(lbl, DEFAULT_CMAP_KEY),
+        )
 
     def _set_thumbnail_channel(self, channel: str) -> None:
-        if hasattr(self, "_browse_tools") and self._browse_tools.thumbnail_channel_cb.currentText() != channel:
-            self._browse_tools.thumbnail_channel_cb.setCurrentText(channel)
-        else:
-            self._on_thumbnail_channel_changed(channel)
-        self._sync_menu_actions()
+        self._apply_thumbnail_setting(
+            "thumbnail_channel_cb",
+            self._on_thumbnail_channel_changed,
+            channel,
+        )
 
     def _set_thumbnail_align(self, mode: str) -> None:
-        if hasattr(self, "_browse_tools") and self._browse_tools.align_rows_cb.currentText() != mode:
-            self._browse_tools.align_rows_cb.setCurrentText(mode)
-        else:
-            self._on_thumbnail_align_changed(mode)
-        self._sync_menu_actions()
+        self._apply_thumbnail_setting(
+            "align_rows_cb",
+            self._on_thumbnail_align_changed,
+            mode,
+        )
 
     def _show_definitions(self) -> None:
         theme = THEMES["dark" if self._dark else "light"]
