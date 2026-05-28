@@ -20,13 +20,30 @@ def v_per_dac(bits: int = DAC_BITS_DEFAULT) -> float:
 
 
 def parse_header(hb: bytes) -> dict:
-    """Parse key=value lines from a Nanonis .dat header block."""
+    """Parse key=value lines from a Nanonis / Createc header block.
+
+    Decodes with ASCII first; falls back to Latin-1 on any byte the
+    ASCII codec cannot represent.  Createc headers contain Latin-1
+    characters (e.g. ``Å`` in ``Dacto[Å]z``) and the previous
+    ``errors="ignore"`` policy silently dropped them, leaving the key
+    as ``Dacto[]z`` — invisible to downstream lookups.  Production
+    Createc reader code already uses a Latin-1-aware parser; this
+    shared helper now matches that behaviour so any caller that
+    happens to wire through it gets the same result.  Review IO #6
+    (fixed 2026-05-28).
+    """
+    def _decode(b: bytes) -> str:
+        try:
+            return b.decode("ascii")
+        except UnicodeDecodeError:
+            return b.decode("latin-1")
+
     hdr: dict = {}
     for line in hb.splitlines():
         if b"=" in line:
             k, v = line.split(b"=", 1)
-            key = k.decode("ascii", errors="ignore").split("/")[-1].strip()
-            val = v.decode("ascii", errors="ignore").strip()
+            key = _decode(k).split("/")[-1].strip()
+            val = _decode(v).strip()
             hdr[key] = val
     return hdr
 

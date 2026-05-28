@@ -35,6 +35,14 @@ def test_safe_conversion_and_header_helpers_contract():
     hdr = parse_header(b"Key1=value1\nsection/SubKey=val\nbad\n")
     assert hdr == {"Key1": "value1", "SubKey": "val"}
     assert parse_header(b"") == {}
+
+    # Regression for review IO #6: Latin-1 bytes (e.g. "Å" 0xC5) must
+    # survive the parser instead of being silently dropped by the
+    # previous errors="ignore" ASCII codec.
+    latin1_block = b"Dacto[\xc5]z=42\n"
+    hdr_l1 = parse_header(latin1_block)
+    assert "Dacto[Å]z" in hdr_l1
+    assert hdr_l1["Dacto[Å]z"] == "42"
     assert find_hdr({"GainPre": "9"}, "gainpre") == "9"
     assert find_hdr({"T_AUXADC6[K]": "4.2"}, "AUXADC6") == "4.2"
     assert find_hdr({}, "missing", "fallback") == "fallback"
