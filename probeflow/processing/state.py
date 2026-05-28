@@ -319,7 +319,15 @@ def _resolve_mask_roi_param(
 
 
 def _load_arithmetic_operand_image(params: "dict[str, Any]") -> np.ndarray:
-    """Load the raw plane referenced by an image-arithmetic step."""
+    """Default image-arithmetic operand resolver — loads from ``source_path``.
+
+    Used as the fallback when no ``operand_resolver`` is passed to
+    :func:`apply_processing_state`.  Performs a file-system read via
+    :func:`probeflow.core.scan_loader.load_scan`, so call sites that need
+    offline / sandboxed behaviour (CLI tests, in-memory dispatch, scratch
+    workflows) should inject their own resolver instead of relying on this
+    one (review arch-backend #13).
+    """
     source_path = params.get("source_path")
     if not source_path:
         raise ValueError("Image arithmetic step is missing source_path.")
@@ -354,6 +362,7 @@ def apply_processing_state(
     *,
     pixel_size_x_m: float | None = None,
     pixel_size_y_m: float | None = None,
+    operand_resolver=None,
     _depth: int = 0,
 ) -> np.ndarray:
     """Apply *state* steps in order to *arr*.
@@ -381,6 +390,16 @@ def apply_processing_state(
         the step-tolerant background fit degraded to non-step-tolerant
         and was biased by step edges on every stepped-surface workflow.
         Pass calibrated values whenever the scan has them.
+    operand_resolver:
+        Optional ``Callable[[dict], np.ndarray]`` for the ``"arithmetic"`` step
+        with ``operand_type="image"``.  Receives the step parameters and must
+        return a float-friendly 2-D array of the same shape as ``arr``.  When
+        ``None`` (default), :func:`_load_arithmetic_operand_image` is used —
+        which reads the file from disk via
+        :func:`probeflow.core.scan_loader.load_scan`.  CLI / sandboxed / test
+        callers that don't want that hidden I/O can inject a resolver that
+        looks up the operand in an in-memory cache or dict (review
+        arch-backend #13).
 
     Returns
     -------
@@ -525,7 +544,8 @@ def apply_processing_state(
             operand_type = str(p.get("operand_type", "constant"))
             operand_image = None
             if operand_type == "image":
-                operand_image = _load_arithmetic_operand_image(p)
+                resolver = operand_resolver or _load_arithmetic_operand_image
+                operand_image = resolver(p)
             elif operand_type == "generated":
                 operand_image = _proc.generate_arithmetic_pattern(
                     a.shape,
@@ -726,6 +746,7 @@ def apply_processing_state_with_calibration(
     roi_set: "Any | None" = None,
     *,
     scan_range_m: tuple[float, float] | None,
+    operand_resolver=None,
 ) -> tuple[np.ndarray, tuple[float, float] | None]:
     """Apply *state* to *arr* and return the post-processing scan_range.
 
@@ -782,6 +803,7 @@ def apply_processing_state_with_calibration(
             roi_set=roi_set,
             pixel_size_x_m=psx,
             pixel_size_y_m=psy,
+            operand_resolver=operand_resolver,
         )
         h_out, w_out = a.shape
         if (h_out, w_out) != (h_in, w_in):
