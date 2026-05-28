@@ -432,11 +432,16 @@ def _parse_page_from_objects(
         _first_object(internal_objects, RHK_OBJECT_STRING_DATA)
         or _first_object(objects, RHK_OBJECT_STRING_DATA)
     )
-    strings = _parse_string_data(_object_bytes(data, string_obj))
+    strings = _parse_string_data(
+        _object_bytes(data, string_obj),
+        notes=notes,
+        page_index=page_index,
+    )
     raw = _decode_image_payload(
         _object_bytes(data, data_obj),
         x_size=x_size,
         y_size=y_size,
+        data_size=int(header.get("data_size", 0)),
         notes=notes,
         page_index=page_index,
     )
@@ -493,10 +498,12 @@ def _decode_image_payload(
     y_size: int,
     notes: list[str],
     page_index: int,
+    data_size: int | None = None,
 ) -> np.ndarray | None:
     n = x_size * y_size
     expected = n * 4
     buf = payload
+    header_dtype = _dtype_from_data_size(data_size, n)
     if len(buf) not in (n * 2, expected, n * 8):
         try:
             buf = zlib.decompress(payload)
@@ -507,6 +514,23 @@ def _decode_image_payload(
                 f"does not match {x_size}x{y_size} numeric data."
             )
             return None
+
+    if header_dtype is not None:
+        dtype, expected_len = header_dtype
+        if len(buf) == expected_len:
+            arr = np.frombuffer(buf, dtype=dtype, count=n).astype(np.float64)
+            return arr.reshape((y_size, x_size)).copy()
+        notes.append(
+            f"RHK page {page_index}: data_size={data_size} implies {expected_len} "
+            f"payload bytes, but decoded payload has {len(buf)} bytes; falling back "
+            "to payload-length dtype detection."
+        )
+    elif data_size not in (None, 0):
+        notes.append(
+            f"RHK page {page_index}: unrecognised data_size={data_size}; "
+            "falling back to payload-length dtype detection."
+        )
+
     if len(buf) == n * 2:
         arr = np.frombuffer(buf, dtype="<i2", count=n).astype(np.float64)
     elif len(buf) == expected:
@@ -524,7 +548,35 @@ def _decode_image_payload(
     return arr.reshape((y_size, x_size)).copy()
 
 
-def _parse_string_data(payload: bytes | None) -> dict[str, str]:
+def _dtype_from_data_size(data_size: int | None, n_values: int) -> tuple[str, int] | None:
+    if data_size is None:
+        return None
+    try:
+        size = int(data_size)
+    except (TypeError, ValueError):
+        return None
+    if size <= 0:
+        return None
+    bytes_per_value: int | None = None
+    if size in (2, 4, 8):
+        bytes_per_value = size
+    elif n_values > 0 and size in (n_values * 2, n_values * 4, n_values * 8):
+        bytes_per_value = size // n_values
+    if bytes_per_value == 2:
+        return "<i2", n_values * 2
+    if bytes_per_value == 4:
+        return "<i4", n_values * 4
+    if bytes_per_value == 8:
+        return "<f8", n_values * 8
+    return None
+
+
+def _parse_string_data(
+    payload: bytes | None,
+    *,
+    notes: list[str] | None = None,
+    page_index: int | None = None,
+) -> dict[str, str]:
     """Parse SM4 string data: length-prefixed UTF-16LE strings.
 
     Each string is stored as a uint16 character count followed by that many
@@ -543,6 +595,14 @@ def _parse_string_data(payload: bytes | None) -> dict[str, str]:
             continue
         char_bytes = length * 2
         if pos + char_bytes > len(payload):
+            if notes is not None:
+                prefix = (
+                    f"RHK page {page_index}: " if page_index is not None else "RHK: "
+                )
+                notes.append(
+                    f"{prefix}string block truncated at string {len(strings)} "
+                    f"(declared {char_bytes} bytes, {len(payload) - pos} available)."
+                )
             break
         text = payload[pos:pos + char_bytes].decode("utf-16-le", errors="replace")
         strings.append(text)

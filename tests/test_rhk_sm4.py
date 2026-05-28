@@ -25,6 +25,8 @@ from probeflow.io.readers.rhk_sm4 import (
     RHK_OBJECT_PAGE_INDEX_ARRAY,
     RHK_OBJECT_STRING_DATA,
     SM4_MAGIC,
+    _decode_image_payload,
+    _parse_string_data,
     parse_object_table,
     parse_page_header,
     read_rhk_sm4,
@@ -211,6 +213,50 @@ def test_page_header_parser_extracts_core_fields():
     assert parsed["scan_dir"] == 3
     assert parsed["z_scale"] == pytest.approx(0.5)
     assert parsed["bias"] == pytest.approx(0.125)
+
+
+def test_decode_image_payload_uses_data_size_for_dtype():
+    notes: list[str] = []
+    payload = np.array([0, 256, -256, 1024], dtype="<i2").tobytes()
+
+    arr = _decode_image_payload(
+        payload,
+        x_size=2,
+        y_size=2,
+        notes=notes,
+        page_index=0,
+        data_size=2,
+    )
+
+    np.testing.assert_array_equal(arr, np.array([[0.0, 256.0], [-256.0, 1024.0]]))
+    assert notes == []
+
+
+def test_decode_image_payload_warns_when_data_size_disagrees_with_payload():
+    notes: list[str] = []
+    payload = np.arange(4, dtype="<i4").tobytes()
+
+    arr = _decode_image_payload(
+        payload,
+        x_size=2,
+        y_size=2,
+        notes=notes,
+        page_index=2,
+        data_size=8,
+    )
+
+    np.testing.assert_array_equal(arr, np.array([[0.0, 1.0], [2.0, 3.0]]))
+    assert any("data_size=8" in note for note in notes)
+
+
+def test_parse_string_data_records_truncated_string_note():
+    notes: list[str] = []
+    payload = (5).to_bytes(2, "little") + "ab".encode("utf-16-le")
+
+    strings = _parse_string_data(payload, notes=notes, page_index=3)
+
+    assert strings == {}
+    assert any("string block truncated" in note for note in notes)
 
 
 # ── Synthetic-file integration tests ─────────────────────────────────────────
