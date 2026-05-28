@@ -279,22 +279,30 @@ def _split_data_section(
     data_pos: int,
     data_section: bytes,
 ) -> tuple[str, str, int]:
-    eol = b"\r\n" if data_section[4:6] == b"\r\n" else b"\n"
-    eol_len = len(eol)
-    first_eol = data_section.find(eol)
+    first_eol, eol_len = _next_line_end(data_section, 4)
     if first_eol < 0:
         raise ValueError(f"{path.name}: missing line ending after DATA marker")
     params_start = first_eol + eol_len
-    second_eol = data_section.find(eol, params_start)
+    second_eol, second_eol_len = _next_line_end(data_section, params_start)
     if second_eol < 0:
         raise ValueError(f"{path.name}: missing spectroscopy params line")
     params_bytes = data_section[params_start:second_eol]
     params_line = params_bytes.decode("latin-1", errors="replace").strip()
-    data_offset = data_pos + second_eol + eol_len
-    data_text = data_section[second_eol + eol_len :].decode(
+    data_offset = data_pos + second_eol + second_eol_len
+    data_text = data_section[second_eol + second_eol_len :].decode(
         "latin-1", errors="replace"
     )
     return params_line, data_text, data_offset
+
+
+def _next_line_end(data: bytes, start: int) -> tuple[int, int]:
+    crlf = data.find(b"\r\n", start)
+    lf = data.find(b"\n", start)
+    if crlf < 0:
+        return lf, 1
+    if lf < 0 or crlf <= lf:
+        return crlf, 2
+    return lf, 1
 
 
 def _parse_params_line(path: Path, params_line: str) -> tuple[int, int, int, int, str]:
@@ -325,7 +333,9 @@ def _selected_output_channels(file_version: str, channel_code: int) -> tuple[str
 
 def _parse_numeric_table(path: Path, data_text: str) -> np.ndarray:
     clean = "\n".join(
-        ln.rstrip("\t ") for ln in data_text.splitlines() if ln.strip()
+        ln.rstrip("\t ").replace(",", ".")
+        for ln in data_text.splitlines()
+        if ln.strip()
     )
     if not clean:
         raise ValueError(f"{path.name}: no data rows found after DATA marker")
@@ -353,7 +363,7 @@ def _summarise_numeric_table(
             continue
         try:
             values = np.fromstring(
-                stripped.replace("\t", " "),
+                stripped.replace(",", ".").replace("\t", " "),
                 sep=" ",
                 dtype=np.float64,
             )
@@ -363,11 +373,6 @@ def _summarise_numeric_table(
             continue
         if col_count is None:
             col_count = int(values.size)
-        elif values.size != col_count:
-            raise ValueError(
-                f"{path.name}: inconsistent data column count "
-                f"({values.size} != {col_count})"
-            )
         if values.size > 1:
             bias = float(values[1])
             bias_min = bias if bias_min is None else min(bias_min, bias)

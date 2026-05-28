@@ -23,6 +23,7 @@ The public API:
 from __future__ import annotations
 
 import re
+import warnings
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -91,7 +92,7 @@ def parse_sxm_header(sxm_path: Path) -> dict:
 
     def _flush() -> None:
         if current_key is not None:
-            params[current_key] = " ".join(buf).strip()
+            params[current_key] = "\n".join(buf).strip()
 
     with open(sxm_path, "rb") as fh:
         for raw in fh:
@@ -104,9 +105,7 @@ def parse_sxm_header(sxm_path: Path) -> dict:
                 current_key = line[1:-1]
                 buf = []
             elif current_key is not None:
-                s = line.strip()
-                if s:
-                    buf.append(s)
+                buf.append(line)
     if not found_end:
         raise ValueError(f"{sxm_path}: missing :SCANIT_END: marker")
     _flush()
@@ -148,14 +147,44 @@ def sxm_data_info(hdr: dict) -> list[dict[str, str]]:
     raw = str(hdr.get("DATA_INFO", "")).strip()
     if not raw:
         return []
+    rows: list[dict[str, str]] = []
+    lines = [line.strip() for line in raw.splitlines() if line.strip()]
+    if len(lines) > 1:
+        for line in lines:
+            toks = line.split()
+            if not toks or "Offset" in toks:
+                continue
+            if len(toks) < 6:
+                warnings.warn(
+                    f"Malformed DATA_INFO row ignored: {line!r}",
+                    UserWarning,
+                    stacklevel=2,
+                )
+                continue
+            _channel, name, unit, direction, calibration, offset = toks[:6]
+            rows.append(
+                {
+                    "name": _display_channel_name(name),
+                    "unit": unit,
+                    "direction": direction.lower(),
+                    "calibration": calibration,
+                    "offset": offset,
+                }
+            )
+        return rows
+
     toks = raw.split()
     if "Offset" not in toks:
         return []
     start = toks.index("Offset") + 1
-    rows: list[dict[str, str]] = []
     for i in range(start, len(toks), 6):
         chunk = toks[i:i + 6]
         if len(chunk) < 6:
+            warnings.warn(
+                f"Malformed DATA_INFO row ignored: {' '.join(chunk)!r}",
+                UserWarning,
+                stacklevel=2,
+            )
             break
         _channel, name, unit, direction, calibration, offset = chunk
         rows.append(

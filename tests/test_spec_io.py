@@ -118,6 +118,44 @@ class TestCreatecVertReport:
         assert report.bias_max_mv == pytest.approx(-50.0, abs=10.0)
         assert len(report.source["sha256"]) == 64
 
+    def test_mixed_eol_after_data_marker_is_accepted(self, tmp_path):
+        text = _createc_vert_text(
+            n_rows=2,
+            channel_code=0b1,
+            rows=[[0, -50.0, 0.0, -1000.0], [1, -50.1, 0.0, -1001.0]],
+        )
+        text = text.replace("DATA\r\n", "DATA\n", 1)
+        f = _write_createc_vert(tmp_path, "mixed_eol.VERT", text)
+
+        report = read_createc_vert_report(f)
+
+        assert report.raw_table_shape == (2, 4)
+
+    def test_metadata_fast_path_tolerates_ragged_rows(self, tmp_path):
+        text = _createc_vert_text(
+            n_rows=2,
+            channel_code=0b1,
+            rows=[[0, -50.0, 0.0, -1000.0], [1, -50.1, 0.0]],
+        )
+        f = _write_createc_vert(tmp_path, "ragged_summary.VERT", text)
+
+        report = read_createc_vert_report(f, include_arrays=False)
+
+        assert report.raw_table_shape == (2, 4)
+        assert report.bias_min_mv == pytest.approx(-50.1)
+
+    def test_comma_decimal_data_rows_are_accepted(self, tmp_path):
+        text = _createc_vert_text(
+            n_rows=2,
+            channel_code=0b1,
+            rows=[[0, "-50,0", "0,0", "-1000,0"], [1, "-50,1", "0,0", "-1001,0"]],
+        )
+        f = _write_createc_vert(tmp_path, "comma_decimal.VERT", text)
+
+        report = read_createc_vert_report(f)
+
+        assert report.bias_min_mv == pytest.approx(-50.1)
+
     def test_parvert30_base_columns(self, tmp_path):
         f = _write_createc_vert(
             tmp_path,
@@ -355,6 +393,24 @@ class TestReadSpecFileErrors:
         # With tighter threshold (0.1 mV) it's a sweep
         spec_tight = read_spec_file(f, time_trace_threshold_mv=0.1)
         assert spec_tight.metadata["sweep_type"] == "bias_sweep"
+
+    def test_nanonis_comma_decimal_data_rows_are_accepted(self, tmp_path):
+        body = (
+            "Experiment\tBias spectroscopy\n"
+            "X (m)\t1,5e-9\n"
+            "Y (m)\t2,5e-9\n"
+            "[DATA]\n"
+            "Bias (V)\tCurrent (A)\n"
+            "0,0\t1,0e-12\n"
+            "0,1\t2,0e-12\n"
+        )
+        f = tmp_path / "nanonis_comma.dat"
+        f.write_text(body, encoding="latin-1")
+
+        spec = read_spec_file(f)
+
+        assert spec.position == pytest.approx((1.5e-9, 2.5e-9))
+        np.testing.assert_allclose(spec.channels["Current"], [1.0e-12, 2.0e-12])
 
 
 # ─── unit-conversion validation against real instrument files ─────────────────

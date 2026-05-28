@@ -12,7 +12,11 @@ import json
 import numpy as np
 
 from probeflow.io.common import check_output_available, check_overwrite
-from probeflow.provenance.export import build_scan_export_provenance
+from probeflow.provenance.export import (
+    build_scan_export_provenance,
+    check_provenance_sidecar_collisions,
+    write_provenance_sidecars,
+)
 from probeflow.core.scan_model import Scan
 
 
@@ -35,16 +39,10 @@ def _plane_meta(
     plane_name: str,
     plane_unit: str,
     visible: bool,
+    provenance,
     out_path=None,
 ):
     """Build a small metadata container for the exported plane."""
-    prov = build_scan_export_provenance(
-        scan,
-        channel_index=plane_idx,
-        channel_name=plane_name,
-        export_kind="gwy",
-        output_path=out_path,
-    )
     meta = GwyContainer()
     meta["ProbeFlow source path"] = (
         str(scan.source_path) if scan.source_path is not None else ""
@@ -57,18 +55,18 @@ def _plane_meta(
     meta["ProbeFlow scan width (m)"] = float(scan.scan_range_m[0])
     meta["ProbeFlow scan height (m)"] = float(scan.scan_range_m[1])
     meta["ProbeFlow num planes"] = int(scan.n_planes)
-    meta["ProbeFlow export provenance"] = json.dumps(prov.to_dict(), sort_keys=True)
+    meta["ProbeFlow export provenance"] = json.dumps(provenance.to_dict(), sort_keys=True)
     meta["ProbeFlow processing state"] = json.dumps(
-        prov.processing_state,
+        provenance.processing_state,
         sort_keys=True,
     )
-    meta["ProbeFlow processing state hash"] = str(prov.processing_state_hash)
+    meta["ProbeFlow processing state hash"] = str(provenance.processing_state_hash)
     meta["ProbeFlow processing steps"] = int(
-        len(prov.processing_state.get("steps", []))
+        len(provenance.processing_state.get("steps", []))
     )
-    meta["ProbeFlow source id"] = str(prov.source_id or "")
-    meta["ProbeFlow channel id"] = str(prov.channel_id or "")
-    meta["ProbeFlow artifact id"] = str(prov.artifact_id or "")
+    meta["ProbeFlow source id"] = str(provenance.source_id or "")
+    meta["ProbeFlow channel id"] = str(provenance.channel_id or "")
+    meta["ProbeFlow artifact id"] = str(provenance.artifact_id or "")
     return meta
 
 
@@ -79,6 +77,7 @@ def write_gwy(
     *,
     include_meta: bool = True,
     overwrite: bool = False,
+    overwrite_sidecars: bool = False,
 ) -> None:
     """Write one plane of *scan* to a Gwyddion ``.gwy`` file.
 
@@ -101,15 +100,6 @@ def write_gwy(
             f"plane_idx={plane_idx} out of range for Scan with "
             f"{scan.n_planes} plane(s)"
         )
-    check_output_available(out_path, overwrite=overwrite)
-
-    GwyContainer, GwyDataField = _import_gwyfile()
-
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-
-    container = GwyContainer()
-    container.filename = str(out_path)
-
     width_m, height_m = scan.scan_range_m
     width_m = float(width_m)
     height_m = float(height_m)
@@ -124,6 +114,27 @@ def write_gwy(
         if plane_idx < len(scan.plane_units)
         else ""
     )
+    provenance = build_scan_export_provenance(
+        scan,
+        channel_index=plane_idx,
+        channel_name=plane_name,
+        export_kind="gwy",
+        output_path=out_path,
+    )
+    check_provenance_sidecar_collisions(
+        out_path,
+        legacy=hasattr(provenance, "to_dict"),
+        overwrite=overwrite_sidecars,
+    )
+    check_output_available(out_path, overwrite=overwrite)
+
+    GwyContainer, GwyDataField = _import_gwyfile()
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    container = GwyContainer()
+    container.filename = str(out_path)
+
     data = np.asarray(scan.planes[plane_idx], dtype=np.float64)
     field = GwyDataField(
         data,
@@ -145,7 +156,14 @@ def write_gwy(
             plane_name,
             plane_unit,
             True,
+            provenance,
             out_path,
         )
 
     container.tofile(str(out_path))
+    write_provenance_sidecars(
+        out_path,
+        provenance,
+        export_format="gwy",
+        overwrite=overwrite_sidecars,
+    )

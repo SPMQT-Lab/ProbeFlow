@@ -105,7 +105,7 @@ def write_pdf(
     Ny, Nx = arr.shape
 
     # Show the axes in nm — the most common physical unit for STM.
-    extent_nm = (0.0, w_m * 1e9, 0.0, h_m * 1e9) if w_m > 0 and h_m > 0 else None
+    extent_nm = (0.0, w_m * 1e9, h_m * 1e9, 0.0) if w_m > 0 and h_m > 0 else None
 
     fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
     im = ax.imshow(

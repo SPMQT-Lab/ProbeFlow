@@ -58,7 +58,10 @@ class TestCsv:
         first_line = out.read_text(encoding="utf-8").splitlines()[0]
         assert first_line.startswith("#")
         assert "plane=" in first_line
-        assert "width_m=" in first_line
+        lines = out.read_text(encoding="utf-8").splitlines()
+        assert any(line.startswith("# width_m=") for line in lines)
+        assert any(line.startswith("# channel_index=0") for line in lines)
+        assert any(line.startswith("# processing_state_hash=") for line in lines)
         sidecar = out.with_suffix(".probeflow.json")
         assert sidecar.exists()
         data = json.loads(sidecar.read_text(encoding="utf-8"))
@@ -88,6 +91,11 @@ class TestGwy:
         assert prov["channel_index"] == plane_idx
         assert meta["ProbeFlow processing state hash"] == prov["processing_state_hash"]
         assert "/1/data" not in obj
+        sidecar = out.with_suffix(".probeflow.json")
+        assert sidecar.exists()
+        sidecar_data = json.loads(sidecar.read_text(encoding="utf-8"))
+        assert sidecar_data["export_format"] == "gwy"
+        assert sidecar_data["source_info"]["channel"] == dat_scan.plane_names[plane_idx]
 
         via_save = tmp_path / "via_save.gwy"
         dat_scan.save_gwy(via_save, plane_idx=1)

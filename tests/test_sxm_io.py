@@ -72,6 +72,30 @@ class TestHeader:
         ]
         assert units == ["m", "m", "A", "A", "Hz", "Hz"]
 
+    def test_parse_header_preserves_multiline_values(self, tmp_path):
+        sxm = tmp_path / "commented.sxm"
+        sxm.write_bytes(
+            b":COMMENT:\nfirst paragraph\n\nsecond paragraph\n:SCANIT_END:\n"
+        )
+
+        hdr = parse_sxm_header(sxm)
+
+        assert hdr["COMMENT"] == "first paragraph\n\nsecond paragraph"
+
+    def test_sxm_data_info_warns_on_partial_row(self):
+        hdr = {
+            "DATA_INFO": (
+                "Channel Name Unit Direction Calibration Offset\n"
+                "14 Z m forward 1.0E-9 0.0\n"
+                "0 Current A forward"
+            )
+        }
+
+        with pytest.warns(UserWarning, match="Malformed DATA_INFO row"):
+            rows = sxm_data_info(hdr)
+
+        assert [row["name"] for row in rows] == ["Z"]
+
     def test_parse_missing_scanit_end_raises(self, tmp_path):
         bad = tmp_path / "truncated.sxm"
         bad.write_bytes(b":NANONIS_VERSION:\n2\n:SCAN_PIXELS:\n4 4\n")

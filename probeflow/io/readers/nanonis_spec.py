@@ -107,7 +107,7 @@ def read_nanonis_spec(path: Union[str, Path]) -> SpecData:
         raise ValueError(f"{path.name}: empty column header")
 
     # Parse the numeric block with np.loadtxt (fast, tolerant of trailing tabs).
-    clean = "\n".join(ln.rstrip("\t ") for ln in data_lines)
+    clean = "\n".join(ln.rstrip("\t ").replace(",", ".") for ln in data_lines)
     if not clean:
         raise ValueError(f"{path.name}: no data rows after [DATA]")
     try:
@@ -396,7 +396,7 @@ def _parse_numeric_row_summary(
         )
     try:
         for value in parts:
-            float(value)
+            float(value.replace(",", "."))
     except ValueError as exc:
         raise ValueError(f"{path.name}: failed to parse data row - {exc}") from exc
 
@@ -447,7 +447,7 @@ def _parse_header_float(hdr: dict[str, str], key: str) -> float:
     if not raw:
         return float("nan")
     try:
-        return float(raw)
+        return float(raw.replace(",", "."))
     except ValueError:
         return float("nan")
 
@@ -457,6 +457,6 @@ def _parse_optional_header_float(hdr: dict[str, str], key: str) -> Optional[floa
     if not raw:
         return None
     try:
-        return float(raw)
+        return float(raw.replace(",", "."))
     except ValueError:
         return None

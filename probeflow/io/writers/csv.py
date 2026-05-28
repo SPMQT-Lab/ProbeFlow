@@ -8,6 +8,7 @@ strip ``#`` comments (pandas, numpy.loadtxt) ignore them.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -63,11 +64,18 @@ def write_csv(
     name = scan.plane_names[plane_idx] if plane_idx < len(scan.plane_names) else f"plane {plane_idx}"
     source_name = scan.source_path.name if scan.source_path is not None else "unknown"
 
-    header = (
-        f"plane={name} units={unit} "
-        f"Nx={Nx} Ny={Ny} "
-        f"width_m={w_m:.6e} height_m={h_m:.6e} "
-        f"source={source_name}"
+    header = "\n".join(
+        [
+            f"plane={json.dumps(name)}",
+            f"units={json.dumps(unit)}",
+            f"channel_index={plane_idx}",
+            f"Nx={Nx}",
+            f"Ny={Ny}",
+            f"width_m={w_m:.6e}",
+            f"height_m={h_m:.6e}",
+            f"source={json.dumps(source_name)}",
+            f"processing_state_hash={json.dumps(str(provenance.processing_state_hash))}",
+        ]
     )
     # Open in binary mode with newline="" so np.savetxt does not get
     # caught by the Windows universal-newline translation (which can
