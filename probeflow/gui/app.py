@@ -564,32 +564,59 @@ class ProbeFlowWindow(QMainWindow):
             if col < table.columnCount():
                 table.setColumnWidth(col, max(72, int(width)))
 
+    # Bump this when the main-window pane structure changes incompatibly
+    # (e.g. a splitter pane is added or removed).  Saved layouts with a
+    # mismatching version are discarded with a status-bar notice so users
+    # are not silently stuck on a stale layout after an upgrade
+    # (review gui-arch #18).
+    LAYOUT_VERSION = 2
+
     def _restore_desktop_layout(self) -> None:
         layout = self._cfg.get("layout", {}).get("main_window", {})
+        stored_version = layout.get("version")
+        version_mismatch = (
+            stored_version is not None and stored_version != self.LAYOUT_VERSION
+        )
+
         restore_geometry_or_default(self, layout.get("geometry"), 0.88)
         state = layout.get("state")
-        if state:
+        if state and not version_mismatch:
             try:
                 self.restoreState(b64_to_qbytearray(state))
             except Exception:
                 pass
 
         main_sizes = layout.get("splitter_sizes")
-        if main_sizes and len(main_sizes) == self._splitter.count():
+        if (not version_mismatch
+                and main_sizes and len(main_sizes) == self._splitter.count()):
             self._splitter.setSizes([max(1, int(x)) for x in main_sizes])
         else:
             self._apply_default_splitter_sizes()
 
         browse_sizes = layout.get("browse_splitter_sizes")
-        if browse_sizes and len(browse_sizes) == self._browse_splitter.count():
+        if (not version_mismatch
+                and browse_sizes
+                and len(browse_sizes) == self._browse_splitter.count()):
             self._browse_splitter.setSizes([max(1, int(x)) for x in browse_sizes])
 
-        self._restore_metadata_table_columns(layout.get("metadata_table_column_widths"))
-        self._show_maximized_on_start = bool(layout.get("was_maximized"))
+        self._restore_metadata_table_columns(
+            None if version_mismatch
+            else layout.get("metadata_table_column_widths")
+        )
+        self._show_maximized_on_start = (
+            False if version_mismatch else bool(layout.get("was_maximized"))
+        )
+
+        if version_mismatch:
+            self._status_bar.showMessage(
+                f"Window layout reset because pane structure changed "
+                f"(saved v{stored_version} -> current v{self.LAYOUT_VERSION})."
+            )
 
     def _save_desktop_layout_into(self, cfg: dict) -> None:
         layout_root = cfg.setdefault("layout", {})
         layout = layout_root.setdefault("main_window", {})
+        layout["version"] = self.LAYOUT_VERSION
         layout["geometry"] = qbytearray_to_b64(self.saveGeometry())
         layout["state"] = qbytearray_to_b64(self.saveState())
         layout["was_maximized"] = self.isMaximized()
