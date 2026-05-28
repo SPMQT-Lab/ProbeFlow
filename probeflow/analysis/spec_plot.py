@@ -314,89 +314,15 @@ _FLOAT_RE = re.compile(r"[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?")
 # (scale, prefix) options per base SI unit, ordered from smallest to largest
 # prefix — the heuristic in ``choose_display_unit`` walks this list and picks
 # the prefix that puts the typical magnitude into [0.1, 1000].
-_UNIT_PREFIX_TABLE: dict[str, list[tuple[float, str]]] = {
-    "m": [(1e12, "pm"), (1e10, "Å"), (1e9, "nm"), (1e6, "µm"), (1.0, "m")],
-    "A": [(1e15, "fA"), (1e12, "pA"), (1e9, "nA"), (1e6, "µA"), (1.0, "A")],
-    "V": [(1e6, "µV"), (1e3, "mV"), (1.0, "V")],
-}
-
-_ZERO_VALUE_DISPLAY_DEFAULTS: dict[str, tuple[float, str]] = {
-    "m": (1e9, "nm"),
-    "A": (1e12, "pA"),
-    "V": (1e3, "mV"),
-}
-
-
-def lookup_unit_scale(si_unit: str, label: str) -> Optional[tuple[float, str]]:
-    """Return ``(scale, label)`` for an explicit user choice of display unit.
-
-    ``si_unit`` is the underlying SI unit (e.g. ``"m"``); ``label`` is the
-    desired display label (e.g. ``"nm"``, ``"Å"``, ``"pm"``). Returns
-    ``None`` if the label is unknown for that base unit, so callers can
-    fall back to ``choose_display_unit``.
-    """
-    table = _UNIT_PREFIX_TABLE.get(si_unit)
-    if table is None:
-        return None
-    for scale, lbl in table:
-        if lbl == label:
-            return scale, lbl
-    return None
-
-
-def choose_display_unit(si_unit: str, values: np.ndarray) -> tuple[float, str]:
-    """Pick a sensible display unit and scale factor.
-
-    Returns ``(scale_factor, display_unit_string)`` where multiplying the raw
-    SI values by ``scale_factor`` gives numbers in the returned display unit.
-
-    Heuristic: compute the median absolute value of non-zero samples and
-    pick the SI prefix that brings that magnitude into ``[0.1, 1000]``.
-    For units without a prefix table (Hz, rad, dimensionless, unknown),
-    returns ``(1.0, si_unit)`` with no scaling.
-    """
-    if values is None:
-        return 1.0, si_unit
-    arr = np.asarray(values, dtype=float)
-    if arr.size == 0:
-        return 1.0, si_unit
-
-    prefixes = _UNIT_PREFIX_TABLE.get(si_unit)
-    if prefixes is None:
-        return 1.0, si_unit
-
-    nonzero = arr[arr != 0]
-    if nonzero.size == 0:
-        return _ZERO_VALUE_DISPLAY_DEFAULTS.get(si_unit, (1.0, si_unit))
-    magnitude = float(np.median(np.abs(nonzero)))
-    if not np.isfinite(magnitude) or magnitude == 0.0:
-        return 1.0, si_unit
-
-    # Pick the smallest (most fine-grained) prefix whose scaled magnitude is
-    # still < 1000 — this walks the table from smallest to largest prefix.
-    chosen = prefixes[-1]  # default: no-prefix SI unit
-    for scale, label in prefixes:
-        scaled = magnitude * scale
-        if 0.1 <= scaled < 1000:
-            chosen = (scale, label)
-            break
-    else:
-        # Nothing matched the [0.1, 1000] window; pick the prefix whose scaled
-        # value is closest to the centre (30) in log-space.
-        best = None
-        best_dist = float("inf")
-        for scale, label in prefixes:
-            scaled = magnitude * scale
-            if scaled <= 0:
-                continue
-            dist = abs(np.log10(scaled) - np.log10(30.0))
-            if dist < best_dist:
-                best_dist = dist
-                best = (scale, label)
-        if best is not None:
-            chosen = best
-
-    return chosen
+# Unit-prefix helpers moved to ``probeflow.measurements.formatting``
+# (review arch-backend #5, 2026-05-28).  Re-exported here so callers
+# that import them from ``spec_plot`` keep working.
+from probeflow.measurements.formatting import (  # noqa: E402
+    _UNIT_PREFIX_TABLE,
+    _ZERO_VALUE_DISPLAY_DEFAULTS,
+    choose_display_unit,
+    lookup_unit_scale,
+)
 
 
 def _parse_sxm_offset(hdr: dict) -> tuple[float, float]:

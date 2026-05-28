@@ -130,11 +130,12 @@ def measure_angle_between_lines(
 
 
 def _fmt_m(value_m: float) -> tuple[float, str]:
-    """Convert metres to a readable STM distance unit (pm / Å / nm)."""
-    v = abs(value_m)
-    if v < 5e-11:       # < 0.05 Å → use pm
-        return value_m * 1e12, "pm"
-    elif v < 1e-9:      # < 1 nm → use Å
-        return value_m * 1e10, "Å"
-    else:
-        return value_m * 1e9, "nm"
+    """Convert metres to a readable STM distance unit (pm / Å / nm / µm).
+
+    Thin wrapper around :func:`probeflow.measurements.formatting.scale_length_m`
+    — the consolidated formatter introduced for review arch-backend #5.
+    Kept here under the legacy name for any in-module callers; new code
+    should import from ``probeflow.measurements.formatting``.
+    """
+    from probeflow.measurements.formatting import scale_length_m
+    return scale_length_m(value_m)

@@ -419,18 +419,26 @@ def _quality_from_n_periods(n_periods: float, prominence: float) -> tuple[str, s
 
 
 def _fmt_m(period_m: float) -> str:
-    if period_m < 1e-9:
-        return f"{period_m * 1e10:.3g} Å"
-    return f"{period_m * 1e9:.3g} nm"
+    """Format a length in metres as ``"value unit"`` (pm/Å/nm/µm).
+
+    Thin wrapper around the consolidated
+    :func:`probeflow.measurements.formatting.format_length_m`
+    (review arch-backend #5).
+    """
+    from probeflow.measurements.formatting import format_length_m
+    return format_length_m(period_m)
 
 
 # ── public formatting helpers (used by GUI) ───────────────────────────────────
 
 def format_period(period_m: float) -> tuple[str, str]:
-    """Return ``(value_str, unit_str)`` with sensible precision."""
-    if period_m < 1e-9:
-        return f"{period_m * 1e10:.3g}", "Å"
-    return f"{period_m * 1e9:.3g}", "nm"
+    """Return ``(value_str, unit_str)`` for a length in metres.
+
+    Wraps :func:`probeflow.measurements.formatting.format_period_m`
+    (consolidated for review arch-backend #5).
+    """
+    from probeflow.measurements.formatting import format_period_m
+    return format_period_m(period_m)
 
 
 def format_result_text(

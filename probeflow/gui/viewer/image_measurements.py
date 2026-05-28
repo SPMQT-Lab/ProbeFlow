@@ -74,10 +74,14 @@ def _metadata_value(value: Any) -> str:
 
 
 def _format_period_bound_nm(value: Any) -> str:
+    """Format a period bound (metres) for display in the measurement
+    table.  Now uses the consolidated formatter (review arch-backend #5)
+    so the unit choice (pm/Å/nm/µm) matches the rest of the GUI."""
     if value is None:
         return ""
     try:
-        return f"{float(value) * 1e9:.12g} nm"
+        from probeflow.measurements.formatting import format_length_m
+        return format_length_m(float(value), precision=12, nan_repr="")
     except (TypeError, ValueError):
         return str(value)
 

@@ -102,9 +102,11 @@ def compute_roi_statistics(
 def _fmt_z(value: float, z_unit: str) -> tuple[float, str]:
     """Scale a z-axis value to a readable unit.
 
-    For metre-based units (z_unit == "m") delegates to ``_fmt_m``.
-    Otherwise returns the raw value with z_unit unchanged.
+    For metre-based units (z_unit == "m") delegates to the consolidated
+    :func:`probeflow.measurements.formatting.scale_length_m`.  Otherwise
+    returns the raw value with z_unit unchanged.  Review arch-backend #5.
     """
     if z_unit == "m":
-        return _fmt_m(value)
+        from probeflow.measurements.formatting import scale_length_m
+        return scale_length_m(value)
     return float(value), z_unit

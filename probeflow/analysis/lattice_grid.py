@@ -443,14 +443,14 @@ def _angle_between_vectors_deg(a: Vec2, b: Vec2) -> float:
 
 
 def _choose_unit(value_m: float) -> tuple[float, str]:
-    """Return (scale_factor, unit_string) for the most readable representation."""
-    value_nm = value_m * 1e9
-    if value_nm < 0.1:
-        return (1e10, "Å")
-    elif value_nm < 100.0:
-        return (1e10, "Å") if value_nm < 1.0 else (1e9, "nm")
-    else:
-        return (1e9, "nm")
+    """Return (scale_factor, unit_string) for the most readable representation.
+
+    Delegates to the consolidated
+    :func:`probeflow.measurements.formatting.choose_length_unit`
+    (review arch-backend #5).
+    """
+    from probeflow.measurements.formatting import choose_length_unit
+    return choose_length_unit(value_m)
 
 
 def format_real_space_measurements(
@@ -510,20 +510,18 @@ def format_reciprocal_measurements(
     g1 = cal.vec_length_q(grid.a_px)
     g2 = cal.vec_length_q(grid.b_px)
 
+    from probeflow.measurements.formatting import format_length_m
+
     def _period_str(g_inv_nm: float) -> str:
         if g_inv_nm < 1e-9:
             return "∞"
         d_nm = 1.0 / g_inv_nm
-        if d_nm >= 1.0:
-            return f"{d_nm:.3g} nm"
-        return f"{d_nm * 10:.3g} Å"
+        return format_length_m(d_nm * 1e-9, precision=3)
 
     def _length_str(length_nm: float) -> str:
         if not np.isfinite(length_nm):
             return "—"
-        if length_nm >= 1.0:
-            return f"{length_nm:.4g} nm"
-        return f"{length_nm * 10.0:.4g} Å"
+        return format_length_m(length_nm * 1e-9, precision=4)
 
     angle = _angle_between_vectors_deg(qvec_a, qvec_b)
     qax, qay = qvec_a
