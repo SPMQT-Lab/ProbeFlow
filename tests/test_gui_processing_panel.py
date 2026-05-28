@@ -1490,15 +1490,16 @@ def test_viewer_refresh_display_array_passes_roi_set(qapp, monkeypatch):
     roi_set.add(roi)
     seen = {}
 
-    def fake_apply(arr, processing, roi_set=None):
-        seen["roi_set"] = roi_set
-        return arr + 1.0
+    def fake_apply(arr, state, passed_roi_set, *, scan_range_m=None):
+        seen["roi_set"] = passed_roi_set
+        return arr + 1.0, scan_range_m
 
-    monkeypatch.setattr(_iv_mod, "_apply_processing", fake_apply)
+    monkeypatch.setattr(_iv_mod, "apply_processing_state_with_calibration", fake_apply)
 
     dlg = ImageViewerDialog.__new__(ImageViewerDialog)
     dlg._display_arr = None
     dlg._raw_arr = np.zeros((2, 2))
+    dlg._scan_range_m = None
     dlg._processing = {
         "stm_background": {
             "fit_region": "active_roi",
@@ -1531,11 +1532,11 @@ def test_viewer_refresh_display_array_blocks_stale_roi_reference(qapp, monkeypat
 
     called = []
 
-    def fake_apply(arr, processing, roi_set=None):
+    def fake_apply(arr, state, passed_roi_set, *, scan_range_m=None):
         called.append(True)
-        return arr + 1.0
+        return arr + 1.0, scan_range_m
 
-    monkeypatch.setattr(_iv_mod, "_apply_processing", fake_apply)
+    monkeypatch.setattr(_iv_mod, "apply_processing_state_with_calibration", fake_apply)
 
     dlg = ImageViewerDialog.__new__(ImageViewerDialog)
     dlg._display_arr = None
@@ -1573,14 +1574,15 @@ def test_viewer_refresh_display_array_blocks_export_after_processing_error(qapp,
         def setText(self, text):
             self.text = text
 
-    def fail_apply(arr, processing, roi_set=None):
+    def fail_apply(arr, state, passed_roi_set, *, scan_range_m=None):
         raise RuntimeError("bad processing setting")
 
-    monkeypatch.setattr(_iv_mod, "_apply_processing", fail_apply)
+    monkeypatch.setattr(_iv_mod, "apply_processing_state_with_calibration", fail_apply)
 
     dlg = ImageViewerDialog.__new__(ImageViewerDialog)
     dlg._display_arr = None
     dlg._raw_arr = np.zeros((2, 2))
+    dlg._scan_range_m = None
     dlg._processing = {"smooth_sigma": 1.0}
     dlg._image_roi_set = ROISet(image_id="img1")
     dlg._reset_zoom_on_next_pixmap = False

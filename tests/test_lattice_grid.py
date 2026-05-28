@@ -747,7 +747,7 @@ def test_image_info_uses_display_array_without_numpy_truth_value(monkeypatch, qa
     monkeypatch.setattr(image_info, "ImageInfoDialog", FakeImageInfoDialog)
 
     class FakeViewer(ImageViewerToolsMixin):
-        pass
+        _track_modeless_child = lambda self, *a: None
 
     viewer = FakeViewer()
     viewer._entries = [SimpleNamespace(path=Path("/missing.sxm"))]

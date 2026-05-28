@@ -88,11 +88,11 @@ def test_features_window_classify_requires_labels(qapp):
     seg_params = win._features_sidebar.classify_segmentation_params()
     win._features_panel.set_particles(
         parts,
-        params_signature=win._features_segmentation_signature(seg_params),
+        params_signature=tuple(sorted(seg_params.items())),
         params_meta=seg_params,
     )
 
-    win._on_features_run("classify")
+    win._features_ctrl._on_run("classify")
 
     assert "Click particles on the image" in win._features_sidebar._status_lbl.text()
     win.close()
@@ -113,7 +113,7 @@ def test_features_window_segmentation_change_clears_labels(qapp, monkeypatch):
     seg_params = win._features_sidebar.classify_segmentation_params()
     win._features_panel.set_particles(
         parts,
-        params_signature=win._features_segmentation_signature(seg_params),
+        params_signature=tuple(sorted(seg_params.items())),
         params_meta=seg_params,
     )
     monkeypatch.setattr(
@@ -151,7 +151,7 @@ def test_features_window_classify_export_includes_samples(qapp, monkeypatch, tmp
     seg_params = win._features_sidebar.classify_segmentation_params()
     win._features_panel.set_particles(
         parts,
-        params_signature=win._features_segmentation_signature(seg_params),
+        params_signature=tuple(sorted(seg_params.items())),
         params_meta=seg_params,
     )
     monkeypatch.setattr(
@@ -169,7 +169,7 @@ def test_features_window_classify_export_includes_samples(qapp, monkeypatch, tmp
     )
 
     monkeypatch.setattr(
-        "probeflow.gui._legacy.QFileDialog.getSaveFileName",
+        "PySide6.QtWidgets.QFileDialog.getSaveFileName",
         lambda *args, **kwargs: (str(tmp_path / "classify.json"), "JSON (*.json)"),
     )
 
@@ -181,7 +181,7 @@ def test_features_window_classify_export_includes_samples(qapp, monkeypatch, tmp
 
     monkeypatch.setattr("probeflow.io.writers.json.write_json", _capture_write_json)
 
-    win._on_features_export("classify")
+    win._features_ctrl._on_export("classify")
 
     assert captured["kind"] == "classifications"
     assert captured["extra_meta"]["samples"][0]["class_name"] == "target"

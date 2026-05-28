@@ -91,23 +91,10 @@ def test_controller_connects_direct_pass_throughs(monkeypatch):
     """Constructor wires crop_template, undo_label, mask_color directly to panel."""
     panel, sidebar, pool, status_cb, preview_pool = _make_mocks()
 
-    monkeypatch.setattr(
-        "probeflow.gui.features.controller.QObject.__init__",
-        lambda self: None
-    )
-
-    ctrl = FeatureCountingController.__new__(FeatureCountingController)
-    # Manually call __init__ body — skip QObject super().__init__()
-    # via monkeypatching isn't reliable; test the connect calls on mock instead.
-
-    # Re-instantiate properly with monkeypatched QObject base
-    import probeflow.gui.features.controller as mod
-    _orig_init = mod.QObject.__init__
-
     # Since we can't easily skip QObject.__init__ without Qt, just verify
     # the sidebar mock receives the expected connect() calls after construction.
     try:
-        ctrl = FeatureCountingController(
+        FeatureCountingController(
             panel, sidebar, pool, status_cb,
             preview_pool=preview_pool,
         )
