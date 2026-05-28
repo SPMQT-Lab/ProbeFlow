@@ -221,8 +221,8 @@ def materialize_image(
 # ── JSON serialization ────────────────────────────────────────────────────────
 
 
-def _result_to_jsonable(result: Any) -> Any:
-    """Convert a measurement result to a JSON-friendly value.
+def _to_jsonable(result: Any) -> Any:
+    """Convert a graph value to a JSON-friendly value.
 
     Numpy arrays become lists; tuples become lists; non-serializable objects
     fall back to ``repr()`` so the round-trip is at least readable, but
@@ -231,10 +231,12 @@ def _result_to_jsonable(result: Any) -> Any:
     """
     if result is None or isinstance(result, (str, int, float, bool)):
         return result
+    if isinstance(result, np.generic):
+        return result.item()
     if isinstance(result, (list, tuple)):
-        return [_result_to_jsonable(x) for x in result]
+        return [_to_jsonable(x) for x in result]
     if isinstance(result, dict):
-        return {str(k): _result_to_jsonable(v) for k, v in result.items()}
+        return {str(k): _to_jsonable(v) for k, v in result.items()}
     if isinstance(result, np.ndarray):
         return result.tolist()
     return repr(result)
@@ -247,13 +249,13 @@ def _node_to_dict(node: Node) -> dict[str, Any]:
         "source_scan_id": node.source_scan_id,
         "operation": node.operation,
         "parent_ids": list(node.parent_ids),
-        "params": dict(node.params),
+        "params": _to_jsonable(node.params),
         "plugin_version": node.plugin_version,
         "warnings": list(node.warnings),
         "units": node.units,
     }
     if isinstance(node, MeasurementNode):
-        base["result"] = _result_to_jsonable(node.result)
+        base["result"] = _to_jsonable(node.result)
     return base
 
 

@@ -18,7 +18,12 @@ Launch the GUI via ``probeflow gui`` (see ``pyproject.toml`` for the
 console-script wiring) or programmatically via ``probeflow.gui.main()``.
 """
 
-__version__ = "beta"
+from importlib.metadata import PackageNotFoundError, version as _package_version
+
+try:
+    __version__ = _package_version("probeflow")
+except PackageNotFoundError:
+    __version__ = "0.0.0b0"
 
 # Public API: the vendor-agnostic Scan abstraction + dispatcher.
 # Importing these does not pull in PySide6 / matplotlib.

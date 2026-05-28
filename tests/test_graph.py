@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import numpy as np
 import pytest
 
@@ -332,3 +333,26 @@ class TestSerialization:
         payload = graph_to_dict(g)
         g2 = graph_from_dict(payload)
         assert g2.get(meas.id).result == [0.0, 0.5, 1.0]
+
+    def test_numpy_scalars_in_params_and_results_are_json_serializable(self):
+        g = ScanGraph(scan_id="s")
+        root = ImageNode(
+            source_scan_id="s",
+            operation="root",
+            array=np.zeros((2, 2)),
+            params={"scale": np.float64(1.5)},
+        )
+        g.add(root, root=True)
+        meas = MeasurementNode(
+            source_scan_id="s",
+            operation="count",
+            parent_ids=(root.id,),
+            result={"n": np.int64(3), "ok": np.bool_(True)},
+        )
+        g.add(meas)
+
+        payload = graph_to_dict(g)
+
+        json.dumps(payload)
+        assert payload["nodes"][0]["params"]["scale"] == 1.5
+        assert payload["nodes"][1]["result"] == {"n": 3, "ok": True}

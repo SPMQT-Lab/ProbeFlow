@@ -35,6 +35,7 @@ def identify_scan_file(path) -> LoadSignature:
         raise FileNotFoundError(p)
     if not p.is_file():
         raise ValueError(f"{p}: expected a file path for scan loading")
+    p = p.resolve()
     ft = sniff_file_type(p)
     suffix = p.suffix.lower()
 
@@ -72,6 +73,7 @@ def identify_spectrum_file(path) -> LoadSignature:
         raise FileNotFoundError(p)
     if not p.is_file():
         raise ValueError(f"{p}: expected a file path for spectroscopy loading")
+    p = p.resolve()
     ft = sniff_file_type(p)
     suffix = p.suffix.lower()
 
