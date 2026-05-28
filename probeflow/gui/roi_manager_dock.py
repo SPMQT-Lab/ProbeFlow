@@ -40,6 +40,7 @@ class ROIManagerDock(QDockWidget):
 
     def __init__(self, roi_set_getter: Callable, callbacks: dict, parent=None):
         super().__init__("ROI Manager", parent)
+        self.setObjectName("roiManagerDock")
         self._roi_set_getter = roi_set_getter
         self._cb = callbacks
         self.setFeatures(
