@@ -134,6 +134,11 @@ class ProbeFlowWindow(QMainWindow):
         # Populated when a viewer closes; restored when the same scan is reopened.
         self._saved_processing: dict = {}
 
+        # Probe whether the optional Survey/ScanFlow integration is importable
+        # (review gui-arch #17).  We resolve this before ``_build_ui`` so the
+        # Tools menu and the deferred SurveyPanel construction agree.
+        self._survey_available = self._probe_survey_available()
+
         self._build_ui()
         self._apply_theme()
         self._restore_desktop_layout()
@@ -150,12 +155,34 @@ class ProbeFlowWindow(QMainWindow):
         # If launched with --open-survey, jump straight into Survey mode with
         # the manifest pre-loaded. Wire the panel's log_message into status bar.
         if self._pending_survey is not None:
-            try:
-                self._survey_panel.log_message.connect(self._status_bar.showMessage)
-                if self._survey_panel.load_manifest(self._pending_survey):
-                    self._switch_mode("survey")
-            except Exception as e:
-                self._status_bar.showMessage(f"Could not open survey: {e}")
+            if not getattr(self, "_survey_available", False):
+                self._status_bar.showMessage(
+                    "Survey mode is unavailable — install `scanflow` to enable it."
+                )
+            else:
+                try:
+                    self._survey_panel.log_message.connect(self._status_bar.showMessage)
+                    if self._survey_panel.load_manifest(self._pending_survey):
+                        self._switch_mode("survey")
+                except Exception as e:
+                    self._status_bar.showMessage(f"Could not open survey: {e}")
+
+    # ── Optional Survey integration probe ─────────────────────────────────────
+    @staticmethod
+    def _probe_survey_available() -> bool:
+        """Return True iff :mod:`probeflow.gui.survey` is importable.
+
+        Used so the GUI degrades gracefully when the optional ``scanflow``
+        dependency is missing (review gui-arch #17): the Tools-menu Survey
+        action becomes disabled, the content-stack slot shows a help label,
+        and any ``--open-survey`` startup argument logs a status-bar notice
+        instead of failing.
+        """
+        try:
+            import probeflow.gui.survey  # noqa: F401
+            return True
+        except Exception:
+            return False
 
     # ── Build ──────────────────────────────────────────────────────────────────
     def _build_ui(self):
@@ -201,8 +228,20 @@ class ProbeFlowWindow(QMainWindow):
         self._features_panel = FeaturesPanel(t)
         self._tv_panel       = TVPanel(t)
         self._dev_terminal   = DeveloperTerminalWidget(t)
-        from probeflow.gui.survey import SurveyPanel
-        self._survey_panel   = SurveyPanel()
+        # Survey integration is optional — when ``probeflow.gui.survey``
+        # cannot be imported (e.g. scanflow not installed in this venv) we
+        # show a placeholder label at the Survey content stack index instead
+        # of crashing the GUI launch (review gui-arch #17).
+        if self._survey_available:
+            from probeflow.gui.survey import SurveyPanel
+            self._survey_panel = SurveyPanel()
+        else:
+            self._survey_panel = QLabel(
+                "Survey mode is unavailable in this install.\n\n"
+                "Install the optional `scanflow` dependency to enable it."
+            )
+            self._survey_panel.setWordWrap(True)
+            self._survey_panel.setAlignment(Qt.AlignCenter)
         self._content_stack.addWidget(self._browse_splitter)        # idx 0 browse
         self._content_stack.addWidget(self._conv_panel)             # idx 1 convert
         self._content_stack.addWidget(self._features_panel)         # idx 2 features
@@ -453,7 +492,14 @@ class ProbeFlowWindow(QMainWindow):
         _mode_action(tools_menu, "Feature counting (tab)", "features", "Ctrl+3")
         _mode_action(tools_menu, "TV denoise", "tv", "Ctrl+4")
         tools_menu.addSeparator()
-        _mode_action(tools_menu, "Survey (ScanFlow campaign)", "survey", "Ctrl+Shift+S")
+        survey_action = _mode_action(
+            tools_menu, "Survey (ScanFlow campaign)", "survey", "Ctrl+Shift+S"
+        )
+        if not self._survey_available:
+            survey_action.setEnabled(False)
+            survey_action.setToolTip(
+                "Survey mode requires the optional `scanflow` dependency."
+            )
         tools_menu.addSeparator()
         _mode_action(tools_menu, "Developer tools", "dev", "Ctrl+5")
         prefs_action = QAction("Preferences...", self)
