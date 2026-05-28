@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from probeflow.processing.spectroscopy import smooth_spectrum
+from probeflow.spectroscopy._kernels import smooth_spectrum
 
 
 def savgol_validation_message(

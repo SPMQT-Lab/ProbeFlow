@@ -7,7 +7,7 @@ from typing import Mapping
 
 import numpy as np
 
-from probeflow.processing.spectroscopy import (
+from probeflow.spectroscopy._kernels import (
     numeric_derivative as _numeric_derivative,
 )
 from probeflow.spectroscopy.models import (
