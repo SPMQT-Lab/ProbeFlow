@@ -24,6 +24,7 @@ def save_viewer_png(
     ch_idx: int,
     ch_name: str | None,
     processing_history=None,
+    add_scalebar: bool = True,
 ) -> str:
     """Write *arr* to *out_path* as a PNG with embedded provenance metadata.
 
@@ -58,7 +59,7 @@ def save_viewer_png(
                     display_state=png_display_state(
                         drs,
                         colormap=colormap,
-                        add_scalebar=True,
+                        add_scalebar=add_scalebar,
                         scalebar_unit="nm",
                         scalebar_pos="bottom-right",
                     ),
@@ -75,6 +76,7 @@ def save_viewer_png(
             clip_low, clip_high,
             lut_fn=_get_lut,
             scan_range_m=(w_m, h_m),
+            add_scalebar=add_scalebar,
             vmin=vmin, vmax=vmax,
             provenance=provenance,
         )

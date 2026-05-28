@@ -1453,6 +1453,15 @@ class ProbeFlowWindow(QMainWindow):
             self, "Save denoised PNG", str(suggested), "PNG (*.png)")
         if not out_path:
             return
+
+        from PySide6.QtWidgets import QMessageBox as _QMB
+        reply = _QMB.question(
+            self, "Scale bar",
+            "Include scale bar in the exported PNG?",
+            _QMB.Yes | _QMB.No, _QMB.Yes,
+        )
+        add_scalebar = (reply == _QMB.Yes)
+
         try:
             from probeflow.processing import export_png
             from probeflow.io.writers.png import lut_from_matplotlib
@@ -1463,7 +1472,7 @@ class ProbeFlowWindow(QMainWindow):
                 out, out_path, "gray", 1.0, 99.0,
                 lut_fn=lut_from_matplotlib,
                 scan_range_m=scan_range_m,
-                add_scalebar=True,
+                add_scalebar=add_scalebar,
                 scalebar_unit="nm",
                 scalebar_pos="bottom-right",
             )

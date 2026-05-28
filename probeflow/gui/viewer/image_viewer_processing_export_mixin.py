@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 from pathlib import Path
 
-from PySide6.QtWidgets import QFileDialog
+from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 from probeflow.gui.config import load_config, save_config
 from probeflow.gui.roi_context import active_area_roi_context
@@ -145,6 +145,16 @@ class ImageViewerProcessingExportMixin:
         if arr is None:
             self._status_lbl.setText("No data to save.")
             return
+
+        # Ask whether to include the scale bar.
+        reply = QMessageBox.question(
+            self, "Scale bar",
+            "Include scale bar in the exported PNG?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes,   # default
+        )
+        add_scalebar = (reply == QMessageBox.Yes)
+
         msg = save_viewer_png(
             arr, out_path, entry.path,
             self._colormap, self._clip_low, self._clip_high,
@@ -154,6 +164,7 @@ class ImageViewerProcessingExportMixin:
                 self._processing_history.to_dict()
                 if self._processing_history is not None else None
             ),
+            add_scalebar=add_scalebar,
         )
         if msg.startswith("Saved") and self._processing_history is not None:
             self._mark_history_export(out_path, export_parameters={"export_kind": "viewer_png"})
