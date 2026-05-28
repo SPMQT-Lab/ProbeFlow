@@ -808,8 +808,22 @@ def apply_geometric_op_to_scan(
     scan
         A Scan object with a ``.planes`` list of 2-D arrays.
     operation
-        One of: "flip_horizontal", "flip_vertical", "rot90_cw", "rot180",
-        "rot270_cw", "rotate_arbitrary".
+        One of: ``"flip_horizontal"``, ``"flip_vertical"``,
+        ``"rotate_90_cw"`` (alias ``"rot90_cw"``),
+        ``"rotate_180"`` (alias ``"rot180"``),
+        ``"rotate_270_cw"`` (alias ``"rot270_cw"``),
+        ``"rotate_arbitrary"``.
+
+        Both vocabularies are accepted: the long form
+        (``rotate_90_cw`` etc.) matches the kernel functions in
+        ``probeflow.processing.geometry`` and the names emitted by
+        ``processing_state_from_gui``; the short form (``rot90_cw``)
+        matches the canonical names used by
+        :class:`~probeflow.core.roi.ROI.transform`.  Review
+        arch-backend #9 (2026-05-28) tightened this so passing either
+        vocabulary now works uniformly through this function (previously
+        only the short form was dispatched per-plane while the
+        scan-range swap below already accepted both).
     params
         Extra parameters for the operation.  For ``rotate_arbitrary``:
         ``{"angle_degrees": float, "order": int}``.  For lossless ops: {}.
@@ -833,46 +847,61 @@ def apply_geometric_op_to_scan(
 
     image_shape = scan.planes[0].shape  # (Ny, Nx)
 
+    # Normalize the operation to the short form used by ROI.transform
+    # so the rest of this function (including the LOSSLESS frozenset,
+    # the per-plane dispatch, and the scan-range swap) only has to
+    # know one vocabulary.  Aliases mirror those in
+    # probeflow.core.roi.ROISet.transform_all.
+    _LONG_TO_SHORT = {
+        "rotate_90_cw": "rot90_cw",
+        "rotate_180": "rot180",
+        "rotate_270_cw": "rot270_cw",
+    }
+    canonical_op = _LONG_TO_SHORT.get(operation, operation)
+
     _LOSSLESS = frozenset({
         "flip_horizontal", "flip_vertical",
         "rot90_cw", "rot180", "rot270_cw",
     })
 
     for i, plane in enumerate(scan.planes):
-        if operation == "flip_horizontal":
+        if canonical_op == "flip_horizontal":
             scan.planes[i] = _proc.flip_horizontal(plane)
-        elif operation == "flip_vertical":
+        elif canonical_op == "flip_vertical":
             scan.planes[i] = _proc.flip_vertical(plane)
-        elif operation == "rot90_cw":
+        elif canonical_op == "rot90_cw":
             scan.planes[i] = _proc.rotate_90_cw(plane)
-        elif operation == "rot180":
+        elif canonical_op == "rot180":
             scan.planes[i] = _proc.rotate_180(plane)
-        elif operation == "rot270_cw":
+        elif canonical_op == "rot270_cw":
             scan.planes[i] = _proc.rotate_270_cw(plane)
-        elif operation == "rotate_arbitrary":
+        elif canonical_op == "rotate_arbitrary":
             scan.planes[i] = _proc.rotate_arbitrary(
                 plane,
                 angle_degrees=float(params.get("angle_degrees", 0.0)),
                 order=int(params.get("order", 1)),
             )
         else:
-            raise ValueError(f"apply_geometric_op_to_scan: unknown operation {operation!r}")
+            raise ValueError(
+                f"apply_geometric_op_to_scan: unknown operation {operation!r}"
+            )
 
     # Swap scan_range_m for operations that transpose width and height.
     # 90° and 270° rotations exchange the physical X and Y extents;
     # flips and 180° rotation leave the aspect ratio unchanged.
-    if operation in ("rot90_cw", "rot270_cw", "rotate_90_cw", "rotate_270_cw"):
+    if canonical_op in ("rot90_cw", "rot270_cw"):
         w, h = scan.scan_range_m
         scan.scan_range_m = (h, w)
 
     if roi_set is not None:
+        # transform_all accepts both vocabularies via its own alias map.
         invalidated = roi_set.transform_all(operation, params, image_shape)
-        if operation in _LOSSLESS and invalidated:
+        if canonical_op in _LOSSLESS and invalidated:
             raise RuntimeError(
                 f"Internal error: lossless operation {operation!r} invalidated "
                 f"{len(invalidated)} ROI(s). This is a bug in ROI.transform()."
             )
-        if operation == "rotate_arbitrary" and invalidated:
+        if canonical_op == "rotate_arbitrary" and invalidated:
             roi_set.rois = [r for r in roi_set.rois if r.id not in set(invalidated)]
             if getattr(roi_set, "active_roi_id", None) in set(invalidated):
                 roi_set.active_roi_id = None

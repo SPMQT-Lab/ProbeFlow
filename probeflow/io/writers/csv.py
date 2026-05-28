@@ -69,8 +69,13 @@ def write_csv(
         f"width_m={w_m:.6e} height_m={h_m:.6e} "
         f"source={source_name}"
     )
-    np.savetxt(out_path, arr, fmt=fmt, delimiter=delimiter,
-               header=header, comments="# ")
+    # Open in binary mode with newline="" so np.savetxt does not get
+    # caught by the Windows universal-newline translation (which can
+    # mix '\n' and '\r\n' separators in the same file).  Review IO #21
+    # (fixed 2026-05-28): cross-platform CSV stability.
+    with open(out_path, "wb") as fh:
+        np.savetxt(fh, arr, fmt=fmt, delimiter=delimiter,
+                   header=header, comments="# ", newline="\n")
     write_provenance_sidecars(
         out_path,
         provenance,

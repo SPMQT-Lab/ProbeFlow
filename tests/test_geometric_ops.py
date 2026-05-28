@@ -383,6 +383,44 @@ class TestApplyGeometricOpToScanRangeSwap:
         scan, _ = apply_geometric_op_to_scan(scan, "flip_vertical")
         assert scan.scan_range_m == (100e-9, 60e-9)
 
+
+class TestApplyGeometricOpAcceptsBothVocabularies:
+    """Regression for arch-backend #9 (2026-05-28) — both short
+    (rot90_cw) and long (rotate_90_cw) forms must be accepted by
+    apply_geometric_op_to_scan.  Previously only the short form was
+    dispatched per-plane; the long form was accepted only by the
+    scan-range swap and raised in the dispatch above."""
+
+    def test_rotate_90_cw_long_form_dispatches(self):
+        scan = _make_asymmetric_scan(width_m=100e-9, height_m=60e-9)
+        scan, _ = apply_geometric_op_to_scan(scan, "rotate_90_cw")
+        # Plane was rotated AND scan-range was swapped — both code
+        # paths recognised the long form.
+        assert scan.planes[0].shape == (10, 6)  # was (6, 10)
+        assert scan.scan_range_m == (60e-9, 100e-9)
+
+    def test_rotate_180_long_form_dispatches(self):
+        scan = _make_asymmetric_scan(width_m=100e-9, height_m=60e-9)
+        scan, _ = apply_geometric_op_to_scan(scan, "rotate_180")
+        assert scan.planes[0].shape == (6, 10)
+        assert scan.scan_range_m == (100e-9, 60e-9)
+
+    def test_rotate_270_cw_long_form_dispatches(self):
+        scan = _make_asymmetric_scan(width_m=100e-9, height_m=60e-9)
+        scan, _ = apply_geometric_op_to_scan(scan, "rotate_270_cw")
+        assert scan.planes[0].shape == (10, 6)
+        assert scan.scan_range_m == (60e-9, 100e-9)
+
+    def test_short_and_long_forms_produce_identical_results(self):
+        scan_short = _make_asymmetric_scan()
+        scan_long = _make_asymmetric_scan()
+        scan_short.planes[0] = np.arange(60.0).reshape(6, 10)
+        scan_long.planes[0] = np.arange(60.0).reshape(6, 10)
+        apply_geometric_op_to_scan(scan_short, "rot90_cw")
+        apply_geometric_op_to_scan(scan_long, "rotate_90_cw")
+        np.testing.assert_array_equal(scan_short.planes[0], scan_long.planes[0])
+        assert scan_short.scan_range_m == scan_long.scan_range_m
+
     def test_two_rot90_cw_restores_scan_range(self):
         scan = _make_asymmetric_scan(width_m=100e-9, height_m=60e-9)
         scan, _ = apply_geometric_op_to_scan(scan, "rot90_cw")

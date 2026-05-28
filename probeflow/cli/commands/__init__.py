@@ -1,18 +1,16 @@
-"""Extraction staging area for CLI command runners.
+"""CLI command runner submodules.
 
-Each submodule re-exports the ``_cmd_*`` runner functions that currently live
-in ``probeflow/cli/_legacy.py``.  The submodules are not yet wired into the
-parser; the active entry point is still ``cli/_legacy.py:_build_parser``.
+Each ``_cmd_*`` runner lives in the topic-specific submodule below
+(``analysis``, ``conversion``, ``info``, ``processing``, ``roi``,
+``scan``, ``spectroscopy``, ``gui``).  The runners are wired into
+``cli/parser.py`` and called from there.
 
-Migration path for each command
---------------------------------
-1. Move the ``_cmd_*`` function (and any private helpers it calls) from
-   ``cli/_legacy.py`` into the appropriate submodule here.
-2. Update ``cli/parser.py`` to import the runner from the submodule instead
-   of from ``_legacy``.
-3. Remove the name from the submodule's ``__all__`` re-export once the
-   original copy in ``_legacy`` is gone.
+Add new CLI commands directly to the appropriate submodule.  The
+legacy ``cli/_legacy.py`` module is now a backward-compatibility
+re-export shim only — do not add new entries there.
 
-New commands should be added directly to the right submodule — not to
-``_legacy``.
+(Review arch-backend #17, 2026-05-28: the previous docstring claimed
+this was an in-progress extraction staging area pointing at
+``_legacy._build_parser`` as the active entry point.  That migration
+is complete; the description here now reflects the actual structure.)
 """
