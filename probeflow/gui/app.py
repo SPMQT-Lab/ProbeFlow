@@ -238,7 +238,8 @@ class ProbeFlowWindow(QMainWindow):
         # each spawned _FeaturesWorker now owns its own signals; we
         # connect ``worker.signals.finished`` at spawn time so concurrent
         # runs cannot cross-talk via a shared signal instance.
-        self._features_pool    = QThreadPool.globalInstance()
+        self._features_pool            = QThreadPool.globalInstance()
+        self._features_preview_gen     = 0   # stale-result guard for live preview
 
         # Floating Feature Counting window (lazy-created on first open)
         self._fc_window = None
@@ -290,6 +291,8 @@ class ProbeFlowWindow(QMainWindow):
             self._on_classify_params_changed)
         self._features_sidebar.segment_requested.connect(
             self._on_features_segment_requested)
+        self._features_sidebar.preview_requested.connect(
+            self._on_features_preview)
         self._features_sidebar.undo_label_requested.connect(
             self._features_panel.undo_last_label)
         self._features_sidebar.mode_changed.connect(
@@ -1200,6 +1203,48 @@ class ProbeFlowWindow(QMainWindow):
         """Convert area as % of image (e.g. 0.001 = 0.001%) to nm²."""
         Ny, Nx = arr.shape
         return (pct / 100.0) * float(Nx) * float(Ny) * px_x_m * px_y_m * 1e18
+
+    # ── Live preview (slider drag) ────────────────────────────────────────────
+
+    def _on_features_preview(self) -> None:
+        """Live preview — runs segmentation silently while sliders are dragged.
+
+        Mirrors _on_features_segment_requested but does NOT advance the sidebar
+        to Phase 2 and does NOT update the particle-count label.  A generation
+        counter discards results from overtaken (stale) workers.
+        """
+        arr = self._features_panel.get_analysis_array()
+        if arr is None:
+            return
+        px_m = self._features_panel.current_pixel_size()
+        px_x_m, px_y_m = self._features_panel.current_pixel_sizes()
+        if px_m <= 0:
+            return
+        params = self._features_sidebar.particles_params()
+        min_pct = params.pop("min_area_pct", 0.001)
+        max_pct = params.pop("max_area_pct", 0.0)
+        params["min_area_nm2"] = self._features_pct_to_nm2(
+            min_pct, arr, px_x_m, px_y_m)
+        params["max_area_nm2"] = (
+            self._features_pct_to_nm2(max_pct, arr, px_x_m, px_y_m)
+            if max_pct > 0 else None
+        )
+        self._features_preview_gen += 1
+        gen = self._features_preview_gen
+        worker = _FeaturesWorker("particles", arr, px_m, px_x_m, px_y_m, params)
+        worker.signals.finished.connect(
+            lambda mode, result, error, g=gen:
+                self._on_features_preview_finished(mode, result, error, g))
+        self._features_pool.start(worker)
+
+    def _on_features_preview_finished(self, mode: str, result, error: str,
+                                      gen: int) -> None:
+        """Handle live-preview result — discard if a newer preview has started."""
+        if gen != self._features_preview_gen or mode != "particles" or error:
+            return
+        self._features_panel.set_particles(result)
+        self._features_sidebar.set_status(
+            f"Preview: {len(result)} particle(s) — press 'Apply Settings' to confirm.")
 
     def _on_features_segment_requested(self) -> None:
         """Phase 1 — segment particles with current threshold + exclusion mask.

@@ -69,6 +69,7 @@ class FeatureCountingWindow(QMainWindow):
         self._pool = QThreadPool.globalInstance()
         # Each spawned _FeaturesWorker owns its own signals so two concurrent
         # (or rapidly back-to-back) workers cannot cross-talk.
+        self._preview_generation = 0   # incremented per preview; stale results ignored
 
         # ── Widgets ──────────────────────────────────────────────────────────
         t: dict = {}   # theme dict — window owns its own styling
@@ -79,6 +80,7 @@ class FeatureCountingWindow(QMainWindow):
         self._sidebar.load_from_browse_requested.connect(
             self.load_from_browse_needed.emit)
         self._sidebar.segment_requested.connect(self._on_segment_requested)
+        self._sidebar.preview_requested.connect(self._on_preview)
         self._sidebar.run_requested.connect(self._on_run)
         self._sidebar.export_requested.connect(self._on_export)
         self._sidebar.crop_template_requested.connect(
@@ -150,6 +152,45 @@ class FeatureCountingWindow(QMainWindow):
     def _on_mask_clear(self) -> None:
         self._panel.clear_exclusion_mask()
         self._sidebar.set_status("Exclusion mask cleared.")
+
+    # ── Live preview (slider drag) ────────────────────────────────────────────
+
+    def _on_preview(self) -> None:
+        """Live preview — runs segmentation silently while sliders are dragged.
+
+        Identical to _on_segment_requested but does NOT advance the sidebar to
+        Phase 2 and does NOT update the particle-count label.  A generation
+        counter discards results from overtaken (stale) workers.
+        """
+        arr = self._panel.get_analysis_array()
+        if arr is None:
+            return
+        px_m = self._panel.current_pixel_size()
+        px_x_m, px_y_m = self._panel.current_pixel_sizes()
+        if px_m <= 0:
+            return
+        params = self._sidebar.particles_params()
+        min_pct = params.pop("min_area_pct", 0.001)
+        max_pct = params.pop("max_area_pct", 0.0)
+        params["min_area_nm2"] = self._pct_to_nm2(min_pct, arr, px_x_m, px_y_m)
+        params["max_area_nm2"] = (
+            self._pct_to_nm2(max_pct, arr, px_x_m, px_y_m) if max_pct > 0 else None
+        )
+        self._preview_generation += 1
+        gen = self._preview_generation
+        worker = _FeaturesWorker("particles", arr, px_m, px_x_m, px_y_m, params)
+        worker.signals.finished.connect(
+            lambda mode, result, error, g=gen:
+                self._on_preview_finished(mode, result, error, g))
+        self._pool.start(worker)
+
+    def _on_preview_finished(self, mode: str, result, error: str,
+                             gen: int) -> None:
+        """Handle live-preview result — discard if a newer preview has been started."""
+        if gen != self._preview_generation or mode != "particles" or error:
+            return
+        self._panel.set_particles(result)
+        self._sidebar.set_status(f"Preview: {len(result)} particle(s) — press 'Apply Settings' to confirm.")
 
     # ── Step 1: Segment ───────────────────────────────────────────────────────
 
