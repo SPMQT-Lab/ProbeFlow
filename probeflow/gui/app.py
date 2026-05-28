@@ -128,7 +128,7 @@ class ProbeFlowWindow(QMainWindow):
         # that the browse window remains interactive while scans are open.  We
         # keep explicit Python references here so the dialogs are not
         # garbage-collected while open (show() does not block like exec()).
-        self._open_viewers: list = []
+        self._open_viewers: set = set()
 
         # Per-scan processing memory: path_str → processing dict.
         # Populated when a viewer closes; restored when the same scan is reopened.
@@ -1149,12 +1149,9 @@ class ProbeFlowWindow(QMainWindow):
         # window stays interactive, and all child windows (FFT viewer, Reciprocal
         # Grid panel, etc.) get normal macOS window controls (minimize, resize).
         # Keep a Python reference so the dialog is not garbage-collected while open.
-        self._open_viewers.append(dlg)
+        self._track_open_viewer(dlg)
         def _on_closed(_result, d=dlg, spec=is_spec):
-            try:
-                self._open_viewers.remove(d)
-            except ValueError:
-                pass
+            self._untrack_open_viewer(d)
             # ── Save processing state so it's restored when this scan is reopened ──
             if not spec:
                 try:
@@ -1175,6 +1172,33 @@ class ProbeFlowWindow(QMainWindow):
                 self._load_from_viewer(d, d._deferred.action)
         dlg.finished.connect(_on_closed)
         dlg.show()
+
+    def _track_open_viewer(self, dlg) -> None:
+        """Hold a strong ref to a modeless viewer and reap it on destruction."""
+        if dlg is None:
+            return
+        try:
+            self._open_viewers.add(dlg)
+        except AttributeError:
+            self._open_viewers = {dlg}
+        try:
+            dlg.destroyed.connect(
+                lambda _obj=None, _dlg=dlg: self._untrack_open_viewer(_dlg)
+            )
+        except Exception:
+            pass
+
+    def _untrack_open_viewer(self, dlg) -> None:
+        viewers = getattr(self, "_open_viewers", None)
+        if not viewers:
+            return
+        try:
+            viewers.discard(dlg)
+        except AttributeError:
+            try:
+                viewers.remove(dlg)
+            except ValueError:
+                pass
 
     def _load_from_viewer(self, dlg, action: str):
         """Load the processed array from a closed ImageViewerDialog into Features or TV."""

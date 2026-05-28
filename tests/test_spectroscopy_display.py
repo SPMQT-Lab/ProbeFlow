@@ -107,6 +107,18 @@ def test_disabling_outlier_mask_keeps_all_finite_points():
     np.testing.assert_allclose(y_out, y)
 
 
+def test_outlier_mask_warns_when_all_samples_are_nonfinite():
+    x = np.array([np.nan, np.inf])
+    y = np.array([1.0, np.nan])
+
+    with pytest.warns(UserWarning, match="no finite x/y samples"):
+        x_out, y_out, keep = apply_outlier_mask(x, y, mode="mad")
+
+    assert x_out.size == 0
+    assert y_out.size == 0
+    assert keep.tolist() == [False, False]
+
+
 def test_constant_normalization_and_vertical_offset():
     trace = _trace(np.array([2.0, 4.0, 6.0]))
     trace = SpectrumTrace(

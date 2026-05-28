@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 
 
@@ -29,6 +31,13 @@ def apply_outlier_mask(
 
     mode = (mode or "none").strip().lower()
     keep = np.isfinite(x_arr) & np.isfinite(y_arr)
+    if not np.any(keep):
+        warnings.warn(
+            "apply_outlier_mask: no finite x/y samples available; returning empty arrays.",
+            UserWarning,
+            stacklevel=2,
+        )
+        return x_arr[keep].copy(), y_arr[keep].copy(), keep
     if mode in {"none", "off"}:
         return x_arr[keep].copy(), y_arr[keep].copy(), keep
 

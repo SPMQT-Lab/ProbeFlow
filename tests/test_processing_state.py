@@ -512,10 +512,24 @@ def test_gui_conversion_emits_zero_reference_steps_and_skips_bad_inputs():
         "points_px": [(0, 0), (9, 0), (0, 9)],
         "patch": 0,
     }
-    assert processing_state_from_gui({"set_zero_xy": "bad"}).steps == []
-    assert processing_state_from_gui(
-        {"set_zero_plane_points": [(0, 0), "bad", (0, 9)]},
-    ).steps == []
+    with pytest.warns(UserWarning, match="set_zero_point"):
+        assert processing_state_from_gui({"set_zero_xy": "bad"}).steps == []
+    with pytest.warns(UserWarning, match="set_zero_plane"):
+        assert processing_state_from_gui(
+            {"set_zero_plane_points": [(0, 0), "bad", (0, 9)]},
+        ).steps == []
+
+
+def test_gui_conversion_warns_when_step_specs_are_skipped():
+    with pytest.warns(UserWarning, match="affine_lattice_correction"):
+        state = processing_state_from_gui({
+            "geometric_ops": [{"op": "affine_lattice_correction", "params": {}}],
+        })
+    assert state.steps == []
+
+    with pytest.warns(UserWarning, match="arithmetic"):
+        state = processing_state_from_gui({"arithmetic_ops": ["bad"]})
+    assert state.steps == []
 
 
 def test_gui_conversion_roi_scope_wraps_local_steps_and_keeps_global_steps_global():

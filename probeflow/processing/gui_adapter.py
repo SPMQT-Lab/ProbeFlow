@@ -71,6 +71,13 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
 
     skipped_roi_scope_warning = False
 
+    def _warn_skipped_step(step_name: str, reason: str) -> None:
+        warnings.warn(
+            f"Skipped GUI processing step {step_name!r}: {reason}",
+            UserWarning,
+            stacklevel=2,
+        )
+
     def _append_step(step: ProcessingStep):
         nonlocal skipped_roi_scope_warning
         if step.op in roi_eligible and roi_scope:
@@ -176,16 +183,20 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
     notches = gui_state.get("periodic_notches")
     if notches:
         peaks = []
+        invalid_peaks = 0
         for peak in notches:
             try:
                 peaks.append((int(peak[0]), int(peak[1])))
             except (TypeError, ValueError, IndexError):
+                invalid_peaks += 1
                 continue
         if peaks:
             _append_step(ProcessingStep("periodic_notch_filter", {
                 "peaks": peaks,
                 "radius_px": float(gui_state.get("periodic_notch_radius", 3.0)),
             }))
+        elif invalid_peaks:
+            _warn_skipped_step("periodic_notch_filter", "no valid notch coordinates")
 
     if gui_state.get("linear_undistort"):
         shear_x = float(gui_state.get("undistort_shear_x", 0.0))
@@ -205,22 +216,29 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
                 "y_px":  y_px,
                 "patch": int(gui_state.get("set_zero_patch", 1)),
             }))
-        except (TypeError, ValueError, IndexError):
-            pass
+        except (TypeError, ValueError, IndexError) as exc:
+            _warn_skipped_step("set_zero_point", str(exc) or "invalid coordinates")
 
     zero_plane = gui_state.get("set_zero_plane_points")
     if zero_plane is not None:
         points = []
+        invalid_points = 0
         for point in zero_plane:
             try:
                 points.append((int(point[0]), int(point[1])))
             except (TypeError, ValueError, IndexError):
+                invalid_points += 1
                 continue
         if len(points) >= 3:
             _append_step(ProcessingStep("set_zero_plane", {
                 "points_px": points[:3],
                 "patch": int(gui_state.get("set_zero_patch", 1)),
             }))
+        else:
+            detail = "requires at least three valid points"
+            if invalid_points:
+                detail += f"; ignored {invalid_points} invalid point(s)"
+            _warn_skipped_step("set_zero_plane", detail)
 
     # Quantize bit-depth steps are deferred to the very end of the
     # pipeline (review image-proc #2, fixed 2026-05-28).  Running
@@ -240,7 +258,8 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
             else:
                 op_name = str(op_spec["op"])
                 op_params = dict(op_spec.get("params", {}))
-        except (TypeError, KeyError):
+        except (TypeError, KeyError) as exc:
+            _warn_skipped_step("geometric_ops", str(exc) or "invalid operation spec")
             continue
         if op_name in ("flip_horizontal", "flip_vertical",
                        "rotate_90_cw", "rotate_180", "rotate_270_cw"):
@@ -249,10 +268,18 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
             import numpy as _np
             raw_matrix = op_params.get("matrix")
             if raw_matrix is None:
+                _warn_skipped_step(
+                    "affine_lattice_correction",
+                    "missing correction matrix",
+                )
                 continue
             try:
                 matrix = _np.asarray(raw_matrix, dtype=float).tolist()
-            except (TypeError, ValueError):
+            except (TypeError, ValueError) as exc:
+                _warn_skipped_step(
+                    "affine_lattice_correction",
+                    str(exc) or "invalid correction matrix",
+                )
                 continue
             params: dict = {
                 "matrix": matrix,
@@ -349,7 +376,8 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
             else:
                 params = dict(op_spec.get("params", {}))
                 roi_id_for_step = op_spec.get("roi_id")
-        except (AttributeError, TypeError, ValueError):
+        except (AttributeError, TypeError, ValueError) as exc:
+            _warn_skipped_step("arithmetic", str(exc) or "invalid arithmetic spec")
             continue
 
         step = ProcessingStep("arithmetic", params)

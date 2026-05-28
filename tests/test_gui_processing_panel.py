@@ -1762,3 +1762,32 @@ def test_tv_load_from_browse_reuses_processed_scan_helper(qapp, monkeypatch):
     assert loaded[0][2] is processed
     assert loaded[0][3] == 2.5e-10
     assert "Loaded example" in statuses[-1]
+
+
+def test_open_viewer_tracking_reaps_destroyed_dialog():
+    from probeflow.gui.app import ProbeFlowWindow
+
+    class FakeSignal:
+        def __init__(self):
+            self._callbacks = []
+
+        def connect(self, callback):
+            self._callbacks.append(callback)
+
+        def emit(self):
+            for callback in list(self._callbacks):
+                callback(None)
+
+    class FakeDialog:
+        def __init__(self):
+            self.destroyed = FakeSignal()
+
+    win = ProbeFlowWindow.__new__(ProbeFlowWindow)
+    win._open_viewers = set()
+    dlg = FakeDialog()
+
+    ProbeFlowWindow._track_open_viewer(win, dlg)
+    assert dlg in win._open_viewers
+
+    dlg.destroyed.emit()
+    assert dlg not in win._open_viewers

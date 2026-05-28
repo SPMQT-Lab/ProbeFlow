@@ -1714,7 +1714,7 @@ class ImageViewerDialog(
                     if hasattr(self, "_status_lbl"):
                         self._status_lbl.setText(self._processing_roi_error)
                     self._display_arr = self._raw_arr
-                    self._display_scan_range_m = self._scan_range_m
+                    self._display_scan_range_m = getattr(self, "_scan_range_m", None)
                     return
                 # Forward calibration through the pipeline so:
                 #   (a) step-tolerance / facet ops interpret step_threshold_deg
@@ -1723,7 +1723,7 @@ class ImageViewerDialog(
                 #       ops (rotate_arbitrary / shear / affine_lattice_correction),
                 #       keeping the scale bar / FFT k-axes consistent with the
                 #       displayed array shape (review image-proc #4).
-                raw_range = self._scan_range_m
+                raw_range = getattr(self, "_scan_range_m", None)
                 try:
                     self._display_arr, self._display_scan_range_m = (
                         apply_processing_state_with_calibration(
@@ -1738,12 +1738,12 @@ class ImageViewerDialog(
                 if hasattr(self, "_status_lbl"):
                     self._status_lbl.setText(self._processing_error)
                 self._display_arr = self._raw_arr
-                self._display_scan_range_m = self._scan_range_m
+                self._display_scan_range_m = getattr(self, "_scan_range_m", None)
         else:
             self._processing_roi_error = ""
             self._processing_error = ""
             self._display_arr = self._raw_arr
-            self._display_scan_range_m = self._scan_range_m
+            self._display_scan_range_m = getattr(self, "_scan_range_m", None)
         new_shape = self._display_arr.shape if self._display_arr is not None else None
         if reset_zoom_if_shape_changed and old_shape is not None and new_shape != old_shape:
             self._reset_zoom_on_next_pixmap = True
