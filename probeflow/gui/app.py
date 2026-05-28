@@ -308,6 +308,8 @@ class ProbeFlowWindow(QMainWindow):
             self._on_classify_params_changed)
         self._features_sidebar.segment_requested.connect(
             self._on_features_segment_requested)
+        self._features_sidebar.advance_phase2_requested.connect(
+            self._on_features_advance_phase2)
         self._features_sidebar.preview_requested.connect(
             self._on_features_preview)
         self._features_sidebar.undo_label_requested.connect(
@@ -1296,14 +1298,12 @@ class ProbeFlowWindow(QMainWindow):
             f"Preview: {len(result)} particle(s) — press 'Apply Settings' to confirm.")
 
     def _on_features_segment_requested(self) -> None:
-        """Phase 1 — segment particles with current threshold + exclusion mask.
+        """'Apply Segmentation' — run full-res segmentation and show the overlay.
 
-        Covers both the Particles and Classify analysis modes:
-        * In Particles mode the contours are the final result.
-        * In Classify mode sample-selection clicking is auto-armed after
-          segmentation so the user can immediately start labeling particles.
+        Stays in Phase 1 so the user can keep adjusting sliders before
+        committing.  Use 'Move to Phase 2 →' to advance.
         """
-        arr = self._features_panel.get_analysis_array()   # applies exclusion mask
+        arr = self._features_panel.get_analysis_array()
         if arr is None:
             self._features_sidebar.set_status("Load a scan first.")
             return
@@ -1313,7 +1313,6 @@ class ProbeFlowWindow(QMainWindow):
             self._features_sidebar.set_status("Scan has no physical pixel size.")
             return
         params = self._features_sidebar.particles_params()
-        # Convert area-% to nm² (sidebar stores % of image area; backend needs nm²)
         min_pct = params.pop("min_area_pct", 0.001)
         max_pct = params.pop("max_area_pct", 0.0)
         params["min_area_nm2"] = self._features_pct_to_nm2(min_pct, arr, px_x_m, px_y_m)
@@ -1322,11 +1321,43 @@ class ProbeFlowWindow(QMainWindow):
             if max_pct > 0 else None
         )
         self._features_sidebar.set_status("Segmenting…")
-        worker = _FeaturesWorker(
-            "particles", arr, px_m, px_x_m, px_y_m, params,
-        )
-        worker.signals.finished.connect(self._on_features_finished)
+        worker = _FeaturesWorker("particles", arr, px_m, px_x_m, px_y_m, params)
+        worker.signals.finished.connect(self._on_features_segment_only_finished)
         self._features_pool.start(worker)
+
+    def _on_features_segment_only_finished(self, mode: str, result, error: str) -> None:
+        """Callback for 'Apply Segmentation' — updates overlay, stays in Phase 1."""
+        if error:
+            self._features_sidebar.set_status(f"Segmentation failed: {error}")
+            self._status_bar.showMessage(f"Segmentation failed: {error}")
+            return
+        self._features_panel.set_particles(result)
+        n = len(result)
+        self._features_sidebar.set_status(
+            f"Found {n} particle{'s' if n != 1 else ''} — "
+            "adjust sliders or click 'Move to Phase 2 →' to continue.")
+        self._status_bar.showMessage(f"Segmentation: {n} particle(s)")
+
+    def _on_features_advance_phase2(self) -> None:
+        """'Move to Phase 2 →' — advance using the particles already found.
+
+        Automatically stops mask-paint mode so that mouse clicks on the image
+        reach particles instead of drawing on the canvas.
+        """
+        particles = self._features_panel.get_particles()
+        if not particles:
+            self._features_sidebar.set_status(
+                "No particles found yet — click 'Apply Segmentation' first.")
+            return
+        self._features_sidebar.stop_mask_painting()   # pencil off in Phase 2
+        self._features_sidebar.set_segment_count(len(particles))
+        current_mode = self._features_sidebar.current_mode()
+        if current_mode == "classify":
+            self._features_panel.set_mode("classify")
+            self._features_panel.set_sample_selection_armed(True)
+            self._features_sidebar.set_status(
+                f"{len(particles)} particle(s). "
+                "Click any particle to label it, then press ▶ Run.")
 
     def _on_features_export(self, mode: str):
         if mode == "particles":
