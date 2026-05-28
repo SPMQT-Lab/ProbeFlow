@@ -103,7 +103,8 @@ class ProbeFlowWindow(QMainWindow):
     RIGHT_INSPECTOR_MIN_W = 300
     CENTRAL_BROWSER_MIN_W = 500
 
-    def __init__(self, *, open_survey: Optional[Path] = None):
+    def __init__(self, *, open_survey: Optional[Path] = None,
+                 browse_folder: Optional[Path] = None):
         super().__init__()
         self.setWindowTitle("ProbeFlow")
         self.setMinimumSize(1100, 720)
@@ -117,6 +118,7 @@ class ProbeFlowWindow(QMainWindow):
         self._running  = False
         self._n_loaded = 0
         self._pending_survey = Path(open_survey) if open_survey else None
+        self._pending_browse = Path(browse_folder) if browse_folder else None
         # Spec → image mapping (populated by user via "Map spectra…" dialogs;
         # kept empty by default so we never auto-attach spectra to the wrong
         # image based on coordinate guesses alone). Keys are spec stems,
@@ -135,6 +137,15 @@ class ProbeFlowWindow(QMainWindow):
         self._build_ui()
         self._apply_theme()
         self._restore_desktop_layout()
+
+        # If launched with --browse (e.g. via the Restart action), open that
+        # folder immediately so the user lands back where they were.
+        if self._pending_browse is not None:
+            try:
+                self._grid.set_root(self._pending_browse)
+                self._update_browse_status()
+            except Exception:
+                pass   # non-fatal: bad path just opens to an empty Browse
 
         # If launched with --open-survey, jump straight into Survey mode with
         # the manifest pre-loaded. Wire the panel's log_message into status bar.
@@ -366,6 +377,14 @@ class ProbeFlowWindow(QMainWindow):
         export_processed_action = QAction("Export processed image...", self)
         export_processed_action.setEnabled(False)
         file_menu.addAction(export_processed_action)
+        file_menu.addSeparator()
+        restart_action = QAction("Restart ProbeFlow", self)
+        restart_action.setShortcut(QKeySequence("Ctrl+Shift+R"))
+        restart_action.setToolTip(
+            "Relaunch ProbeFlow — picks up any code changes immediately "
+            "(useful during development with an editable pip install)")
+        restart_action.triggered.connect(self._restart_app)
+        file_menu.addAction(restart_action)
         file_menu.addSeparator()
         quit_action = QAction("Quit", self)
         quit_action.setShortcut(QKeySequence.Quit)
@@ -1602,6 +1621,32 @@ class ProbeFlowWindow(QMainWindow):
         dlg = AboutDialog(t, self)
         dlg.exec()
 
+    # ── Restart ────────────────────────────────────────────────────────────────
+    def _restart_app(self) -> None:
+        """Relaunch ProbeFlow in a fresh process and close this window.
+
+        Because ProbeFlow is installed with ``pip install -e .``, the new
+        process picks up any source-file edits you made since the last launch —
+        no reinstall step needed.  The new window appears before this one
+        closes so there is no gap in the taskbar.
+
+        The current folder is passed via ``--browse`` so you land back where
+        you were automatically.
+        """
+        import subprocess
+
+        # Always use ``python -m probeflow gui`` rather than sys.argv so this
+        # works identically whether ProbeFlow was started as ``probeflow gui``,
+        # ``python -m probeflow gui``, or from an IDE.
+        args = [sys.executable, "-m", "probeflow", "gui"]
+
+        cur = self._grid.current_dir()
+        if cur:
+            args += ["--browse", str(cur)]
+
+        subprocess.Popen(args)
+        QApplication.instance().quit()
+
     # ── Close ──────────────────────────────────────────────────────────────────
     def closeEvent(self, event):
         cfg = load_config()
@@ -1625,10 +1670,11 @@ class ProbeFlowWindow(QMainWindow):
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────
-def main(*, open_survey: "Optional[Path]" = None) -> None:
+def main(*, open_survey: "Optional[Path]" = None,
+         browse_folder: "Optional[Path]" = None) -> None:
     app    = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("ProbeFlow")
-    window = ProbeFlowWindow(open_survey=open_survey)
+    window = ProbeFlowWindow(open_survey=open_survey, browse_folder=browse_folder)
     if getattr(window, "_show_maximized_on_start", False):
         window.showMaximized()
     else:
