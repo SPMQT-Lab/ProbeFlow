@@ -5,6 +5,7 @@ import json
 import logging
 import math
 import re
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -607,7 +608,7 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-def main() -> None:
+def main() -> int:
     args = parse_args()
     setup_logging(args.verbose)
 
@@ -632,7 +633,7 @@ def main() -> None:
         files = sorted(src.glob("*.dat"))
         if not files:
             log.warning("No .dat files found in %s", src)
-            return
+            return 0
         log.info("Found %d .dat file(s) to process", len(files))
         for i, p in enumerate(files, 1):
             log.info("[%d/%d] Processing %s ...", i, len(files), p.name)
@@ -646,11 +647,13 @@ def main() -> None:
         err_path = out_dir / "errors.json"
         err_path.write_text(json.dumps(errors, indent=2), encoding="utf-8")
         log.warning("%d file(s) failed. Error log: %s", len(errors), err_path)
+        return 1
     else:
         log.info("All files processed successfully.")
 
     log.info("Outputs in: %s", out_dir)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

@@ -12,7 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from probeflow.indexing import index_folder
+from probeflow.core.indexing import index_folder
 
 
 def _format_item(item) -> str:

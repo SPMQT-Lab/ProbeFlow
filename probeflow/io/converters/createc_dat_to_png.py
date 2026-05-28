@@ -3,6 +3,7 @@
 import argparse
 import json
 import logging
+import sys
 from pathlib import Path
 
 from PIL import Image
@@ -129,7 +130,7 @@ def main(
     clip_low: float = 1.0,
     clip_high: float = 99.0,
     verbose: bool = False,
-) -> None:
+) -> int:
     if src is None and out_root is None:
         args = parse_args()
         src = args.input_dir or DEFAULT_INPUT_DIR
@@ -165,7 +166,7 @@ def main(
         files = sorted(SRC.glob("*.dat"))
         if not files:
             log.warning("No .dat files found in %s", SRC)
-            return
+            return 0
         log.info("Found %d .dat file(s) to process", len(files))
         for i, p in enumerate(files, 1):
             log.info("[%d/%d] Processing %s ...", i, len(files), p.name)
@@ -179,11 +180,13 @@ def main(
         err_path = OUT_ROOT / "errors.json"
         err_path.write_text(json.dumps(errors, indent=2), encoding="utf-8")
         log.warning("%d file(s) failed. Error log: %s", len(errors), err_path)
+        return 1
     else:
         log.info("All files processed successfully.")
 
     log.info("Outputs in: %s", OUT_ROOT)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
