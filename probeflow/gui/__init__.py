@@ -13,12 +13,27 @@ should present those results, not own them.
 
 Future cleanup
 --------------
-The legacy main-window implementation still lives in
-``probeflow.gui._legacy`` so public imports remain stable while widgets
-and dialogs are transplanted into ``browse/``, ``viewer/``, ``convert/``,
-``features/``, ``terminal/``, and ``dialogs/``.  Keep GUI code Qt-facing
-only: do not add provenance dataclasses, numerical kernels, measurement
-algorithms, readers, or writers here.
+A small backward-compatibility shim lives in ``probeflow.gui.compat``
+(formerly ``_legacy.py``) so public ``from probeflow.gui import X`` imports
+remain stable while widgets and dialogs are transplanted into ``browse/``,
+``viewer/``, ``convert/``, ``features/``, ``terminal/``, and ``dialogs/``.
+Keep GUI code Qt-facing only: do not add provenance dataclasses, numerical
+kernels, measurement algorithms, readers, or writers here.
+
+Dialog / dock keep-alive convention
+-----------------------------------
+- Non-modal top-level viewers spawned from ``ProbeFlowWindow`` are tracked in
+  ``self._open_viewers`` (a strong-ref set reaped by Qt's ``destroyed`` signal,
+  see :class:`probeflow.gui.app.ProbeFlowWindow`).
+- Per-viewer modeless children spawned from an ``ImageViewerDialog`` are
+  tracked in ``self._modeless_children`` (registry maintained by
+  ``_track_modeless_child`` / ``_close_modeless_children`` and reaped via
+  ``destroyed``).
+- Docks docked into a main window are stored as ``self._<name>_dock``
+  (e.g. ``self._roi_dock``).
+
+New dialog / dock code should follow one of these patterns rather than
+introducing a fresh ad-hoc keep-alive attribute.
 """
 
 from __future__ import annotations
@@ -102,7 +117,7 @@ _LEGACY_EXPORTS = {
 }
 
 # Names that have been fully extracted to probeflow.gui.dialogs.
-# Exposed here for backward compatibility without loading _legacy.
+# Exposed here for backward compatibility without loading compat.
 _DIALOGS_EXPORTS = {
     "ViewerSpecMappingDialog",
     "_DEFINITIONS_HTML",
@@ -110,24 +125,24 @@ _DIALOGS_EXPORTS = {
 }
 
 
-def _load_legacy():
+def _load_compat():
     existing = {
         name: value
         for name, value in globals().items()
         if not (name.startswith("__") and name.endswith("__"))
         and name not in {"Any", "ModuleType", "annotations", "import_module", "main", "models", "rendering", "sys"}
     }
-    legacy = import_module("probeflow.gui._legacy")
+    compat = import_module("probeflow.gui.compat")
     for name, value in existing.items():
-        if hasattr(legacy, name) and getattr(legacy, name) is not value:
-            setattr(legacy, name, value)
+        if hasattr(compat, name) and getattr(compat, name) is not value:
+            setattr(compat, name, value)
     globals().update({
         name: value
-        for name, value in vars(legacy).items()
+        for name, value in vars(compat).items()
         if not (name.startswith("__") and name.endswith("__"))
         and name not in {"main"}
     })
-    return legacy
+    return compat
 
 
 def __getattr__(name: str) -> Any:
@@ -135,7 +150,7 @@ def __getattr__(name: str) -> Any:
         from probeflow.gui import dialogs as _dialogs
         return getattr(_dialogs, name)
     if name in _LEGACY_EXPORTS:
-        return getattr(_load_legacy(), name)
+        return getattr(_load_compat(), name)
     raise AttributeError(f"module 'probeflow.gui' has no attribute {name!r}")
 
 
@@ -147,15 +162,15 @@ def main(*, open_survey: Any = None, browse_folder: Any = None) -> None:
     When ``browse_folder`` is set, the Browse tab opens that folder on startup.
     """
 
-    _load_legacy().main(open_survey=open_survey, browse_folder=browse_folder)
+    _load_compat().main(open_survey=open_survey, browse_folder=browse_folder)
 
 
 class _GuiCompatModule(ModuleType):
     def __setattr__(self, name: str, value: Any) -> None:
         super().__setattr__(name, value)
-        legacy = sys.modules.get("probeflow.gui._legacy")
-        if legacy is not None and hasattr(legacy, name):
-            setattr(legacy, name, value)
+        compat = sys.modules.get("probeflow.gui.compat")
+        if compat is not None and hasattr(compat, name):
+            setattr(compat, name, value)
 
 
 sys.modules[__name__].__class__ = _GuiCompatModule

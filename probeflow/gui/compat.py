@@ -1,11 +1,12 @@
 """Backward-compatibility re-exports for ``probeflow.gui``.
 
-This module used to hold the main-window implementation; classes have since
-been transplanted into their proper subpackages (``app``, ``browse``,
-``convert``, ``dialogs``, ``features``, ``navbar``, ``processing``,
-``terminal``).  The remaining purpose of this file is to keep the historical
-``from probeflow.gui import X`` import surface stable while ``gui/__init__.py``
-re-exports each name through its ``_LEGACY_EXPORTS`` set.
+This module used to be ``probeflow.gui._legacy`` and held the main-window
+implementation; classes have since been transplanted into their proper
+subpackages (``app``, ``browse``, ``convert``, ``dialogs``, ``features``,
+``navbar``, ``processing``, ``terminal``).  The remaining purpose of this
+file is to keep the historical ``from probeflow.gui import X`` import surface
+stable while ``gui/__init__.py`` re-exports each name through its
+``_LEGACY_EXPORTS`` set.
 
 Boundary rules: do not add parsers, writers, numerical kernels, analysis
 algorithms, model definitions, or graph-node dataclasses here — those belong
@@ -15,7 +16,7 @@ in ``io/``, ``processing/``, ``analysis/``, ``core/``, or ``provenance/``.
 from __future__ import annotations
 
 # Re-exports below are consumed via ``gui/__init__.py:_LEGACY_EXPORTS`` and
-# (in two test cases) via ``import probeflow.gui._legacy as gui_mod``.
+# (in two test cases) via ``import probeflow.gui.compat as gui_mod``.
 
 # QFileDialog is patched at module-level by
 # tests/test_gui_processing_panel.py (``gui_mod.QFileDialog``); keep it here

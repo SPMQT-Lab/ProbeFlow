@@ -1634,7 +1634,7 @@ def test_viewer_dialog_initializes_panel_from_thumbnail_processing(qapp, monkeyp
 def test_viewer_save_provenance_action_writes_json(qapp, monkeypatch, tmp_path):
     from probeflow.gui import ImageViewerDialog, SxmFile, THEMES
     from probeflow.provenance import ProcessingHistory, SourceRecord
-    import probeflow.gui._legacy as gui_mod
+    import probeflow.gui.compat as gui_mod
 
     monkeypatch.setattr(ImageViewerDialog, "_load_current", lambda self: None)
 
@@ -1674,7 +1674,7 @@ def test_viewer_save_provenance_action_writes_json(qapp, monkeypatch, tmp_path):
 
 def test_viewer_save_processed_image_action_dispatches_writer(qapp, monkeypatch, tmp_path):
     from probeflow.gui import ImageViewerDialog, SxmFile, THEMES
-    import probeflow.gui._legacy as gui_mod
+    import probeflow.gui.compat as gui_mod
     import probeflow.gui.viewer.image_viewer_processing_export_mixin as export_mixin
 
     monkeypatch.setattr(ImageViewerDialog, "_load_current", lambda self: None)

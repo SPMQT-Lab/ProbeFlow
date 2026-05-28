@@ -1,5 +1,9 @@
-"""Main window compatibility location."""
+"""Main window compatibility location.
 
-from probeflow.gui._legacy import ProbeFlowWindow
+``ProbeFlowWindow`` lives in :mod:`probeflow.gui.app`; this module re-exports
+it under the historical ``probeflow.gui.main_window`` import path.
+"""
+
+from probeflow.gui.app import ProbeFlowWindow
 
 __all__ = ["ProbeFlowWindow"]

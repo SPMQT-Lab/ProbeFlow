@@ -1,6 +1,7 @@
 """ImageViewerDialog — double-click viewer with scroll/zoom, histogram, processing, export.
 
-Extracted from probeflow.gui._legacy as part of the ongoing GUI refactor.
+Extracted from the historical probeflow.gui._legacy as part of the ongoing
+GUI refactor (now re-exported via ``probeflow.gui.compat``).
 """
 
 from __future__ import annotations

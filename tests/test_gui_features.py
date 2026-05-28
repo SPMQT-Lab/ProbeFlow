@@ -76,7 +76,7 @@ def test_features_panel_sample_label_flow(qapp, monkeypatch):
 def test_features_window_classify_requires_labels(qapp):
     pytest.importorskip("cv2")
     from probeflow.analysis.features import segment_particles
-    from probeflow.gui._legacy import ProbeFlowWindow
+    from probeflow.gui.compat import ProbeFlowWindow
 
     arr = _sample_arr()
     parts = segment_particles(arr, pixel_size_m=1e-9, min_area_nm2=0.5, size_sigma_clip=None)
@@ -102,7 +102,7 @@ def test_features_window_classify_requires_labels(qapp):
 def test_features_window_segmentation_change_clears_labels(qapp, monkeypatch):
     pytest.importorskip("cv2")
     from probeflow.analysis.features import segment_particles
-    from probeflow.gui._legacy import ProbeFlowWindow
+    from probeflow.gui.compat import ProbeFlowWindow
 
     arr = _sample_arr()
     parts = segment_particles(arr, pixel_size_m=1e-9, min_area_nm2=0.5, size_sigma_clip=None)
@@ -138,7 +138,7 @@ def test_features_window_segmentation_change_clears_labels(qapp, monkeypatch):
 def test_features_window_classify_export_includes_samples(qapp, monkeypatch, tmp_path):
     pytest.importorskip("cv2")
     from probeflow.analysis.features import Classification, segment_particles
-    from probeflow.gui._legacy import ProbeFlowWindow
+    from probeflow.gui.compat import ProbeFlowWindow
 
     arr = _sample_arr()
     parts = segment_particles(arr, pixel_size_m=1e-9, min_area_nm2=0.5, size_sigma_clip=None)

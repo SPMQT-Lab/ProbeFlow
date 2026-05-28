@@ -1,9 +1,9 @@
 """ProbeFlow main window and application entry point.
 
 This module contains ``ProbeFlowWindow`` (the top-level QMainWindow) and the
-``main()`` entry point.  It was extracted from ``gui/_legacy.py`` as Phase 5
-of the ongoing refactor; ``_legacy.py`` now re-imports from here for backward
-compatibility.
+``main()`` entry point.  It was extracted from the historical ``_legacy.py``
+as Phase 5 of the ongoing refactor; ``probeflow.gui.compat`` now re-imports
+from here for backward compatibility.
 """
 
 from __future__ import annotations
