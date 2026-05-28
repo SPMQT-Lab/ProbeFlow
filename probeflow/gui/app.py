@@ -294,6 +294,12 @@ class ProbeFlowWindow(QMainWindow):
             self._features_panel.undo_last_label)
         self._features_sidebar.mode_changed.connect(
             self._on_features_mode_changed)
+        self._features_sidebar.mask_paint_toggled.connect(
+            self._on_features_mask_paint_toggled)
+        self._features_sidebar.mask_clear_requested.connect(
+            self._features_panel.clear_exclusion_mask)
+        self._features_sidebar.mask_color_changed.connect(
+            self._features_panel.set_mask_color)
 
         self._pending_classify_segment: bool = False
 
@@ -1034,8 +1040,20 @@ class ProbeFlowWindow(QMainWindow):
         self._features_sidebar.set_status(
             f"Loaded {entry.stem} (plane {plane_idx}, px = {px_m * 1e12:.1f} pm)")
 
+    def _on_features_mask_paint_toggled(self, painting: bool) -> None:
+        self._features_panel.set_mask_painting(
+            painting, self._features_sidebar.brush_size())
+        if painting:
+            self._features_sidebar.set_status(
+                "Mask mode — click or drag on the image to paint exclusion zones.")
+        else:
+            status = ("Mask active — excluded regions shown in colour."
+                      if self._features_panel.has_exclusion_mask()
+                      else "Mask drawing stopped.")
+            self._features_sidebar.set_status(status)
+
     def _on_features_run(self, mode: str):
-        arr = self._features_panel.current_array()
+        arr = self._features_panel.get_analysis_array()   # applies exclusion mask
         if arr is None:
             self._features_sidebar.set_status("Load a scan first.")
             return
@@ -1162,7 +1180,7 @@ class ProbeFlowWindow(QMainWindow):
 
     def _on_features_segment_for_classify(self) -> None:
         """Segment particles using the Classify tab's params, then arm clicking."""
-        arr = self._features_panel.current_array()
+        arr = self._features_panel.get_analysis_array()   # applies exclusion mask
         if arr is None:
             self._features_sidebar.set_status("Load a scan first.")
             return

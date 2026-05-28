@@ -80,6 +80,9 @@ class FeatureCountingWindow(QMainWindow):
         self._sidebar.undo_label_requested.connect(
             self._panel.undo_last_label)
         self._sidebar.mode_changed.connect(self._on_mode_changed)
+        self._sidebar.mask_paint_toggled.connect(self._on_mask_paint_toggled)
+        self._sidebar.mask_clear_requested.connect(self._on_mask_clear)
+        self._sidebar.mask_color_changed.connect(self._panel.set_mask_color)
         # "← Browse" button hides this window (Browse is always in main window)
         self._panel.go_to_browse_requested.connect(self.hide)
 
@@ -125,8 +128,23 @@ class FeatureCountingWindow(QMainWindow):
 
     # ── Segment for classify ──────────────────────────────────────────────────
 
+    def _on_mask_paint_toggled(self, painting: bool) -> None:
+        self._panel.set_mask_painting(painting, self._sidebar.brush_size())
+        if painting:
+            self._sidebar.set_status(
+                "Mask mode — click or drag on the image to paint exclusion zones.")
+        else:
+            status = ("Mask active — excluded regions shown in red."
+                      if self._panel.has_exclusion_mask()
+                      else "Mask drawing stopped.")
+            self._sidebar.set_status(status)
+
+    def _on_mask_clear(self) -> None:
+        self._panel.clear_exclusion_mask()
+        self._sidebar.set_status("Exclusion mask cleared.")
+
     def _on_segment_for_classify(self) -> None:
-        arr = self._panel.current_array()
+        arr = self._panel.get_analysis_array()
         if arr is None:
             self._sidebar.set_status("Load a scan first.")
             return
@@ -147,7 +165,7 @@ class FeatureCountingWindow(QMainWindow):
     # ── Run ───────────────────────────────────────────────────────────────────
 
     def _on_run(self, mode: str) -> None:
-        arr = self._panel.current_array()
+        arr = self._panel.get_analysis_array()   # applies exclusion mask if present
         if arr is None:
             self._sidebar.set_status("Load a scan first.")
             return

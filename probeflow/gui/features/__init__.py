@@ -48,6 +48,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QScrollArea,
+    QSpinBox,
     QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -139,10 +140,14 @@ class _FeatureView(QGraphicsView):
     crop
         Left-drag draws a rectangle; release emits
         ``crop_completed(x0, y0, x1, y1)`` in image-pixel coordinates.
+    mask_paint
+        Left-click / drag paints exclusion-mask brush strokes, emitting
+        ``mask_painted(scene_x, scene_y)`` for each sampled point.
     """
 
     particle_clicked = Signal(float, float)        # scene (image-pixel) coords
     crop_completed   = Signal(int, int, int, int)  # x0, y0, x1, y1 in image px
+    mask_painted     = Signal(float, float)        # scene x, scene y (brush centre)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -153,10 +158,12 @@ class _FeatureView(QGraphicsView):
         self._scene.addItem(self._pixmap_item)
         self._overlay_items: list = []
 
-        self._classify_armed = False
-        self._cropping       = False
-        self._crop_start     = None
-        self._crop_rect_item = None
+        self._classify_armed  = False
+        self._cropping        = False
+        self._crop_start      = None
+        self._crop_rect_item  = None
+        self._mask_painting   = False
+        self._brush_radius_px = 10
 
         self.setDragMode(QGraphicsView.ScrollHandDrag)
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
@@ -244,6 +251,20 @@ class _FeatureView(QGraphicsView):
         self._classify_armed = armed
         self.setCursor(Qt.CrossCursor if armed else Qt.ArrowCursor)
 
+    def set_mask_painting(self, painting: bool, brush_radius_px: int = 10) -> None:
+        """Enter/exit exclusion-mask paint mode."""
+        self._mask_painting   = painting
+        self._brush_radius_px = brush_radius_px
+        if painting:
+            self.setDragMode(QGraphicsView.NoDrag)
+            # Must set cursor on the viewport — that is the widget the user
+            # actually interacts with; setting it on the view has no effect.
+            self.viewport().setCursor(Qt.CrossCursor)
+        else:
+            if not self._cropping:
+                self.setDragMode(QGraphicsView.ScrollHandDrag)
+            self.viewport().setCursor(Qt.ArrowCursor)
+
     def set_cropping(self, cropping: bool) -> None:
         self._cropping   = cropping
         self._crop_start = None
@@ -269,6 +290,10 @@ class _FeatureView(QGraphicsView):
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.LeftButton:
             pos = self.mapToScene(event.pos())
+            if self._mask_painting:
+                self.mask_painted.emit(pos.x(), pos.y())
+                event.accept()   # explicit accept so Qt delivers mouseMoveEvent
+                return
             if self._cropping:
                 self._crop_start = (pos.x(), pos.y())
                 if self._crop_rect_item:
@@ -285,6 +310,10 @@ class _FeatureView(QGraphicsView):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event) -> None:
+        if self._mask_painting and (event.buttons() & Qt.LeftButton):
+            pos = self.mapToScene(event.pos())
+            self.mask_painted.emit(pos.x(), pos.y())
+            return
         if self._cropping and self._crop_start and (event.buttons() & Qt.LeftButton):
             pos = self.mapToScene(event.pos())
             x0, y0 = self._crop_start
@@ -434,6 +463,10 @@ class FeaturesPanel(QWidget):
         self._label_history: list = []     # undo stack for sample labels
         self._show_overlay: bool = True    # toggle: show/hide classify overlay
         self._class_colors: dict = {}      # class_name → hex color string
+        self._exclusion_mask: np.ndarray | None = None   # bool mask, same shape as _arr
+        self._mask_brush_radius: int = 10
+        self._mask_color: tuple[int, int, int] = (220, 50, 50)   # R, G, B
+        self._mask_overlay_item = None     # QGraphicsPixmapItem — lives outside _overlay_items
         self._build()
 
     def _build(self):
@@ -462,6 +495,7 @@ class FeaturesPanel(QWidget):
         self._view = _FeatureView(self)
         self._view.particle_clicked.connect(self._on_particle_clicked)
         self._view.crop_completed.connect(self._on_crop_completed)
+        self._view.mask_painted.connect(self._on_mask_painted)
         lay.addWidget(self._view, 1)
 
         # ── View toolbar ────────────────────────────────────────────────────
@@ -531,6 +565,7 @@ class FeaturesPanel(QWidget):
         self._show_overlay  = True
         self._overlay_toggle_btn.setVisible(False)
         self._overlay_toggle_btn.setText("👁 Original")
+        self.clear_exclusion_mask()   # discard any mask from the previous image
         self._redraw(reset_view=True)
         self._results_table.setRowCount(0)
         plane_lbl = PLANE_NAMES[plane_idx] if 0 <= plane_idx < len(PLANE_NAMES) else f"plane {plane_idx}"
@@ -776,6 +811,92 @@ class FeaturesPanel(QWidget):
                 "Click to show the classified overlay again.")
         self._redraw()
 
+    # ── Exclusion mask ────────────────────────────────────────────────────────
+
+    def set_mask_color(self, r: int, g: int, b: int) -> None:
+        """Change the highlight colour of the exclusion mask overlay."""
+        self._mask_color = (int(r), int(g), int(b))
+        if self.has_exclusion_mask():
+            self._update_mask_overlay()   # redraw with new colour immediately
+
+    def set_mask_painting(self, painting: bool, brush_radius: int = 10) -> None:
+        """Enter or exit mask-paint mode on the view."""
+        self._mask_brush_radius = brush_radius
+        self._view.set_mask_painting(painting, brush_radius)
+
+    def clear_exclusion_mask(self) -> None:
+        """Remove the exclusion mask and its overlay from the scene."""
+        self._exclusion_mask = None
+        if self._mask_overlay_item is not None:
+            self._view._scene.removeItem(self._mask_overlay_item)
+            self._mask_overlay_item = None
+
+    def has_exclusion_mask(self) -> bool:
+        return self._exclusion_mask is not None and bool(self._exclusion_mask.any())
+
+    def get_analysis_array(self) -> np.ndarray | None:
+        """Return the image array with excluded pixels set to the local minimum.
+
+        Excluded pixels become dark background in the uint8 view used by
+        ``segment_particles``, so the algorithm naturally ignores them.
+        """
+        if self._arr is None:
+            return None
+        if not self.has_exclusion_mask():
+            return self._arr
+        masked = self._arr.copy()
+        finite_vals = masked[np.isfinite(masked)]
+        fill = float(finite_vals.min()) if finite_vals.size > 0 else 0.0
+        masked[self._exclusion_mask] = fill
+        return masked
+
+    def _on_mask_painted(self, scene_x: float, scene_y: float) -> None:
+        """Paint a circular brush stroke into the exclusion mask."""
+        if self._arr is None:
+            return
+        if self._exclusion_mask is None:
+            self._exclusion_mask = np.zeros(self._arr.shape, dtype=bool)
+
+        ix, iy = int(round(scene_x)), int(round(scene_y))
+        r = self._mask_brush_radius
+        Ny, Nx = self._arr.shape
+        y0, y1 = max(0, iy - r), min(Ny, iy + r + 1)
+        x0, x1 = max(0, ix - r), min(Nx, ix + r + 1)
+
+        ys, xs = np.ogrid[y0:y1, x0:x1]
+        circle = (xs - ix) ** 2 + (ys - iy) ** 2 <= r ** 2
+        self._exclusion_mask[y0:y1, x0:x1] |= circle
+        self._update_mask_overlay()
+
+    def _update_mask_overlay(self) -> None:
+        """Re-render the semi-transparent red exclusion-mask overlay in the scene."""
+        if self._exclusion_mask is None or not self._exclusion_mask.any():
+            if self._mask_overlay_item is not None:
+                self._view._scene.removeItem(self._mask_overlay_item)
+                self._mask_overlay_item = None
+            return
+
+        h, w = self._exclusion_mask.shape
+        rgba = np.zeros((h, w, 4), dtype=np.uint8)
+        r, g, b = self._mask_color
+        rgba[self._exclusion_mask] = [r, g, b, 160]   # R, G, B, A — user-selected colour
+
+        # Use tobytes() exactly like _arr_to_pixmap does: QImage references the
+        # bytes buffer so it must stay alive until QPixmap.fromImage() copies it.
+        data = np.ascontiguousarray(rgba).tobytes()
+        qimg = QImage(data, w, h, 4 * w, QImage.Format_RGBA8888)
+        pixmap = QPixmap.fromImage(qimg)   # deep-copies image data into the pixmap
+
+        if self._mask_overlay_item is None:
+            self._mask_overlay_item = QGraphicsPixmapItem(pixmap)
+            self._mask_overlay_item.setPos(0, 0)
+            self._mask_overlay_item.setZValue(5)   # above image, below particle overlays
+            self._view._scene.addItem(self._mask_overlay_item)
+        else:
+            self._mask_overlay_item.setPixmap(pixmap)
+
+        self._view.viewport().update()   # force immediate repaint
+
     # ── Events from _FeatureView ──────────────────────────────────────────────
 
     def _on_particle_clicked(self, scene_x: float, scene_y: float) -> None:
@@ -926,6 +1047,19 @@ class FeaturesSidebar(QWidget):
     run_requested                   = Signal(str)   # mode
     export_requested                = Signal(str)   # mode
     crop_template_requested         = Signal()
+    mask_paint_toggled              = Signal(bool)  # True = start painting, False = stop
+    mask_clear_requested            = Signal()
+    mask_color_changed              = Signal(int, int, int)  # R, G, B
+
+    # Available mask highlight colours (name → (R, G, B))
+    MASK_COLORS: dict[str, tuple[int, int, int]] = {
+        "Red":     (220,  50,  50),
+        "Blue":    ( 50, 100, 220),
+        "Green":   ( 50, 200,  50),
+        "Yellow":  (220, 220,  50),
+        "Cyan":    ( 50, 200, 220),
+        "Magenta": (200,  50, 200),
+    }
 
     def __init__(self, t: dict, parent=None):
         super().__init__(parent)
@@ -997,6 +1131,55 @@ class FeaturesSidebar(QWidget):
 
         lay.addWidget(_sep())
 
+        # ── Exclusion mask ────────────────────────────────────────────────────
+        mask_lbl = QLabel("Exclusion mask")
+        mask_lbl.setFont(QFont("Helvetica", 10, QFont.Bold))
+        lay.addWidget(mask_lbl)
+
+        mask_hint = QLabel(
+            "Paint over step edges or any region you want to ignore before running.")
+        mask_hint.setFont(QFont("Helvetica", 8))
+        mask_hint.setWordWrap(True)
+        mask_hint.setStyleSheet("color: #888;")
+        lay.addWidget(mask_hint)
+
+        brush_row = QHBoxLayout()
+        brush_row.addWidget(QLabel("Brush (px):"))
+        self._brush_spin = QSpinBox()
+        self._brush_spin.setRange(1, 300)
+        self._brush_spin.setValue(10)
+        self._brush_spin.setToolTip("Brush radius in image pixels.")
+        brush_row.addWidget(self._brush_spin, 1)
+        lay.addLayout(brush_row)
+
+        color_row = QHBoxLayout()
+        color_row.addWidget(QLabel("Colour:"))
+        self._mask_color_cb = QComboBox()
+        for name in self.MASK_COLORS:
+            self._mask_color_cb.addItem(name)
+        self._mask_color_cb.setCurrentText("Red")
+        self._mask_color_cb.setToolTip("Highlight colour for the exclusion mask overlay.")
+        self._mask_color_cb.currentTextChanged.connect(self._on_mask_color_changed)
+        color_row.addWidget(self._mask_color_cb, 1)
+        lay.addLayout(color_row)
+
+        self._mask_btn = QPushButton("✏  Draw exclusion mask")
+        self._mask_btn.setCheckable(True)
+        self._mask_btn.setFont(QFont("Helvetica", 9))
+        self._mask_btn.setFixedHeight(28)
+        self._mask_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self._mask_btn.toggled.connect(self._on_mask_btn_toggled)
+        lay.addWidget(self._mask_btn)
+
+        self._clear_mask_btn = QPushButton("🗑  Clear mask")
+        self._clear_mask_btn.setFont(QFont("Helvetica", 9))
+        self._clear_mask_btn.setFixedHeight(26)
+        self._clear_mask_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self._clear_mask_btn.clicked.connect(self.mask_clear_requested.emit)
+        lay.addWidget(self._clear_mask_btn)
+
+        lay.addWidget(_sep())
+
         self._run_btn = QPushButton("Run")
         self._run_btn.setFont(QFont("Helvetica", 10, QFont.Bold))
         self._run_btn.setFixedHeight(32)
@@ -1035,14 +1218,17 @@ class FeaturesSidebar(QWidget):
         self._thr_cb.addItems(["otsu", "manual", "adaptive"])
         l.addWidget(self._thr_cb)
 
-        row = QHBoxLayout()
-        row.addWidget(QLabel("Manual (0-255):"))
+        manual_row = QHBoxLayout()
+        manual_row.setContentsMargins(0, 0, 0, 0)
+        manual_row.addWidget(QLabel("Manual (0-255):"))
         self._manual_spin = QDoubleSpinBox()
         self._manual_spin.setRange(0.0, 255.0)
         self._manual_spin.setValue(128.0)
         self._manual_spin.setDecimals(0)
-        row.addWidget(self._manual_spin)
-        l.addLayout(row)
+        self._manual_spin.setEnabled(False)   # greyed out until "manual" mode is selected
+        manual_row.addWidget(self._manual_spin)
+        l.addLayout(manual_row)
+        self._thr_cb.currentTextChanged.connect(self._on_thr_mode_changed)
 
         self._invert_cb = QCheckBox("Invert (segment dark features)")
         l.addWidget(self._invert_cb)
@@ -1136,6 +1322,19 @@ class FeaturesSidebar(QWidget):
         self._cls_thr_cb = QComboBox()
         self._cls_thr_cb.addItems(["otsu", "manual", "adaptive"])
         l.addWidget(self._cls_thr_cb)
+
+        cls_manual_row = QHBoxLayout()
+        cls_manual_row.setContentsMargins(0, 0, 0, 0)
+        cls_manual_row.addWidget(QLabel("Manual (0-255):"))
+        self._cls_manual_spin = QDoubleSpinBox()
+        self._cls_manual_spin.setRange(0.0, 255.0)
+        self._cls_manual_spin.setValue(128.0)
+        self._cls_manual_spin.setDecimals(0)
+        self._cls_manual_spin.setEnabled(False)   # greyed out until "manual" mode is selected
+        self._cls_manual_spin.valueChanged.connect(lambda _: self.classify_params_changed.emit())
+        cls_manual_row.addWidget(self._cls_manual_spin)
+        l.addLayout(cls_manual_row)
+        self._cls_thr_cb.currentTextChanged.connect(self._on_cls_thr_mode_changed)
 
         self._cls_invert_cb = QCheckBox("Invert (segment dark features)")
         l.addWidget(self._cls_invert_cb)
@@ -1237,6 +1436,9 @@ class FeaturesSidebar(QWidget):
     def classify_segmentation_params(self) -> dict:
         return {
             "threshold":    self._cls_thr_cb.currentText(),
+            "manual_value": self._cls_manual_spin.value()
+                            if self._cls_thr_cb.currentText() == "manual"
+                            else None,
             "invert":       self._cls_invert_cb.isChecked(),
             "min_area_nm2": self._cls_min_area_spin.value(),
         }
@@ -1246,6 +1448,32 @@ class FeaturesSidebar(QWidget):
         return {
             "use_sharpness": self._sharpness_cb.isChecked(),
         }
+
+    def mask_color_rgb(self) -> tuple[int, int, int]:
+        """Return the currently selected mask highlight colour as (R, G, B)."""
+        name = self._mask_color_cb.currentText()
+        return self.MASK_COLORS.get(name, (220, 50, 50))
+
+    def _on_mask_color_changed(self, name: str) -> None:
+        r, g, b = self.MASK_COLORS.get(name, (220, 50, 50))
+        self.mask_color_changed.emit(r, g, b)
+
+    def _on_thr_mode_changed(self, text: str) -> None:
+        """Enable the manual-value spinbox only when 'manual' threshold is selected."""
+        self._manual_spin.setEnabled(text == "manual")
+
+    def _on_cls_thr_mode_changed(self, text: str) -> None:
+        """Same as above for the classify-tab threshold."""
+        self._cls_manual_spin.setEnabled(text == "manual")
+
+    def brush_size(self) -> int:
+        """Current brush radius in image pixels."""
+        return int(self._brush_spin.value())
+
+    def _on_mask_btn_toggled(self, checked: bool) -> None:
+        self._mask_btn.setText(
+            "✋  Stop drawing" if checked else "✏  Draw exclusion mask")
+        self.mask_paint_toggled.emit(checked)
 
     def set_status(self, text: str):
         self._status_lbl.setText(text)
