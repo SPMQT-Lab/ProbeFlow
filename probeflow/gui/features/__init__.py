@@ -1294,9 +1294,9 @@ class FeaturesSidebar(QWidget):
         self._max_area_slider.valueChanged.connect(lambda _: self._schedule_preview())
         self._invert_cb.stateChanged.connect(lambda _: self._schedule_preview())
 
-        # ── Apply Settings button ──────────────────────────────────────────────
+        # ── Apply Segmentation button ─────────────────────────────────────────
         lay.addWidget(_sep())
-        self._segment_btn = QPushButton("Apply Settings")
+        self._segment_btn = QPushButton("Apply Segmentation")
         self._segment_btn.setFont(QFont("Helvetica", 10, QFont.Bold))
         self._segment_btn.setFixedHeight(34)
         self._segment_btn.setObjectName("accentBtn")
@@ -1334,6 +1334,19 @@ class FeaturesSidebar(QWidget):
         self._segment_count_lbl.setFont(QFont("Helvetica", 9, QFont.Bold))
         self._segment_count_lbl.setWordWrap(True)
         lay.addWidget(self._segment_count_lbl)
+
+        # Re-segment shortcut — same action as Phase 1's "Apply Segmentation"
+        # but visible here so you can change threshold and re-run without
+        # navigating back to Phase 1 first.
+        reseg_btn = QPushButton("Apply Segmentation")
+        reseg_btn.setFont(QFont("Helvetica", 9))
+        reseg_btn.setFixedHeight(28)
+        reseg_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        reseg_btn.setToolTip(
+            "Re-run segmentation with the current threshold and area settings\n"
+            "without leaving the Analysis phase.")
+        reseg_btn.clicked.connect(self.segment_requested.emit)
+        lay.addWidget(reseg_btn)
 
         lay.addWidget(_sep())
 
