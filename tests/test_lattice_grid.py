@@ -5,6 +5,8 @@ from __future__ import annotations
 import math
 import os
 import tempfile
+from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -608,14 +610,21 @@ class _FakeGridItem:
 
 
 class _FakeController:
+    def __init__(self):
+        self.uninstalled = False
+        self.active_values = []
+
     def set_active(self, _active):
-        pass
+        self.active_values.append(_active)
 
     def set_locked(self, _locked):
         pass
 
     def set_ab_equal(self, _checked):
         pass
+
+    def uninstall(self):
+        self.uninstalled = True
 
 
 def test_ideal_lattice_presets_control_enabled_fields(qapp):
@@ -690,6 +699,66 @@ def test_real_space_known_structure_feeds_correction_target(qapp):
         panel.close()
         panel.deleteLater()
         qapp.processEvents()
+
+
+def test_lattice_grid_panel_cleanup_clears_preview_and_uninstalls_controller(qapp):
+    from probeflow.gui.lattice_grid.real_space_panel import LatticeGridPanel
+
+    grid = LatticeGrid.make_square(50, 50, 20)
+    cal = RealSpaceCalibration.from_scan_range((10e-9, 10e-9), 100, 100)
+    controller = _FakeController()
+    cleared = []
+    panel = LatticeGridPanel(
+        _FakeGridItem(grid),
+        controller,
+        cal,
+        100,
+        100,
+        clear_preview_fn=lambda: cleared.append(True),
+    )
+    try:
+        panel._set_preview_state(True)
+
+        panel.cleanup()
+
+        assert cleared == [True]
+        assert panel._preview_active is False
+        assert controller.active_values[-1] is False
+        assert controller.uninstalled is True
+    finally:
+        panel.close()
+        panel.deleteLater()
+        qapp.processEvents()
+
+
+def test_image_info_uses_display_array_without_numpy_truth_value(monkeypatch, qapp):
+    from probeflow.gui.dialogs import image_info
+    from probeflow.gui.viewer.image_viewer_tools_mixin import ImageViewerToolsMixin
+
+    captured = {}
+
+    class FakeImageInfoDialog:
+        def __init__(self, *, current_shape=None, **_kwargs):
+            captured["shape"] = current_shape
+
+        def show(self):
+            captured["shown"] = True
+
+    monkeypatch.setattr(image_info, "ImageInfoDialog", FakeImageInfoDialog)
+
+    class FakeViewer(ImageViewerToolsMixin):
+        pass
+
+    viewer = FakeViewer()
+    viewer._entries = [SimpleNamespace(path=Path("/missing.sxm"))]
+    viewer._idx = 0
+    viewer._processing_history = None
+    viewer._display_arr = np.ones((3, 4), dtype=float)
+    viewer._raw_arr = np.zeros((1, 2), dtype=float)
+
+    viewer._on_show_image_info()
+
+    assert captured == {"shape": (3, 4), "shown": True}
 
 
 # ── edge cases ────────────────────────────────────────────────────────────────

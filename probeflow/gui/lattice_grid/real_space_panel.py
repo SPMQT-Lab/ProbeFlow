@@ -114,6 +114,18 @@ class LatticeGridPanel(QWidget):
         self._build()
         self.sync_from_model()
 
+    def cleanup(self) -> None:
+        """Release transient viewer state owned by this panel."""
+        self._clear_preview_if_active()
+        try:
+            self._ctrl.set_active(False)
+        except RuntimeError:
+            pass
+        try:
+            self._ctrl.uninstall()
+        except RuntimeError:
+            pass
+
     # ── layout ────────────────────────────────────────────────────────────────
 
     def _build(self) -> None:

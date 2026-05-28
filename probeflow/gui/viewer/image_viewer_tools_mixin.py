@@ -26,9 +26,23 @@ from probeflow.gui.viewer.tool_launch import (
 
 
 class ImageViewerToolsMixin:
+    def _current_viewer_array(self):
+        arr = getattr(self, "_display_arr", None)
+        if arr is None:
+            arr = getattr(self, "_raw_arr", None)
+        return arr
+
     def _clear_lattice_grid_overlay(self, *, close_dock: bool = True) -> bool:
         """Remove the real-space lattice grid overlay and optionally close its dock."""
         removed = False
+        panel = getattr(self, "_lattice_grid_panel", None)
+        if panel is not None:
+            try:
+                panel.cleanup()
+            except RuntimeError:
+                pass
+            self._lattice_grid_panel = None
+
         item = getattr(self, "_lattice_grid_item", None)
         if item is not None:
             removed = True
@@ -103,6 +117,7 @@ class ImageViewerToolsMixin:
             clear_preview_fn=_clear_lattice_correction_preview,
         )
         self._lattice_grid_item = item
+        self._lattice_grid_panel = panel
         dock = QDockWidget("Lattice Grid", self._viewer_main)
         dock.setObjectName("imageViewerLatticeGridDock")
         dock.setWidget(panel)
@@ -331,7 +346,7 @@ class ImageViewerToolsMixin:
         else:
             hist_text = "(No processing history)"
 
-        arr = getattr(self, "_display_arr", None) or getattr(self, "_raw_arr", None)
+        arr = self._current_viewer_array()
         current_shape = arr.shape if arr is not None else None
 
         dlg = ImageInfoDialog(
