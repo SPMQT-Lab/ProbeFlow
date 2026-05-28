@@ -130,9 +130,12 @@ class ProbeFlowWindow(QMainWindow):
         # garbage-collected while open (show() does not block like exec()).
         self._open_viewers: set = set()
 
-        # Per-scan processing memory: path_str → processing dict.
-        # Populated when a viewer closes; restored when the same scan is reopened.
-        self._saved_processing: dict = {}
+        # Per-scan processing memory: path_str → (mtime_at_save, processing dict).
+        # Populated when a viewer closes; restored when the same scan is reopened
+        # *and* its mtime is unchanged (review gui-arch #10).  This prevents
+        # cached processing from replaying on top of stale data after ScanFlow
+        # or an external editor rewrites the file.
+        self._saved_processing: dict[str, tuple[float | None, dict]] = {}
 
         # Probe whether the optional Survey/ScanFlow integration is importable
         # (review gui-arch #17).  We resolve this before ``_build_ui`` so the
@@ -166,6 +169,49 @@ class ProbeFlowWindow(QMainWindow):
                         self._switch_mode("survey")
                 except Exception as e:
                     self._status_bar.showMessage(f"Could not open survey: {e}")
+
+    # ── Per-scan processing cache (mtime-aware) ───────────────────────────────
+
+    @staticmethod
+    def _entry_mtime(entry) -> float | None:
+        """Return current mtime for an entry's path, or ``None`` on error."""
+        try:
+            import os as _os
+            return float(_os.path.getmtime(str(entry.path)))
+        except Exception:
+            return None
+
+    def _saved_processing_get(self, entry) -> dict | None:
+        """Return cached processing for *entry* if and only if its mtime matches.
+
+        On mismatch (file rewritten on disk by ScanFlow / external editor /
+        re-save), drop the cache entry and emit a status-bar notice so the
+        user understands why their saved processing no longer applies.
+        """
+        key = str(entry.path)
+        cached = self._saved_processing.get(key)
+        if cached is None:
+            return None
+        cached_mtime, proc = cached
+        current_mtime = self._entry_mtime(entry)
+        if (cached_mtime is None or current_mtime is None
+                or abs(current_mtime - cached_mtime) > 1e-3):
+            self._saved_processing.pop(key, None)
+            if hasattr(self, "_status_bar"):
+                self._status_bar.showMessage(
+                    f"Saved processing for {entry.path.name} dropped — file "
+                    "changed on disk."
+                )
+            return None
+        return proc
+
+    def _saved_processing_set(self, entry, processing: dict) -> None:
+        """Cache *processing* for *entry* together with the current mtime."""
+        key = str(entry.path)
+        if processing:
+            self._saved_processing[key] = (self._entry_mtime(entry), dict(processing))
+        else:
+            self._saved_processing.pop(key, None)
 
     # ── Optional Survey integration probe ─────────────────────────────────────
     @staticmethod
@@ -1083,7 +1129,7 @@ class ProbeFlowWindow(QMainWindow):
 
         # Apply saved processing (align rows, background, etc.) so Feature
         # Counting sees the same image the user processed in the viewer.
-        saved_proc = self._saved_processing.get(str(entry.path))
+        saved_proc = self._saved_processing_get(entry)
         if saved_proc:
             try:
                 from probeflow.gui.rendering import _apply_processing
@@ -1231,7 +1277,7 @@ class ProbeFlowWindow(QMainWindow):
         else:
             cmap_key, clip, proc = self._grid.get_card_state(entry)
             # Restore any processing the user applied last time this scan was open.
-            saved = self._saved_processing.get(str(entry.path))
+            saved = self._saved_processing_get(entry)
             if saved:
                 proc = dict(saved)
             sxm_entries = [e for e in self._grid.get_entries() if isinstance(e, SxmFile)]
@@ -1253,14 +1299,11 @@ class ProbeFlowWindow(QMainWindow):
                 try:
                     last_entry = d._entries[d._idx]
                     state = dict(getattr(d, "_processing", {}) or {})
-                    key = str(last_entry.path)
-                    if state:
-                        self._saved_processing[key] = state
-                    else:
-                        # User reset to original — forget the saved state too.
-                        self._saved_processing.pop(key, None)
+                    # mtime-aware set: empty state evicts the cache entry,
+                    # non-empty state stores (mtime, state) (review gui-arch #10).
+                    self._saved_processing_set(last_entry, state)
                     # Also update the Browse thumbnail so it shows the processed view.
-                    self._grid.set_entry_processing(key, state)
+                    self._grid.set_entry_processing(str(last_entry.path), state)
                 except Exception:
                     pass
             # Handle "Send to …" actions requested from inside the image viewer.
