@@ -97,9 +97,12 @@ def sniff_file_type(path) -> FileType:
     if b":NANONIS_VERSION:" in head:
         return FileType.NANONIS_IMAGE
 
-    # Fallback: a file with a DATA marker followed by binary bytes is a
-    # Createc image whose magic header we didn't recognise.
-    if _has_binary_data_block(head):
+    # Fallback: Createc images with older or non-standard parameter blocks.
+    # We require the file to begin with '[' (characteristic of Createc INI
+    # headers such as [Paramco30]) to avoid false positives on Nanonis
+    # spectroscopy .dat files that happen to contain "DATA" followed by a
+    # byte that is 0x78 (ASCII 'x').
+    if head.startswith(b"[") and _has_binary_data_block(head):
         return FileType.CREATEC_IMAGE
 
     return FileType.UNKNOWN

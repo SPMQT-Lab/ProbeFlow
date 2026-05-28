@@ -241,6 +241,12 @@ class ProbeFlowWindow(QMainWindow):
         self._features_pool            = QThreadPool.globalInstance()
         self._features_preview_gen     = 0   # stale-result guard for live preview
 
+        # Dedicated 1-thread pool for live slider previews (see window.py for
+        # full rationale). Keeps stale preview workers from piling up.
+        self._features_preview_pool = QThreadPool()
+        self._features_preview_pool.setMaxThreadCount(1)
+        self._pending_features_preview_worker = None  # type: _FeaturesWorker | None
+
         # Floating Feature Counting window (lazy-created on first open)
         self._fc_window = None
 
@@ -1210,8 +1216,12 @@ class ProbeFlowWindow(QMainWindow):
         """Live preview — runs segmentation silently while sliders are dragged.
 
         Mirrors _on_features_segment_requested but does NOT advance the sidebar
-        to Phase 2 and does NOT update the particle-count label.  A generation
-        counter discards results from overtaken (stale) workers.
+        to Phase 2 and does NOT update the particle-count label.
+
+        Performance strategy: step-slice the array to ≤512 px on its longest
+        axis (preserves physical nm² coordinates), use a dedicated 1-thread pool,
+        and cancel the pending-but-not-started worker via ``tryTake`` on every
+        new tick so only the most recent slider position is ever processed.
         """
         arr = self._features_panel.get_analysis_array()
         if arr is None:
@@ -1223,19 +1233,39 @@ class ProbeFlowWindow(QMainWindow):
         params = self._features_sidebar.particles_params()
         min_pct = params.pop("min_area_pct", 0.001)
         max_pct = params.pop("max_area_pct", 0.0)
+        # Area thresholds are in nm² — scale-invariant, safe to reuse on
+        # the downscaled array (physical area is preserved by step-slicing).
         params["min_area_nm2"] = self._features_pct_to_nm2(
             min_pct, arr, px_x_m, px_y_m)
         params["max_area_nm2"] = (
             self._features_pct_to_nm2(max_pct, arr, px_x_m, px_y_m)
             if max_pct > 0 else None
         )
+
+        # Downscale: step-slice so the longest axis is ≤ 512 px.
+        step = max(1, max(arr.shape) // 512)
+        if step > 1:
+            arr_prev  = arr[::step, ::step]
+            px_x_prev = px_x_m * step
+            px_y_prev = px_y_m * step
+            px_prev   = float(np.sqrt(px_x_prev * px_y_prev))
+        else:
+            arr_prev, px_x_prev, px_y_prev, px_prev = arr, px_x_m, px_y_m, px_m
+
         self._features_preview_gen += 1
         gen = self._features_preview_gen
-        worker = _FeaturesWorker("particles", arr, px_m, px_x_m, px_y_m, params)
+
+        # Cancel the pending (not-yet-started) preview worker if present.
+        if self._pending_features_preview_worker is not None:
+            self._features_preview_pool.tryTake(self._pending_features_preview_worker)
+            self._pending_features_preview_worker = None
+
+        worker = _FeaturesWorker("particles", arr_prev, px_prev, px_x_prev, px_y_prev, params)
         worker.signals.finished.connect(
             lambda mode, result, error, g=gen:
                 self._on_features_preview_finished(mode, result, error, g))
-        self._features_pool.start(worker)
+        self._pending_features_preview_worker = worker
+        self._features_preview_pool.start(worker)
 
     def _on_features_preview_finished(self, mode: str, result, error: str,
                                       gen: int) -> None:

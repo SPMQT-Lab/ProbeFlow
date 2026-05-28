@@ -71,6 +71,14 @@ class FeatureCountingWindow(QMainWindow):
         # (or rapidly back-to-back) workers cannot cross-talk.
         self._preview_generation = 0   # incremented per preview; stale results ignored
 
+        # Dedicated 1-thread pool for live slider previews.  Using a separate
+        # pool with maxThreadCount=1 lets us cancel a queued-but-not-started
+        # preview worker when a newer one arrives, so the UI always shows the
+        # most recent slider position instead of queuing stale results.
+        self._preview_pool = QThreadPool()
+        self._preview_pool.setMaxThreadCount(1)
+        self._pending_preview_worker = None   # type: _FeaturesWorker | None
+
         # ── Widgets ──────────────────────────────────────────────────────────
         t: dict = {}   # theme dict — window owns its own styling
         self._panel   = FeaturesPanel(t)
@@ -159,8 +167,20 @@ class FeatureCountingWindow(QMainWindow):
         """Live preview — runs segmentation silently while sliders are dragged.
 
         Identical to _on_segment_requested but does NOT advance the sidebar to
-        Phase 2 and does NOT update the particle-count label.  A generation
-        counter discards results from overtaken (stale) workers.
+        Phase 2 and does NOT update the particle-count label.
+
+        Performance strategy
+        --------------------
+        * The array is step-sliced to a max of 512 px on the longest axis.
+          Each pixel is scaled accordingly so physical coordinates in the
+          returned ``Particle`` objects are still in metres relative to the
+          *full-resolution* scan origin — contour overlays therefore appear at
+          the correct positions when drawn on the full-resolution image.
+        * A dedicated 1-thread pool prevents stale workers from piling up.
+          If a preview worker is still *pending* (not yet started) when a
+          newer one arrives we cancel it via ``tryTake`` first.
+        * A generation counter discards the result of any worker that was
+          overtaken while actually running.
         """
         arr = self._panel.get_analysis_array()
         if arr is None:
@@ -172,17 +192,37 @@ class FeatureCountingWindow(QMainWindow):
         params = self._sidebar.particles_params()
         min_pct = params.pop("min_area_pct", 0.001)
         max_pct = params.pop("max_area_pct", 0.0)
+        # Area thresholds are in nm² — scale-invariant, reused as-is on the
+        # downscaled array because physical area is preserved by step-slicing.
         params["min_area_nm2"] = self._pct_to_nm2(min_pct, arr, px_x_m, px_y_m)
         params["max_area_nm2"] = (
             self._pct_to_nm2(max_pct, arr, px_x_m, px_y_m) if max_pct > 0 else None
         )
+
+        # Downscale: step-slice so the longest axis is ≤ 512 px.
+        step = max(1, max(arr.shape) // 512)
+        if step > 1:
+            arr_prev   = arr[::step, ::step]
+            px_x_prev  = px_x_m * step
+            px_y_prev  = px_y_m * step
+            px_prev    = float(np.sqrt(px_x_prev * px_y_prev))
+        else:
+            arr_prev, px_x_prev, px_y_prev, px_prev = arr, px_x_m, px_y_m, px_m
+
         self._preview_generation += 1
         gen = self._preview_generation
-        worker = _FeaturesWorker("particles", arr, px_m, px_x_m, px_y_m, params)
+
+        # Cancel the pending (not-yet-started) preview worker if present.
+        if self._pending_preview_worker is not None:
+            self._preview_pool.tryTake(self._pending_preview_worker)
+            self._pending_preview_worker = None
+
+        worker = _FeaturesWorker("particles", arr_prev, px_prev, px_x_prev, px_y_prev, params)
         worker.signals.finished.connect(
             lambda mode, result, error, g=gen:
                 self._on_preview_finished(mode, result, error, g))
-        self._pool.start(worker)
+        self._pending_preview_worker = worker
+        self._preview_pool.start(worker)
 
     def _on_preview_finished(self, mode: str, result, error: str,
                              gen: int) -> None:
