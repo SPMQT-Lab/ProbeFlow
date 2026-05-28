@@ -7,8 +7,13 @@ from pathlib import Path
 import pytest
 
 from probeflow import read_scan_metadata
-from probeflow.core.metadata import _extract_createc_fields, ScanMetadata
+from probeflow.core.metadata import (
+    _extract_createc_fields,
+    _extract_nanonis_fields,
+    ScanMetadata,
+)
 from probeflow.core.scan_loader import load_scan
+from probeflow.io.converters.createc_dat_to_sxm import construct_hdr
 
 
 TESTDATA = Path(__file__).resolve().parents[1] / "test_data"
@@ -176,3 +181,17 @@ class TestCreatecSetpointExtraction:
     def test_createc_zero_setpoint_fixture_remains_unknown(self):
         meta = read_scan_metadata(TESTDATA / "createc_scan_island_60nm.dat")
         assert meta.setpoint is None
+
+
+class TestNanonisSetpointExtraction:
+    def test_converted_dat_header_preserves_z_controller_setpoint(self):
+        dat_meta = read_scan_metadata(_CREATEC_OVERVIEW)
+        sxm_hdr = construct_hdr(
+            dict(dat_meta.raw_header),
+            _CREATEC_OVERVIEW,
+            num_chan=4,
+        )
+
+        _bias, setpoint, _comment, _dt = _extract_nanonis_fields(sxm_hdr)
+
+        assert setpoint == pytest.approx(dat_meta.setpoint)

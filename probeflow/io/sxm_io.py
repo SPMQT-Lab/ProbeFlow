@@ -200,6 +200,30 @@ def sxm_plane_metadata(hdr: dict, n_planes: int) -> tuple[list[str], list[str]]:
     return names[:n_planes], units[:n_planes]
 
 
+def _expanded_plane_directions(rows: list[dict[str, str]]) -> list[str]:
+    directions: list[str] = []
+    for row in rows:
+        direction = row["direction"]
+        if direction == "both":
+            directions.extend(("forward", "backward"))
+        elif direction in {"forward", "forw", "fwd"}:
+            directions.append("forward")
+        elif direction in {"backward", "backw", "bwd"}:
+            directions.append("backward")
+        elif direction:
+            directions.append(direction)
+        else:
+            directions.append("forward")
+    return directions
+
+
+def _plane_direction(hdr: dict, plane_idx: int) -> str:
+    directions = _expanded_plane_directions(sxm_data_info(hdr))
+    if 0 <= plane_idx < len(directions):
+        return directions[plane_idx]
+    return "backward" if plane_idx % 2 == 1 else "forward"
+
+
 def _display_channel_name(name: str) -> str:
     return name.replace("_", " ")
 
@@ -212,13 +236,14 @@ def orient_plane(arr: np.ndarray, hdr: dict, plane_idx: int) -> np.ndarray:
     Two corrections are needed to present an array with origin = top-left
     and forward scan direction:
       * ``SCAN_DIR='up'`` rows were acquired bottom-to-top → flip vertically.
-      * Odd plane indices (1 = Z bwd, 3 = I bwd) were acquired right-to-left
-        → flip horizontally.
+      * DATA_INFO backward planes were acquired right-to-left → flip
+        horizontally.  Headers without direction metadata fall back to the
+        legacy odd-plane convention.
     """
     scan_dir = hdr.get("SCAN_DIR", "down").strip().lower()
     if scan_dir == "up":
         arr = np.flipud(arr)
-    if plane_idx % 2 == 1:
+    if _plane_direction(hdr, plane_idx) == "backward":
         arr = np.fliplr(arr)
     return arr
 

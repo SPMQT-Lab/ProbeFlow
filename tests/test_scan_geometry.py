@@ -79,6 +79,31 @@ class TestOrientPlane:
         result = orient_plane(arr.copy(), hdr, plane_idx=3)
         np.testing.assert_array_equal(result, arr[:, ::-1])
 
+    def test_data_info_forward_plane_overrides_odd_index_fallback(self):
+        arr = self._make_arr()
+        hdr = {
+            "SCAN_DIR": "down",
+            "DATA_INFO": (
+                "Channel Name Unit Direction Calibration Offset "
+                "14 Z m forward 1.0E-9 0.0 "
+                "15 Current A forward 1.0E-12 0.0"
+            ),
+        }
+        result = orient_plane(arr.copy(), hdr, plane_idx=1)
+        np.testing.assert_array_equal(result, arr)
+
+    def test_data_info_backward_first_plane_flips_columns(self):
+        arr = self._make_arr()
+        hdr = {
+            "SCAN_DIR": "down",
+            "DATA_INFO": (
+                "Channel Name Unit Direction Calibration Offset "
+                "14 Z m backward 1.0E-9 0.0"
+            ),
+        }
+        result = orient_plane(arr.copy(), hdr, plane_idx=0)
+        np.testing.assert_array_equal(result, arr[:, ::-1])
+
 
 # ── Pixel-size consistency ────────────────────────────────────────────────────
 

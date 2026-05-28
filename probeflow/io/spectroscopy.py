@@ -567,10 +567,12 @@ def _default_spec_channels(channel_order: list[str]) -> list[str]:
 
 
 def _position_from_createc_header(hdr: dict[str, str]) -> tuple[float, float]:
-    dac_to_a_xy = _f(find_hdr(hdr, "Dacto[A]xy", "1"), 1.0)
+    dac_to_nm_xy = _f(find_hdr(hdr, "Dacto[A]xy", "1"), 1.0)
     ox_dac = _f(find_hdr(hdr, "OffsetX", "0"), 0.0)
     oy_dac = _f(find_hdr(hdr, "OffsetY", "0"), 0.0)
-    return (ox_dac * dac_to_a_xy * 1e-10, oy_dac * dac_to_a_xy * 1e-10)
+    # Createc labels this value with "[A]", but DAT scan conversion already
+    # treats it as nm/DAC for lateral offsets.
+    return (ox_dac * dac_to_nm_xy * 1e-9, oy_dac * dac_to_nm_xy * 1e-9)
 
 
 def _read_createc_vert(

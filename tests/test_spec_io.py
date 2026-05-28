@@ -281,6 +281,12 @@ class TestReadSpecFileTimeTrace:
 # ─── read_spec_file — bias sweep ─────────────────────────────────────────────
 
 class TestReadSpecFileBiasSweep:
+    def test_createc_vert_position_uses_dat_lateral_scale_convention(self, bias_sweep_spec):
+        hdr = parse_spec_header(VERT_BIAS_SWEEP)
+        expected_x = float(hdr["OffsetX"]) * float(hdr["Dacto[A]xy"]) * 1e-9
+        expected_y = float(hdr["OffsetY"]) * float(hdr["Dacto[A]xy"]) * 1e-9
+        assert bias_sweep_spec.position == pytest.approx((expected_x, expected_y))
+
     def test_real_bias_sweep_fixture_contract(self, bias_sweep_spec):
         assert isinstance(bias_sweep_spec, SpecData)
         assert bias_sweep_spec.metadata["sweep_type"] == "bias_sweep"

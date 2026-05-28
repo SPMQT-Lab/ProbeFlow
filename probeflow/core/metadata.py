@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+import re
 from typing import Any
 
 from probeflow.core.common import _f
@@ -216,8 +217,11 @@ def _extract_nanonis_fields(hdr: dict) -> tuple:
     # Bias: prefer "Bias>Bias (V)", fall back to "BIAS"
     bias = _f(hdr.get("Bias>Bias (V)") or hdr.get("BIAS"))
 
-    # Setpoint current: "Current>Current (A)"
-    setpoint = _f(hdr.get("Current>Current (A)"))
+    # Setpoint current: native Nanonis stores this directly, while converted
+    # DAT files carry it in the Z-CONTROLLER table.
+    setpoint = _positive_or_none(_f(hdr.get("Current>Current (A)")))
+    if setpoint is None:
+        setpoint = _extract_z_controller_setpoint(hdr)
 
     # Comment
     raw_comment = hdr.get("COMMENT", "")
@@ -232,6 +236,14 @@ def _extract_nanonis_fields(hdr: dict) -> tuple:
         acq_dt = None
 
     return bias, setpoint, comment, acq_dt
+
+
+def _extract_z_controller_setpoint(hdr: dict) -> float | None:
+    raw = str(hdr.get("Z-CONTROLLER", ""))
+    match = re.search(r"([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)\s*A\b", raw)
+    if match is None:
+        return None
+    return _positive_or_none(_f(match.group(1)))
 
 
 def _extract_rhk_fields(hdr: dict) -> tuple:
