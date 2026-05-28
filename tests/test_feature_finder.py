@@ -211,3 +211,36 @@ def test_find_image_features_returns_canonical_records():
     assert pt.roi_id is None
     assert math.isnan(pt.x_phys)
     assert math.isnan(pt.y_phys)
+
+
+def test_find_image_features_and_detect_local_maxima_agree_on_peak_locations():
+    """Both detection paths share ``_detect_peaks_nms`` (review arch-backend #3).
+
+    A two-peak image with the same min_distance and an absolute threshold
+    must yield identical pixel locations from both APIs.  This guards
+    against future NMS divergence between the FeatureFinder dialog
+    (``find_image_features``) and the measurement dock
+    (``detect_local_maxima``).
+    """
+    from probeflow.measurements.features import detect_local_maxima
+
+    img = _image((20, 10, 3.0), (44, 40, 3.0), shape=(64, 64))
+    threshold = 1.0
+    min_dist = 5.0
+
+    ff_result = find_image_features(
+        img,
+        threshold_mode="above",
+        threshold_low=threshold,
+        min_distance_px=min_dist,
+    )
+    dlm_points = detect_local_maxima(
+        img,
+        threshold_mode="absolute",
+        threshold_value=threshold,
+        min_distance_px=int(min_dist),
+    )
+
+    ff_locs = sorted((round(pt.x_px), round(pt.y_px)) for pt in ff_result.points)
+    dlm_locs = sorted((round(pt.x_px), round(pt.y_px)) for pt in dlm_points)
+    assert ff_locs == dlm_locs

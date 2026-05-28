@@ -21,6 +21,7 @@ import numpy as np
 # leaves the context fields (point_id, x_phys, y_phys, channel,
 # source_label, roi_id) at their defaults.  The legacy ``label``
 # field was never populated in production and is dropped.
+from probeflow.measurements.features import _detect_peaks_nms
 from probeflow.measurements.models import FeaturePoint
 
 
@@ -132,30 +133,14 @@ def find_image_features(
     if not np.any(selected):
         return FeatureDetectionResult(points=(), message="No candidates after thresholding.", **_common)
 
-    # Peak detection via maximum filter.
-    # For minima, negate the working copy so local minima become local maxima.
+    # For minima, negate so local minima become local maxima in the kernel.
     detect_arr = work if mode == "maxima" else -work
 
-    from scipy.ndimage import maximum_filter, minimum_filter
-    radius = int(max(1, min_distance_px))
-    size = 2 * radius + 1
-    local_max = detect_arr == maximum_filter(detect_arr, size=size, mode="nearest")
-    local_bg = minimum_filter(detect_arr, size=size, mode="nearest")
-    has_contrast = detect_arr > local_bg
-    candidates = selected & local_max & has_contrast
-
-    rows, cols = np.nonzero(candidates)
-    if rows.size == 0:
+    # Delegate NMS to the canonical kernel shared with detect_local_maxima
+    # (review arch-backend #3 — prevents NMS divergence between detection paths).
+    accepted = _detect_peaks_nms(detect_arr, selected, min_distance_px)
+    if not accepted:
         return FeatureDetectionResult(points=(), message="No peaks detected.", **_common)
-
-    # Sort descending by peak response (so strongest features survive NMS first).
-    order = np.argsort(detect_arr[rows, cols])[::-1]
-    min_d = float(min_distance_px)
-    accepted: list[tuple[int, int]] = []
-    for idx in order:
-        r, c = int(rows[idx]), int(cols[idx])
-        if _far_enough(r, c, accepted, min_d):
-            accepted.append((r, c))
 
     points = tuple(
         FeaturePoint(x_px=float(c), y_px=float(r), z_value=float(arr[r, c]))
@@ -243,8 +228,3 @@ def feature_points_to_csv(
     return out.getvalue()
 
 
-def _far_enough(row: int, col: int, accepted: list[tuple[int, int]], min_dist: float) -> bool:
-    if not accepted:
-        return True
-    d2 = min_dist ** 2
-    return all((row - r) ** 2 + (col - c) ** 2 >= d2 for r, c in accepted)

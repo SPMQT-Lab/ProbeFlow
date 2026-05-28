@@ -54,29 +54,12 @@ def detect_local_maxima(
         return []
 
     threshold = _threshold_value(work[selected], threshold_mode, threshold_value)
-    radius = int(max(1, min_distance_px))
-    size = 2 * radius + 1
-    from scipy.ndimage import maximum_filter, median_filter, minimum_filter
-    local_max = work == maximum_filter(work, size=size, mode="nearest")
-    local_min = minimum_filter(work, size=size, mode="nearest")
-    local_contrast = work > local_min
-    candidates = selected & local_max & local_contrast & (work >= threshold)
-    if min_prominence is not None:
-        local_median = median_filter(work, size=size, mode="nearest")
-        candidates &= (work - local_median) >= float(min_prominence)
-
-    rows, cols = np.nonzero(candidates)
-    if rows.size == 0:
-        return []
-    order = np.argsort(work[rows, cols])[::-1]
-    accepted: list[tuple[int, int]] = []
-    for idx in order:
-        row = int(rows[idx])
-        col = int(cols[idx])
-        if _far_enough(row, col, accepted, radius):
-            accepted.append((row, col))
-            if max_peaks is not None and len(accepted) >= int(max_peaks):
-                break
+    candidates = selected & (work >= threshold)
+    accepted = _detect_peaks_nms(
+        work, candidates, min_distance_px,
+        min_prominence=min_prominence,
+        max_peaks=max_peaks,
+    )
 
     point_roi = roi_id or getattr(roi, "id", None)
     return [
@@ -178,8 +161,69 @@ def _threshold_value(values: np.ndarray, mode: str, value: float) -> float:
     raise ValueError(f"Unknown threshold mode: {mode!r}")
 
 
-def _far_enough(row: int, col: int, accepted: list[tuple[int, int]], min_distance: int) -> bool:
+def _far_enough(row: int, col: int, accepted: list[tuple[int, int]], min_distance: float) -> bool:
     if not accepted:
         return True
     min_d2 = float(min_distance) ** 2
     return all((row - r) ** 2 + (col - c) ** 2 >= min_d2 for r, c in accepted)
+
+
+def _detect_peaks_nms(
+    detect_arr: np.ndarray,
+    candidates_mask: np.ndarray,
+    min_distance_px: float,
+    *,
+    score_arr: np.ndarray | None = None,
+    min_prominence: float | None = None,
+    max_peaks: int | None = None,
+) -> list[tuple[int, int]]:
+    """Canonical max-filter + NMS peak detector shared by all detection paths.
+
+    Both :func:`detect_local_maxima` and
+    :func:`probeflow.analysis.feature_finder.find_image_features` delegate
+    here so NMS behaviour stays in sync (review arch-backend #3).
+
+    Parameters
+    ----------
+    detect_arr
+        Array to run max-filter on.  Negate before calling to find minima.
+    candidates_mask
+        Boolean mask of pre-filtered candidates (ROI + threshold).
+    min_distance_px
+        NMS exclusion radius in pixels.
+    score_arr
+        Array used for ranking; defaults to ``detect_arr``.  Candidates are
+        sorted descending so the strongest peak survives NMS first.
+    min_prominence
+        If set, accept a candidate only when its value exceeds the local
+        median (same window as NMS) by at least this amount.
+    max_peaks
+        Stop after this many accepted peaks.
+    """
+    from scipy.ndimage import maximum_filter, median_filter, minimum_filter
+
+    radius = int(max(1, min_distance_px))
+    size = 2 * radius + 1
+    local_max = detect_arr == maximum_filter(detect_arr, size=size, mode="nearest")
+    local_min = minimum_filter(detect_arr, size=size, mode="nearest")
+    has_contrast = detect_arr > local_min
+    cands = candidates_mask & local_max & has_contrast
+    if min_prominence is not None:
+        local_median = median_filter(detect_arr, size=size, mode="nearest")
+        cands &= (detect_arr - local_median) >= float(min_prominence)
+
+    rows, cols = np.nonzero(cands)
+    if rows.size == 0:
+        return []
+
+    rank_arr = detect_arr if score_arr is None else score_arr
+    order = np.argsort(rank_arr[rows, cols])[::-1]
+    min_d = float(min_distance_px)
+    accepted: list[tuple[int, int]] = []
+    for idx in order:
+        r, c = int(rows[idx]), int(cols[idx])
+        if _far_enough(r, c, accepted, min_d):
+            accepted.append((r, c))
+            if max_peaks is not None and len(accepted) >= int(max_peaks):
+                break
+    return accepted
