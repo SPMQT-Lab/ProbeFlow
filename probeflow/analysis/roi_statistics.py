@@ -1,13 +1,20 @@
-"""ROI statistics backend returning the canonical measurement format."""
+"""ROI statistics backend returning the canonical measurement format.
+
+This module is a thin convenience wrapper around the canonical
+:func:`probeflow.measurements.image.roi_statistics` kernel — it adds
+the GUI-side extras (``area_nm2`` value, human-readable ``summary``
+string) and exposes the legacy parameter spelling
+(``roi_mask`` positional, ``pixel_size_x_m`` kw) that the
+image-viewer mixin call site relies on.  Review arch-backend #4
+(2026-05-28) consolidated the two parallel kernels here — the
+arithmetic now happens in exactly one place.
+"""
 
 from __future__ import annotations
 
-import math
-from typing import Any
-
 import numpy as np
 
-from probeflow.analysis.simple_measurements import _fmt_m
+from probeflow.measurements.image import roi_statistics
 from probeflow.measurements.models import MeasurementResult
 
 
@@ -37,6 +44,9 @@ def compute_roi_statistics(
     z_unit
         SI unit string for image values (e.g. ``"m"`` or ``"A"``).
     """
+    # Shape-mismatch check matches the legacy error message phrasing
+    # because tests assert ``ValueError(match="shape")``.  The canonical
+    # kernel also raises but with a different message.
     arr = np.asarray(image, dtype=np.float64)
     mask = np.asarray(roi_mask, dtype=bool)
     if arr.shape != mask.shape:
@@ -44,25 +54,38 @@ def compute_roi_statistics(
             f"image shape {arr.shape} != mask shape {mask.shape}"
         )
 
-    finite = arr[mask]
-    finite = finite[np.isfinite(finite)]
-    if finite.size == 0:
-        raise ValueError("ROI contains no finite image pixels.")
+    # Delegate to the canonical kernel.  It already handles the
+    # all-NaN error and emits every shared value key
+    # (mean_height, median_height, std_height, rms_roughness,
+    # peak_to_peak, min_height, max_height, n_finite_pixels,
+    # n_nonfinite_pixels, area).  We then patch in the
+    # area_nm2/summary GUI extras.
+    base = roi_statistics(
+        arr,
+        measurement_id=measurement_id or "M?",
+        source_label=source,
+        source_path=source or None,
+        channel=channel,
+        mask=mask,
+        pixel_size_x=pixel_size_x_m,
+        pixel_size_y=pixel_size_y_m,
+        x_unit="m",
+        y_unit="m",
+        height_unit=z_unit,
+        data_basis="processed_image",
+        notes=roi_name,
+    )
 
-    n = int(finite.size)
-    mean_val = float(np.mean(finite))
-    median_val = float(np.median(finite))
-    std_val = float(np.std(finite))
-    rms_val = float(math.sqrt(float(np.mean((finite - mean_val) ** 2))))
-    range_val = float(np.max(finite) - np.min(finite))
-    area_m2 = float(n) * float(pixel_size_x_m) * float(pixel_size_y_m)
+    # GUI-convenience extras the kernel does not compute.
+    area_m2 = float(base.values["area"])
     area_nm2 = area_m2 * 1e18
+    mean_val = float(base.values["mean_height"])
+    rms_val = float(base.values["rms_roughness"])
+    range_val = float(base.values["peak_to_peak"])
 
-    # Format z values for human-readable summary (use z_unit prefix table).
     mean_v, mean_u = _fmt_z(mean_val, z_unit)
     rms_v, rms_u = _fmt_z(rms_val, z_unit)
     range_v, range_u = _fmt_z(range_val, z_unit)
-
     summary = (
         f"Area: {area_nm2:.4g} nm²"
         f"  Mean: {mean_v:.4g} {mean_u}"
@@ -70,33 +93,15 @@ def compute_roi_statistics(
         f"  Range: {range_v:.4g} {range_u}"
     )
 
-    return MeasurementResult(
-        measurement_id=measurement_id or "M?",
-        kind="roi_stats",
-        source_label=source,
-        source_path=source or None,
-        channel=channel,
-        x_unit="m",
-        y_unit="m",
-        z_unit=z_unit,
-        values={
-            "area_m2": area_m2,
-            "area_nm2": area_nm2,
-            "n_finite_pixels": n,
-            "mean_height": mean_val,
-            "median_height": median_val,
-            "std_height": std_val,
-            "rms_roughness": rms_val,
-            "peak_to_peak": range_val,
-        },
-        context={
-            "summary": summary,
-            "roi_id": roi_id,
-            "roi_name": roi_name,
-            "area_unit": "nm^2",
-        },
-        notes=roi_name,
-    )
+    # Add legacy convenience keys.  ``MeasurementResult`` is frozen
+    # but ``values``/``context`` are mutable dicts.
+    base.values["area_m2"] = area_m2
+    base.values["area_nm2"] = area_nm2
+    base.context["summary"] = summary
+    base.context["roi_id"] = roi_id
+    base.context["roi_name"] = roi_name
+    base.context["area_unit"] = "nm^2"
+    return base
 
 
 def _fmt_z(value: float, z_unit: str) -> tuple[float, str]:

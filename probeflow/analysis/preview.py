@@ -413,7 +413,7 @@ def _detect_points(
                 y_m=y_m,
                 dx_m=(x_px - (nx / 2.0)) * pixel_size_x_m,
                 dy_m=(y_px - (ny / 2.0)) * pixel_size_y_m,
-                score=float(point.value),
+                score=float(point.z_value),
                 bbox_px=(int(round(x_px)), int(round(y_px)), int(round(x_px)) + 1, int(round(y_px)) + 1),
                 label="point",
             )

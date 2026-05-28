@@ -151,7 +151,7 @@ def test_roi_mask_excludes_features_outside():
 # --- Test 8: feature image generation places pixels at expected coordinates ---
 
 def test_feature_image_places_pixels_at_expected_coords():
-    points = [FeaturePoint(x_px=10.0, y_px=20.0, value=5.0)]
+    points = [FeaturePoint(x_px=10.0, y_px=20.0, z_value=5.0)]
     img = feature_points_to_image(points, (32, 32), radius_px=0.0)
     assert img[20, 10] == pytest.approx(1.0)
     assert img[20, 11] == pytest.approx(0.0)
@@ -161,7 +161,7 @@ def test_feature_image_places_pixels_at_expected_coords():
 # --- Test 9: dilation increases feature area ---
 
 def test_dilation_increases_feature_area():
-    points = [FeaturePoint(x_px=16.0, y_px=16.0, value=1.0)]
+    points = [FeaturePoint(x_px=16.0, y_px=16.0, z_value=1.0)]
     shape = (32, 32)
     single_pixel = feature_points_to_image(points, shape, radius_px=0.0)
     dilated = feature_points_to_image(points, shape, radius_px=3.0)
@@ -171,9 +171,43 @@ def test_dilation_increases_feature_area():
 # --- Test 10: smoothing preserves total feature image approximately ---
 
 def test_smoothing_preserves_total_feature_image():
-    points = [FeaturePoint(x_px=16.0, y_px=16.0, value=1.0)]
+    points = [FeaturePoint(x_px=16.0, y_px=16.0, z_value=1.0)]
     shape = (64, 64)
     unsmoothed = feature_points_to_image(points, shape, radius_px=3.0, smoothing_sigma_px=0.0)
     smoothed = feature_points_to_image(points, shape, radius_px=3.0, smoothing_sigma_px=1.5)
     # Gaussian smoothing (with sufficient margin from edges) preserves total mass.
     assert float(smoothed.sum()) == pytest.approx(float(unsmoothed.sum()), rel=0.01)
+
+
+# --- Regression for review arch-backend #2 ---
+
+def test_feature_point_is_the_canonical_class():
+    """``probeflow.analysis.feature_finder.FeaturePoint`` is now an alias
+    of ``probeflow.measurements.models.FeaturePoint`` — not a separate
+    dataclass.  Both names must resolve to the same object so legacy
+    imports and the canonical-detector path produce interoperable
+    records."""
+    from probeflow.measurements.models import FeaturePoint as CanonicalFP
+    assert FeaturePoint is CanonicalFP
+
+
+def test_find_image_features_returns_canonical_records():
+    """``find_image_features`` populates intrinsic fields (x_px, y_px,
+    z_value) and leaves context fields at canonical defaults so the
+    resulting points are valid canonical
+    ``measurements.models.FeaturePoint`` instances."""
+    import math
+    img = _image((10, 20, 5.0))
+    result = find_image_features(img, threshold_low=1.0, min_distance_px=3.0)
+    assert len(result.points) == 1
+    pt = result.points[0]
+    assert pt.x_px == pytest.approx(10.0)
+    assert pt.y_px == pytest.approx(20.0)
+    assert pt.z_value == pytest.approx(5.0, rel=0.01)
+    # Context defaults
+    assert pt.point_id == ""
+    assert pt.channel == ""
+    assert pt.source_label == ""
+    assert pt.roi_id is None
+    assert math.isnan(pt.x_phys)
+    assert math.isnan(pt.y_phys)

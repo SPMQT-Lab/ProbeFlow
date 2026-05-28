@@ -13,14 +13,15 @@ from typing import Sequence
 
 import numpy as np
 
-
-@dataclass(frozen=True)
-class FeaturePoint:
-    """One detected point feature in pixel coordinates."""
-    x_px: float
-    y_px: float
-    value: float
-    label: int | None = None
+# Review arch-backend #2 (2026-05-28): the previous local
+# ``FeaturePoint`` dataclass (x_px, y_px, value, label) collided with
+# ``probeflow.measurements.models.FeaturePoint``.  Both detection
+# pipelines now share the canonical model — ``find_image_features``
+# below populates the intrinsic fields (x_px, y_px, z_value) and
+# leaves the context fields (point_id, x_phys, y_phys, channel,
+# source_label, roi_id) at their defaults.  The legacy ``label``
+# field was never populated in production and is dropped.
+from probeflow.measurements.models import FeaturePoint
 
 
 @dataclass(frozen=True)
@@ -157,7 +158,7 @@ def find_image_features(
             accepted.append((r, c))
 
     points = tuple(
-        FeaturePoint(x_px=float(c), y_px=float(r), value=float(arr[r, c]))
+        FeaturePoint(x_px=float(c), y_px=float(r), z_value=float(arr[r, c]))
         for r, c in accepted
     )
     return FeatureDetectionResult(
@@ -237,7 +238,7 @@ def feature_points_to_csv(
             f"{pt.y_px:.4f}",
             f"{pt.x_px * pixel_size_x_nm:.6f}",
             f"{pt.y_px * pixel_size_y_nm:.6f}",
-            f"{pt.value:.10g}",
+            f"{pt.z_value:.10g}",
         ])
     return out.getvalue()
 

@@ -273,3 +273,39 @@ def test_roi_stats_non_metre_z_unit():
     )
     assert result.z_unit == "nA"
     assert math.isclose(result.values["mean_height"], 42.0, rel_tol=1e-9)
+
+
+def test_compute_roi_statistics_delegates_to_canonical_kernel():
+    """Regression for review arch-backend #4 — the legacy
+    ``compute_roi_statistics`` is now a thin wrapper around the
+    canonical ``probeflow.measurements.image.roi_statistics`` kernel,
+    so both functions must agree on every shared value key for the
+    same input."""
+    from probeflow.measurements.image import roi_statistics as canonical
+    img = np.ones((10, 10)) * 1.5e-10
+    img[2, 3] = float("nan")  # exercise non-finite handling
+    mask = np.ones((10, 10), dtype=bool)
+    legacy_result = compute_roi_statistics(
+        img, mask,
+        pixel_size_x_m=1e-10, pixel_size_y_m=1e-10,
+        z_unit="m",
+    )
+    canonical_result = canonical(
+        img,
+        measurement_id="M?",
+        source_label="",
+        source_path=None,
+        channel="",
+        mask=mask,
+        pixel_size_x=1e-10, pixel_size_y=1e-10,
+        x_unit="m", y_unit="m", height_unit="m",
+    )
+    # Every shared value key matches (the legacy result additionally
+    # carries area_m2/area_nm2 convenience extras).
+    for key in canonical_result.values:
+        assert legacy_result.values[key] == pytest.approx(canonical_result.values[key]), key
+
+    # Legacy extras present but kernel result does not have them.
+    assert "summary" in legacy_result.context
+    assert "area_nm2" in legacy_result.values
+    assert "summary" not in canonical_result.context

@@ -26,16 +26,35 @@ class MeasurementResult:
 
 @dataclass(frozen=True)
 class FeaturePoint:
-    """One detected point feature in image and physical coordinates."""
+    """One detected point feature.
 
-    point_id: str
+    Pixel coordinates (``x_px``, ``y_px``) and the channel value at that
+    pixel (``z_value``) are the intrinsic detection-time fields and have
+    no defaults.  All other fields are context that the detector may or
+    may not have available — they default to empty / NaN so the
+    detection-time call sites (e.g.
+    :func:`probeflow.analysis.feature_finder.find_image_features`) can
+    construct the canonical type without supplying calibration or
+    source metadata they do not have.  The downstream measurement
+    helpers (e.g.
+    :func:`probeflow.measurements.features.detect_local_maxima`) pass
+    the full set of kwargs.
+
+    Review arch-backend #2 (2026-05-28) unified this with the previous
+    smaller ``probeflow.analysis.feature_finder.FeaturePoint`` (4
+    fields, now removed).  The legacy ``value`` field is renamed to
+    ``z_value``; the legacy ``label`` field was never populated in
+    production and is dropped.
+    """
+
     x_px: float
     y_px: float
-    x_phys: float
-    y_phys: float
     z_value: float
-    channel: str
-    source_label: str
+    point_id: str = ""
+    x_phys: float = float("nan")
+    y_phys: float = float("nan")
+    channel: str = ""
+    source_label: str = ""
     roi_id: str | None = None
 
 

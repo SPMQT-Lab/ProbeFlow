@@ -84,7 +84,7 @@ class TestLegacyWrappersDelegate:
 
     def test_feature_points_to_image_via_shared_paint(self):
         from probeflow.analysis.feature_finder import FeaturePoint, feature_points_to_image
-        pts = [FeaturePoint(x_px=5.0, y_px=10.0, value=1.0)]
+        pts = [FeaturePoint(x_px=5.0, y_px=10.0, z_value=1.0)]
         out = feature_points_to_image(pts, (20, 20), radius_px=2.0, value=2.0)
         # Centre and 4-neighbours present at radius 2 (d²<=4)
         assert out[10, 5] == 2.0
