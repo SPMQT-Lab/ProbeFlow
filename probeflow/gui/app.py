@@ -1063,6 +1063,14 @@ class ProbeFlowWindow(QMainWindow):
 
         if mode == "particles":
             params = self._features_sidebar.particles_params()
+            min_pct = params.pop("min_area_pct", 0.001)
+            max_pct = params.pop("max_area_pct", 0.0)
+            params["min_area_nm2"] = self._features_pct_to_nm2(
+                min_pct, arr, px_x_m, px_y_m)
+            params["max_area_nm2"] = (
+                self._features_pct_to_nm2(max_pct, arr, px_x_m, px_y_m)
+                if max_pct > 0 else None
+            )
         elif mode == "template":
             tmpl = self._features_panel.get_template()
             if tmpl is None:
@@ -1090,8 +1098,15 @@ class ProbeFlowWindow(QMainWindow):
                 if k in idx_to_p
             ]
             run_p = self._features_sidebar.classify_run_params()
-            params = {"particles": particles, "samples": samples,
-                      "use_sharpness": run_p.get("use_sharpness", False)}
+            params = {
+                "particles":        particles,
+                "samples":          samples,
+                "use_sharpness":    run_p.get("use_sharpness",    False),
+                "threshold_method": run_p.get("threshold_method", "gmm"),
+                "manual_threshold": run_p.get("manual_threshold", 0.5),
+                "encoder":          run_p.get("encoder",          "raw"),
+                "rotate_augment":   run_p.get("rotate_augment",   False),
+            }
         else:
             self._features_sidebar.set_status(f"Unknown mode {mode!r}")
             return
@@ -1110,13 +1125,15 @@ class ProbeFlowWindow(QMainWindow):
             return
         if mode == "particles":
             self._features_panel.set_particles(result)
+            # Advance sidebar to Phase 2 and show the particle count.
+            self._features_sidebar.set_segment_count(len(result))
             current_mode = self._features_sidebar.current_mode()
             if current_mode == "classify":
                 self._features_panel.set_mode("classify")
                 self._features_panel.set_sample_selection_armed(True)
                 self._features_sidebar.set_status(
                     f"Found {len(result)} particle(s). "
-                    "Click any particle to label it, then press ② Run.")
+                    "Click any particle to label it, then press ▶ Run.")
             else:
                 self._features_sidebar.set_status(f"Found {len(result)} particle(s).")
             self._status_bar.showMessage(f"Segmentation: {len(result)} particle(s)")
@@ -1177,8 +1194,15 @@ class ProbeFlowWindow(QMainWindow):
         elif mode != "classify":
             self._features_panel.set_sample_selection_armed(False)
 
+    @staticmethod
+    def _features_pct_to_nm2(pct: float, arr,
+                              px_x_m: float, px_y_m: float) -> float:
+        """Convert area as % of image (e.g. 0.001 = 0.001%) to nm²."""
+        Ny, Nx = arr.shape
+        return (pct / 100.0) * float(Nx) * float(Ny) * px_x_m * px_y_m * 1e18
+
     def _on_features_segment_requested(self) -> None:
-        """Step 1 — segment particles with current threshold + exclusion mask.
+        """Phase 1 — segment particles with current threshold + exclusion mask.
 
         Covers both the Particles and Classify analysis modes:
         * In Particles mode the contours are the final result.
@@ -1195,6 +1219,14 @@ class ProbeFlowWindow(QMainWindow):
             self._features_sidebar.set_status("Scan has no physical pixel size.")
             return
         params = self._features_sidebar.particles_params()
+        # Convert area-% to nm² (sidebar stores % of image area; backend needs nm²)
+        min_pct = params.pop("min_area_pct", 0.001)
+        max_pct = params.pop("max_area_pct", 0.0)
+        params["min_area_nm2"] = self._features_pct_to_nm2(min_pct, arr, px_x_m, px_y_m)
+        params["max_area_nm2"] = (
+            self._features_pct_to_nm2(max_pct, arr, px_x_m, px_y_m)
+            if max_pct > 0 else None
+        )
         self._features_sidebar.set_status("Segmenting…")
         worker = _FeaturesWorker(
             "particles", arr, px_m, px_x_m, px_y_m, params,

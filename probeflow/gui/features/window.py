@@ -153,12 +153,19 @@ class FeatureCountingWindow(QMainWindow):
 
     # ── Step 1: Segment ───────────────────────────────────────────────────────
 
-    def _on_segment_requested(self) -> None:
-        """Step 1 — run segmentation with current threshold + exclusion mask.
+    @staticmethod
+    def _pct_to_nm2(pct: float, arr: np.ndarray,
+                    px_x_m: float, px_y_m: float) -> float:
+        """Convert area as % of image (e.g. 0.001 = 0.001%) to nm²."""
+        Ny, Nx = arr.shape
+        return (pct / 100.0) * float(Nx) * float(Ny) * px_x_m * px_y_m * 1e18
 
-        After particles are found the image shows contour overlays.  If the
-        current analysis mode is 'classify', sample-selection clicking is
-        automatically armed so the user can immediately start labeling.
+    def _on_segment_requested(self) -> None:
+        """Phase 1 — segment with current threshold, area limits, exclusion mask.
+
+        After particles are found the image shows contour overlays and the
+        sidebar automatically advances to Phase 2 (Analysis).  If the current
+        analysis mode is 'classify', sample-selection clicking is also armed.
         """
         arr = self._panel.get_analysis_array()   # applies exclusion mask
         if arr is None:
@@ -170,6 +177,13 @@ class FeatureCountingWindow(QMainWindow):
             self._sidebar.set_status("Scan has no physical pixel size.")
             return
         params = self._sidebar.particles_params()
+        # Convert area-% to nm² (sidebar stores % of image area; backend needs nm²)
+        min_pct = params.pop("min_area_pct", 0.001)
+        max_pct = params.pop("max_area_pct", 0.0)
+        params["min_area_nm2"] = self._pct_to_nm2(min_pct, arr, px_x_m, px_y_m)
+        params["max_area_nm2"] = (
+            self._pct_to_nm2(max_pct, arr, px_x_m, px_y_m) if max_pct > 0 else None
+        )
         self._sidebar.set_status("Segmenting…")
         worker = _FeaturesWorker(
             "particles", arr, px_m, px_x_m, px_y_m, params,
@@ -180,7 +194,7 @@ class FeatureCountingWindow(QMainWindow):
     # ── Step 2: Run ───────────────────────────────────────────────────────────
 
     def _on_run(self, mode: str) -> None:
-        """Step 2 — run the selected analysis mode."""
+        """Phase 2 — run the selected analysis mode."""
         arr = self._panel.get_analysis_array()   # applies exclusion mask if present
         if arr is None:
             self._sidebar.set_status("Load a scan first.")
@@ -193,6 +207,13 @@ class FeatureCountingWindow(QMainWindow):
 
         if mode == "particles":
             params = self._sidebar.particles_params()
+            # Convert area-% to nm²
+            min_pct = params.pop("min_area_pct", 0.001)
+            max_pct = params.pop("max_area_pct", 0.0)
+            params["min_area_nm2"] = self._pct_to_nm2(min_pct, arr, px_x_m, px_y_m)
+            params["max_area_nm2"] = (
+                self._pct_to_nm2(max_pct, arr, px_x_m, px_y_m) if max_pct > 0 else None
+            )
         elif mode == "template":
             tmpl = self._panel.get_template()
             if tmpl is None:
@@ -220,8 +241,15 @@ class FeatureCountingWindow(QMainWindow):
                 if k in idx_to_p
             ]
             run_p = self._sidebar.classify_run_params()
-            params = {"particles": particles, "samples": samples,
-                      "use_sharpness": run_p.get("use_sharpness", False)}
+            params = {
+                "particles":        particles,
+                "samples":          samples,
+                "use_sharpness":    run_p.get("use_sharpness",    False),
+                "threshold_method": run_p.get("threshold_method", "gmm"),
+                "manual_threshold": run_p.get("manual_threshold", 0.5),
+                "encoder":          run_p.get("encoder",          "raw"),
+                "rotate_augment":   run_p.get("rotate_augment",   False),
+            }
         else:
             self._sidebar.set_status(f"Unknown mode {mode!r}")
             return
@@ -243,6 +271,8 @@ class FeatureCountingWindow(QMainWindow):
 
         if mode == "particles":
             self._panel.set_particles(result)
+            # Advance sidebar to Phase 2 and show the particle count.
+            self._sidebar.set_segment_count(len(result))
             # If the user is in classify mode, auto-arm sample-label clicking
             # so they can immediately click particles to label them.
             current_mode = self._sidebar.current_mode()
@@ -251,7 +281,7 @@ class FeatureCountingWindow(QMainWindow):
                 self._panel.set_sample_selection_armed(True)
                 self._sidebar.set_status(
                     f"Found {len(result)} particle(s). "
-                    "Click any particle to label it, then press ② Run.")
+                    "Click any particle to label it, then press ▶ Run.")
             else:
                 self._sidebar.set_status(f"Found {len(result)} particle(s).")
             self._status_bar.showMessage(f"Segmentation: {len(result)} particle(s)")

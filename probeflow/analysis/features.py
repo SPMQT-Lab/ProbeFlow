@@ -510,6 +510,28 @@ def _embed_pca_kmeans(crops: np.ndarray, *, n_components: int = 16) -> np.ndarra
     return pca.fit_transform(flat)
 
 
+def _rotate_crop(crop: np.ndarray, angle_deg: float) -> np.ndarray:
+    """Rotate a 2-D float array by ``angle_deg`` degrees (OpenCV, reflect-padded).
+
+    Uses ``cv2.warpAffine`` with ``BORDER_REFLECT`` so the corners are filled
+    with plausible image data rather than zeros.  Falls back to returning the
+    original crop if OpenCV is unavailable.
+    """
+    try:
+        cv2 = _cv()
+        h, w = crop.shape
+        cx, cy = w / 2.0, h / 2.0
+        M = cv2.getRotationMatrix2D((cx, cy), float(angle_deg), 1.0)
+        rotated = cv2.warpAffine(
+            crop.astype(np.float32), M, (w, h),
+            flags=cv2.INTER_LINEAR,
+            borderMode=cv2.BORDER_REFLECT,
+        )
+        return rotated.astype(crop.dtype)
+    except Exception:
+        return crop
+
+
 def _threshold_similarities(sims: np.ndarray, method: str) -> float:
     """Return the similarity cutoff above which a particle is 'a match'."""
     if sims.size == 0:
@@ -547,9 +569,11 @@ def classify_particles(
     *,
     encoder: str = "raw",
     threshold_method: str = "gmm",
+    manual_threshold: float = 0.5,
     crop_size_px: int = 48,
     use_sharpness: bool = False,
     sharpness_weight: float = 3.0,
+    rotate_augment: bool = False,
 ) -> List[Classification]:
     """Classify each particle against labelled sample particles.
 
@@ -560,14 +584,19 @@ def classify_particles(
     particles
         Sequence of Particles to classify.
     samples
-        List of ``(class_name, sample_particle)`` pairs. Multiple particles may
-        share the same class_name; their similarities are max-pooled.
+        List of ``(class_name, sample_particle)`` pairs.  Multiple particles
+        may share the same class_name; their similarities are max-pooled.
     encoder
         ``"raw"`` — flattened z-normalised pixel vectors.
         ``"pca_kmeans"`` — PCA-reduced pixel vectors.
     threshold_method
         How to pick the "match" cutoff: ``"gmm"`` (default), ``"otsu"``,
-        ``"distribution"``.
+        ``"distribution"``, or ``"manual"`` (uses ``manual_threshold``).
+    manual_threshold
+        Fixed similarity cutoff used when ``threshold_method="manual"``.
+        Range 0–1; particles whose best similarity ≥ this value are classified.
+    crop_size_px
+        Side length of the square crop centred on each particle centroid.
     use_sharpness
         When True, append a normalised sharpness dimension (variance of
         Laplacian, stored in ``Particle.sharpness``) to each embedding vector.
@@ -578,6 +607,11 @@ def classify_particles(
         How strongly the sharpness dimension pulls the embedding apart.
         Default 3.0 works well when the shape similarity is high and blur is
         the main discriminating feature.
+    rotate_augment
+        When True, generate 36 rotated copies (0–350°, step 10°) of each
+        labelled sample crop before embedding.  The best-match similarity
+        across all rotations is used, making classification rotation-invariant.
+        Mirrors the UniMR rotation-augmentation approach.
 
     Returns
     -------
@@ -595,8 +629,21 @@ def classify_particles(
 
     pcrops = np.stack([_crop_particle(arr, p, crop_size_px)
                        for p in all_particles], axis=0)
-    scrops = np.stack([_crop_particle(arr, sp, crop_size_px)
-                       for sp in sample_particles], axis=0)
+
+    # Build sample crops — optionally augmented with 36 rotations
+    raw_scrops = [_crop_particle(arr, sp, crop_size_px) for sp in sample_particles]
+    if rotate_augment:
+        aug_scrops: List[np.ndarray] = []
+        aug_names:  List[str]        = []
+        for (name, _), scrop in zip(samples, raw_scrops):
+            for angle in range(0, 360, 10):   # 0, 10, 20, …, 350  (36 angles)
+                aug_scrops.append(_rotate_crop(scrop, float(angle)))
+                aug_names.append(name)
+        scrops = np.stack(aug_scrops, axis=0)
+        sample_names = aug_names
+    else:
+        scrops = np.stack(raw_scrops, axis=0)
+        sample_names = [name for name, _ in samples]
 
     if encoder == "raw":
         p_emb = _embed_raw(pcrops)
@@ -638,12 +685,16 @@ def classify_particles(
     s_u = _unit(s_emb)
     sim_matrix = p_u @ s_u.T    # (Np, Ns)
 
-    # Per-particle: max similarity across all samples + the class of the argmax.
+    # Per-particle: max similarity across all samples (or augmented rotations)
+    # plus the class of the argmax.
     best_sim = sim_matrix.max(axis=1)
     best_idx = sim_matrix.argmax(axis=1)
-    sample_names = [name for name, _ in samples]
 
-    cutoff = _threshold_similarities(best_sim, threshold_method)
+    if threshold_method == "manual":
+        cutoff = float(manual_threshold)
+    else:
+        cutoff = _threshold_similarities(best_sim, threshold_method)
+
     out: List[Classification] = []
     for i, (p, sim, argmax) in enumerate(zip(all_particles, best_sim, best_idx)):
         label = sample_names[int(argmax)] if sim >= cutoff else "other"

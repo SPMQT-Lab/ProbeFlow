@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
     QFrame,
+    QGroupBox,
     QGraphicsEllipseItem,
     QGraphicsLineItem,
     QGraphicsPathItem,
@@ -47,7 +48,9 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QPushButton,
+    QRadioButton,
     QScrollArea,
+    QSlider,
     QSpinBox,
     QStackedWidget,
     QTableWidget,
@@ -416,6 +419,10 @@ class _FeaturesWorker(QRunnable):
                 res = classify_particles(
                     self._arr, particles, samples,
                     use_sharpness=self._params.get("use_sharpness", False),
+                    threshold_method=self._params.get("threshold_method", "gmm"),
+                    manual_threshold=self._params.get("manual_threshold", 0.5),
+                    encoder=self._params.get("encoder", "raw"),
+                    rotate_augment=self._params.get("rotate_augment", False),
                 )
             else:
                 raise ValueError(f"Unknown mode {self._mode!r}")
@@ -1037,21 +1044,33 @@ class FeaturesPanel(QWidget):
 
 
 class FeaturesSidebar(QWidget):
-    """Right sidebar for Features-tab analysis parameters."""
+    """Right sidebar — two-phase UniMR-style interface.
 
-    mode_changed                    = Signal(str)   # "particles" / "template" / "lattice" / "classify"
-    classify_params_changed         = Signal()      # emitted when Step-1 segmentation params change
-    segment_requested               = Signal()      # Step-1 "Segment" button clicked
-    undo_label_requested            = Signal()
-    load_from_browse_requested      = Signal()
-    run_requested                   = Signal(str)   # Step-2 Run button — mode
-    export_requested                = Signal(str)   # mode
-    crop_template_requested         = Signal()
-    mask_paint_toggled              = Signal(bool)  # True = start painting, False = stop
-    mask_clear_requested            = Signal()
-    mask_color_changed              = Signal(int, int, int)  # R, G, B
+    Phase 1 (Segmentation)
+        Threshold slider (0–255), min/max area sliders (as % of image area),
+        invert checkbox, exclusion mask tools, "Apply Settings" button.
+        Clicking "Apply Settings" runs segmentation and auto-advances to Phase 2.
 
-    # Available mask highlight colours (name → (R, G, B))
+    Phase 2 (Analysis)
+        Shows particle count, mode tabs (Particles / Template / Lattice /
+        Classify), Run, and Export buttons.  "← Settings" returns to Phase 1.
+        The Classify tab exposes threshold method (Manual/Otsu/GMM/Distribution),
+        encoding (Raw/PCA+KMeans/Auto), and rotation-augmentation options that
+        mirror the UniMR classification interface.
+    """
+
+    mode_changed               = Signal(str)   # "particles"/"template"/"lattice"/"classify"
+    classify_params_changed    = Signal()      # Phase-1 segmentation params changed
+    segment_requested          = Signal()      # "Apply Settings" button clicked
+    undo_label_requested       = Signal()
+    load_from_browse_requested = Signal()
+    run_requested              = Signal(str)   # mode
+    export_requested           = Signal(str)   # mode
+    crop_template_requested    = Signal()
+    mask_paint_toggled         = Signal(bool)  # True = start painting
+    mask_clear_requested       = Signal()
+    mask_color_changed         = Signal(int, int, int)  # R, G, B
+
     MASK_COLORS: dict[str, tuple[int, int, int]] = {
         "Red":     (220,  50,  50),
         "Blue":    ( 50, 100, 220),
@@ -1066,6 +1085,8 @@ class FeaturesSidebar(QWidget):
         self._t = t
         self._build()
 
+    # ── Top-level layout ──────────────────────────────────────────────────────
+
     def _build(self):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -1078,10 +1099,41 @@ class FeaturesSidebar(QWidget):
 
         inner = QWidget()
         lay = QVBoxLayout(inner)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+
+        # Two-phase stacked widget: 0 = Segmentation, 1 = Analysis
+        self._phase_stack = QStackedWidget()
+        self._phase_stack.addWidget(self._build_phase1())
+        self._phase_stack.addWidget(self._build_phase2())
+        lay.addWidget(self._phase_stack, 1)
+
+        # Shared status label — always visible below the phase stack
+        sw = QWidget()
+        sl = QVBoxLayout(sw)
+        sl.setContentsMargins(10, 4, 10, 8)
+        sl.setSpacing(0)
+        self._status_lbl = QLabel("Load a scan to begin.")
+        self._status_lbl.setFont(QFont("Helvetica", 9))
+        self._status_lbl.setWordWrap(True)
+        sl.addWidget(self._status_lbl)
+        lay.addWidget(sw)
+
+        scroll.setWidget(inner)
+        outer.addWidget(scroll)
+
+        # Default mode (also initialises the Run button label)
+        self._select_mode("particles")
+
+    # ── Phase 1 — Segmentation ────────────────────────────────────────────────
+
+    def _build_phase1(self) -> QWidget:
+        page = QWidget()
+        lay  = QVBoxLayout(page)
         lay.setContentsMargins(10, 10, 10, 6)
         lay.setSpacing(6)
 
-        # ── Load & plane ──────────────────────────────────────────────────────
+        # ── Load & Plane ───────────────────────────────────────────────────────
         load_btn = QPushButton("Load primary scan from Browse")
         load_btn.setFont(QFont("Helvetica", 10))
         load_btn.setFixedHeight(30)
@@ -1099,80 +1151,90 @@ class FeaturesSidebar(QWidget):
         lay.addLayout(plane_row)
         lay.addWidget(_sep())
 
-        # ════════════════════════════════════════════════════════════════
-        # STEP 1 — Segmentation
-        # ════════════════════════════════════════════════════════════════
-        step1_lbl = QLabel("① Segmentation")
-        step1_lbl.setFont(QFont("Helvetica", 11, QFont.Bold))
-        lay.addWidget(step1_lbl)
+        # ── Segmentation Settings ──────────────────────────────────────────────
+        seg_title = QLabel("Segmentation Settings")
+        seg_title.setFont(QFont("Helvetica", 10, QFont.Bold))
+        lay.addWidget(seg_title)
 
-        step1_hint = QLabel(
-            "Set threshold, paint exclusion zones, then press Segment.")
-        step1_hint.setFont(QFont("Helvetica", 8))
-        step1_hint.setWordWrap(True)
-        step1_hint.setStyleSheet("color: #888;")
-        lay.addWidget(step1_hint)
+        # Threshold slider (0–255)
+        thr_row = QHBoxLayout()
+        thr_row.addWidget(QLabel("Threshold:"))
+        thr_row.addStretch(1)
+        self._thr_val_lbl = QLabel("128")
+        self._thr_val_lbl.setMinimumWidth(28)
+        self._thr_val_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        thr_row.addWidget(self._thr_val_lbl)
+        lay.addLayout(thr_row)
 
-        # ── Threshold ─────────────────────────────────────────────────────────
-        lay.addWidget(QLabel("Threshold"))
-        self._thr_cb = QComboBox()
-        self._thr_cb.addItems(["otsu", "manual", "adaptive"])
-        lay.addWidget(self._thr_cb)
-        self._thr_cb.currentTextChanged.connect(self._on_thr_mode_changed)
-        self._thr_cb.currentTextChanged.connect(lambda _: self.classify_params_changed.emit())
+        self._thr_slider = QSlider(Qt.Horizontal)
+        self._thr_slider.setRange(0, 255)
+        self._thr_slider.setValue(128)
+        self._thr_slider.setToolTip(
+            "Normalised image intensity threshold (0–255).\n"
+            "Pixels above this value are segmented as particle foreground.")
+        self._thr_slider.valueChanged.connect(self._on_thr_slider_changed)
+        self._thr_slider.valueChanged.connect(
+            lambda _: self.classify_params_changed.emit())
+        lay.addWidget(self._thr_slider)
 
-        manual_row = QHBoxLayout()
-        manual_row.setContentsMargins(0, 0, 0, 0)
-        manual_row.addWidget(QLabel("Manual (0-255):"))
-        self._manual_spin = QDoubleSpinBox()
-        self._manual_spin.setRange(0.0, 255.0)
-        self._manual_spin.setValue(128.0)
-        self._manual_spin.setDecimals(0)
-        self._manual_spin.setEnabled(False)   # greyed out until "manual" selected
-        self._manual_spin.valueChanged.connect(lambda _: self.classify_params_changed.emit())
-        manual_row.addWidget(self._manual_spin)
-        lay.addLayout(manual_row)
+        # Min Area slider (0–100 → 0–0.100% of image area)
+        min_row = QHBoxLayout()
+        min_row.addWidget(QLabel("Min Area:"))
+        min_row.addStretch(1)
+        self._min_area_val_lbl = QLabel("0.001%")
+        self._min_area_val_lbl.setMinimumWidth(50)
+        self._min_area_val_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        min_row.addWidget(self._min_area_val_lbl)
+        lay.addLayout(min_row)
+
+        self._min_area_slider = QSlider(Qt.Horizontal)
+        self._min_area_slider.setRange(0, 100)   # each unit = 0.001%  →  0–0.100%
+        self._min_area_slider.setValue(1)
+        self._min_area_slider.setToolTip(
+            "Minimum particle area as % of total image area (0–0.100%).\n"
+            "Particles smaller than this are discarded.")
+        self._min_area_slider.valueChanged.connect(self._on_min_area_slider_changed)
+        self._min_area_slider.valueChanged.connect(
+            lambda _: self.classify_params_changed.emit())
+        lay.addWidget(self._min_area_slider)
+
+        # Max Area slider (0–1000 → 0–1.000% of image area)
+        max_row = QHBoxLayout()
+        max_row.addWidget(QLabel("Max Area:"))
+        max_row.addStretch(1)
+        self._max_area_val_lbl = QLabel("off")
+        self._max_area_val_lbl.setMinimumWidth(50)
+        self._max_area_val_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        max_row.addWidget(self._max_area_val_lbl)
+        lay.addLayout(max_row)
+
+        self._max_area_slider = QSlider(Qt.Horizontal)
+        self._max_area_slider.setRange(0, 1000)  # each unit = 0.001%  →  0–1.000%
+        self._max_area_slider.setValue(0)
+        self._max_area_slider.setToolTip(
+            "Maximum particle area as % of total image area (0–1.000%).\n"
+            "0 = no upper limit.")
+        self._max_area_slider.valueChanged.connect(self._on_max_area_slider_changed)
+        self._max_area_slider.valueChanged.connect(
+            lambda _: self.classify_params_changed.emit())
+        lay.addWidget(self._max_area_slider)
 
         self._invert_cb = QCheckBox("Invert (segment dark features)")
-        self._invert_cb.stateChanged.connect(lambda _: self.classify_params_changed.emit())
+        self._invert_cb.setFont(QFont("Helvetica", 9))
+        self._invert_cb.setToolTip(
+            "When checked, dark depressions are segmented instead of bright protrusions.")
+        self._invert_cb.stateChanged.connect(
+            lambda _: self.classify_params_changed.emit())
         lay.addWidget(self._invert_cb)
 
-        # ── Area filters ──────────────────────────────────────────────────────
-        row2 = QHBoxLayout()
-        row2.addWidget(QLabel("min area (nm²):"))
-        self._min_area_spin = QDoubleSpinBox()
-        self._min_area_spin.setRange(0.0, 1e6)
-        self._min_area_spin.setDecimals(2)
-        self._min_area_spin.setValue(0.5)
-        self._min_area_spin.valueChanged.connect(lambda _: self.classify_params_changed.emit())
-        row2.addWidget(self._min_area_spin)
-        lay.addLayout(row2)
-
-        row3 = QHBoxLayout()
-        row3.addWidget(QLabel("max area (nm²):"))
-        self._max_area_spin = QDoubleSpinBox()
-        self._max_area_spin.setRange(0.0, 1e9)
-        self._max_area_spin.setDecimals(2)
-        self._max_area_spin.setValue(0.0)   # 0 → disabled
-        row3.addWidget(self._max_area_spin)
-        lay.addLayout(row3)
-
-        row4 = QHBoxLayout()
-        row4.addWidget(QLabel("sigma-clip:"))
-        self._sigma_spin = QDoubleSpinBox()
-        self._sigma_spin.setRange(0.0, 10.0)
-        self._sigma_spin.setDecimals(1)
-        self._sigma_spin.setValue(2.0)
-        row4.addWidget(self._sigma_spin)
-        lay.addLayout(row4)
-
-        # ── Exclusion mask ────────────────────────────────────────────────────
+        # ── Exclusion Mask ─────────────────────────────────────────────────────
         lay.addWidget(_sep())
-        mask_lbl = QLabel("Exclusion mask")
+        mask_lbl = QLabel("Exclusion Mask")
         mask_lbl.setFont(QFont("Helvetica", 10, QFont.Bold))
         lay.addWidget(mask_lbl)
 
-        mask_hint = QLabel("Paint step edges or any region to exclude from segmentation.")
+        mask_hint = QLabel(
+            "Paint step edges or regions to exclude from segmentation.")
         mask_hint.setFont(QFont("Helvetica", 8))
         mask_hint.setWordWrap(True)
         mask_hint.setStyleSheet("color: #888;")
@@ -1193,7 +1255,8 @@ class FeaturesSidebar(QWidget):
         for name in self.MASK_COLORS:
             self._mask_color_cb.addItem(name)
         self._mask_color_cb.setCurrentText("Red")
-        self._mask_color_cb.setToolTip("Highlight colour for the exclusion mask overlay.")
+        self._mask_color_cb.setToolTip(
+            "Highlight colour for the exclusion mask overlay.")
         self._mask_color_cb.currentTextChanged.connect(self._on_mask_color_changed)
         color_row.addWidget(self._mask_color_cb, 1)
         lay.addLayout(color_row)
@@ -1213,37 +1276,59 @@ class FeaturesSidebar(QWidget):
         self._clear_mask_btn.clicked.connect(self.mask_clear_requested.emit)
         lay.addWidget(self._clear_mask_btn)
 
-        # ── Step 1 action ─────────────────────────────────────────────────────
+        # ── Apply Settings button ──────────────────────────────────────────────
         lay.addWidget(_sep())
-        self._segment_btn = QPushButton("① Segment")
+        self._segment_btn = QPushButton("Apply Settings")
         self._segment_btn.setFont(QFont("Helvetica", 10, QFont.Bold))
-        self._segment_btn.setFixedHeight(32)
+        self._segment_btn.setFixedHeight(34)
         self._segment_btn.setObjectName("accentBtn")
         self._segment_btn.setCursor(QCursor(Qt.PointingHandCursor))
         self._segment_btn.setToolTip(
-            "Apply threshold and exclusion mask, then find all particles.\n"
-            "Results are shown as contour overlays on the image.")
+            "Segment the image with the current threshold and area settings.\n"
+            "The Analysis phase opens automatically when segmentation completes.")
         self._segment_btn.clicked.connect(self.segment_requested.emit)
         lay.addWidget(self._segment_btn)
 
+        lay.addStretch(1)
+        return page
+
+    # ── Phase 2 — Analysis ────────────────────────────────────────────────────
+
+    def _build_phase2(self) -> QWidget:
+        page = QWidget()
+        lay  = QVBoxLayout(page)
+        lay.setContentsMargins(10, 10, 10, 6)
+        lay.setSpacing(6)
+
+        # ── Back button + segmentation count ──────────────────────────────────
+        back_row = QHBoxLayout()
+        back_btn = QPushButton("← Settings")
+        back_btn.setFont(QFont("Helvetica", 9))
+        back_btn.setFixedHeight(26)
+        back_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        back_btn.setToolTip("Return to Phase 1 segmentation settings.")
+        back_btn.clicked.connect(self._on_back_to_phase1)
+        back_row.addWidget(back_btn)
+        back_row.addStretch(1)
+        lay.addLayout(back_row)
+
+        self._segment_count_lbl = QLabel("Segmentation not run yet.")
+        self._segment_count_lbl.setFont(QFont("Helvetica", 9, QFont.Bold))
+        self._segment_count_lbl.setWordWrap(True)
+        lay.addWidget(self._segment_count_lbl)
+
         lay.addWidget(_sep())
 
-        # ════════════════════════════════════════════════════════════════
-        # STEP 2 — Analysis
-        # ════════════════════════════════════════════════════════════════
-        step2_lbl = QLabel("② Analysis")
-        step2_lbl.setFont(QFont("Helvetica", 11, QFont.Bold))
-        lay.addWidget(step2_lbl)
-
+        # ── Mode tabs ──────────────────────────────────────────────────────────
         mode_row = QHBoxLayout()
         mode_row.setSpacing(4)
         self._mode_group = QButtonGroup(self)
         self._mode_group.setExclusive(True)
-        self._mode_btns = {}
+        self._mode_btns: dict = {}
         for key, label in [("particles", "Particles"),
-                           ("template",  "Template"),
-                           ("lattice",   "Lattice"),
-                           ("classify",  "Classify")]:
+                            ("template",  "Template"),
+                            ("lattice",   "Lattice"),
+                            ("classify",  "Classify")]:
             b = QPushButton(label)
             b.setCheckable(True)
             b.setFont(QFont("Helvetica", 9))
@@ -1256,40 +1341,35 @@ class FeaturesSidebar(QWidget):
         lay.addLayout(mode_row)
 
         self._mode_stack = QStackedWidget()
-        self._mode_stack.addWidget(self._build_particles_tab())
-        self._mode_stack.addWidget(self._build_template_tab())
-        self._mode_stack.addWidget(self._build_lattice_tab())
-        self._mode_stack.addWidget(self._build_classify_tab())
+        self._mode_stack.addWidget(self._build_particles_tab())   # 0
+        self._mode_stack.addWidget(self._build_template_tab())    # 1
+        self._mode_stack.addWidget(self._build_lattice_tab())     # 2
+        self._mode_stack.addWidget(self._build_classify_tab())    # 3
         lay.addWidget(self._mode_stack)
 
         lay.addWidget(_sep())
 
-        self._run_btn = QPushButton("② Run")
+        self._run_btn = QPushButton("▶ Run")
         self._run_btn.setFont(QFont("Helvetica", 10, QFont.Bold))
         self._run_btn.setFixedHeight(32)
         self._run_btn.setObjectName("accentBtn")
         self._run_btn.setCursor(QCursor(Qt.PointingHandCursor))
-        self._run_btn.clicked.connect(lambda: self.run_requested.emit(self._current_mode()))
+        self._run_btn.clicked.connect(
+            lambda: self.run_requested.emit(self._current_mode()))
         lay.addWidget(self._run_btn)
 
-        self._export_btn = QPushButton("Export JSON...")
+        self._export_btn = QPushButton("Export JSON…")
         self._export_btn.setFont(QFont("Helvetica", 9))
         self._export_btn.setFixedHeight(28)
         self._export_btn.setCursor(QCursor(Qt.PointingHandCursor))
-        self._export_btn.clicked.connect(lambda: self.export_requested.emit(self._current_mode()))
+        self._export_btn.clicked.connect(
+            lambda: self.export_requested.emit(self._current_mode()))
         lay.addWidget(self._export_btn)
 
-        self._status_lbl = QLabel("Load a scan to begin.")
-        self._status_lbl.setFont(QFont("Helvetica", 9))
-        self._status_lbl.setWordWrap(True)
-        lay.addWidget(self._status_lbl)
-
         lay.addStretch(1)
+        return page
 
-        scroll.setWidget(inner)
-        outer.addWidget(scroll)
-
-        self._select_mode("particles")
+    # ── Mode tab pages ─────────────────────────────────────────────────────────
 
     def _build_particles_tab(self) -> QWidget:
         w = QWidget()
@@ -1297,10 +1377,10 @@ class FeaturesSidebar(QWidget):
         l.setContentsMargins(0, 4, 0, 4)
         l.setSpacing(4)
         info = QLabel(
-            "Press ① Segment above to find and count particles.\n\n"
-            "The segmentation parameters (threshold, area filters, "
-            "exclusion mask) are all configured in the Step 1 section.\n\n"
-            "Press ② Run to re-run segmentation with the current settings.")
+            "Counts and characterises all segmented particles.\n\n"
+            "Segmentation settings (threshold, area filters, exclusion mask) "
+            "are in Phase 1 — press '← Settings' to change them.\n\n"
+            "Press ▶ Run to re-run segmentation with the current settings.")
         info.setFont(QFont("Helvetica", 9))
         info.setWordWrap(True)
         info.setStyleSheet("color: #888;")
@@ -1313,7 +1393,7 @@ class FeaturesSidebar(QWidget):
         l.setContentsMargins(0, 4, 0, 4)
         l.setSpacing(4)
 
-        crop_btn = QPushButton("Crop template from image...")
+        crop_btn = QPushButton("Crop template from image…")
         crop_btn.setFont(QFont("Helvetica", 9))
         crop_btn.setFixedHeight(28)
         crop_btn.setCursor(QCursor(Qt.PointingHandCursor))
@@ -1335,29 +1415,117 @@ class FeaturesSidebar(QWidget):
         self._dist_spin = QDoubleSpinBox()
         self._dist_spin.setRange(0.0, 1e4)
         self._dist_spin.setDecimals(3)
-        self._dist_spin.setValue(0.0)   # 0 -> auto (half template side)
+        self._dist_spin.setValue(0.0)   # 0 → auto
         row2.addWidget(self._dist_spin)
         l.addLayout(row2)
 
-        hint = QLabel("Tip: draw a tight rectangle over one motif. Distance of 0 -> auto.")
+        hint = QLabel("Tip: draw a tight rectangle over one motif. Distance 0 → auto.")
         hint.setFont(QFont("Helvetica", 8))
         hint.setWordWrap(True)
         l.addWidget(hint)
+        return w
+
+    def _build_lattice_tab(self) -> QWidget:
+        w = QWidget()
+        l = QVBoxLayout(w)
+        l.setContentsMargins(0, 4, 0, 4)
+        l.setSpacing(4)
+        info = QLabel(
+            "Extracts primitive lattice vectors via SIFT keypoint clustering.\n"
+            "Best on atomically-resolved images with a clear repeating motif.")
+        info.setFont(QFont("Helvetica", 9))
+        info.setWordWrap(True)
+        l.addWidget(info)
         return w
 
     def _build_classify_tab(self) -> QWidget:
         w = QWidget()
         l = QVBoxLayout(w)
         l.setContentsMargins(0, 4, 0, 4)
-        l.setSpacing(4)
+        l.setSpacing(6)
 
         info = QLabel(
-            "① Press 'Segment' (Step 1 above) to find particles.\n"
-            "② Click any particle on the image to assign a class label.\n"
-            "③ Press '② Run' to classify all particles.")
+            "① Press 'Apply Settings' to find particles.\n"
+            "② Click particles on the image to assign class labels.\n"
+            "③ Press ▶ Run to classify all remaining particles.")
         info.setFont(QFont("Helvetica", 9))
         info.setWordWrap(True)
         l.addWidget(info)
+
+        # ── Threshold Settings group ───────────────────────────────────────────
+        thr_box = QGroupBox("Threshold Settings")
+        thr_box.setFont(QFont("Helvetica", 9))
+        thr_box_lay = QVBoxLayout(thr_box)
+        thr_box_lay.setSpacing(4)
+
+        man_row = QHBoxLayout()
+        man_row.addWidget(QLabel("Manual value (0–1):"))
+        self._cls_manual_spin = QDoubleSpinBox()
+        self._cls_manual_spin.setRange(0.0, 1.0)
+        self._cls_manual_spin.setDecimals(3)
+        self._cls_manual_spin.setSingleStep(0.05)
+        self._cls_manual_spin.setValue(0.5)
+        self._cls_manual_spin.setEnabled(False)   # only active in "Manual" mode
+        man_row.addWidget(self._cls_manual_spin)
+        thr_box_lay.addLayout(man_row)
+
+        self._cls_thr_group = QButtonGroup(thr_box)
+        self._cls_thr_group.setExclusive(True)
+        self._cls_thr_btns: dict = {}
+        for key, label in [("manual", "Manual"), ("otsu", "Otsu"),
+                            ("gmm", "GMM"), ("distribution", "Distribution")]:
+            rb = QRadioButton(label)
+            rb.setFont(QFont("Helvetica", 9))
+            rb.toggled.connect(
+                lambda checked, k=key:
+                    self._on_cls_thr_mode_changed(k) if checked else None)
+            self._cls_thr_group.addButton(rb)
+            thr_box_lay.addWidget(rb)
+            self._cls_thr_btns[key] = rb
+        self._cls_thr_btns["gmm"].setChecked(True)
+        l.addWidget(thr_box)
+
+        # ── Encoding Settings group ────────────────────────────────────────────
+        enc_box = QGroupBox("Encoding Settings")
+        enc_box.setFont(QFont("Helvetica", 9))
+        enc_box_lay = QVBoxLayout(enc_box)
+        enc_box_lay.setSpacing(4)
+
+        self._enc_group = QButtonGroup(enc_box)
+        self._enc_group.setExclusive(True)
+        self._enc_btns: dict = {}
+        for key, label in [("raw",       "Raw Features"),
+                            ("pca_kmeans", "PCA + KMeans"),
+                            ("auto",      "Auto Select")]:
+            rb = QRadioButton(label)
+            rb.setFont(QFont("Helvetica", 9))
+            self._enc_group.addButton(rb)
+            enc_box_lay.addWidget(rb)
+            self._enc_btns[key] = rb
+        self._enc_btns["raw"].setChecked(True)
+        l.addWidget(enc_box)
+
+        # ── Augmentation & options ─────────────────────────────────────────────
+        self._rotate_aug_cb = QCheckBox("Rotation Augmentation")
+        self._rotate_aug_cb.setFont(QFont("Helvetica", 9))
+        self._rotate_aug_cb.setToolTip(
+            "Generate 36 rotated versions (0–350°, step 10°) of each labelled\n"
+            "sample before matching.  Improves classification of molecules at\n"
+            "arbitrary orientations.  Slightly slower to run.")
+        l.addWidget(self._rotate_aug_cb)
+
+        rot_hint = QLabel("36 rotations × 10° — orientation-invariant matching.")
+        rot_hint.setFont(QFont("Helvetica", 8))
+        rot_hint.setStyleSheet("color: #888;")
+        rot_hint.setWordWrap(True)
+        l.addWidget(rot_hint)
+
+        self._sharpness_cb = QCheckBox("Sharpness-sensitive")
+        self._sharpness_cb.setFont(QFont("Helvetica", 9))
+        self._sharpness_cb.setToolTip(
+            "Adds Laplacian-variance (sharpness) as an extra feature.\n"
+            "Use when one class is fuzzy and the other is sharp.")
+        l.addWidget(self._sharpness_cb)
 
         l.addWidget(_sep())
 
@@ -1368,44 +1536,40 @@ class FeaturesSidebar(QWidget):
         undo_btn.clicked.connect(self.undo_label_requested.emit)
         l.addWidget(undo_btn)
 
-        l.addWidget(_sep())
-
-        self._sharpness_cb = QCheckBox("Sharpness-sensitive")
-        self._sharpness_cb.setFont(QFont("Helvetica", 9))
-        self._sharpness_cb.setToolTip(
-            "Enable when two molecule types look the same in shape but one is\n"
-            "fuzzy/blurred and the other is sharp. Adds the Laplacian variance\n"
-            "of each particle as an extra classification feature.")
-        l.addWidget(self._sharpness_cb)
-
-        sharp_hint = QLabel("Use when one class is fuzzy, the other is sharp.")
-        sharp_hint.setFont(QFont("Helvetica", 8))
-        sharp_hint.setStyleSheet("color: #888;")
-        sharp_hint.setWordWrap(True)
-        l.addWidget(sharp_hint)
-
         return w
 
-    def _build_lattice_tab(self) -> QWidget:
-        w = QWidget()
-        l = QVBoxLayout(w)
-        l.setContentsMargins(0, 4, 0, 4)
-        l.setSpacing(4)
+    # ── Phase navigation ──────────────────────────────────────────────────────
 
-        info = QLabel(
-            "Extracts primitive lattice vectors via SIFT keypoint clustering.\n"
-            "Best on atomically-resolved images with a clear repeating motif.")
-        info.setFont(QFont("Helvetica", 9))
-        info.setWordWrap(True)
-        l.addWidget(info)
-        return w
+    def _on_back_to_phase1(self) -> None:
+        """Return to Phase 1 (Segmentation)."""
+        self._phase_stack.setCurrentIndex(0)
 
-    def _select_mode(self, key: str):
+    def set_segment_count(self, n: int) -> None:
+        """Called after segmentation completes — shows count and switches to Phase 2."""
+        self._segment_count_lbl.setText(
+            f"{n} particle{'s' if n != 1 else ''} found.")
+        self._phase_stack.setCurrentIndex(1)
+        self._update_run_btn_label()
+
+    def _update_run_btn_label(self) -> None:
+        mode = self._current_mode()
+        labels = {
+            "particles": "▶ Run (Particles)",
+            "template":  "▶ Run (Template)",
+            "lattice":   "▶ Run (Lattice)",
+            "classify":  "▶ Start Classification",
+        }
+        self._run_btn.setText(labels.get(mode, "▶ Run"))
+
+    # ── Mode selection ─────────────────────────────────────────────────────────
+
+    def _select_mode(self, key: str) -> None:
         for k, b in self._mode_btns.items():
             b.setChecked(k == key)
         idx = {"particles": 0, "template": 1, "lattice": 2, "classify": 3}[key]
         self._mode_stack.setCurrentIndex(idx)
         self.mode_changed.emit(key)
+        self._update_run_btn_label()
 
     def _current_mode(self) -> str:
         for k, b in self._mode_btns.items():
@@ -1416,19 +1580,50 @@ class FeaturesSidebar(QWidget):
     def current_mode(self) -> str:
         return self._current_mode()
 
+    # ── Slider value display handlers ─────────────────────────────────────────
+
+    def _on_thr_slider_changed(self, value: int) -> None:
+        self._thr_val_lbl.setText(str(value))
+
+    def _on_min_area_slider_changed(self, value: int) -> None:
+        pct = value * 0.001
+        self._min_area_val_lbl.setText(f"{pct:.3f}%")
+
+    def _on_max_area_slider_changed(self, value: int) -> None:
+        if value == 0:
+            self._max_area_val_lbl.setText("off")
+        else:
+            pct = value * 0.001
+            self._max_area_val_lbl.setText(f"{pct:.3f}%")
+
+    # ── Classify threshold method ─────────────────────────────────────────────
+
+    def _on_cls_thr_mode_changed(self, key: str) -> None:
+        """Enable the manual-value spinbox only when 'Manual' is selected."""
+        self._cls_manual_spin.setEnabled(key == "manual")
+
+    # ── Public parameter getters ──────────────────────────────────────────────
+
     def plane_index(self) -> int:
         return int(self._plane_cb.currentIndex())
 
     def particles_params(self) -> dict:
+        """Return segmentation parameters.
+
+        Area values are returned as percentage of image area (0–100 scale, e.g.
+        0.001 means 0.001%).  Callers must convert to nm² using image shape and
+        pixel sizes::
+
+            pixel_area_nm2 = Nx * Ny * px_x_m * px_y_m * 1e18
+            min_nm2 = (params["min_area_pct"] / 100.0) * pixel_area_nm2
+        """
         return {
-            "threshold":       self._thr_cb.currentText(),
-            "manual_value":    self._manual_spin.value(),
+            "threshold":       "manual",
+            "manual_value":    float(self._thr_slider.value()),
             "invert":          self._invert_cb.isChecked(),
-            "min_area_nm2":    self._min_area_spin.value(),
-            "max_area_nm2":    None if self._max_area_spin.value() <= 0
-                               else self._max_area_spin.value(),
-            "size_sigma_clip": None if self._sigma_spin.value() <= 0
-                               else self._sigma_spin.value(),
+            "min_area_pct":    self._min_area_slider.value() * 0.001,  # 0–0.100 %
+            "max_area_pct":    self._max_area_slider.value() * 0.001,  # 0–1.000 %
+            "size_sigma_clip": None,
         }
 
     def template_params(self) -> dict:
@@ -1439,40 +1634,44 @@ class FeaturesSidebar(QWidget):
         }
 
     def classify_segmentation_params(self) -> dict:
-        """Return segmentation params for the classify workflow.
-
-        Now proxies to :meth:`particles_params` — Step 1 controls are shared
-        between the Particles and Classify analysis modes.
-        """
+        """Segmentation params for the classify workflow — proxies particles_params."""
         return self.particles_params()
 
     def classify_run_params(self) -> dict:
-        """Extra parameters forwarded to classify_particles() at run time."""
+        """Classification parameters forwarded to classify_particles()."""
+        thr_method = next(
+            (k for k, rb in self._cls_thr_btns.items() if rb.isChecked()), "gmm"
+        )
+        encoder = next(
+            (k for k, rb in self._enc_btns.items() if rb.isChecked()), "raw"
+        )
+        if encoder == "auto":
+            encoder = "raw"   # CLIP unavailable; auto → raw features
         return {
-            "use_sharpness": self._sharpness_cb.isChecked(),
+            "use_sharpness":    self._sharpness_cb.isChecked(),
+            "threshold_method": thr_method,
+            "manual_threshold": self._cls_manual_spin.value(),
+            "encoder":          encoder,
+            "rotate_augment":   self._rotate_aug_cb.isChecked(),
         }
 
+    # ── Mask helpers ──────────────────────────────────────────────────────────
+
     def mask_color_rgb(self) -> tuple[int, int, int]:
-        """Return the currently selected mask highlight colour as (R, G, B)."""
         name = self._mask_color_cb.currentText()
         return self.MASK_COLORS.get(name, (220, 50, 50))
 
-    def _on_mask_color_changed(self, name: str) -> None:
-        r, g, b = self.MASK_COLORS.get(name, (220, 50, 50))
-        self.mask_color_changed.emit(r, g, b)
-
-    def _on_thr_mode_changed(self, text: str) -> None:
-        """Enable the manual-value spinbox only when 'manual' threshold is selected."""
-        self._manual_spin.setEnabled(text == "manual")
-
     def brush_size(self) -> int:
-        """Current brush radius in image pixels."""
         return int(self._brush_spin.value())
+
+    def set_status(self, text: str) -> None:
+        self._status_lbl.setText(text)
 
     def _on_mask_btn_toggled(self, checked: bool) -> None:
         self._mask_btn.setText(
             "✋  Stop drawing" if checked else "✏  Draw exclusion mask")
         self.mask_paint_toggled.emit(checked)
 
-    def set_status(self, text: str):
-        self._status_lbl.setText(text)
+    def _on_mask_color_changed(self, name: str) -> None:
+        r, g, b = self.MASK_COLORS.get(name, (220, 50, 50))
+        self.mask_color_changed.emit(r, g, b)
