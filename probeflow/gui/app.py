@@ -39,8 +39,8 @@ from probeflow.gui.navbar import Navbar
 from probeflow.gui.features import (
     FeaturesPanel,
     FeaturesSidebar,
-    _FeaturesWorker,
 )
+from probeflow.gui.features.controller import FeatureCountingController
 from probeflow.gui.features.tv import (
     TVPanel,
     TVSidebar,
@@ -245,18 +245,11 @@ class ProbeFlowWindow(QMainWindow):
         self._splitter.setStretchFactor(1, 0)
         self._apply_default_splitter_sizes()
 
-        # Features tab plumbing.  Review gui-arch #2 (fixed 2026-05-28):
-        # each spawned _FeaturesWorker now owns its own signals; we
-        # connect ``worker.signals.finished`` at spawn time so concurrent
-        # runs cannot cross-talk via a shared signal instance.
-        self._features_pool            = QThreadPool.globalInstance()
-        self._features_preview_gen     = 0   # stale-result guard for live preview
-
-        # Dedicated 1-thread pool for live slider previews (see window.py for
-        # full rationale). Keeps stale preview workers from piling up.
+        # Features tab plumbing — worker dispatch is owned by the controller.
+        self._features_pool = QThreadPool.globalInstance()
+        # Dedicated 1-thread pool for live slider previews.
         self._features_preview_pool = QThreadPool()
         self._features_preview_pool.setMaxThreadCount(1)
-        self._pending_features_preview_worker = None  # type: _FeaturesWorker | None
 
         # Floating Feature Counting window (lazy-created on first open)
         self._fc_window = None
@@ -300,28 +293,14 @@ class ProbeFlowWindow(QMainWindow):
             lambda: self._switch_mode("browse"))
         self._features_sidebar.load_from_browse_requested.connect(
             self._on_features_load_from_browse)
-        self._features_sidebar.run_requested.connect(self._on_features_run)
-        self._features_sidebar.export_requested.connect(self._on_features_export)
-        self._features_sidebar.crop_template_requested.connect(
-            self._features_panel.begin_template_crop)
-        self._features_sidebar.classify_params_changed.connect(
-            self._on_classify_params_changed)
-        self._features_sidebar.segment_requested.connect(
-            self._on_features_segment_requested)
-        self._features_sidebar.advance_phase2_requested.connect(
-            self._on_features_advance_phase2)
-        self._features_sidebar.preview_requested.connect(
-            self._on_features_preview)
-        self._features_sidebar.undo_label_requested.connect(
-            self._features_panel.undo_last_label)
-        self._features_sidebar.mode_changed.connect(
-            self._on_features_mode_changed)
-        self._features_sidebar.mask_paint_toggled.connect(
-            self._on_features_mask_paint_toggled)
-        self._features_sidebar.mask_clear_requested.connect(
-            self._features_panel.clear_exclusion_mask)
-        self._features_sidebar.mask_color_changed.connect(
-            self._features_panel.set_mask_color)
+        # All other sidebar signals are wired by the controller.
+        self._features_ctrl = FeatureCountingController(
+            self._features_panel, self._features_sidebar,
+            self._features_pool,
+            status_cb=lambda msg: self._status_bar.showMessage(msg),
+            preview_pool=self._features_preview_pool,
+            parent_widget=self,
+        )
 
         # Status bar
         self._status_bar = QStatusBar()
@@ -1061,339 +1040,6 @@ class ProbeFlowWindow(QMainWindow):
         self._features_panel.load_entry(entry, plane_idx, arr, px_m, px_x_m, px_y_m)
         self._features_sidebar.set_status(
             f"Loaded {entry.stem} (plane {plane_idx}, px = {px_m * 1e12:.1f} pm)")
-
-    def _on_features_mask_paint_toggled(self, painting: bool) -> None:
-        self._features_panel.set_mask_painting(
-            painting, self._features_sidebar.brush_size())
-        if painting:
-            self._features_sidebar.set_status(
-                "Mask mode — click or drag on the image to paint exclusion zones.")
-        else:
-            status = ("Mask active — excluded regions shown in colour."
-                      if self._features_panel.has_exclusion_mask()
-                      else "Mask drawing stopped.")
-            self._features_sidebar.set_status(status)
-
-    def _on_features_run(self, mode: str):
-        arr = self._features_panel.get_analysis_array()   # applies exclusion mask
-        if arr is None:
-            self._features_sidebar.set_status("Load a scan first.")
-            return
-        px_m = self._features_panel.current_pixel_size()
-        px_x_m, px_y_m = self._features_panel.current_pixel_sizes()
-        if px_m <= 0:
-            self._features_sidebar.set_status("Scan has no physical pixel size.")
-            return
-
-        if mode == "particles":
-            params = self._features_sidebar.particles_params()
-            min_pct = params.pop("min_area_pct", 0.001)
-            max_pct = params.pop("max_area_pct", 0.0)
-            params["min_area_nm2"] = self._features_pct_to_nm2(
-                min_pct, arr, px_x_m, px_y_m)
-            params["max_area_nm2"] = (
-                self._features_pct_to_nm2(max_pct, arr, px_x_m, px_y_m)
-                if max_pct > 0 else None
-            )
-        elif mode == "template":
-            tmpl = self._features_panel.get_template()
-            if tmpl is None:
-                self._features_sidebar.set_status(
-                    "Crop a template first (Template mode → 'Crop template…').")
-                return
-            params = self._features_sidebar.template_params()
-            params["template"] = tmpl
-        elif mode == "lattice":
-            params = {}
-        elif mode == "classify":
-            particles = self._features_panel.get_particles()
-            if not particles:
-                self._features_sidebar.set_status(
-                    "Press '① Segment' first to find particles.")
-                return
-            if not self._features_panel.has_sample_labels():
-                self._features_sidebar.set_status(
-                    "Click particles on the image to label at least one example.")
-                return
-            idx_to_p = {p.index: p for p in particles}
-            samples = [
-                (v["name"], idx_to_p[k])
-                for k, v in self._features_panel._sample_labels.items()
-                if k in idx_to_p
-            ]
-            run_p = self._features_sidebar.classify_run_params()
-            params = {
-                "particles":        particles,
-                "samples":          samples,
-                "use_sharpness":    run_p.get("use_sharpness",    False),
-                "threshold_method": run_p.get("threshold_method", "gmm"),
-                "manual_threshold": run_p.get("manual_threshold", 0.5),
-                "encoder":          run_p.get("encoder",          "raw"),
-                "rotate_augment":   run_p.get("rotate_augment",   False),
-            }
-        else:
-            self._features_sidebar.set_status(f"Unknown mode {mode!r}")
-            return
-
-        self._features_sidebar.set_status(f"Running {mode}…")
-        worker = _FeaturesWorker(
-            mode, arr, px_m, px_x_m, px_y_m, params,
-        )
-        worker.signals.finished.connect(self._on_features_finished)
-        self._features_pool.start(worker)
-
-    def _on_features_finished(self, mode: str, result, error: str):
-        if error:
-            self._features_sidebar.set_status(f"{mode} failed: {error}")
-            self._status_bar.showMessage(f"{mode} failed: {error}")
-            return
-        if mode == "particles":
-            self._features_panel.set_particles(result)
-            # Advance sidebar to Phase 2 and show the particle count.
-            self._features_sidebar.set_segment_count(len(result))
-            current_mode = self._features_sidebar.current_mode()
-            if current_mode == "classify":
-                self._features_panel.set_mode("classify")
-                self._features_panel.set_sample_selection_armed(True)
-                self._features_sidebar.set_status(
-                    f"Found {len(result)} particle(s). "
-                    "Click any particle to label it, then press ▶ Run.")
-            else:
-                self._features_sidebar.set_status(f"Found {len(result)} particle(s).")
-            self._status_bar.showMessage(f"Segmentation: {len(result)} particle(s)")
-        elif mode == "template":
-            self._features_panel.set_detections(result)
-            self._features_sidebar.set_status(
-                f"Found {len(result)} match(es).")
-        elif mode == "lattice":
-            self._features_panel.set_lattice(result)
-            self._features_sidebar.set_status(
-                f"|a|={result.a_length_m * 1e9:.3f} nm  "
-                f"|b|={result.b_length_m * 1e9:.3f} nm  "
-                f"γ={result.gamma_deg:.1f}°")
-        elif mode == "classify":
-            _BIN = 15
-            class_angles: dict = {}
-            for c in result:
-                class_angles.setdefault(c.class_name, []).append(
-                    getattr(c, "particle_orientation_deg", 0.0))
-            total = len(result)
-            parts = []
-            for cls_name in sorted(class_angles):
-                angles = class_angles[cls_name]
-                if cls_name == "other":
-                    pct = 100.0 * len(angles) / total if total > 0 else 0.0
-                    parts.append(f"other: {len(angles)} ({pct:.0f}%)")
-                    continue
-                valid = np.array([a for a in angles if a == a], dtype=float)
-                if valid.size == 0:
-                    parts.append(f"{cls_name}: {len(angles)}")
-                    continue
-                bins = np.floor(valid / _BIN).astype(int)
-                for b in sorted(set(bins.tolist())):
-                    n_b = int((bins == b).sum())
-                    mean_a = float(valid[bins == b].mean())
-                    pct = 100.0 * n_b / total if total > 0 else 0.0
-                    parts.append(f"{cls_name}({mean_a:.0f}°): {n_b} ({pct:.0f}%)")
-            summary = "  |  ".join(parts)
-            self._features_panel.set_classifications(result)
-            self._features_sidebar.set_status(
-                f"Classified {total} particle(s) — {summary}")
-
-    def _features_segmentation_signature(self, params: dict) -> tuple:
-        return tuple(sorted(params.items()))
-
-    def _on_classify_params_changed(self) -> None:
-        self._features_panel.clear_sample_labels()
-        self._features_sidebar.set_status(
-            "Segmentation parameters changed — sample labels cleared.")
-
-    def _on_features_mode_changed(self, mode: str) -> None:
-        """Arm/disarm classify clicking when the analysis mode tab changes."""
-        self._features_panel.set_mode(mode)
-        if mode == "classify" and self._features_panel.get_particles():
-            self._features_panel.set_sample_selection_armed(True)
-            self._features_sidebar.set_status(
-                "Click any particle on the image to label it, then press Run.")
-        elif mode != "classify":
-            self._features_panel.set_sample_selection_armed(False)
-
-    @staticmethod
-    def _features_pct_to_nm2(pct: float, arr,
-                              px_x_m: float, px_y_m: float) -> float:
-        """Convert area as % of image (e.g. 0.001 = 0.001%) to nm²."""
-        Ny, Nx = arr.shape
-        return (pct / 100.0) * float(Nx) * float(Ny) * px_x_m * px_y_m * 1e18
-
-    # ── Live preview (slider drag) ────────────────────────────────────────────
-
-    def _on_features_preview(self) -> None:
-        """Live preview — runs segmentation silently while sliders are dragged.
-
-        Mirrors _on_features_segment_requested but does NOT advance the sidebar
-        to Phase 2 and does NOT update the particle-count label.
-
-        Performance strategy: step-slice the array to ≤512 px on its longest
-        axis (preserves physical nm² coordinates), use a dedicated 1-thread pool,
-        and cancel the pending-but-not-started worker via ``tryTake`` on every
-        new tick so only the most recent slider position is ever processed.
-        """
-        arr = self._features_panel.get_analysis_array()
-        if arr is None:
-            return
-        px_m = self._features_panel.current_pixel_size()
-        px_x_m, px_y_m = self._features_panel.current_pixel_sizes()
-        if px_m <= 0:
-            return
-        params = self._features_sidebar.particles_params()
-        min_pct = params.pop("min_area_pct", 0.001)
-        max_pct = params.pop("max_area_pct", 0.0)
-        # Area thresholds are in nm² — scale-invariant, safe to reuse on
-        # the downscaled array (physical area is preserved by step-slicing).
-        params["min_area_nm2"] = self._features_pct_to_nm2(
-            min_pct, arr, px_x_m, px_y_m)
-        params["max_area_nm2"] = (
-            self._features_pct_to_nm2(max_pct, arr, px_x_m, px_y_m)
-            if max_pct > 0 else None
-        )
-
-        # Downscale: step-slice so the longest axis is ≤ 512 px.
-        step = max(1, max(arr.shape) // 512)
-        if step > 1:
-            arr_prev  = arr[::step, ::step]
-            px_x_prev = px_x_m * step
-            px_y_prev = px_y_m * step
-            px_prev   = float(np.sqrt(px_x_prev * px_y_prev))
-        else:
-            arr_prev, px_x_prev, px_y_prev, px_prev = arr, px_x_m, px_y_m, px_m
-
-        self._features_preview_gen += 1
-        gen = self._features_preview_gen
-
-        # Cancel the pending (not-yet-started) preview worker if present.
-        if self._pending_features_preview_worker is not None:
-            self._features_preview_pool.tryTake(self._pending_features_preview_worker)
-            self._pending_features_preview_worker = None
-
-        worker = _FeaturesWorker("particles", arr_prev, px_prev, px_x_prev, px_y_prev, params)
-        worker.signals.finished.connect(
-            lambda mode, result, error, g=gen:
-                self._on_features_preview_finished(mode, result, error, g))
-        self._pending_features_preview_worker = worker
-        self._features_preview_pool.start(worker)
-
-    def _on_features_preview_finished(self, mode: str, result, error: str,
-                                      gen: int) -> None:
-        """Handle live-preview result — discard if a newer preview has started."""
-        if gen != self._features_preview_gen or mode != "particles" or error:
-            return
-        self._features_panel.set_particles(result)
-        self._features_sidebar.set_status(
-            f"Preview: {len(result)} particle(s) — press 'Apply Settings' to confirm.")
-
-    def _on_features_segment_requested(self) -> None:
-        """'Apply Segmentation' — run full-res segmentation and show the overlay.
-
-        Stays in Phase 1 so the user can keep adjusting sliders before
-        committing.  Use 'Move to Phase 2 →' to advance.
-        """
-        arr = self._features_panel.get_analysis_array()
-        if arr is None:
-            self._features_sidebar.set_status("Load a scan first.")
-            return
-        px_m = self._features_panel.current_pixel_size()
-        px_x_m, px_y_m = self._features_panel.current_pixel_sizes()
-        if px_m <= 0:
-            self._features_sidebar.set_status("Scan has no physical pixel size.")
-            return
-        params = self._features_sidebar.particles_params()
-        min_pct = params.pop("min_area_pct", 0.001)
-        max_pct = params.pop("max_area_pct", 0.0)
-        params["min_area_nm2"] = self._features_pct_to_nm2(min_pct, arr, px_x_m, px_y_m)
-        params["max_area_nm2"] = (
-            self._features_pct_to_nm2(max_pct, arr, px_x_m, px_y_m)
-            if max_pct > 0 else None
-        )
-        self._features_sidebar.set_status("Segmenting…")
-        worker = _FeaturesWorker("particles", arr, px_m, px_x_m, px_y_m, params)
-        worker.signals.finished.connect(self._on_features_segment_only_finished)
-        self._features_pool.start(worker)
-
-    def _on_features_segment_only_finished(self, mode: str, result, error: str) -> None:
-        """Callback for 'Apply Segmentation' — updates overlay, stays in Phase 1."""
-        if error:
-            self._features_sidebar.set_status(f"Segmentation failed: {error}")
-            self._status_bar.showMessage(f"Segmentation failed: {error}")
-            return
-        self._features_panel.set_particles(result)
-        n = len(result)
-        self._features_sidebar.set_status(
-            f"Found {n} particle{'s' if n != 1 else ''} — "
-            "adjust sliders or click 'Move to Phase 2 →' to continue.")
-        self._status_bar.showMessage(f"Segmentation: {n} particle(s)")
-
-    def _on_features_advance_phase2(self) -> None:
-        """'Move to Phase 2 →' — advance using the particles already found.
-
-        Automatically stops mask-paint mode so that mouse clicks on the image
-        reach particles instead of drawing on the canvas.
-        """
-        particles = self._features_panel.get_particles()
-        if not particles:
-            self._features_sidebar.set_status(
-                "No particles found yet — click 'Apply Segmentation' first.")
-            return
-        self._features_sidebar.stop_mask_painting()   # pencil off in Phase 2
-        self._features_sidebar.set_segment_count(len(particles))
-        current_mode = self._features_sidebar.current_mode()
-        if current_mode == "classify":
-            self._features_panel.set_mode("classify")
-            self._features_panel.set_sample_selection_armed(True)
-            self._features_sidebar.set_status(
-                f"{len(particles)} particle(s). "
-                "Click any particle to label it, then press ▶ Run.")
-
-    def _on_features_export(self, mode: str):
-        if mode == "particles":
-            items = self._features_panel.get_particles()
-            kind  = "particles"
-            extra_meta = {"source": None}
-        elif mode == "template":
-            items = self._features_panel.get_detections()
-            kind  = "detections"
-            extra_meta = {"source": None}
-        elif mode == "lattice":
-            lat = self._features_panel.get_lattice()
-            items = [lat] if lat is not None else []
-            kind  = "lattice"
-            extra_meta = {"source": None}
-        elif mode == "classify":
-            items = self._features_panel.get_classifications()
-            kind  = "classifications"
-            extra_meta = {
-                "samples": self._features_panel.sample_label_rows(),
-                "classification": self._features_panel._classification_meta,
-            }
-        else:
-            return
-        entry = self._features_panel.current_entry()
-        if mode != "classify":
-            extra_meta["source"] = str(entry.path) if entry else None
-        if not items:
-            self._features_sidebar.set_status("Nothing to export — run an analysis first.")
-            return
-        suggested = (Path.home() / f"{entry.stem if entry else 'features'}_{kind}.json")
-        out_path, _ = QFileDialog.getSaveFileName(
-            self, f"Export {kind} JSON", str(suggested), "JSON (*.json)")
-        if not out_path:
-            return
-        try:
-            from probeflow.io.writers.json import write_json
-            write_json(out_path, items, kind=kind, extra_meta=extra_meta)
-            self._features_sidebar.set_status(f"Exported → {out_path}")
-            self._status_bar.showMessage(f"Exported {kind} → {out_path}")
-        except Exception as exc:
-            self._features_sidebar.set_status(f"Export failed: {exc}")
 
     # ── TV-denoise tab handlers ────────────────────────────────────────────────
     def _on_tv_load_from_browse(self):
