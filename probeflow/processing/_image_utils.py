@@ -43,8 +43,8 @@ def _nan_normalized_gaussian(arr: np.ndarray, sigma: float) -> np.ndarray:
     sigma = max(float(sigma), 0.0)
     values = np.where(finite, a, 0.0)
     weights = finite.astype(np.float64)
-    blurred_values = gaussian_filter(values, sigma=sigma, mode="reflect")
-    blurred_weights = gaussian_filter(weights, sigma=sigma, mode="reflect")
+    blurred_values = gaussian_filter(values, sigma=sigma, mode="constant", cval=0.0)
+    blurred_weights = gaussian_filter(weights, sigma=sigma, mode="constant", cval=0.0)
     out = np.full(a.shape, np.nan, dtype=np.float64)
     np.divide(
         blurred_values,

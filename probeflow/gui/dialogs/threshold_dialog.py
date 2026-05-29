@@ -24,6 +24,18 @@ from PySide6.QtWidgets import (
 )
 
 
+def _display_range_from_finite(finite: np.ndarray) -> tuple[float, float]:
+    if finite.size == 0:
+        return 0.0, 1.0
+    raw_min = float(finite.min())
+    raw_max = float(finite.max())
+    display_min = float(np.percentile(finite, 1.0))
+    display_max = float(np.percentile(finite, 99.0))
+    if display_min >= display_max:
+        return raw_min, raw_max
+    return display_min, display_max
+
+
 # ── Scientific-notation spinbox ───────────────────────────────────────────────
 
 class _SciSpinBox(QDoubleSpinBox):
@@ -145,9 +157,11 @@ class ThresholdDialog(QDialog):
             self._finite = finite
             self._vmin = float(finite.min())
             self._vmax = float(finite.max())
+            self._display_vmin, self._display_vmax = _display_range_from_finite(finite)
         else:
             self._finite = np.array([0.0, 1.0])
             self._vmin, self._vmax = 0.0, 1.0
+            self._display_vmin, self._display_vmax = 0.0, 1.0
 
         # Initial bounds: 1st/99th percentile (ImageJ "Auto" equivalent)
         lo_init = float(np.percentile(self._finite, 1.0))
@@ -302,9 +316,9 @@ class ThresholdDialog(QDialog):
         chosen bounds are overlaid with a semi-transparent highlight colour.
         """
         arr = self._arr
-        span = self._vmax - self._vmin
+        span = self._display_vmax - self._display_vmin
         if span > 0:
-            norm = np.clip((arr - self._vmin) / span, 0.0, 1.0)
+            norm = np.clip((arr - self._display_vmin) / span, 0.0, 1.0)
         else:
             norm = np.zeros_like(arr, dtype=np.float32)
 

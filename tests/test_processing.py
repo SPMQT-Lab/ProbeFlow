@@ -32,6 +32,8 @@ from probeflow.processing import (
     subtract_background,
 )
 from probeflow.processing.image import set_zero_point
+from probeflow.processing.geometry import threshold_image
+from probeflow.processing._image_utils import _nan_normalized_gaussian
 from probeflow.cli import main as cli_main
 
 
@@ -831,6 +833,26 @@ class TestGaussianHighPass:
     def test_invalid_sigma_raises(self):
         with pytest.raises(ValueError, match="sigma_px"):
             gaussian_high_pass(np.ones((8, 8)), sigma_px=float("nan"))
+
+    def test_nan_normalized_gaussian_does_not_reflect_boundary_signal(self):
+        arr = np.full((9, 9), np.nan)
+        arr[0, 4] = 10.0
+
+        out = _nan_normalized_gaussian(arr, sigma=1.0)
+
+        assert np.isnan(out[-1, 4])
+        assert out[0, 4] == pytest.approx(10.0)
+
+
+class TestThresholdImage:
+    def test_binarize_preserves_nan_mask(self):
+        arr = np.array([[0.0, 1.0, np.nan], [2.0, 3.0, 4.0]])
+
+        out = threshold_image(arr, lower=1.0, upper=3.0, mode="binarize")
+
+        np.testing.assert_array_equal(out[:, :2], np.array([[0.0, 1.0], [1.0, 1.0]]))
+        assert np.isnan(out[0, 2])
+        assert out[1, 2] == 0.0
 
 
 class TestFftSoftBorder:

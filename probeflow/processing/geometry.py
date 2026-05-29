@@ -106,7 +106,13 @@ def line_profile(
 
     if width_px <= 1.0:
         # ``map_coordinates`` takes (row, col) = (y, x).
-        z = map_coordinates(arr, np.vstack([ys, xs]), order=order, mode="reflect")
+        z = map_coordinates(
+            arr,
+            np.vstack([ys, xs]),
+            order=order,
+            mode="constant",
+            cval=np.nan,
+        )
     else:
         # Physical-space perpendicular mapped back to pixel coordinates.
         # Line direction in physical space: (dx_px*psx, dy_px*psy).
@@ -120,16 +126,24 @@ def line_profile(
             nx, ny = nx_un / perp_px_len, ny_un / perp_px_len
         else:
             nx, ny = -dy_px / px_len, dx_px / px_len
-        n_perp = int(round(width_px))
-        offsets = np.linspace(-(width_px - 1) / 2.0,
-                              (width_px - 1) / 2.0, n_perp)
-        accum = np.zeros(n_samples, dtype=np.float64)
+        n_perp = max(1, int(math.ceil(width_px)))
+        offsets = np.linspace(-(n_perp - 1) / 2.0,
+                              (n_perp - 1) / 2.0, n_perp)
+        samples = []
         for off in offsets:
             ys_o = ys + off * ny
             xs_o = xs + off * nx
-            accum += map_coordinates(arr, np.vstack([ys_o, xs_o]),
-                                     order=order, mode="reflect")
-        z = accum / n_perp
+            samples.append(
+                map_coordinates(
+                    arr,
+                    np.vstack([ys_o, xs_o]),
+                    order=order,
+                    mode="constant",
+                    cval=np.nan,
+                )
+            )
+        with np.errstate(invalid="ignore"):
+            z = np.nanmean(np.vstack(samples), axis=0)
 
     # Physical distance: scale x and y components by their respective pixel sizes.
     dx_m = dx_px * pixel_size_x_m
@@ -388,13 +402,8 @@ def affine_lattice_correction(
 
     Ny, Nx = arr.shape
     a = arr.astype(np.float64, copy=True)
-
-    # Replace NaN/inf with finite mean for interpolation; restore below
-    nan_mask = ~np.isfinite(a)
-    if nan_mask.any():
-        finite_vals = a[~nan_mask]
-        temp_fill = float(finite_vals.mean()) if finite_vals.size else 0.0
-        a[nan_mask] = temp_fill
+    finite_mask = np.isfinite(a)
+    values = np.where(finite_mask, a, 0.0)
 
     T_inv = np.linalg.inv(matrix)
 
@@ -434,17 +443,42 @@ def affine_lattice_correction(
     else:
         cval = 0.0
 
-    out = map_coordinates(
-        a,
-        np.vstack([row_src, col_src]),
-        order=order_map[interpolation],
+    coords = np.vstack([row_src, col_src])
+    order = order_map[interpolation]
+    out_values = map_coordinates(
+        values,
+        coords,
+        order=order,
         mode="constant",
-        cval=cval,
+        cval=0.0,
     ).reshape(Ny_out, Nx_out)
+    out_weights = map_coordinates(
+        finite_mask.astype(np.float64),
+        coords,
+        order=order,
+        mode="constant",
+        cval=0.0,
+    ).reshape(Ny_out, Nx_out)
+    out = np.full((Ny_out, Nx_out), np.nan, dtype=np.float64)
+    np.divide(
+        out_values,
+        out_weights,
+        out=out,
+        where=out_weights > 1e-12,
+    )
 
+    oob = (
+        (row_src < 0)
+        | (row_src > Ny - 1)
+        | (col_src < 0)
+        | (col_src > Nx - 1)
+    ).reshape(Ny_out, Nx_out)
     if fill_mode == "nan":
-        oob = (row_src < 0) | (row_src > Ny - 1) | (col_src < 0) | (col_src > Nx - 1)
-        out[oob.reshape(Ny_out, Nx_out)] = np.nan
+        out[oob] = np.nan
+    else:
+        out[oob] = cval
+    touched_nan = (~oob) & (out_weights < 0.999999)
+    out[touched_nan] = np.nan
 
     return out
 
@@ -695,7 +729,8 @@ def threshold_image(
     mode
         ``'clip'``: values outside ``[lower, upper]`` become NaN, preserving
         the original data range inside the band.
-        ``'binarize'``: pixels *inside* ``[lower, upper]`` become 1.0, outside 0.0.
+        ``'binarize'``: finite pixels inside ``[lower, upper]`` become 1.0,
+        finite pixels outside become 0.0, and non-finite pixels remain NaN.
     """
     if mode not in ("clip", "binarize"):
         raise ValueError(f"mode must be 'clip' or 'binarize', got {mode!r}")
@@ -707,12 +742,14 @@ def threshold_image(
         if upper is not None:
             a[finite & (a > upper)] = np.nan
     else:  # binarize
-        mask = np.ones(a.shape, dtype=bool)
+        finite = np.isfinite(a)
+        mask = finite.copy()
         if lower is not None:
             mask &= a >= lower
         if upper is not None:
             mask &= a <= upper
         a = mask.astype(np.float64)
+        a[~finite] = np.nan
     return a
 
 

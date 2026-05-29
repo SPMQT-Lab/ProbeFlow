@@ -57,3 +57,37 @@ def test_rejects_zero_length():
     except ValueError:
         return
     raise AssertionError("expected ValueError for zero-length segment")
+
+
+def test_border_samples_outside_image_as_nan():
+    arr = np.arange(9, dtype=np.float64).reshape(3, 3)
+
+    _s, z = line_profile(
+        arr,
+        (-1, 1),
+        (2, 1),
+        pixel_size_x_m=1e-10,
+        pixel_size_y_m=1e-10,
+        n_samples=4,
+        interp="nearest",
+    )
+
+    assert np.isnan(z[0])
+    np.testing.assert_allclose(z[1:], arr[1, :])
+
+
+def test_swath_width_uses_stable_ceil_sampling_at_border():
+    arr = np.tile(np.arange(4, dtype=np.float64)[:, None] * 10.0, (1, 5))
+
+    _s, z = line_profile(
+        arr,
+        (0, 0),
+        (4, 0),
+        pixel_size_x_m=1e-10,
+        pixel_size_y_m=1e-10,
+        width_px=2.5,
+        n_samples=5,
+        interp="nearest",
+    )
+
+    np.testing.assert_allclose(z, np.full(5, 5.0))

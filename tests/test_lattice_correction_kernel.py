@@ -181,6 +181,21 @@ class TestFillNan:
         out = affine_lattice_correction(arr, np.eye(2), expand_canvas=False, fill_mode="nan")
         assert np.isfinite(out).all()
 
+    def test_source_nan_is_preserved_instead_of_mean_filled(self):
+        arr = _ramp_image(7, 7)
+        arr[3, 3] = np.nan
+        matrix = np.array([[1.05, 0.0], [0.0, 1.0]])
+
+        out = affine_lattice_correction(
+            arr,
+            matrix,
+            expand_canvas=False,
+            interpolation="bilinear",
+            fill_mode="nan",
+        )
+
+        assert np.isnan(out[3, 3])
+
 
 # ── 6. fill mode zero ─────────────────────────────────────────────────────────
 
