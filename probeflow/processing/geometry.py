@@ -319,6 +319,8 @@ def linear_undistort(
         raise ValueError("scale_y must be > 0")
     a = arr.astype(np.float64, copy=True)
     nan_mask = ~np.isfinite(a)
+    if nan_mask.all():
+        return a
     if nan_mask.any():
         a[nan_mask] = float(np.nanmean(a))
     Ny, Nx = a.shape

@@ -255,6 +255,8 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
     deferred_quantize_specs: list[dict] = []
 
     for op_spec in gui_state.get("geometric_ops") or []:
+        if op_spec is None:
+            continue
         try:
             if isinstance(op_spec, str):
                 op_name = op_spec

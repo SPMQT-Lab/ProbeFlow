@@ -248,10 +248,10 @@ def gaussian_smooth(arr: np.ndarray, sigma_px: float = 1.0) -> np.ndarray:
     nan_mask = ~np.isfinite(arr)
     if nan_mask.all():
         return arr
+    if not nan_mask.any():
+        return gaussian_filter(arr, sigma=sigma_px, mode="reflect")
     smoothed = _nan_normalized_gaussian(arr, sigma_px)
-    if nan_mask.any():
-        smoothed[nan_mask] = np.nan
-
+    smoothed[nan_mask] = np.nan
     return smoothed
 
 
