@@ -157,8 +157,9 @@ def test_fft_lattice_panel_embeds_in_grid_tab_and_clear_removes_overlay(qapp):
         assert panel is not None
         assert dlg._fft_lattice_dock is None
         assert dlg._clear_grid_btn.isEnabled()
-        assert dlg._tab_widget.currentIndex() == dlg._grid_tab_index
-        assert dlg._advanced_grid_grp.isChecked()
+        # Grid tab is at index 1; opening a grid switches to it
+        assert dlg._tab_widget.currentIndex() == 1
+        assert dlg._grid_tab_index == 1
 
         app = QApplication.instance()
         assert app is not None
@@ -181,7 +182,8 @@ def test_fft_lattice_panel_embeds_in_grid_tab_and_clear_removes_overlay(qapp):
         qapp.processEvents()
 
 
-def test_correction_tab_defaults_to_manual_grid_workflow(qapp):
+def test_tab_layout_and_content(qapp):
+    """Verify tab order and that key controls live in the expected tabs."""
     import numpy as np
     from PySide6.QtWidgets import QCheckBox, QGroupBox, QPushButton
 
@@ -190,16 +192,36 @@ def test_correction_tab_defaults_to_manual_grid_workflow(qapp):
         dlg.show()
         qapp.processEvents()
 
-        correction_tab = dlg._tab_widget.widget(0)
-        button_texts = {btn.text() for btn in correction_tab.findChildren(QPushButton)}
-        checkbox_texts = {cb.text() for cb in correction_tab.findChildren(QCheckBox)}
-        group_titles = {grp.title() for grp in correction_tab.findChildren(QGroupBox)}
+        # Tab order: Inspect(0), Grid(1), Correction(2), Expert(3)
+        assert dlg._tab_widget.tabText(0) == "Inspect"
+        assert dlg._tab_widget.tabText(1) == "Grid"
+        assert dlg._tab_widget.tabText(2) == "Correction"
+        assert dlg._tab_widget.tabText(3) == "⚙ Expert"
 
-        assert "Create/Edit reciprocal grid" in button_texts
-        assert "Preview corrected image" in button_texts
-        assert {"1. Known structure", "2. Fit reciprocal grid", "3. Undistort image"} <= group_titles
-        assert "Detect peaks" not in button_texts
-        assert "Pick peaks" not in checkbox_texts
+        # Inspect tab is active on open
+        assert dlg._tab_widget.currentIndex() == 0
+
+        # Grid tab contains the Draw Grid button and Known structure group
+        grid_tab = dlg._tab_widget.widget(1)
+        grid_btn_texts = {btn.text() for btn in grid_tab.findChildren(QPushButton)}
+        grid_group_titles = {grp.title() for grp in grid_tab.findChildren(QGroupBox)}
+        assert "Draw Grid" in grid_btn_texts
+        assert "Clear Grid" in grid_btn_texts
+        assert "Known structure" in grid_group_titles
+        assert "Compare with known structure" in grid_group_titles
+
+        # Correction tab: correction label + preview + apply buttons
+        corr_tab = dlg._tab_widget.widget(2)
+        corr_btn_texts = {btn.text() for btn in corr_tab.findChildren(QPushButton)}
+        assert "Preview corrected image" in corr_btn_texts
+        assert "Apply correction" in corr_btn_texts
+
+        # Expert tab: no grid panel section, has scanner calibration
+        expert_tab = dlg._tab_widget.widget(3)
+        expert_btn_texts = {btn.text() for btn in expert_tab.findChildren(QPushButton)}
+        expert_cb_texts = {cb.text() for cb in expert_tab.findChildren(QCheckBox)}
+        assert "Detect peaks" in expert_btn_texts
+        assert "Pick peaks" in expert_cb_texts
     finally:
         dlg.close()
         dlg.deleteLater()

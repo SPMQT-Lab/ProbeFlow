@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import math
+from dataclasses import replace
+
 import numpy as np
 
 from probeflow.analysis.lattice_grid import (
@@ -87,7 +90,18 @@ def open_fft_tool(
         qx_axis=qx_axis, qy_axis=qy_axis,
         image_width=Nx, image_height=Ny,
     )
-    grid = LatticeGrid.make_square(cx_px, cy_px, size_px, space="reciprocal")
+    _sq = LatticeGrid.make_square(cx_px, cy_px, size_px, space="reciprocal")
+    _a_px = _sq.a_px
+    _a_len = math.hypot(_a_px[0], _a_px[1])
+    _a_ang = math.atan2(_a_px[1], _a_px[0])
+    grid = replace(
+        _sq,
+        kind="hexagonal",
+        b_px=(
+            _a_len * math.cos(_a_ang + math.radians(60)),
+            _a_len * math.sin(_a_ang + math.radians(60)),
+        ),
+    )
 
     overlay = FFTLatticeOverlay(ax, canvas, qx_axis, qy_axis, Nx, Ny)
     overlay.set_grid(grid)

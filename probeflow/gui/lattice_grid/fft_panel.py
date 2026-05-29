@@ -72,7 +72,6 @@ class FFTLatticePanel(QWidget):
 
         self._lock_cb = QCheckBox("Lock lattice constraint")
         self._lock_cb.setFont(QFont("Helvetica", 9))
-        self._lock_cb.setChecked(True)
         self._lock_cb.toggled.connect(self._on_locked_changed)
         lay.addWidget(self._lock_cb)
 
@@ -183,6 +182,9 @@ class FFTLatticePanel(QWidget):
         fft_note.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         lay.addWidget(fft_note)
         lay.addStretch(1)
+
+        # Default: start unlocked so the user can freely adjust both vectors.
+        self._overlay.set_locked(False)
 
     def _on_grid_changed(self, grid: LatticeGrid) -> None:
         self.sync_from_model()

@@ -39,6 +39,9 @@ from probeflow.gui.lattice_correction_ui import (
     upsert_structure,
 )
 from probeflow.gui.no_wheel import install_no_wheel_spinboxes
+from probeflow.gui.viewer.display_range import DisplayRangeController
+from probeflow.gui.viewer.display_sliders import DisplaySliderController
+from probeflow.gui.viewer.histogram import HistogramPanel
 
 
 class FFTViewerDialog(QDialog):
@@ -90,11 +93,7 @@ class FFTViewerDialog(QDialog):
         self._pan_anchor: tuple | None = None
         self._fft_lattice_drag_active: bool = False
         self._disp_range: tuple = (0.0, 1.0)
-        self._vmin_frac: float = 0.0
-        self._vmax_frac: float = 1.0
-        self._hist_drag: str | None = None
-        self._vmin_line = None
-        self._vmax_line = None
+        self._last_fft_disp: np.ndarray | None = None
         self._fft_im = None
         self._fft_lattice_dock = None
         self._fft_lattice_panel = None
@@ -104,7 +103,29 @@ class FFTViewerDialog(QDialog):
         self._bragg_artists: list = []
         self._calib_picks: list = []   # (qx_nm, qy_nm) in nm⁻¹
 
+        self._fft_drs = DisplayRangeController(clip_low=0.0, clip_high=100.0, parent=self)
+
         self._build()
+
+        self._display_slider_ctrl = DisplaySliderController(
+            self._fft_drs,
+            self._hist_panel,
+            lambda: self._last_fft_disp,
+            lambda: (1.0, "", "Intensity"),
+        )
+        self._fft_drs.rangeChanged.connect(self._apply_intensity_from_drs)
+        self._hist_panel.minReleased.connect(
+            lambda v: self._display_slider_ctrl.on_min_changed(v))
+        self._hist_panel.maxReleased.connect(
+            lambda v: self._display_slider_ctrl.on_max_changed(v))
+        self._hist_panel.brightnessReleased.connect(
+            lambda v: self._display_slider_ctrl.on_brightness_changed(v))
+        self._hist_panel.contrastReleased.connect(
+            lambda v: self._display_slider_ctrl.on_contrast_changed(v))
+        self._hist_panel.rangeReleased.connect(self._on_fft_hist_range_released)
+        self._hist_panel.resetRequested.connect(self._reset_intensity)
+        self._hist_panel.autoClipRequested.connect(self._reset_intensity)
+
         self._recompute_fft()
         self._update_info_panel()
         self._redraw()
@@ -208,20 +229,10 @@ class FFTViewerDialog(QDialog):
         grid_btn.setFont(QFont("Helvetica", 9))
         grid_btn.setFixedHeight(24)
         grid_btn.setMinimumWidth(68)
-        grid_btn.setToolTip("Show reciprocal-space lattice grid controls")
+        grid_btn.setToolTip("Switch to the Grid tab (creates a lattice overlay if none exists)")
         grid_btn.clicked.connect(lambda _checked=False: self._on_open_fft_lattice(select_advanced=True))
         tb.addWidget(grid_btn)
         self._grid_lattice_btn = grid_btn
-
-        clear_btn = QPushButton("Clear Grid")
-        clear_btn.setFont(QFont("Helvetica", 9))
-        clear_btn.setFixedHeight(24)
-        clear_btn.setMinimumWidth(80)
-        clear_btn.setToolTip("Remove the reciprocal-space lattice overlay")
-        clear_btn.setEnabled(False)
-        clear_btn.clicked.connect(self._on_clear_fft_lattice)
-        tb.addWidget(clear_btn)
-        self._clear_grid_btn = clear_btn
 
         return tb
 
@@ -279,13 +290,89 @@ class FFTViewerDialog(QDialog):
         self._tab_widget.setMinimumHeight(300)
         self._tab_widget.setFont(QFont("Helvetica", 9))
 
-        # ── Guided Correction tab ────────────────────────────────────────────
-        corr_tab = QWidget()
-        corr_lay = QVBoxLayout(corr_tab)
-        corr_lay.setSpacing(4)
-        corr_lay.setContentsMargins(6, 5, 6, 4)
+        # ── Tab 0: Inspect ───────────────────────────────────────────────────
+        inspect_tab = QWidget()
+        inspect_lay = QHBoxLayout(inspect_tab)
+        inspect_lay.setContentsMargins(6, 6, 6, 6)
+        inspect_lay.setSpacing(8)
 
-        ref_grp = QGroupBox("1. Known structure")
+        intensity_grp = QGroupBox("Intensity")
+        intensity_grp.setFont(QFont("Helvetica", 9))
+        int_lay = QVBoxLayout(intensity_grp)
+        int_lay.setContentsMargins(6, 6, 6, 4)
+        self._hist_panel = HistogramPanel(parent=intensity_grp)
+        int_lay.addWidget(self._hist_panel, 1)
+        inspect_lay.addWidget(intensity_grp, 1)
+
+        radial_grp = QGroupBox("Radial profile")
+        radial_grp.setFont(QFont("Helvetica", 9))
+        rad_lay = QVBoxLayout(radial_grp)
+        self._radial_fig = Figure(figsize=(1, 1), dpi=90)
+        self._radial_fig.patch.set_facecolor(bg)
+        self._radial_canvas = FigureCanvasQTAgg(self._radial_fig)
+        self._radial_ax = self._radial_fig.add_axes([0.11, 0.24, 0.85, 0.66])
+        self._radial_ax.set_facecolor(bg)
+        rad_lay.addWidget(self._radial_canvas, 1)
+        inspect_lay.addWidget(radial_grp, 1)
+        self._tab_widget.addTab(inspect_tab, "Inspect")
+
+        # ── Tab 1: Grid ──────────────────────────────────────────────────────
+        grid_scroll = QScrollArea()
+        grid_scroll.setWidgetResizable(True)
+        grid_scroll.setFrameShape(QFrame.NoFrame)
+        grid_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        grid_inner = QWidget()
+        grid_outer_lay = QVBoxLayout(grid_inner)
+        grid_outer_lay.setContentsMargins(8, 8, 8, 6)
+        grid_outer_lay.setSpacing(6)
+
+        # Measurement summary — always visible at the top
+        self._grid_measure_lbl = QLabel("No grid — click Draw Grid to start")
+        self._grid_measure_lbl.setFont(QFont("Courier", 9))
+        self._grid_measure_lbl.setWordWrap(True)
+        self._grid_measure_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        grid_outer_lay.addWidget(self._grid_measure_lbl)
+
+        # Grid extent control row (lives here, used by panel)
+        extent_row = QHBoxLayout()
+        extent_row.addWidget(QLabel("Grid orders ±:"))
+        self._grid_extent_spin = QSpinBox()
+        self._grid_extent_spin.setRange(1, 200)
+        self._grid_extent_spin.setValue(12)
+        self._grid_extent_spin.setFont(QFont("Helvetica", 9))
+        self._grid_extent_spin.setFixedHeight(24)
+        self._grid_extent_spin.setToolTip("How many reciprocal-lattice repeats to draw in each direction.")
+        self._grid_extent_spin.valueChanged.connect(self._on_grid_extent_changed)
+        extent_row.addWidget(self._grid_extent_spin)
+        extent_row.addStretch(1)
+        grid_outer_lay.addLayout(extent_row)
+
+        # Panel container: initially shows placeholder + Draw Grid button;
+        # replaced by FFTLatticePanel when a grid is created.
+        grid_panel_container = QWidget()
+        self._grid_tab_lay = QVBoxLayout(grid_panel_container)
+        self._grid_tab_lay.setContentsMargins(0, 0, 0, 0)
+        self._grid_placeholder_lbl = QLabel(
+            "Click Draw Grid to overlay a reciprocal lattice.\n"
+            "Drag the g₁/g₂ handles to align with Bragg peaks."
+        )
+        self._grid_placeholder_lbl.setFont(QFont("Helvetica", 9))
+        self._grid_placeholder_lbl.setAlignment(Qt.AlignCenter)
+        self._grid_placeholder_lbl.setWordWrap(True)
+        self._grid_draw_btn = QPushButton("Draw Grid")
+        self._grid_draw_btn.setFont(QFont("Helvetica", 9))
+        self._grid_draw_btn.setFixedHeight(26)
+        self._grid_draw_btn.setToolTip(
+            "Create a hexagonal reciprocal-lattice overlay on the FFT. "
+            "Drag the handles to align g₁/g₂ with Bragg peaks."
+        )
+        self._grid_draw_btn.clicked.connect(lambda: self._on_open_fft_lattice())
+        self._grid_tab_lay.addWidget(self._grid_placeholder_lbl)
+        self._grid_tab_lay.addWidget(self._grid_draw_btn)
+        grid_outer_lay.addWidget(grid_panel_container)
+
+        # Known structure section (moved here from Correction tab)
+        ref_grp = QGroupBox("Known structure")
         ref_grp.setFont(QFont("Helvetica", 9))
         ref_grp.setMinimumHeight(120)
         ref_grid = QGridLayout(ref_grp)
@@ -372,52 +459,43 @@ class FFTViewerDialog(QDialog):
         ref_grid.addWidget(self._bragg_radius_lbl, 3, 0, 1, 4)
         self._refresh_structure_combo(self._active_known_structure.name)
         self._apply_known_structure_to_fft(self._active_known_structure, refresh=False)
-        corr_lay.addWidget(ref_grp)
+        grid_outer_lay.addWidget(ref_grp)
 
-        meas_grp = QGroupBox("2. Fit reciprocal grid")
-        meas_grp.setFont(QFont("Helvetica", 9))
-        meas_grp.setMinimumHeight(86)
-        meas_lay = QVBoxLayout(meas_grp)
-        meas_lay.setContentsMargins(8, 7, 8, 4)
-        meas_lay.setSpacing(3)
-        meas_btn_row = QHBoxLayout()
-        self._edit_grid_btn = QPushButton("Create/Edit reciprocal grid")
-        self._edit_grid_btn.setFont(QFont("Helvetica", 9))
-        self._edit_grid_btn.setFixedHeight(24)
-        self._edit_grid_btn.setToolTip("Create/select the FFT grid overlay and adjust g1/g2 handles on the FFT.")
-        self._edit_grid_btn.clicked.connect(self._on_edit_reciprocal_grid)
-        meas_btn_row.addWidget(self._edit_grid_btn)
-        meas_btn_row.addSpacing(8)
-        meas_btn_row.addWidget(QLabel("Grid orders ±:"))
-        self._grid_extent_spin = QSpinBox()
-        self._grid_extent_spin.setRange(1, 200)
-        self._grid_extent_spin.setValue(12)
-        self._grid_extent_spin.setFont(QFont("Helvetica", 9))
-        self._grid_extent_spin.setFixedHeight(24)
-        self._grid_extent_spin.setToolTip("How many reciprocal-lattice repeats to draw in each direction.")
-        self._grid_extent_spin.valueChanged.connect(self._on_grid_extent_changed)
-        meas_btn_row.addWidget(self._grid_extent_spin)
-        meas_btn_row.addStretch(1)
-        meas_lay.addLayout(meas_btn_row)
-
-        self._fft_measured_lbl = QLabel("Create or edit a reciprocal grid to measure the direct lattice.")
+        # Compare section
+        compare_grp = QGroupBox("Compare with known structure")
+        compare_grp.setFont(QFont("Helvetica", 9))
+        compare_lay = QVBoxLayout(compare_grp)
+        compare_lay.setContentsMargins(8, 7, 8, 4)
+        self._fft_measured_lbl = QLabel(
+            "Draw a grid and select a known structure to see the comparison."
+        )
         self._fft_measured_lbl.setFont(QFont("Courier", 8))
         self._fft_measured_lbl.setWordWrap(True)
         self._fft_measured_lbl.setMinimumHeight(32)
-        self._fft_measured_lbl.setMaximumHeight(44)
+        self._fft_measured_lbl.setMaximumHeight(54)
         self._fft_measured_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        meas_lay.addWidget(self._fft_measured_lbl)
-        corr_lay.addWidget(meas_grp)
+        compare_lay.addWidget(self._fft_measured_lbl)
+        grid_outer_lay.addWidget(compare_grp)
 
-        apply_grp = QGroupBox("3. Undistort image")
-        apply_grp.setFont(QFont("Helvetica", 9))
-        apply_grp.setMinimumHeight(98)
-        apply_lay = QVBoxLayout(apply_grp)
-        apply_lay.setContentsMargins(8, 7, 8, 4)
-        apply_lay.setSpacing(3)
+        # Clear Grid button at the bottom of the Grid tab
+        self._clear_grid_btn = QPushButton("Clear Grid")
+        self._clear_grid_btn.setFont(QFont("Helvetica", 9))
+        self._clear_grid_btn.setFixedHeight(24)
+        self._clear_grid_btn.setToolTip("Remove the reciprocal-space lattice overlay")
+        self._clear_grid_btn.setEnabled(False)
+        self._clear_grid_btn.clicked.connect(self._on_clear_fft_lattice)
+        grid_outer_lay.addWidget(self._clear_grid_btn)
+        grid_outer_lay.addStretch(1)
+        grid_scroll.setWidget(grid_inner)
+        self._grid_tab_index = self._tab_widget.addTab(grid_scroll, "Grid")
 
-        # Internal target controls. The main workflow takes its target from
-        # Known lattice; these widgets preserve the existing correction code path.
+        # ── Tab 2: Correction ────────────────────────────────────────────────
+        corr_tab = QWidget()
+        corr_lay = QVBoxLayout(corr_tab)
+        corr_lay.setSpacing(6)
+        corr_lay.setContentsMargins(8, 8, 8, 6)
+
+        # Ideal-lattice target controls (read-only in this tab; editable in Expert)
         self._fft_ideal_combo = QComboBox()
         self._fft_ideal_combo.addItems(["Match measured", "Square", "Rectangular", "Hexagonal", "Custom"])
         self._fft_ideal_combo.setCurrentText("Square")
@@ -450,6 +528,11 @@ class FFTViewerDialog(QDialog):
         self._fft_preserve_orientation_cb.toggled.connect(self._on_fft_ideal_changed)
         self._fft_expand_cb = QCheckBox("Expand canvas")
         self._fft_expand_cb.setChecked(True)
+        self._fft_expand_cb.setToolTip(
+            "Grow the output canvas so no image content is clipped when "
+            "the correction involves rotation."
+        )
+        self._fft_expand_cb.toggled.connect(self._on_fft_ideal_changed)
         self._fft_interp_combo = QComboBox()
         self._fft_interp_combo.addItems(["Bilinear", "Nearest", "Bicubic"])
         self._fft_fill_combo = QComboBox()
@@ -459,9 +542,17 @@ class FFTViewerDialog(QDialog):
         self._fft_correction_lbl.setFont(QFont("Courier", 8))
         self._fft_correction_lbl.setWordWrap(True)
         self._fft_correction_lbl.setMinimumHeight(34)
-        self._fft_correction_lbl.setMaximumHeight(48)
+        self._fft_correction_lbl.setMaximumHeight(60)
         self._fft_correction_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        apply_lay.addWidget(self._fft_correction_lbl)
+        corr_lay.addWidget(self._fft_correction_lbl)
+
+        opts_row = QHBoxLayout()
+        opts_row.addWidget(self._fft_preserve_orientation_cb)
+        opts_row.addSpacing(8)
+        opts_row.addWidget(self._fft_expand_cb)
+        opts_row.addStretch(1)
+        corr_lay.addLayout(opts_row)
+
         action_row = QHBoxLayout()
         self._fft_preview_btn = QPushButton("Preview corrected image")
         self._fft_preview_btn.setFont(QFont("Helvetica", 9))
@@ -485,48 +576,12 @@ class FFTViewerDialog(QDialog):
         action_row.addWidget(self._fft_clear_preview_btn)
         action_row.addStretch(1)
         action_row.addWidget(self._fft_apply_btn)
-        apply_lay.addLayout(action_row)
+        corr_lay.addLayout(action_row)
         self._apply_known_structure_to_fft(self._active_known_structure, refresh=False)
-        corr_lay.addWidget(apply_grp)
         corr_lay.addStretch(1)
         self._tab_widget.addTab(corr_tab, "Correction")
 
-        # ── Inspect tab ─────────────────────────────────────────────────────
-        inspect_tab = QWidget()
-        inspect_lay = QHBoxLayout(inspect_tab)
-        inspect_lay.setContentsMargins(6, 6, 6, 6)
-        inspect_lay.setSpacing(8)
-        intensity_grp = QGroupBox("Intensity")
-        intensity_grp.setFont(QFont("Helvetica", 9))
-        int_lay = QVBoxLayout(intensity_grp)
-        self._hist_fig = Figure(figsize=(1, 1), dpi=90)
-        self._hist_fig.patch.set_facecolor(bg)
-        self._hist_canvas = FigureCanvasQTAgg(self._hist_fig)
-        self._hist_ax = self._hist_fig.add_subplot(111)
-        self._hist_ax.set_facecolor(bg)
-        int_lay.addWidget(self._hist_canvas, 1)
-        reset_intensity_btn = QPushButton("Reset range")
-        reset_intensity_btn.setFont(QFont("Helvetica", 9))
-        reset_intensity_btn.setFixedHeight(22)
-        reset_intensity_btn.clicked.connect(self._reset_intensity)
-        int_lay.addWidget(reset_intensity_btn)
-        self._hist_canvas.mpl_connect("button_press_event", self._on_hist_press)
-        self._hist_canvas.mpl_connect("motion_notify_event", self._on_hist_motion)
-        self._hist_canvas.mpl_connect("button_release_event", self._on_hist_release)
-        inspect_lay.addWidget(intensity_grp, 1)
-        radial_grp = QGroupBox("Radial profile")
-        radial_grp.setFont(QFont("Helvetica", 9))
-        rad_lay = QVBoxLayout(radial_grp)
-        self._radial_fig = Figure(figsize=(1, 1), dpi=90)
-        self._radial_fig.patch.set_facecolor(bg)
-        self._radial_canvas = FigureCanvasQTAgg(self._radial_fig)
-        self._radial_ax = self._radial_fig.add_axes([0.11, 0.24, 0.85, 0.66])
-        self._radial_ax.set_facecolor(bg)
-        rad_lay.addWidget(self._radial_canvas, 1)
-        inspect_lay.addWidget(radial_grp, 1)
-        self._tab_widget.addTab(inspect_tab, "Inspect")
-
-        # ── Advanced tab ────────────────────────────────────────────────────
+        # ── Tab 3: Expert ────────────────────────────────────────────────────
         advanced_scroll = QScrollArea()
         advanced_scroll.setWidgetResizable(True)
         advanced_scroll.setFrameShape(QFrame.NoFrame)
@@ -552,16 +607,6 @@ class FFTViewerDialog(QDialog):
             grp.toggled.connect(content.setVisible)
             return grp, content_lay
 
-        grid_grp, grid_content_lay = _collapsible_group("Reciprocal grid details", checked=False)
-        grid_grp.setFont(QFont("Helvetica", 9))
-        self._advanced_grid_grp = grid_grp
-        self._grid_tab_lay = grid_content_lay
-        self._grid_placeholder_lbl = QLabel("Click Edit reciprocal grid to create controls.")
-        self._grid_placeholder_lbl.setFont(QFont("Helvetica", 9))
-        self._grid_placeholder_lbl.setAlignment(Qt.AlignCenter)
-        self._grid_tab_lay.addWidget(self._grid_placeholder_lbl)
-        advanced_lay.addWidget(grid_grp)
-
         correction_opts_grp, opts_lay_outer = _collapsible_group(
             "Advanced correction options", checked=False,
         )
@@ -579,30 +624,22 @@ class FFTViewerDialog(QDialog):
         target_grid.setColumnStretch(1, 1)
         target_grid.setColumnStretch(3, 1)
         opts_lay_outer.addLayout(target_grid)
-        opts_row = QHBoxLayout()
-        opts_row.addWidget(self._fft_preserve_orientation_cb)
-        opts_row.addSpacing(8)
-        self._fft_expand_cb.setToolTip(
-            "Grow the output canvas so no image content is clipped when "
-            "the correction involves rotation."
-        )
-        opts_row.addWidget(self._fft_expand_cb)
-        opts_row.addSpacing(8)
-        opts_row.addWidget(QLabel("Interpolation:"))
+        opts_adv_row = QHBoxLayout()
+        opts_adv_row.addWidget(QLabel("Interpolation:"))
         self._fft_interp_combo.setToolTip(
             "Resampling method used when remapping pixels.  "
             "Bilinear is a good default."
         )
-        opts_row.addWidget(self._fft_interp_combo)
-        opts_row.addSpacing(8)
-        opts_row.addWidget(QLabel("Fill:"))
+        opts_adv_row.addWidget(self._fft_interp_combo)
+        opts_adv_row.addSpacing(8)
+        opts_adv_row.addWidget(QLabel("Fill:"))
         self._fft_fill_combo.setToolTip(
             "Value assigned to pixels outside the original image boundary "
             "after transformation."
         )
-        opts_row.addWidget(self._fft_fill_combo)
-        opts_row.addStretch(1)
-        opts_lay_outer.addLayout(opts_row)
+        opts_adv_row.addWidget(self._fft_fill_combo)
+        opts_adv_row.addStretch(1)
+        opts_lay_outer.addLayout(opts_adv_row)
         advanced_lay.addWidget(correction_opts_grp)
 
         piezo_grp, piezo_lay = _collapsible_group(
@@ -678,7 +715,7 @@ class FFTViewerDialog(QDialog):
         advanced_lay.addWidget(piezo_grp)
         advanced_lay.addStretch(1)
         advanced_scroll.setWidget(advanced_inner)
-        self._grid_tab_index = self._tab_widget.addTab(advanced_scroll, "⚙ Expert")
+        self._tab_widget.addTab(advanced_scroll, "⚙ Expert")
 
         self._fft_splitter = QSplitter(Qt.Vertical)
         self._fft_splitter.addWidget(fft_top)
@@ -844,6 +881,7 @@ class FFTViewerDialog(QDialog):
         self._disp_range = (
             (float(finite.min()), float(finite.max())) if finite.size > 0 else (0.0, 1.0)
         )
+        self._last_fft_disp = mag
         return mag
 
     # ── drawing ────────────────────────────────────────────────────────────────
@@ -927,8 +965,9 @@ class FFTViewerDialog(QDialog):
         ax.set_facecolor(bg)
         disp = self._compute_display_fft()
         lo, hi = self._disp_range
-        vmin_val = lo + self._vmin_frac * (hi - lo)
-        vmax_val = lo + self._vmax_frac * (hi - lo)
+        vmin_val, vmax_val = self._fft_drs.resolve(disp)
+        if vmin_val is None:
+            vmin_val, vmax_val = lo, hi
         extent_q = [
             float(self._qx[0]), float(self._qx[-1]),
             float(self._qy[-1]), float(self._qy[0]),
@@ -1170,89 +1209,51 @@ class FFTViewerDialog(QDialog):
             self._canvas_fft.draw_idle()
 
     def _update_histogram(self, disp: np.ndarray):
-        fg = self._theme.get("fg", "#dddddd")
-        bg = self._theme.get("bg", "#1e1e1e")
-        ax = self._hist_ax
-        ax.cla()
-        ax.set_facecolor(bg)
-        self._vmin_line = None
-        self._vmax_line = None
         finite = disp[np.isfinite(disp)]
-        if finite.size > 0:
-            lo, hi = self._disp_range
-            ax.hist(finite.ravel(), bins=256, range=(lo, hi),
-                    color="#6699bb", alpha=0.9, linewidth=0, log=True)
-            vmin_val = lo + self._vmin_frac * (hi - lo)
-            vmax_val = lo + self._vmax_frac * (hi - lo)
-            ylo, yhi = ax.get_ylim()
-            self._vmin_line = ax.axvline(vmin_val, color="#ff6060", lw=2.0, zorder=5)
-            self._vmax_line = ax.axvline(vmax_val, color="#50ee70", lw=2.0, zorder=5)
-            ax.set_xlim(lo, hi)
-            ax.set_ylim(ylo, yhi)
-        ax.set_yticks([])
-        ax.tick_params(colors=fg, labelsize=8, length=3)
-        for sp in ax.spines.values():
-            sp.set_color(fg)
-        self._hist_fig.subplots_adjust(left=0.14, right=0.97, top=0.97, bottom=0.22)
-        self._hist_canvas.draw_idle()
+        if finite.size == 0:
+            self._hist_panel.clear(self._theme)
+            return
+        lo, hi = self._disp_range
+        vmin, vmax = self._fft_drs.resolve(disp)
+        if vmin is None:
+            vmin, vmax = lo, hi
+        self._hist_panel.render(
+            flat_phys=finite.ravel(),
+            lo_phys=float(vmin),
+            hi_phys=float(vmax),
+            unit="",
+            axis_label="Intensity",
+            theme=self._theme,
+            scale=1.0,
+            data_min_phys=lo,
+            data_max_phys=hi,
+        )
+        self._display_slider_ctrl.update()
 
-    def _apply_intensity(self):
-        """Fast path: update FFT clim and histogram markers without full redraw."""
+    def _apply_intensity_from_drs(self) -> None:
+        """Fast path: update FFT clim and histogram markers from display-range controller."""
         if self._fft_im is None:
             return
-        lo, hi = self._disp_range
-        vmin_val = lo + self._vmin_frac * (hi - lo)
-        vmax_val = lo + self._vmax_frac * (hi - lo)
-        self._fft_im.set_clim(vmin_val, vmax_val)
+        disp = self._last_fft_disp
+        if disp is None:
+            return
+        vmin, vmax = self._fft_drs.resolve(disp)
+        if vmin is None:
+            return
+        self._fft_im.set_clim(vmin, vmax)
         self._canvas_fft.draw_idle()
-        self._update_histogram_markers()
+        self._hist_panel.update_drag_lines(float(vmin), float(vmax))
+        self._display_slider_ctrl.update()
 
-    def _update_histogram_markers(self):
-        if self._vmin_line is None or self._vmax_line is None:
-            return
-        lo, hi = self._disp_range
-        vmin_val = lo + self._vmin_frac * (hi - lo)
-        vmax_val = lo + self._vmax_frac * (hi - lo)
-        self._vmin_line.set_xdata([vmin_val, vmin_val])
-        self._vmax_line.set_xdata([vmax_val, vmax_val])
-        self._hist_canvas.draw_idle()
+    def _apply_intensity(self) -> None:
+        """Convenience alias for _apply_intensity_from_drs."""
+        self._apply_intensity_from_drs()
 
-    def _on_hist_press(self, event):
-        if event.inaxes is not self._hist_ax or event.xdata is None:
-            return
-        lo, hi = self._disp_range
-        if hi <= lo:
-            return
-        x = event.xdata
-        span = hi - lo
-        tol = span * 0.04
-        vmin_val = lo + self._vmin_frac * span
-        vmax_val = lo + self._vmax_frac * span
-        d_min = abs(x - vmin_val)
-        d_max = abs(x - vmax_val)
-        if d_min <= tol or d_max <= tol:
-            self._hist_drag = "vmin" if d_min <= d_max else "vmax"
+    def _on_fft_hist_range_released(self, lo_phys: float, hi_phys: float) -> None:
+        self._fft_drs.set_manual(lo_phys, hi_phys)
 
-    def _on_hist_motion(self, event):
-        if self._hist_drag is None or event.inaxes is not self._hist_ax or event.xdata is None:
-            return
-        lo, hi = self._disp_range
-        if hi <= lo:
-            return
-        frac = max(0.0, min(1.0, (event.xdata - lo) / (hi - lo)))
-        if self._hist_drag == "vmin":
-            self._vmin_frac = min(frac, self._vmax_frac)
-        else:
-            self._vmax_frac = max(frac, self._vmin_frac)
-        self._apply_intensity()
-
-    def _on_hist_release(self, event):
-        self._hist_drag = None
-
-    def _reset_intensity(self):
-        self._vmin_frac = 0.0
-        self._vmax_frac = 1.0
-        self._apply_intensity()
+    def _reset_intensity(self) -> None:
+        self._fft_drs.reset(0.0, 100.0)
 
     def _update_info_panel(self):
         Ny, Nx = self._arr.shape
@@ -1449,7 +1450,26 @@ class FFTViewerDialog(QDialog):
 
     def _on_fft_grid_changed(self, _grid=None) -> None:
         self._clear_fft_preview_if_active()
+        self._refresh_grid_measure_lbl()
         self._refresh_fft_correction_ui()
+
+    def _refresh_grid_measure_lbl(self) -> None:
+        lbl = getattr(self, "_grid_measure_lbl", None)
+        if lbl is None:
+            return
+        panel = getattr(self, "_fft_lattice_panel", None)
+        if panel is None:
+            lbl.setText("No grid — click Draw Grid to start")
+            return
+        try:
+            from probeflow.analysis.lattice_grid import format_reciprocal_measurements
+            grid = panel._overlay.grid()
+            if grid is None:
+                return
+            d = format_reciprocal_measurements(grid, panel._cal)
+            lbl.setText(f"{d['g1']}    {d['g2']}    ∠ {d['angle']}")
+        except Exception:
+            pass
 
     def _on_grid_extent_changed(self, value: int) -> None:
         overlay = getattr(self, "_fft_lattice_overlay", None)
@@ -1757,7 +1777,7 @@ class FFTViewerDialog(QDialog):
             self._fig_fft.savefig(path, dpi=150, bbox_inches="tight")
 
     def _clear_grid_tab(self) -> None:
-        """Reset the embedded reciprocal-grid tab to its empty state."""
+        """Reset the embedded Grid tab panel area to its placeholder state."""
         lay = getattr(self, "_grid_tab_lay", None)
         if lay is None:
             return
@@ -1767,9 +1787,15 @@ class FFTViewerDialog(QDialog):
             if widget is not None:
                 widget.setParent(None)
         lay.addWidget(self._grid_placeholder_lbl)
+        draw_btn = getattr(self, "_grid_draw_btn", None)
+        if draw_btn is not None:
+            lay.addWidget(draw_btn)
+        lbl = getattr(self, "_grid_measure_lbl", None)
+        if lbl is not None:
+            lbl.setText("No grid — click Draw Grid to start")
 
     def _set_grid_tab_panel(self, panel: QWidget) -> None:
-        """Install the reciprocal-grid controls into the embedded Grid tab."""
+        """Install the reciprocal-grid controls into the Grid tab panel area."""
         lay = getattr(self, "_grid_tab_lay", None)
         if lay is None:
             return
@@ -1809,9 +1835,6 @@ class FFTViewerDialog(QDialog):
         existing_panel = getattr(self, "_fft_lattice_panel", None)
         if existing is not None and existing_panel is not None:
             if select_advanced:
-                grp = getattr(self, "_advanced_grid_grp", None)
-                if grp is not None:
-                    grp.setChecked(True)
                 self._tab_widget.setCurrentIndex(self._grid_tab_index)
             return
         if self._qx is None or self._qy is None:
@@ -1843,12 +1866,10 @@ class FFTViewerDialog(QDialog):
         self._set_grid_tab_panel(panel)
         self._on_grid_extent_changed(self._grid_extent_spin.value())
         if select_advanced:
-            grp = getattr(self, "_advanced_grid_grp", None)
-            if grp is not None:
-                grp.setChecked(True)
             self._tab_widget.setCurrentIndex(self._grid_tab_index)
         if getattr(self, "_clear_grid_btn", None) is not None:
             self._clear_grid_btn.setEnabled(True)
+        self._refresh_grid_measure_lbl()
         self._refresh_fft_correction_ui()
 
     # ── Bragg ring overlay ─────────────────────────────────────────────────────
