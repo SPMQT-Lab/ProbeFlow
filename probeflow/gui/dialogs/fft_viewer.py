@@ -267,7 +267,7 @@ class FFTViewerDialog(QDialog):
         for sp in self._ax_fft.spines.values():
             sp.set_color(fg)
         self._ax_fft.tick_params(colors=fg, labelsize=9)
-        self._fig_fft.subplots_adjust(left=0.12, right=0.98, top=0.93, bottom=0.14)
+        self._fig_fft.subplots_adjust(left=0.07, right=0.99, top=0.95, bottom=0.09)
 
         fft_top = QWidget()
         fft_top_lay = QHBoxLayout(fft_top)
@@ -986,7 +986,7 @@ class FFTViewerDialog(QDialog):
         ]
         self._fft_im = ax.imshow(
             disp, cmap=self._fft_cmap, origin="upper",
-            extent=extent_q, aspect="equal",
+            extent=extent_q, aspect="auto",
             vmin=vmin_val, vmax=vmax_val,
         )
         ax.set_xlim(*self._fft_xlim)
