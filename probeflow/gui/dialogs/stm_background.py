@@ -534,7 +534,7 @@ class STMBackgroundDialog(QDialog):
         if jump_threshold is not None:
             thr_scale, thr_unit = _auto_unit(np.array([jump_threshold]))
             lines += [
-                f"Jump handling:    on",
+                "Jump handling:    on",
                 f"Jump threshold:   {jump_threshold * thr_scale:.3g} {thr_unit}",
                 f"Largest adj jump: {largest_adj * adj_scale:.3g} {adj_unit}",
                 f"Detected jumps:   {len(result.jump_positions)}",
