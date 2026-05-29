@@ -775,6 +775,24 @@ class FeaturesPanel(QWidget):
     def get_particles(self):
         return list(self._particles)
 
+    def clear_particles(self) -> None:
+        """Remove segmentation overlay — returns the panel to the raw image."""
+        self._particles    = []
+        self._overlay_mode = "none"
+        self._results_table.setRowCount(0)
+        self._redraw()
+
+    def clear_classifications(self) -> None:
+        """Remove classification overlay — keeps particle contours visible."""
+        self._classifications = []
+        self._classification_meta = None
+        self._overlay_mode = "particles"
+        self._overlay_toggle_btn.setVisible(False)
+        self._overlay_toggle_btn.setText("👁 Original")
+        self._show_overlay = True
+        self._results_table.setRowCount(0)
+        self._redraw()
+
     def get_detections(self):
         return list(self._detections)
 
@@ -1061,9 +1079,11 @@ class FeaturesSidebar(QWidget):
 
     mode_changed               = Signal(str)   # "particles"/"template"/"lattice"/"classify"
     classify_params_changed    = Signal()      # Phase-1 segmentation params changed
-    segment_requested          = Signal()      # "Apply Segmentation" — run + stay in Phase 1
-    advance_phase2_requested   = Signal()      # "Move to Phase 2" — advance using found particles
-    preview_requested          = Signal()      # debounced live preview (slider drag)
+    segment_requested              = Signal()  # "Apply Segmentation" — run + stay in Phase 1
+    clear_segmentation_requested   = Signal()  # "Remove Segmentation" — clear overlay
+    advance_phase2_requested       = Signal()  # "Move to Phase 2" — advance using found particles
+    clear_classification_requested = Signal()  # "Remove Classification" — drop labels (Phase 2)
+    preview_requested              = Signal()  # debounced live preview (slider drag)
     undo_label_requested       = Signal()
     load_from_browse_requested = Signal()
     run_requested              = Signal(str)   # mode
@@ -1308,6 +1328,15 @@ class FeaturesSidebar(QWidget):
         self._segment_btn.clicked.connect(self.segment_requested.emit)
         lay.addWidget(self._segment_btn)
 
+        self._clear_seg_btn = QPushButton("Remove Segmentation")
+        self._clear_seg_btn.setFont(QFont("Helvetica", 9))
+        self._clear_seg_btn.setFixedHeight(28)
+        self._clear_seg_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self._clear_seg_btn.setToolTip(
+            "Clear the segmentation overlay and return to the raw image.")
+        self._clear_seg_btn.clicked.connect(self.clear_segmentation_requested.emit)
+        lay.addWidget(self._clear_seg_btn)
+
         self._advance_btn = QPushButton("Move to Phase 2 →")
         self._advance_btn.setFont(QFont("Helvetica", 10))
         self._advance_btn.setFixedHeight(30)
@@ -1386,6 +1415,15 @@ class FeaturesSidebar(QWidget):
         self._run_btn.clicked.connect(
             lambda: self.run_requested.emit(self._current_mode()))
         lay.addWidget(self._run_btn)
+
+        self._clear_cls_btn = QPushButton("Remove Classification")
+        self._clear_cls_btn.setFont(QFont("Helvetica", 9))
+        self._clear_cls_btn.setFixedHeight(28)
+        self._clear_cls_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self._clear_cls_btn.setToolTip(
+            "Clear classification results and return to the particle contour view.")
+        self._clear_cls_btn.clicked.connect(self.clear_classification_requested.emit)
+        lay.addWidget(self._clear_cls_btn)
 
         self._export_btn = QPushButton("Export JSON…")
         self._export_btn.setFont(QFont("Helvetica", 9))

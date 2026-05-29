@@ -10,9 +10,10 @@ because the two hosts load data differently:
   - ProbeFlowWindow: reads Browse selection + applies saved viewer processing.
   - FeatureCountingWindow: receives a pre-loaded array via ``load_entry()``.
 
-All other FeaturesSidebar signals (segment, run, export, preview, mode change,
-mask, classify, crop, undo, colour) are connected in ``__init__`` so callers
-do not scatter signal wiring across the host class.
+All other FeaturesSidebar signals (segment, clear_segmentation, advance_phase2,
+clear_classification, run, export, preview, mode change, mask, classify, crop,
+undo, colour) are connected in ``__init__`` so callers do not scatter signal
+wiring across the host class.
 """
 
 from __future__ import annotations
@@ -113,7 +114,9 @@ class FeatureCountingController(QObject):
 
         # Orchestration slots.
         sidebar.segment_requested.connect(self._on_segment)
+        sidebar.clear_segmentation_requested.connect(self._on_clear_segmentation)
         sidebar.advance_phase2_requested.connect(self._on_advance_phase2)
+        sidebar.clear_classification_requested.connect(self._on_clear_classification)
         sidebar.preview_requested.connect(self._on_preview)
         sidebar.run_requested.connect(self._on_run)
         sidebar.export_requested.connect(self._on_export)
@@ -154,6 +157,21 @@ class FeatureCountingController(QObject):
     def _on_mask_clear(self) -> None:
         self._panel.clear_exclusion_mask()
         self._sidebar.set_status("Exclusion mask cleared.")
+
+    # ── Clear actions (Phase 1 / Phase 2) ────────────────────────────────────
+
+    def _on_clear_segmentation(self) -> None:
+        """'Remove Segmentation' — clears overlay, stays in Phase 1."""
+        self._panel.clear_particles()
+        self._sidebar.set_status("Segmentation cleared.")
+        self._status_cb("Segmentation cleared.")
+
+    def _on_clear_classification(self) -> None:
+        """'Remove Classification' — drops labels, restores particle contour view."""
+        self._panel.clear_classifications()
+        self._sidebar.set_status(
+            "Classification cleared — particle contours restored.")
+        self._status_cb("Classification cleared.")
 
     # ── Live preview (slider drag) ────────────────────────────────────────────
 
