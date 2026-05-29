@@ -191,12 +191,25 @@ class FFTViewerDialog(QDialog):
 
         tb.addStretch(1)
 
+        show_tools_btn = QPushButton("Show tools")
+        show_tools_btn.setFont(QFont("Helvetica", 9))
+        show_tools_btn.setFixedHeight(24)
+        show_tools_btn.setMinimumWidth(86)
+        show_tools_btn.setCheckable(True)
+        show_tools_btn.setToolTip("Show or hide the cursor details side panel")
+        show_tools_btn.toggled.connect(self._on_show_tools_toggled)
+        tb.addWidget(show_tools_btn)
+        self._show_tools_btn = show_tools_btn
+
         focus_btn = QPushButton("Focus FFT")
         focus_btn.setFont(QFont("Helvetica", 9))
         focus_btn.setFixedHeight(24)
         focus_btn.setMinimumWidth(86)
         focus_btn.setCheckable(True)
-        focus_btn.setToolTip("Hide the real-space reference and lower tools for a larger FFT view")
+        focus_btn.setToolTip(
+            "Hide the real-space reference, side panel, and lower tools "
+            "for a larger FFT view. Click again to exit."
+        )
         focus_btn.toggled.connect(self._on_focus_fft_toggled)
         tb.addWidget(focus_btn)
         self._focus_fft_btn = focus_btn
@@ -273,18 +286,12 @@ class FFTViewerDialog(QDialog):
         self._cursor_readout_lbl = QLabel("Move over the FFT")
         self._cursor_readout_lbl.setFont(QFont("Courier", 8))
         self._cursor_readout_lbl.setWordWrap(True)
-        corr_title = QLabel("Correction")
-        corr_title.setFont(QFont("Helvetica", 9, QFont.Bold))
-        self._fft_correction_status_lbl = QLabel("No reciprocal grid yet")
-        self._fft_correction_status_lbl.setFont(QFont("Helvetica", 8))
-        self._fft_correction_status_lbl.setWordWrap(True)
         side_lay.addWidget(cursor_title)
         side_lay.addWidget(self._cursor_readout_lbl)
-        side_lay.addSpacing(8)
-        side_lay.addWidget(corr_title)
-        side_lay.addWidget(self._fft_correction_status_lbl)
         side_lay.addStretch(1)
         fft_top_lay.addWidget(side_panel)
+        self._side_panel = side_panel
+        side_panel.hide()  # hidden by default; "Show tools" in toolbar reveals it
 
         self._tab_widget = QTabWidget()
         self._tab_widget.setMinimumHeight(300)
@@ -545,6 +552,11 @@ class FFTViewerDialog(QDialog):
         self._fft_correction_lbl.setMaximumHeight(60)
         self._fft_correction_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
         corr_lay.addWidget(self._fft_correction_lbl)
+
+        self._fft_correction_status_lbl = QLabel("No reciprocal grid yet")
+        self._fft_correction_status_lbl.setFont(QFont("Helvetica", 8))
+        self._fft_correction_status_lbl.setWordWrap(True)
+        corr_lay.addWidget(self._fft_correction_status_lbl)
 
         opts_row = QHBoxLayout()
         opts_row.addWidget(self._fft_preserve_orientation_cb)
@@ -1012,9 +1024,24 @@ class FFTViewerDialog(QDialog):
         tabs = getattr(self, "_tab_widget", None)
         if tabs is not None:
             tabs.setVisible(not checked)
+        # Side panel: hidden in focus mode; otherwise follow the tools toggle
+        side = getattr(self, "_side_panel", None)
+        if side is not None:
+            tools_btn = getattr(self, "_show_tools_btn", None)
+            tools_on = tools_btn is not None and tools_btn.isChecked()
+            side.setVisible(not checked and tools_on)
         btn = getattr(self, "_focus_fft_btn", None)
         if btn is not None:
-            btn.setText("Show tools" if checked else "Focus FFT")
+            btn.setText("Exit Focus" if checked else "Focus FFT")
+
+    def _on_show_tools_toggled(self, checked: bool) -> None:
+        side = getattr(self, "_side_panel", None)
+        if side is not None:
+            focus_active = getattr(self, "_focus_fft_active", False)
+            side.setVisible(checked and not focus_active)
+        btn = getattr(self, "_show_tools_btn", None)
+        if btn is not None:
+            btn.setText("Hide tools" if checked else "Show tools")
 
     def _set_status_text(self, text: str) -> None:
         self._status_lbl.setText(text)
