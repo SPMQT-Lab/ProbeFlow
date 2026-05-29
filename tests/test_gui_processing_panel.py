@@ -1713,6 +1713,225 @@ def test_viewer_save_processed_image_action_dispatches_writer(qapp, monkeypatch,
     dlg.deleteLater()
 
 
+def test_viewer_export_tab_shows_summary_and_format_controls(qapp, monkeypatch):
+    from probeflow.gui import ImageViewerDialog, SxmFile, THEMES
+
+    monkeypatch.setattr(ImageViewerDialog, "_load_current", lambda self: None)
+
+    long_stem = "createc_scan_overview_240nm_pos_with_a_really_long_filename"
+    entry = SxmFile(
+        path=Path("/tmp/example.sxm"),
+        stem=long_stem,
+        Nx=7,
+        Ny=5,
+        bias_mv=-50.0,
+        current_pa=1500.0,
+        source_format="dat",
+    )
+    dlg = ImageViewerDialog(entry, [entry], "gray", THEMES["dark"])
+    dlg._raw_arr = np.zeros((5, 7), dtype=float)
+    dlg._display_arr = None
+    dlg._processing = {
+        "geometric_ops": [
+            {"op": "quantize_bit_depth", "params": {"bits": 16}},
+        ],
+    }
+    dlg._export_png_file_lbl.resize(80, dlg._export_png_file_lbl.height())
+    dlg._update_export_summary()
+    full_name = f"{long_stem}_viewer.png"
+
+    assert dlg._export_png_size_lbl.text() == "7x5 px"
+    assert dlg._export_png_file_lbl.text() != full_name
+    assert dlg._export_png_file_lbl.toolTip() == full_name
+    assert dlg._export_bias_lbl.text() == "-50 mV"
+    assert dlg._export_current_lbl.text() == "1.5 nA"
+    assert dlg._export_precision_lbl.text() == "16-bit quantized"
+    assert dlg._export_provenance_chk.isChecked()
+    assert dlg._export_scalebar_chk.isChecked()
+    assert dlg._save_png_btn.text().endswith("Save PNG copy…")
+    assert dlg._save_pdf_btn.text() == "Save PDF copy…"
+    assert dlg._save_sxm_btn.isEnabled()
+    assert dlg._save_gwy_btn.text() == "Save GWY copy…"
+
+    dlg.close()
+    dlg.deleteLater()
+
+
+def test_viewer_export_tab_disables_sxm_for_sm4_sources(qapp, monkeypatch):
+    from probeflow.gui import ImageViewerDialog, SxmFile, THEMES
+
+    monkeypatch.setattr(ImageViewerDialog, "_load_current", lambda self: None)
+
+    entry = SxmFile(
+        path=Path("/tmp/example.sm4"),
+        stem="example",
+        Nx=8,
+        Ny=8,
+        source_format="sm4",
+    )
+    dlg = ImageViewerDialog(entry, [entry], "gray", THEMES["dark"])
+    dlg._update_export_summary()
+
+    assert not dlg._save_sxm_btn.isEnabled()
+    assert "Createc .dat" in dlg._save_sxm_btn.toolTip()
+
+    dlg.close()
+    dlg.deleteLater()
+
+
+def test_viewer_save_png_action_uses_export_checkboxes(qapp, monkeypatch, tmp_path):
+    from probeflow.gui import ImageViewerDialog, SxmFile, THEMES
+    import probeflow.gui.compat as gui_mod
+    import probeflow.gui.viewer.image_viewer_processing_export_mixin as export_mixin
+
+    monkeypatch.setattr(ImageViewerDialog, "_load_current", lambda self: None)
+
+    entry = SxmFile(path=Path("/tmp/example.sxm"), stem="example", Nx=8, Ny=8)
+    dlg = ImageViewerDialog(entry, [entry], "gray", THEMES["dark"])
+    dlg._display_arr = np.ones((8, 8), dtype=float)
+    dlg._export_provenance_chk.setChecked(False)
+    dlg._export_scalebar_chk.setChecked(False)
+    out = tmp_path / "current_view.png"
+    monkeypatch.setattr(
+        gui_mod.QFileDialog,
+        "getSaveFileName",
+        lambda *args, **kwargs: (str(out), ""),
+    )
+
+    saved_calls = []
+
+    def fake_save_viewer_png(*args, **kwargs):
+        saved_calls.append((args, kwargs))
+        return f"Saved -> {Path(args[1]).name}"
+
+    monkeypatch.setattr(dlg, "_assert_exportable_processing", lambda: True)
+    monkeypatch.setattr(export_mixin, "save_viewer_png", fake_save_viewer_png)
+
+    dlg._on_save_png()
+
+    assert saved_calls[0][1]["add_scalebar"] is False
+    assert saved_calls[0][1]["include_provenance"] is False
+    assert "Saved" in dlg._status_lbl.text()
+
+    dlg.close()
+    dlg.deleteLater()
+
+
+def test_viewer_save_pdf_action_dispatches_current_view_writer(qapp, monkeypatch, tmp_path):
+    from probeflow.gui import ImageViewerDialog, SxmFile, THEMES
+    import probeflow.gui.compat as gui_mod
+    import probeflow.gui.viewer.image_viewer_processing_export_mixin as export_mixin
+
+    monkeypatch.setattr(ImageViewerDialog, "_load_current", lambda self: None)
+
+    entry = SxmFile(path=Path("/tmp/example.sxm"), stem="example", Nx=8, Ny=8)
+    dlg = ImageViewerDialog(entry, [entry], "gray", THEMES["dark"])
+    dlg._display_arr = np.ones((8, 8), dtype=float)
+    dlg._export_provenance_chk.setChecked(False)
+    dlg._export_scalebar_chk.setChecked(False)
+    out_without_suffix = tmp_path / "current_view"
+    captured_dialog = {}
+    monkeypatch.setattr(
+        gui_mod.QFileDialog,
+        "getSaveFileName",
+        lambda *args, **kwargs: (
+            captured_dialog.setdefault("default", args[2]) and str(out_without_suffix),
+            "",
+        ),
+    )
+
+    class FakeScan:
+        processing_state = type("PS", (), {"steps": []})()
+
+    saved_calls = []
+
+    def fake_save_processed_image(scan, plane_idx, path, **kwargs):
+        saved_calls.append((plane_idx, path, kwargs))
+        return f"Saved processed image -> {path.name}"
+
+    monkeypatch.setattr(dlg, "_assert_exportable_processing", lambda: True)
+    monkeypatch.setattr(dlg, "_processed_scan_for_export", lambda: (FakeScan(), 1))
+    monkeypatch.setattr(export_mixin, "save_processed_image", fake_save_processed_image)
+
+    dlg._on_save_pdf()
+
+    assert captured_dialog["default"].endswith("example_viewer.pdf")
+    assert saved_calls[0][0] == 1
+    assert saved_calls[0][1] == out_without_suffix.with_suffix(".pdf")
+    assert saved_calls[0][2]["include_provenance"] is False
+    assert saved_calls[0][2]["add_scalebar"] is False
+    assert saved_calls[0][2]["display_settings"] is None
+    assert "Saved processed image" in dlg._status_lbl.text()
+
+    dlg.close()
+    dlg.deleteLater()
+
+
+@pytest.mark.parametrize(
+    "method_name,suffix",
+    [
+        ("_on_save_sxm", ".sxm"),
+        ("_on_save_gwy", ".gwy"),
+    ],
+)
+def test_viewer_direct_data_export_actions_dispatch_current_view_writer(
+    qapp,
+    monkeypatch,
+    tmp_path,
+    method_name,
+    suffix,
+):
+    from probeflow.gui import ImageViewerDialog, SxmFile, THEMES
+    import probeflow.gui.compat as gui_mod
+    import probeflow.gui.viewer.image_viewer_processing_export_mixin as export_mixin
+
+    monkeypatch.setattr(ImageViewerDialog, "_load_current", lambda self: None)
+
+    entry = SxmFile(
+        path=Path("/tmp/example.dat"),
+        stem="example",
+        Nx=8,
+        Ny=8,
+        source_format="dat",
+    )
+    dlg = ImageViewerDialog(entry, [entry], "gray", THEMES["dark"])
+    dlg._display_arr = np.ones((8, 8), dtype=float)
+    out_without_suffix = tmp_path / f"current_view_{suffix.lstrip('.')}"
+    captured_dialog = {}
+    monkeypatch.setattr(
+        gui_mod.QFileDialog,
+        "getSaveFileName",
+        lambda *args, **kwargs: (
+            captured_dialog.setdefault("default", args[2]) and str(out_without_suffix),
+            "",
+        ),
+    )
+
+    class FakeScan:
+        processing_state = type("PS", (), {"steps": []})()
+
+    saved_calls = []
+
+    def fake_save_processed_image(scan, plane_idx, path, **kwargs):
+        saved_calls.append((plane_idx, path, kwargs))
+        return f"Saved processed image -> {path.name}"
+
+    monkeypatch.setattr(dlg, "_assert_exportable_processing", lambda: True)
+    monkeypatch.setattr(dlg, "_processed_scan_for_export", lambda: (FakeScan(), 1))
+    monkeypatch.setattr(export_mixin, "save_processed_image", fake_save_processed_image)
+
+    getattr(dlg, method_name)()
+
+    assert captured_dialog["default"].endswith(f"example_viewer{suffix}")
+    assert saved_calls[0][0] == 1
+    assert saved_calls[0][1] == out_without_suffix.with_suffix(suffix)
+    assert saved_calls[0][2]["include_provenance"] is True
+    assert "Saved processed image" in dlg._status_lbl.text()
+
+    dlg.close()
+    dlg.deleteLater()
+
+
 def test_tv_load_from_browse_reuses_processed_scan_helper(qapp, monkeypatch):
     from probeflow.gui import SxmFile
     from probeflow.gui.app import ProbeFlowWindow

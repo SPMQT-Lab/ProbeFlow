@@ -25,6 +25,7 @@ def save_viewer_png(
     ch_name: str | None,
     processing_history=None,
     add_scalebar: bool = True,
+    include_provenance: bool = True,
 ) -> str:
     """Write *arr* to *out_path* as a PNG with embedded provenance metadata.
 
@@ -48,7 +49,7 @@ def save_viewer_png(
 
         vmin, vmax = drs.resolve(arr)
         provenance = None
-        if _scan is not None:
+        if include_provenance and _scan is not None:
             try:
                 ps = processing_state_from_gui(processing or {})
                 provenance = build_scan_export_provenance(

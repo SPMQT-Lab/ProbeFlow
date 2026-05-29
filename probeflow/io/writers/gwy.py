@@ -76,6 +76,8 @@ def write_gwy(
     plane_idx: int = 0,
     *,
     include_meta: bool = True,
+    include_provenance: bool = True,
+    provenance=None,
     overwrite: bool = False,
     overwrite_sidecars: bool = False,
 ) -> None:
@@ -91,6 +93,10 @@ def write_gwy(
         Plane to mark visible when Gwyddion opens the file.
     include_meta:
         If true, add a small metadata container under ``/0/meta``.
+    include_provenance:
+        If true, embed ProbeFlow provenance metadata and write a sidecar.
+    provenance:
+        Optional pre-built provenance record supplied by a higher-level export path.
     """
     out_path = Path(out_path)
     if scan.source_path is not None:
@@ -114,18 +120,20 @@ def write_gwy(
         if plane_idx < len(scan.plane_units)
         else ""
     )
-    provenance = build_scan_export_provenance(
-        scan,
-        channel_index=plane_idx,
-        channel_name=plane_name,
-        export_kind="gwy",
-        output_path=out_path,
-    )
-    check_provenance_sidecar_collisions(
-        out_path,
-        legacy=hasattr(provenance, "to_dict"),
-        overwrite=overwrite_sidecars,
-    )
+    if include_provenance and provenance is None:
+        provenance = build_scan_export_provenance(
+            scan,
+            channel_index=plane_idx,
+            channel_name=plane_name,
+            export_kind="gwy",
+            output_path=out_path,
+        )
+    if include_provenance and provenance is not None:
+        check_provenance_sidecar_collisions(
+            out_path,
+            legacy=hasattr(provenance, "to_dict"),
+            overwrite=overwrite_sidecars,
+        )
     check_output_available(out_path, overwrite=overwrite)
 
     GwyContainer, GwyDataField = _import_gwyfile()
@@ -148,7 +156,7 @@ def write_gwy(
     container["/0/data"] = field
     container["/0/data/title"] = str(plane_name)
     container["/0/data/visible"] = True
-    if include_meta:
+    if include_meta and provenance is not None:
         container["/0/meta"] = _plane_meta(
             GwyContainer,
             scan,
@@ -161,9 +169,10 @@ def write_gwy(
         )
 
     container.tofile(str(out_path))
-    write_provenance_sidecars(
-        out_path,
-        provenance,
-        export_format="gwy",
-        overwrite=overwrite_sidecars,
-    )
+    if provenance is not None:
+        write_provenance_sidecars(
+            out_path,
+            provenance,
+            export_format="gwy",
+            overwrite=overwrite_sidecars,
+        )

@@ -110,10 +110,6 @@ from probeflow.gui.viewer.tool_launch import (
 from probeflow.gui.viewer.shortcuts import viewer_command
 from probeflow.core.scan_loader import load_scan
 from probeflow.gui.viewer.scan_load import load_scan_for_viewer, ViewerScanData
-from probeflow.gui.viewer.processed_export import (
-    build_processed_export_provenance,
-    write_processed_export_sidecar,
-)
 from probeflow.gui.viewer.image_viewer_display_mixin import ImageViewerDisplayMixin
 from probeflow.gui.viewer.image_viewer_processing_export_mixin import (
     ImageViewerProcessingExportMixin,
@@ -130,6 +126,31 @@ from probeflow.gui.dialogs.definitions import _DefinitionsDialog
 from probeflow.gui.dialogs.fft_viewer import FFTViewerDialog
 from probeflow.gui.dialogs.periodic_filter import PeriodicFilterDialog
 from probeflow.gui.dialogs.stm_background import STMBackgroundDialog
+
+
+class _ElidedLabel(QLabel):
+    """Single-line label that keeps the full text available as a tooltip."""
+
+    def __init__(self, text: str = "", parent=None):
+        super().__init__("", parent)
+        self._full_text = ""
+        self.set_full_text(text)
+
+    def set_full_text(self, text: str) -> None:
+        self._full_text = str(text)
+        self.setToolTip(self._full_text)
+        self._refresh_elide()
+
+    def resizeEvent(self, event):  # noqa: N802 - Qt override
+        super().resizeEvent(event)
+        self._refresh_elide()
+
+    def _refresh_elide(self) -> None:
+        width = max(24, self.width() - 2)
+        super().setText(
+            self.fontMetrics().elidedText(self._full_text, Qt.ElideMiddle, width)
+        )
+
 
 class ImageViewerDialog(
     ImageViewerRoiMixin,
@@ -590,12 +611,76 @@ class ImageViewerDialog(
         processing_lay.addWidget(_sep())
 
         # ── Save PNG — always visible ─────────────────────────────────────────
-        save_btn = QPushButton("⬇  Save PNG copy…")
-        save_btn.setFont(QFont("Helvetica", 8, QFont.Bold))
-        save_btn.setFixedHeight(26)
-        save_btn.setObjectName("accentBtn")
-        save_btn.clicked.connect(self._on_save_png)
-        export_lay.addWidget(save_btn)
+        self._save_png_btn = QPushButton("⬇  Save PNG copy…")
+        self._save_png_btn.setFont(QFont("Helvetica", 8, QFont.Bold))
+        self._save_png_btn.setFixedHeight(26)
+        self._save_png_btn.setObjectName("accentBtn")
+        self._save_png_btn.clicked.connect(self._on_save_png)
+        export_lay.addWidget(self._save_png_btn)
+
+        summary = QWidget()
+        summary_lay = QGridLayout(summary)
+        summary_lay.setContentsMargins(2, 4, 2, 4)
+        summary_lay.setHorizontalSpacing(8)
+        summary_lay.setVerticalSpacing(2)
+
+        def _summary_row(row: int, name: str, attr: str, *, elide: bool = False) -> QLabel:
+            key_lbl = QLabel(name)
+            key_lbl.setFont(QFont("Helvetica", 8, QFont.Bold))
+            key_lbl.setStyleSheet("color: palette(mid);")
+            val_lbl = _ElidedLabel("--") if elide else QLabel("--")
+            val_lbl.setFont(QFont("Helvetica", 8))
+            val_lbl.setWordWrap(False)
+            val_lbl.setSizePolicy(
+                QSizePolicy.Ignored if elide else QSizePolicy.Preferred,
+                QSizePolicy.Preferred,
+            )
+            val_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            val_lbl.setObjectName(attr)
+            summary_lay.addWidget(key_lbl, row, 0)
+            summary_lay.addWidget(val_lbl, row, 1)
+            setattr(self, attr, val_lbl)
+            return val_lbl
+
+        _summary_row(0, "PNG", "_export_png_size_lbl")
+        _summary_row(1, "File", "_export_png_file_lbl", elide=True)
+        _summary_row(2, "Bias", "_export_bias_lbl")
+        _summary_row(3, "Current", "_export_current_lbl")
+        _summary_row(4, "Data", "_export_precision_lbl")
+        summary_lay.setColumnStretch(1, 1)
+        export_lay.addWidget(summary)
+
+        self._export_provenance_chk = QCheckBox("Write provenance")
+        self._export_provenance_chk.setFont(QFont("Helvetica", 8))
+        self._export_provenance_chk.setChecked(True)
+        export_lay.addWidget(self._export_provenance_chk)
+
+        self._export_scalebar_chk = QCheckBox("Include scale bar")
+        self._export_scalebar_chk.setFont(QFont("Helvetica", 8))
+        self._export_scalebar_chk.setChecked(True)
+        export_lay.addWidget(self._export_scalebar_chk)
+
+        self._save_pdf_btn = QPushButton("Save PDF copy…")
+        self._save_pdf_btn.setFont(QFont("Helvetica", 8, QFont.Bold))
+        self._save_pdf_btn.setFixedHeight(26)
+        self._save_pdf_btn.clicked.connect(self._on_save_pdf)
+        export_lay.addWidget(self._save_pdf_btn)
+
+        self._save_sxm_btn = QPushButton("Save SXM copy…")
+        self._save_sxm_btn.setFont(QFont("Helvetica", 8, QFont.Bold))
+        self._save_sxm_btn.setFixedHeight(26)
+        self._save_sxm_btn.clicked.connect(self._on_save_sxm)
+        export_lay.addWidget(self._save_sxm_btn)
+
+        self._save_gwy_btn = QPushButton("Save GWY copy…")
+        self._save_gwy_btn.setFont(QFont("Helvetica", 8, QFont.Bold))
+        self._save_gwy_btn.setFixedHeight(26)
+        self._save_gwy_btn.setToolTip(
+            "Export a Gwyddion .gwy file. Requires the optional gwyfile package."
+        )
+        self._save_gwy_btn.clicked.connect(self._on_save_gwy)
+        export_lay.addWidget(self._save_gwy_btn)
+        self._update_export_summary()
 
         # ── Send to tool (collapsible) ────────────────────────────────────────
         _, self._export_widget, send_lay = _collapsible_section(
@@ -1716,6 +1801,7 @@ class ImageViewerDialog(
                         self._status_lbl.setText(self._processing_roi_error)
                     self._display_arr = self._raw_arr
                     self._display_scan_range_m = getattr(self, "_scan_range_m", None)
+                    self._update_export_summary()
                     return
                 # Forward calibration through the pipeline so:
                 #   (a) step-tolerance / facet ops interpret step_threshold_deg
@@ -1748,6 +1834,7 @@ class ImageViewerDialog(
         new_shape = self._display_arr.shape if self._display_arr is not None else None
         if reset_zoom_if_shape_changed and old_shape is not None and new_shape != old_shape:
             self._reset_zoom_on_next_pixmap = True
+        self._update_export_summary()
 
     def _refresh_histogram_and_markers(self, entry: SxmFile):
         self._update_histogram()

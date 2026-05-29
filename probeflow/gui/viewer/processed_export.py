@@ -143,6 +143,8 @@ def save_processed_image(
     display_settings: Optional[dict] = None,
     roi_set=None,
     processing_history: Optional[dict] = None,
+    include_provenance: bool = True,
+    add_scalebar: bool = True,
 ) -> str:
     """Write *scan* plane *plane_idx* to *out_path* in the format implied by suffix.
 
@@ -156,7 +158,7 @@ def save_processed_image(
     suffix = out_path.suffix.lower()
     try:
         provenance = None
-        if suffix != ".sxm" and display_settings is not None:
+        if include_provenance and suffix != ".sxm" and display_settings is not None:
             provenance = build_processed_export_provenance(
                 scan, out_path, plane_idx, display_settings,
                 roi_set=roi_set, processing_history=processing_history,
@@ -170,22 +172,23 @@ def save_processed_image(
             scan.save_png(
                 out_path, plane_idx=plane_idx,
                 colormap=colormap, clip_low=clip_low, clip_high=clip_high,
-                add_scalebar=True,
+                add_scalebar=add_scalebar,
                 provenance=provenance,
             )
         elif suffix == ".pdf":
             scan.save_pdf(
                 out_path, plane_idx=plane_idx,
                 colormap=colormap, clip_low=clip_low, clip_high=clip_high,
+                show_scalebar=add_scalebar,
                 provenance=provenance,
             )
         elif suffix == ".csv":
             scan.save_csv(out_path, plane_idx=plane_idx, provenance=provenance)
         elif suffix == ".gwy":
-            scan.save_gwy(out_path, plane_idx=plane_idx)
-            write_processed_export_sidecar(
-                scan, out_path, plane_idx, display_settings or {},
-                roi_set=roi_set, processing_history=processing_history,
+            scan.save_gwy(
+                out_path, plane_idx=plane_idx,
+                include_provenance=include_provenance,
+                include_meta=include_provenance,
                 provenance=provenance,
             )
         elif suffix == ".sxm":

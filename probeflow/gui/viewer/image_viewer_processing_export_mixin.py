@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 from pathlib import Path
 
-from PySide6.QtWidgets import QFileDialog, QMessageBox
+from PySide6.QtWidgets import QFileDialog
 
 from probeflow.gui.config import load_config, save_config
 from probeflow.gui.roi_context import active_area_roi_context
@@ -132,39 +132,136 @@ class ImageViewerProcessingExportMixin:
         if self._proc_undo_ctrl is not None:
             self._proc_undo_ctrl.update_buttons()
 
+    def _current_export_array(self):
+        return self._display_arr if self._display_arr is not None else self._raw_arr
+
+    def _default_viewer_export_path(self, suffix: str) -> Path:
+        entry = self._entries[self._idx]
+        suffix = suffix if suffix.startswith(".") else f".{suffix}"
+        return Path.home() / f"{entry.stem}_viewer{suffix}"
+
+    def _export_provenance_enabled(self) -> bool:
+        checkbox = getattr(self, "_export_provenance_chk", None)
+        return True if checkbox is None else bool(checkbox.isChecked())
+
+    def _export_scalebar_enabled(self) -> bool:
+        checkbox = getattr(self, "_export_scalebar_chk", None)
+        return True if checkbox is None else bool(checkbox.isChecked())
+
+    def _source_format_for_export(self) -> str:
+        entry = self._entries[self._idx]
+        return str(
+            getattr(self, "_scan_format", "")
+            or getattr(entry, "source_format", None)
+            or ""
+        ).lower()
+
+    def _update_export_format_controls(self) -> None:
+        sxm_btn = getattr(self, "_save_sxm_btn", None)
+        if sxm_btn is None:
+            return
+        fmt = self._source_format_for_export()
+        sxm_enabled = fmt in {"dat", "createc_dat"}
+        sxm_btn.setEnabled(sxm_enabled)
+        if sxm_enabled:
+            sxm_btn.setToolTip("Export the current Createc .dat view as a Nanonis .sxm file.")
+        else:
+            sxm_btn.setToolTip(
+                "SXM conversion from the viewer is intended for Createc .dat scans; "
+                "SM4 and existing SXM sources should use PNG/PDF/GWY or the multi-format dialog."
+            )
+
+    def _export_precision_text(self) -> str:
+        bits = None
+        for op in (self._processing or {}).get("geometric_ops") or []:
+            if not isinstance(op, dict) or op.get("op") != "quantize_bit_depth":
+                continue
+            try:
+                bits = int((op.get("params") or {}).get("bits"))
+            except (TypeError, ValueError):
+                bits = None
+        if bits is not None:
+            return f"{bits}-bit quantized"
+        arr = self._current_export_array()
+        if arr is None:
+            return "--"
+        return f"{arr.dtype} data"
+
+    @staticmethod
+    def _format_export_bias(bias_mv) -> str:
+        if bias_mv is None:
+            return "--"
+        try:
+            bias_mv = float(bias_mv)
+        except (TypeError, ValueError):
+            return "--"
+        if abs(bias_mv) >= 1000:
+            return f"{bias_mv / 1000:.4g} V"
+        return f"{bias_mv:.4g} mV"
+
+    @staticmethod
+    def _format_export_current(current_pa) -> str:
+        if current_pa is None:
+            return "--"
+        try:
+            current_pa = float(current_pa)
+        except (TypeError, ValueError):
+            return "--"
+        if abs(current_pa) >= 1000:
+            return f"{current_pa / 1000:.4g} nA"
+        return f"{current_pa:.4g} pA"
+
+    def _update_export_summary(self) -> None:
+        if not hasattr(self, "_export_png_size_lbl"):
+            return
+        arr = self._current_export_array()
+        if arr is None or getattr(arr, "ndim", 0) < 2:
+            size_text = "--"
+        else:
+            h, w = arr.shape[:2]
+            size_text = f"{int(w)}x{int(h)} px"
+
+        entry = self._entries[self._idx]
+        self._export_png_size_lbl.setText(size_text)
+        filename = self._default_viewer_export_path(".png").name
+        file_lbl = self._export_png_file_lbl
+        if hasattr(file_lbl, "set_full_text"):
+            file_lbl.set_full_text(filename)
+        else:
+            file_lbl.setText(filename)
+            file_lbl.setToolTip(filename)
+        self._export_bias_lbl.setText(self._format_export_bias(getattr(entry, "bias_mv", None)))
+        self._export_current_lbl.setText(
+            self._format_export_current(getattr(entry, "current_pa", None))
+        )
+        self._export_precision_lbl.setText(self._export_precision_text())
+        self._update_export_format_controls()
+
     def _on_save_png(self):
         entry = self._entries[self._idx]
         if not self._assert_exportable_processing():
             return
         out_path, _ = QFileDialog.getSaveFileName(
-            self, "Save PNG", str(Path.home() / f"{entry.stem}_viewer.png"),
+            self, "Save PNG", str(self._default_viewer_export_path(".png")),
             "PNG images (*.png)")
         if not out_path:
             return
-        arr = self._display_arr if self._display_arr is not None else self._raw_arr
+        arr = self._current_export_array()
         if arr is None:
             self._status_lbl.setText("No data to save.")
             return
 
-        # Ask whether to include the scale bar.
-        reply = QMessageBox.question(
-            self, "Scale bar",
-            "Include scale bar in the exported PNG?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.Yes,   # default
-        )
-        add_scalebar = (reply == QMessageBox.Yes)
-
         msg = save_viewer_png(
             arr, out_path, entry.path,
-            self._colormap, self._clip_low, self._clip_high,
+            self._viewer_colormap, self._clip_low, self._clip_high,
             self._drs, self._processing, self._image_roi_set,
             self._ch_cb.currentIndex(), self._ch_cb.currentText() or None,
             processing_history=(
                 self._processing_history.to_dict()
                 if self._processing_history is not None else None
             ),
-            add_scalebar=add_scalebar,
+            add_scalebar=self._export_scalebar_enabled(),
+            include_provenance=self._export_provenance_enabled(),
         )
         if msg.startswith("Saved") and self._processing_history is not None:
             self._mark_history_export(out_path, export_parameters={"export_kind": "viewer_png"})
@@ -226,19 +323,20 @@ class ImageViewerProcessingExportMixin:
     def _current_display_settings(self) -> dict:
         from probeflow.provenance.export import png_display_state
 
+        add_scalebar = self._export_scalebar_enabled()
         return png_display_state(
             self._drs,
             clip_low=self._clip_low,
             clip_high=self._clip_high,
             colormap=self._viewer_colormap,
-            add_scalebar=True,
+            add_scalebar=add_scalebar,
             scalebar_unit="nm",
             scalebar_pos="bottom-right",
         )
 
     def _processed_scan_for_export(self):
         entry = self._entries[self._idx]
-        arr = self._display_arr if self._display_arr is not None else self._raw_arr
+        arr = self._current_export_array()
         # Post-processing scan_range_m must reflect any shape-changing step
         # (rotate_arbitrary / shear / affine_lattice_correction expand the
         # canvas; without this the exported PNG scale bar and FFT k-axes
@@ -303,19 +401,78 @@ class ImageViewerProcessingExportMixin:
         except ValueError as exc:
             self._status_lbl.setText(str(exc))
             return
+        include_provenance = self._export_provenance_enabled()
         msg = save_processed_image(
             scan, plane_idx, out,
             colormap=self._viewer_colormap,
             clip_low=self._clip_low,
             clip_high=self._clip_high,
-            display_settings=self._current_display_settings(),
+            display_settings=(
+                self._current_display_settings() if include_provenance else None
+            ),
             roi_set=self._image_roi_set,
             processing_history=(
                 self._processing_history.to_dict()
                 if self._processing_history is not None else None
             ),
+            include_provenance=include_provenance,
+            add_scalebar=self._export_scalebar_enabled(),
         )
         self._status_lbl.setText(msg)
+
+    def _on_save_current_view_as(self, suffix: str, title: str, file_filter: str) -> None:
+        if not self._assert_exportable_processing():
+            return
+        suffix = suffix if suffix.startswith(".") else f".{suffix}"
+        sxm_btn = getattr(self, "_save_sxm_btn", None)
+        if suffix == ".sxm" and sxm_btn is not None and not sxm_btn.isEnabled():
+            self._status_lbl.setText(
+                "SXM export from the viewer is available for Createc .dat scans."
+            )
+            return
+        out_path, _ = QFileDialog.getSaveFileName(
+            self,
+            title,
+            str(self._default_viewer_export_path(suffix)),
+            file_filter,
+        )
+        if not out_path:
+            return
+        out = Path(out_path)
+        if not out.suffix:
+            out = out.with_suffix(suffix)
+        try:
+            scan, plane_idx = self._processed_scan_for_export()
+        except ValueError as exc:
+            self._status_lbl.setText(str(exc))
+            return
+        include_provenance = self._export_provenance_enabled()
+        msg = save_processed_image(
+            scan, plane_idx, out,
+            colormap=self._viewer_colormap,
+            clip_low=self._clip_low,
+            clip_high=self._clip_high,
+            display_settings=(
+                self._current_display_settings() if include_provenance else None
+            ),
+            roi_set=self._image_roi_set,
+            processing_history=(
+                self._processing_history.to_dict()
+                if self._processing_history is not None else None
+            ),
+            include_provenance=include_provenance,
+            add_scalebar=self._export_scalebar_enabled(),
+        )
+        self._status_lbl.setText(msg)
+
+    def _on_save_pdf(self):
+        self._on_save_current_view_as(".pdf", "Save PDF", "PDF figures (*.pdf)")
+
+    def _on_save_sxm(self):
+        self._on_save_current_view_as(".sxm", "Save SXM", "Nanonis SXM (*.sxm)")
+
+    def _on_save_gwy(self):
+        self._on_save_current_view_as(".gwy", "Save GWY", "Gwyddion (*.gwy)")
 
     def _on_save_provenance(self):
         if not self._assert_exportable_processing():

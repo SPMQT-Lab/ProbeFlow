@@ -97,6 +97,7 @@ class ImageViewerToolsMixin:
 
         def _preview_lattice_correction(corrected_arr) -> None:
             self._display_arr = corrected_arr
+            self._update_export_summary()
             self._refresh_viewer_pixmap(reset_zoom=False)
 
         def _clear_lattice_correction_preview() -> None:
@@ -484,6 +485,7 @@ class ImageViewerToolsMixin:
 
         def _preview_fft_correction(corrected_arr) -> None:
             self._display_arr = corrected_arr
+            self._update_export_summary()
             self._refresh_viewer_pixmap(reset_zoom=False)
 
         def _clear_fft_correction_preview() -> None:

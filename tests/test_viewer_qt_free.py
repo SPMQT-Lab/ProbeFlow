@@ -113,6 +113,69 @@ def test_save_processed_image_png(tmp_path):
     assert "Saved processed image" in msg
 
 
+def test_save_processed_image_pdf_can_skip_provenance(tmp_path):
+    from probeflow.gui.viewer.processed_export import save_processed_image
+
+    scan = _make_fake_scan()
+    out = tmp_path / "result.pdf"
+
+    with patch(
+        "probeflow.provenance.export.build_scan_export_provenance",
+        return_value="prov",
+    ) as build_provenance:
+        msg = save_processed_image(
+            scan, 0, out,
+            display_settings={"colormap": "gray"},
+            include_provenance=False,
+        )
+
+    build_provenance.assert_not_called()
+    scan.save_pdf.assert_called_once_with(
+        out, plane_idx=0,
+        colormap="gray", clip_low=1.0, clip_high=99.0,
+        show_scalebar=True,
+        provenance=None,
+    )
+    assert "Saved processed image" in msg
+
+
+def test_save_processed_image_png_can_skip_scalebar(tmp_path):
+    from probeflow.gui.viewer.processed_export import save_processed_image
+
+    scan = _make_fake_scan()
+    out = tmp_path / "result.png"
+
+    msg = save_processed_image(scan, 0, out, add_scalebar=False)
+
+    scan.save_png.assert_called_once_with(
+        out, plane_idx=0,
+        colormap="gray", clip_low=1.0, clip_high=99.0,
+        add_scalebar=False, provenance=None,
+    )
+    assert "Saved processed image" in msg
+
+
+def test_save_processed_image_gwy_can_skip_provenance(tmp_path):
+    from probeflow.gui.viewer.processed_export import save_processed_image
+
+    scan = _make_fake_scan()
+    out = tmp_path / "result.gwy"
+
+    msg = save_processed_image(
+        scan, 0, out,
+        display_settings={"colormap": "gray"},
+        include_provenance=False,
+    )
+
+    scan.save_gwy.assert_called_once_with(
+        out, plane_idx=0,
+        include_provenance=False,
+        include_meta=False,
+        provenance=None,
+    )
+    assert "Saved processed image" in msg
+
+
 def test_save_processed_image_csv(tmp_path):
     from probeflow.gui.viewer.processed_export import save_processed_image
 
@@ -169,6 +232,38 @@ def test_save_processed_image_exception_returns_error_string(tmp_path):
 
     assert "Save processed image error" in msg
     assert "disk full" in msg
+
+
+# ── save_viewer_png ──────────────────────────────────────────────────────────
+
+def test_save_viewer_png_can_skip_provenance(tmp_path):
+    from probeflow.gui.viewer.png_export import save_viewer_png
+
+    arr = np.zeros((8, 12), dtype=float)
+    out = tmp_path / "viewer.png"
+    fake_scan = MagicMock()
+    fake_scan.scan_range_m = (12e-9, 8e-9)
+    drs = MagicMock()
+    drs.resolve.return_value = (0.0, 1.0)
+
+    with patch(
+        "probeflow.core.scan_loader.load_scan",
+        return_value=fake_scan,
+    ), patch(
+        "probeflow.provenance.export.build_scan_export_provenance",
+        return_value="prov",
+    ) as build_provenance, patch(
+        "probeflow.processing.export_png",
+    ) as export_png:
+        msg = save_viewer_png(
+            arr, str(out), tmp_path / "source.sxm",
+            "gray", 1.0, 99.0, drs, {}, None, 0, "Z",
+            include_provenance=False,
+        )
+
+    build_provenance.assert_not_called()
+    assert export_png.call_args.kwargs["provenance"] is None
+    assert "Saved" in msg
 
 
 # ── save_provenance_json ──────────────────────────────────────────────────────
