@@ -739,6 +739,7 @@ class FFTViewerDialog(QDialog):
             "On: q_x and q_y zoom symmetrically (equal q/pixel in both directions, "
             "but may leave blank space on a wide canvas)."
         )
+        self._fft_equal_aspect_cb.toggled.connect(self._on_equal_aspect_toggled)
         display_grp_lay.addWidget(self._fft_equal_aspect_cb)
         advanced_lay.addWidget(display_grp)
         advanced_lay.addStretch(1)
@@ -763,6 +764,7 @@ class FFTViewerDialog(QDialog):
         self._canvas_fft.mpl_connect("button_release_event", self._on_release)
         self._canvas_fft.mpl_connect("motion_notify_event",  self._on_motion)
         self._canvas_fft.mpl_connect("draw_event",           self._sync_tab_width)
+        self._canvas_fft.mpl_connect("resize_event",         self._adapt_zoom_to_canvas)
         self._radial_canvas.mpl_connect("motion_notify_event", self._on_motion)
 
     def _build(self):
@@ -862,7 +864,17 @@ class FFTViewerDialog(QDialog):
             return np.outer(self._tukey_1d(Ny), self._tukey_1d(Nx))
         return np.ones((Ny, Nx), dtype=np.float64)
 
-    def _recompute_fft(self):
+    def _recompute_fft(self, reset_view: bool = True):
+        """Recompute the FFT magnitude and reciprocal-space axes.
+
+        ``reset_view`` controls the q-window:
+          • True  — reset to the full reciprocal-space range (image first
+            loaded, or after a correction changed the canvas/q-grid).
+          • False — preserve the current zoom (e.g. switching the apodisation
+            window, which leaves the image shape and q-grid unchanged).
+            ``_redraw_fft_panel`` then re-fits q_x to the canvas aspect, so the
+            preserved view stays undistorted.
+        """
         arr = self._arr.copy()
         finite = arr[np.isfinite(arr)]
         arr[~np.isfinite(arr)] = float(np.nanmedian(finite)) if finite.size > 0 else 0.0
@@ -883,8 +895,9 @@ class FFTViewerDialog(QDialog):
 
         self._qx = np.fft.fftshift(np.fft.fftfreq(Nx, d=dx_nm))
         self._qy = np.fft.fftshift(np.fft.fftfreq(Ny, d=dy_nm))
-        self._fft_xlim = (float(self._qx[0]),  float(self._qx[-1]))
-        self._fft_ylim = (float(self._qy[-1]), float(self._qy[0]))
+        if reset_view:
+            self._fft_xlim = (float(self._qx[0]),  float(self._qx[-1]))
+            self._fft_ylim = (float(self._qy[-1]), float(self._qy[0]))
 
     def _compute_display_fft(self) -> np.ndarray:
         mag = self._fft_mag.copy()
@@ -1005,6 +1018,15 @@ class FFTViewerDialog(QDialog):
             extent=extent_q, aspect="auto",
             vmin=vmin_val, vmax=vmax_val,
         )
+        # Enforce the display-aspect invariant on every draw. In fill-canvas
+        # (default) mode the axes stretch to fill the canvas and q_x is re-fitted
+        # to the canvas aspect, preserving the current q_y zoom; in equal-aspect
+        # mode the axes box is squared (matplotlib then adds side margins).
+        if self._use_equal_aspect():
+            ax.set_aspect("equal", adjustable="box")
+        else:
+            ax.set_aspect("auto")
+            self._aspect_correct_xlim()
         ax.set_xlim(*self._fft_xlim)
         ax.set_ylim(*self._fft_ylim)
         scale_lbl = "log₁₀|FFT|" if self._scale_mode == "log" else "|FFT|"
@@ -1083,20 +1105,37 @@ class FFTViewerDialog(QDialog):
         h = ch * (0.95 - 0.09)
         return w / h if h > 1 else 1.0
 
-    def _adapt_zoom_to_canvas(self) -> None:
-        """Re-derive q_x limits from the current canvas aspect, preserving q_y zoom.
+    def _aspect_correct_xlim(self) -> None:
+        """Recompute _fft_xlim from _fft_ylim and the canvas aspect (no redraw).
 
-        Called after any layout change that resizes the canvas (Focus FFT toggle,
-        Show tools toggle) so circles in q-space remain circular on screen.
+        Enforces the core display invariant — in fill-canvas (non-equal) mode the
+        visible q_x span must equal the q_y span × canvas aspect, so q-space
+        circles render as circles. Preserves the current q_y zoom and the x
+        centre. No-op in equal-aspect mode (there the axes box is squared instead).
         """
         if self._use_equal_aspect():
             return
         yb, yt = self._fft_ylim   # yb > yt (inverted y axis)
         y_half = abs(yb - yt) / 2
-        yc = (yb + yt) / 2
         xc = (self._fft_xlim[0] + self._fft_xlim[1]) / 2
         x_half = y_half * self._axes_aspect()
         self._fft_xlim = (xc - x_half, xc + x_half)
+
+    def _on_equal_aspect_toggled(self, *_args) -> None:
+        """Re-fit and redraw when the equal-aspect display mode is switched."""
+        self._zoom_fit()
+        self._redraw()
+
+    def _adapt_zoom_to_canvas(self, *_args) -> None:
+        """Re-fit q_x to the current canvas aspect and redraw, preserving q_y zoom.
+
+        The single chokepoint for every canvas-size change — window resize,
+        splitter drag, Focus FFT / Show tools toggles — wired to the matplotlib
+        ``resize_event`` so circles stay circular no matter how the size changed.
+        """
+        if self._use_equal_aspect():
+            return
+        self._aspect_correct_xlim()
         self._ax_fft.set_xlim(*self._fft_xlim)
         self._canvas_fft.draw_idle()
 
@@ -1299,7 +1338,9 @@ class FFTViewerDialog(QDialog):
 
     def _on_window_changed(self, idx: int):
         self._window_mode = ["hann", "none", "tukey"][idx]
-        self._recompute_fft()
+        # Apodisation change leaves the image shape and q-grid unchanged, so keep
+        # the user's current zoom rather than snapping back to the full FFT.
+        self._recompute_fft(reset_view=False)
         self._redraw()
 
     def _on_dc_changed(self, idx: int):
