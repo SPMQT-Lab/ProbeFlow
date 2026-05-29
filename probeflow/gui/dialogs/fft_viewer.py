@@ -132,6 +132,10 @@ class FFTViewerDialog(QDialog):
 
         tb.addWidget(_lbl("Scale:"))
         self._scale_combo = _combo(["Log", "Linear"], 80)
+        self._scale_combo.setToolTip(
+            "FFT display scale.  Log makes weak peaks visible; "
+            "Linear shows raw amplitude ratios."
+        )
         self._scale_combo.currentIndexChanged.connect(self._on_scale_changed)
         tb.addWidget(self._scale_combo)
 
@@ -139,17 +143,28 @@ class FFTViewerDialog(QDialog):
         self._cmap_combo = _combo(
             ["Gray", "Gray (inv.)", "Inferno", "Hot", "Viridis", "Plasma", "Turbo"], 96
         )
+        self._cmap_combo.setToolTip("Colour map for the FFT intensity display.")
         self._cmap_combo.currentIndexChanged.connect(self._on_cmap_changed)
         tb.addWidget(self._cmap_combo)
 
         tb.addWidget(_lbl("Window:"))
         self._window_combo = _combo(["Hann", "None", "Tukey"], 82)
+        self._window_combo.setToolTip(
+            "Apodisation window applied before the FFT to reduce ringing at image edges. "
+            "Hann is recommended for most images."
+        )
         self._window_combo.currentIndexChanged.connect(self._on_window_changed)
         tb.addWidget(self._window_combo)
 
         tb.addWidget(_lbl("DC:"))
         self._dc_combo = _combo(["Zero DC", "Keep DC", "Mask DC"], 95)
         self._dc_combo.setCurrentIndex(1)
+        self._dc_combo.setToolTip(
+            "How the zero-frequency (DC) component is treated.  "
+            "'Keep DC' shows the bright central peak; "
+            "'Zero DC' removes it; "
+            "'Mask DC' hides it without removing it from the data."
+        )
         self._dc_combo.currentIndexChanged.connect(self._on_dc_changed)
         tb.addWidget(self._dc_combo)
 
@@ -184,6 +199,7 @@ class FFTViewerDialog(QDialog):
         exp_btn.setFont(QFont("Helvetica", 9))
         exp_btn.setFixedHeight(24)
         exp_btn.setMinimumWidth(96)
+        exp_btn.setToolTip("Save the current FFT view as a PNG file.")
         exp_btn.clicked.connect(self._on_export)
         tb.addWidget(exp_btn)
 
@@ -566,20 +582,40 @@ class FFTViewerDialog(QDialog):
         opts_row = QHBoxLayout()
         opts_row.addWidget(self._fft_preserve_orientation_cb)
         opts_row.addSpacing(8)
+        self._fft_expand_cb.setToolTip(
+            "Grow the output canvas so no image content is clipped when "
+            "the correction involves rotation."
+        )
         opts_row.addWidget(self._fft_expand_cb)
         opts_row.addSpacing(8)
         opts_row.addWidget(QLabel("Interpolation:"))
+        self._fft_interp_combo.setToolTip(
+            "Resampling method used when remapping pixels.  "
+            "Bilinear is a good default."
+        )
         opts_row.addWidget(self._fft_interp_combo)
         opts_row.addSpacing(8)
         opts_row.addWidget(QLabel("Fill:"))
+        self._fft_fill_combo.setToolTip(
+            "Value assigned to pixels outside the original image boundary "
+            "after transformation."
+        )
         opts_row.addWidget(self._fft_fill_combo)
         opts_row.addStretch(1)
         opts_lay_outer.addLayout(opts_row)
         advanced_lay.addWidget(correction_opts_grp)
 
         piezo_grp, piezo_lay = _collapsible_group(
-            "Automatic peak picking and piezo constants", checked=False,
+            "Scanner calibration (expert)", checked=False,
         )
+        piezo_info_lbl = QLabel(
+            "Measures piezo scan-speed constants from Bragg picks.\n"
+            "This is for scanner calibration — not needed for image undistortion."
+        )
+        piezo_info_lbl.setFont(QFont("Helvetica", 8))
+        piezo_info_lbl.setWordWrap(True)
+        piezo_info_lbl.setStyleSheet("color: gray; font-style: italic;")
+        piezo_lay.addWidget(piezo_info_lbl)
         peak_btn_row = QHBoxLayout()
         self._bragg_detect_btn = QPushButton("Detect peaks")
         self._bragg_detect_btn.setFont(QFont("Helvetica", 9))
@@ -642,7 +678,7 @@ class FFTViewerDialog(QDialog):
         advanced_lay.addWidget(piezo_grp)
         advanced_lay.addStretch(1)
         advanced_scroll.setWidget(advanced_inner)
-        self._grid_tab_index = self._tab_widget.addTab(advanced_scroll, "Advanced")
+        self._grid_tab_index = self._tab_widget.addTab(advanced_scroll, "⚙ Expert")
 
         self._fft_splitter = QSplitter(Qt.Vertical)
         self._fft_splitter.addWidget(fft_top)
@@ -1543,7 +1579,10 @@ class FFTViewerDialog(QDialog):
                 "Create a reciprocal grid, then drag g1/g2 handles until the grid "
                 "tracks the visible Bragg peaks."
             )
-            corr_lbl.setText("Align a reciprocal grid to compute correction factors.")
+            corr_lbl.setText(
+                "Step 2: Click 'Create/Edit reciprocal grid' below and drag the "
+                "g₁/g₂ handles onto two Bragg peaks in the FFT."
+            )
             if status_lbl is not None:
                 status_lbl.setText("No reciprocal grid yet")
             return
@@ -1575,12 +1614,14 @@ class FFTViewerDialog(QDialog):
             return
 
         self._fft_correction = result
-        corr_lbl.setText("\n".join(
-            correction_main_lines(
-                result,
-                preserve_orientation=self._fft_preserve_orientation_cb.isChecked(),
-            )
-        ))
+        correction_lines = correction_main_lines(
+            result,
+            preserve_orientation=self._fft_preserve_orientation_cb.isChecked(),
+        )
+        corr_lbl.setText(
+            "\n".join(correction_lines)
+            + "\n→ Click 'Preview corrected image' to verify."
+        )
         if status_lbl is not None:
             status_lbl.setText("Correction ready")
         if self._get_image_fn is not None:
@@ -1672,9 +1713,22 @@ class FFTViewerDialog(QDialog):
         if isinstance(structure, KnownStructure):
             op_params["known_structure"] = structure.as_dict()
         self._apply_correction_fn("affine_lattice_correction", op_params)
+        # Recompute FFT from the now-corrected image so the display reflects the
+        # undistorted real-space data.  _apply_correction_fn calls
+        # _refresh_processing_display() synchronously, so _get_image_fn() already
+        # returns the corrected array by the time we reach here.
+        if self._get_image_fn is not None:
+            updated = self._get_image_fn()
+            if updated is not None and np.asarray(updated).ndim == 2:
+                self._arr = np.asarray(updated, dtype=np.float64)
+                self._recompute_fft()
+                self._redraw()
+        # Clear the stale grid overlay — it was fitted on the pre-correction FFT
+        # and no longer aligns with the corrected diffraction pattern.
+        self._on_clear_fft_lattice()
         self._fft_correction_lbl.setText(
-            "Correction applied.\n"
-            "FFT grid remains visible for reference."
+            "Correction applied. FFT recomputed from corrected image.\n"
+            "Bragg peaks should now lie on the inner shell ring."
         )
         self._fft_correction_status_lbl.setText("Correction applied")
         self._fft_preview_btn.setEnabled(False)
