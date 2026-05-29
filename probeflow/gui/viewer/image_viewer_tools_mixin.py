@@ -501,7 +501,7 @@ class ImageViewerToolsMixin:
 
         dlg = FFTViewerDialog(
             arr,
-            self._scan_range_m or (1e-9, 1e-9),
+            self._display_scan_range_m or self._scan_range_m or (1e-9, 1e-9),
             colormap=self._colormap,
             theme=self._t,
             channel_unit=self._channel_unit(),
