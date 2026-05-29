@@ -7,7 +7,7 @@ import numpy as np
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QApplication,
@@ -725,6 +725,22 @@ class FFTViewerDialog(QDialog):
         self._bragg_copy_btn.clicked.connect(self._copy_bragg_results)
         piezo_lay.addWidget(self._bragg_copy_btn)
         advanced_lay.addWidget(piezo_grp)
+
+        display_grp = QGroupBox("Display")
+        display_grp.setFont(QFont("Helvetica", 9))
+        display_grp_lay = QVBoxLayout(display_grp)
+        display_grp_lay.setContentsMargins(8, 8, 8, 6)
+        self._fft_equal_aspect_cb = QCheckBox("Preserve equal q_x/q_y aspect while zoomed")
+        self._fft_equal_aspect_cb.setFont(QFont("Helvetica", 9))
+        self._fft_equal_aspect_cb.setChecked(False)
+        self._fft_equal_aspect_cb.setToolTip(
+            "Off (default): zoom uses the full canvas width — the visible q-window "
+            "matches the canvas shape so no space is wasted. "
+            "On: q_x and q_y zoom symmetrically (equal q/pixel in both directions, "
+            "but may leave blank space on a wide canvas)."
+        )
+        display_grp_lay.addWidget(self._fft_equal_aspect_cb)
+        advanced_lay.addWidget(display_grp)
         advanced_lay.addStretch(1)
         advanced_scroll.setWidget(advanced_inner)
         self._tab_widget.addTab(advanced_scroll, "⚙ Expert")
@@ -1015,6 +1031,9 @@ class FFTViewerDialog(QDialog):
     def showEvent(self, event):
         super().showEvent(event)
         self._sync_tab_width()
+        if not getattr(self, "_initial_fit_done", False):
+            self._initial_fit_done = True
+            QTimer.singleShot(0, self._zoom_fit)
 
     def _on_focus_fft_toggled(self, checked: bool) -> None:
         self._focus_fft_active = bool(checked)
@@ -1051,16 +1070,42 @@ class FFTViewerDialog(QDialog):
 
     # ── zoom / pan ─────────────────────────────────────────────────────────────
 
+    def _axes_aspect(self) -> float:
+        """Width/height pixel ratio of the FFT axes (accounts for subplot margins)."""
+        cw = self._canvas_fft.width()
+        ch = self._canvas_fft.height()
+        if cw < 1 or ch < 1:
+            return 1.0
+        # Must match the subplots_adjust call: left=0.07, right=0.99, top=0.95, bottom=0.09
+        w = cw * (0.99 - 0.07)
+        h = ch * (0.95 - 0.09)
+        return w / h if h > 1 else 1.0
+
+    def _use_equal_aspect(self) -> bool:
+        cb = getattr(self, "_fft_equal_aspect_cb", None)
+        return cb is not None and cb.isChecked()
+
     def _zoom_fit(self):
-        self._fft_xlim = (float(self._qx[0]),  float(self._qx[-1]))
-        self._fft_ylim = (float(self._qy[-1]), float(self._qy[0]))
+        qx_center = (float(self._qx[0]) + float(self._qx[-1])) / 2
+        qy_center = (float(self._qy[0]) + float(self._qy[-1])) / 2
+        qy_half = (float(self._qy[-1]) - float(self._qy[0])) / 2
+        if self._use_equal_aspect():
+            qx_half = (float(self._qx[-1]) - float(self._qx[0])) / 2
+        else:
+            qx_half = qy_half * self._axes_aspect()
+        self._fft_xlim = (qx_center - qx_half, qx_center + qx_half)
+        self._fft_ylim = (qy_center + qy_half, qy_center - qy_half)
         self._ax_fft.set_xlim(*self._fft_xlim)
         self._ax_fft.set_ylim(*self._fft_ylim)
         self._canvas_fft.draw_idle()
 
     def _zoom_centre(self):
-        qx_half = (float(self._qx[-1]) - float(self._qx[0])) * 0.25
+        # Show centre quarter-range in y; derive x from canvas aspect.
         qy_half = (float(self._qy[-1]) - float(self._qy[0])) * 0.25
+        if self._use_equal_aspect():
+            qx_half = (float(self._qx[-1]) - float(self._qx[0])) * 0.25
+        else:
+            qx_half = qy_half * self._axes_aspect()
         self._fft_xlim = (-qx_half, qx_half)
         self._fft_ylim = (qy_half, -qy_half)
         self._ax_fft.set_xlim(*self._fft_xlim)
@@ -1069,20 +1114,28 @@ class FFTViewerDialog(QDialog):
 
     def _zoom_by(self, factor: float, cx: float | None = None, cy: float | None = None):
         xl, xr = self._fft_xlim
-        yb, yt = self._fft_ylim
+        yb, yt = self._fft_ylim   # yb > yt (inverted y axis)
         xc = cx if cx is not None else (xl + xr) / 2
         yc = cy if cy is not None else (yb + yt) / 2
-        min_x, min_y = self._minimum_fft_spans()
-        self._fft_xlim = self._interval_with_min_span(
-            xc + (xl - xc) * factor,
-            xc + (xr - xc) * factor,
-            min_x,
-        )
-        self._fft_ylim = self._interval_with_min_span(
-            yc + (yb - yc) * factor,
-            yc + (yt - yc) * factor,
-            min_y,
-        )
+        if self._use_equal_aspect():
+            # Symmetric: scale both axes by the same factor.
+            min_x, min_y = self._minimum_fft_spans()
+            self._fft_xlim = self._interval_with_min_span(
+                xc + (xl - xc) * factor, xc + (xr - xc) * factor, min_x,
+            )
+            self._fft_ylim = self._interval_with_min_span(
+                yc + (yb - yc) * factor, yc + (yt - yc) * factor, min_y,
+            )
+        else:
+            # Aspect-aware: scale y by factor, derive x so q/pixel is equal.
+            y_half = abs(yb - yt) / 2 * factor
+            x_half = y_half * self._axes_aspect()
+            _, min_y = self._minimum_fft_spans()
+            min_x = min_y * self._axes_aspect()
+            y_half = max(y_half, min_y / 2)
+            x_half = max(x_half, min_x / 2)
+            self._fft_xlim = (xc - x_half, xc + x_half)
+            self._fft_ylim = (yc + y_half, yc - y_half)
         self._ax_fft.set_xlim(*self._fft_xlim)
         self._ax_fft.set_ylim(*self._fft_ylim)
         self._canvas_fft.draw_idle()
@@ -1212,7 +1265,12 @@ class FFTViewerDialog(QDialog):
                 f"x={event.xdata:.2f} nm  y={event.ydata:.2f} nm"
             )
         else:
-            self._set_status_text("")
+            xl, xr = self._fft_xlim
+            yb, yt = self._fft_ylim   # yb > yt (inverted)
+            self._set_status_text(
+                f"q_x: {xl:.3g} to {xr:.3g} nm⁻¹    "
+                f"q_y: {yt:.3g} to {yb:.3g} nm⁻¹"
+            )
 
     # ── toolbar callbacks ──────────────────────────────────────────────────────
 
