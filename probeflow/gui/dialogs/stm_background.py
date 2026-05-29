@@ -133,6 +133,12 @@ class STMBackgroundDialog(QDialog):
         self._last_result = None
         self._last_mode = "corrected"
 
+        # Determine display unit from image profile so the jump threshold
+        # spin box uses the same height units as the plot axes.
+        _init_prof = compute_scanline_profile(self._image, mask=None, statistic="median")
+        _fp = _init_prof[np.isfinite(_init_prof)]
+        self._unit_scale, self._unit_label = _auto_unit(_fp) if _fp.size > 0 else (1e9, "nm")
+
         root = QVBoxLayout(self)
         root.setSpacing(8)
 
@@ -192,14 +198,16 @@ class STMBackgroundDialog(QDialog):
         jump_row.setContentsMargins(0, 0, 0, 0)
         self._jump_cb = QCheckBox()
         self._jump_spin = QDoubleSpinBox()
-        self._jump_spin.setRange(1e-15, 1e15)
-        self._jump_spin.setDecimals(3)
-        self._jump_spin.setSingleStep(1.0)
-        self._jump_spin.setValue(0.0)
+        self._jump_spin.setRange(1e-6, 1e6)   # in display units (nm / pm / μm)
+        self._jump_spin.setDecimals(4)
+        _default_display = round(1e-10 * self._unit_scale, 6)  # 100 pm in display units
+        self._jump_spin.setSingleStep(max(1e-4, _default_display / 10))
+        self._jump_spin.setValue(_default_display)
+        self._jump_spin.setSuffix(f" {self._unit_label}")
         self._jump_spin.setEnabled(False)
         self._jump_spin.setToolTip(
             "Detect abrupt row-to-row changes in the median/mean height profile. "
-            "The threshold is in image height units. "
+            f"Threshold in {self._unit_label} — the same unit shown on the plot. "
             "Detected jumps are removed before fitting the smooth background, "
             "then added back to the fitted background before subtraction."
         )
@@ -301,7 +309,8 @@ class STMBackgroundDialog(QDialog):
         else:
             params["blur_length"] = None
         params["jump_threshold"] = (
-            float(self._jump_spin.value()) if self._jump_cb.isChecked() else None
+            float(self._jump_spin.value()) / self._unit_scale
+            if self._jump_cb.isChecked() else None
         )
         if fit_region == "active_roi" and self._active_roi_id:
             params["fit_roi_id"] = self._active_roi_id
@@ -510,18 +519,30 @@ class STMBackgroundDialog(QDialog):
             f"Max |residual|:   {res_max * res_scale:.3g} {res_unit}",
         ]
 
+        # Largest adjacent row-to-row difference (regardless of threshold)
+        p_arr = result.line_profile.copy()
+        p_arr[~np.isfinite(p_arr)] = np.nan
+        consec_diffs = np.abs(np.diff(p_arr))
+        fin_diffs = consec_diffs[np.isfinite(consec_diffs)]
+        if fin_diffs.size > 0:
+            largest_adj = float(np.max(fin_diffs))
+            adj_scale, adj_unit = _auto_unit(fin_diffs)
+        else:
+            largest_adj, adj_scale, adj_unit = 0.0, scale, unit
+
         jump_threshold = result.params.jump_threshold
         if jump_threshold is not None:
             thr_scale, thr_unit = _auto_unit(np.array([jump_threshold]))
             lines += [
                 f"Jump handling:    on",
                 f"Jump threshold:   {jump_threshold * thr_scale:.3g} {thr_unit}",
+                f"Largest adj jump: {largest_adj * adj_scale:.3g} {adj_unit}",
                 f"Detected jumps:   {len(result.jump_positions)}",
             ]
             if result.jump_sizes:
-                largest = float(np.max(np.abs(result.jump_sizes)))
-                jmp_scale, jmp_unit = _auto_unit(np.array(list(result.jump_sizes)))
-                lines.append(f"Largest jump:     {largest * jmp_scale:.3g} {jmp_unit}")
+                largest_det = float(np.max(np.abs(result.jump_sizes)))
+                det_scale, det_unit = _auto_unit(np.abs(np.array(list(result.jump_sizes))))
+                lines.append(f"Largest detected: {largest_det * det_scale:.3g} {det_unit}")
         else:
             lines.append("Jump handling:    off")
 

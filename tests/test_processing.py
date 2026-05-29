@@ -644,6 +644,59 @@ class TestQuantizeBitDepth:
         assert ops_in_order.index("arithmetic") < ops_in_order.index("quantize_bit_depth")
 
 
+class TestComputeJumpProfilePhysicalUnits:
+    """Unit-scale tests matching the spec's 100 pm / 50 pm scenarios."""
+
+    def test_100pm_step_detected_with_50pm_threshold_nm_scale(self):
+        from probeflow.processing.background import _compute_jump_profile
+        # Profile in nm: 0.100 nm (100 pm) step at index 5
+        p = np.zeros(10, dtype=float)
+        p[5:] += 0.100  # nm
+        j, positions, sizes = _compute_jump_profile(p, threshold=0.050)  # 50 pm in nm
+        assert positions == (5,), f"Expected jump at row 5, got {positions}"
+        assert abs(sizes[0] - 0.100) < 1e-10
+
+    def test_40pm_step_not_detected_with_50pm_threshold_nm_scale(self):
+        from probeflow.processing.background import _compute_jump_profile
+        p = np.zeros(10, dtype=float)
+        p[5:] += 0.040  # 40 pm in nm
+        j, positions, sizes = _compute_jump_profile(p, threshold=0.050)  # 50 pm in nm
+        assert positions == ()
+
+    def test_auto_unit_metre_scale_gives_nm_not_mm(self):
+        # Ensures _auto_unit returns nm (not mm) for typical STM profile values
+        from probeflow.gui.dialogs.stm_background import _auto_unit
+        profile_m = np.array([1e-9, 2e-9, 1.5e-9])  # ~1-2 nm in metres
+        scale, unit = _auto_unit(profile_m)
+        assert unit == "nm", f"Expected 'nm' for nm-scale data, got '{unit}'"
+        assert abs(scale - 1e9) < 1, f"Expected scale 1e9, got {scale}"
+
+    def test_auto_unit_pm_scale_gives_pm_not_mm(self):
+        from probeflow.gui.dialogs.stm_background import _auto_unit
+        profile_m = np.array([1e-11, 5e-11, 3e-11])  # ~10-50 pm in metres
+        scale, unit = _auto_unit(profile_m)
+        assert unit == "pm", f"Expected 'pm' for pm-scale data, got '{unit}'"
+
+    def test_jump_threshold_0p05nm_in_nm_profile_metres_detects_100pm_step(self):
+        # Full pipeline: profile in metres, threshold in nm (as entered in GUI spin)
+        # GUI spin value 0.05 nm → processing_params divides by 1e9 → threshold = 5e-11 m
+        # Step is 100 pm = 1e-10 m, threshold is 50 pm = 5e-11 m → detected
+        from probeflow.processing.background import _compute_jump_profile
+        p_metres = np.zeros(10, dtype=float)
+        p_metres[5:] += 1e-10  # 100 pm in metres
+        threshold_metres = 0.05 / 1e9  # 0.05 nm in GUI → 5e-11 m raw
+        j, positions, sizes = _compute_jump_profile(p_metres, threshold=threshold_metres)
+        assert positions == (5,), "100 pm step should be detected with 50 pm threshold"
+
+    def test_jump_threshold_raw_value_diagnosed_correctly(self):
+        # Verify that _auto_unit(raw_threshold) gives nm/pm, not mm
+        from probeflow.gui.dialogs.stm_background import _auto_unit
+        raw_threshold = 1e-10  # 100 pm in metres (what processing_params returns after fix)
+        scale, unit = _auto_unit(np.array([raw_threshold]))
+        assert unit == "pm", f"100 pm threshold should display as pm, got '{unit}'"
+        assert abs(raw_threshold * scale - 100.0) < 0.01, "Should display as ~100 pm"
+
+
 class TestComputeJumpProfile:
     def test_single_step_detected(self):
         from probeflow.processing.background import _compute_jump_profile
