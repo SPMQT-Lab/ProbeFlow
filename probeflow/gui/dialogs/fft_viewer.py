@@ -1052,6 +1052,7 @@ class FFTViewerDialog(QDialog):
         btn = getattr(self, "_focus_fft_btn", None)
         if btn is not None:
             btn.setText("Exit Focus" if checked else "Focus FFT")
+        QTimer.singleShot(0, self._adapt_zoom_to_canvas)
 
     def _on_show_tools_toggled(self, checked: bool) -> None:
         side = getattr(self, "_side_panel", None)
@@ -1061,6 +1062,7 @@ class FFTViewerDialog(QDialog):
         btn = getattr(self, "_show_tools_btn", None)
         if btn is not None:
             btn.setText("Hide tools" if checked else "Show tools")
+        QTimer.singleShot(0, self._adapt_zoom_to_canvas)
 
     def _set_status_text(self, text: str) -> None:
         self._status_lbl.setText(text)
@@ -1080,6 +1082,23 @@ class FFTViewerDialog(QDialog):
         w = cw * (0.99 - 0.07)
         h = ch * (0.95 - 0.09)
         return w / h if h > 1 else 1.0
+
+    def _adapt_zoom_to_canvas(self) -> None:
+        """Re-derive q_x limits from the current canvas aspect, preserving q_y zoom.
+
+        Called after any layout change that resizes the canvas (Focus FFT toggle,
+        Show tools toggle) so circles in q-space remain circular on screen.
+        """
+        if self._use_equal_aspect():
+            return
+        yb, yt = self._fft_ylim   # yb > yt (inverted y axis)
+        y_half = abs(yb - yt) / 2
+        yc = (yb + yt) / 2
+        xc = (self._fft_xlim[0] + self._fft_xlim[1]) / 2
+        x_half = y_half * self._axes_aspect()
+        self._fft_xlim = (xc - x_half, xc + x_half)
+        self._ax_fft.set_xlim(*self._fft_xlim)
+        self._canvas_fft.draw_idle()
 
     def _use_equal_aspect(self) -> bool:
         cb = getattr(self, "_fft_equal_aspect_cb", None)
