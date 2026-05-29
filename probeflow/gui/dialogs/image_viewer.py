@@ -1922,6 +1922,7 @@ class ImageViewerDialog(
             active_roi_mask=roi_mask,
             active_roi_id=roi_id,
             active_roi_name=roi_name,
+            prior_row_alignment=self._processing.get("align_rows") or None,
             parent=self,
         )
         dlg.applied.connect(self._on_stm_background_applied)
