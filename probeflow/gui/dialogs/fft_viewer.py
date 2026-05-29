@@ -1720,9 +1720,22 @@ class FFTViewerDialog(QDialog):
         if self._get_image_fn is not None:
             updated = self._get_image_fn()
             if updated is not None and np.asarray(updated).ndim == 2:
+                # Preserve original pixel sizes across the canvas-size change.
+                # Canvas expansion increases row/col count without changing the
+                # physical size of each pixel.  If we kept _scan_range_m the same
+                # while Nx/Ny grew, _recompute_fft would divide the same physical
+                # range over more pixels, computing a smaller dx/dy and a
+                # spuriously higher Nyquist frequency in the expanded direction.
+                orig_ny, orig_nx = self._arr.shape
+                px_x_nm = self._scan_range_m[0] * 1e9 / orig_nx if orig_nx > 0 else 1.0
+                px_y_nm = self._scan_range_m[1] * 1e9 / orig_ny if orig_ny > 0 else 1.0
                 self._arr = np.asarray(updated, dtype=np.float64)
+                new_ny, new_nx = self._arr.shape
+                self._scan_range_m = (px_x_nm * new_nx * 1e-9,
+                                      px_y_nm * new_ny * 1e-9)
                 self._recompute_fft()
                 self._redraw()
+                self._update_info_panel()
         # Clear the stale grid overlay — it was fitted on the pre-correction FFT
         # and no longer aligns with the corrected diffraction pattern.
         self._on_clear_fft_lattice()
