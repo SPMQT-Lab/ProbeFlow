@@ -1185,15 +1185,18 @@ class FFTViewerDialog(QDialog):
                 yc + (yb - yc) * factor, yc + (yt - yc) * factor, min_y,
             )
         else:
-            # Aspect-aware: scale y by factor, derive x so q/pixel is equal.
-            y_half = abs(yb - yt) / 2 * factor
-            x_half = y_half * self._axes_aspect()
+            # Aspect-aware: scale q_y by factor, derive q_x so q/pixel is equal,
+            # and keep the point (xc, yc) fixed under the cursor (so scroll-zoom
+            # toward the mouse doesn't recentre the view).
             _, min_y = self._minimum_fft_spans()
-            min_x = min_y * self._axes_aspect()
-            y_half = max(y_half, min_y / 2)
-            x_half = max(x_half, min_x / 2)
-            self._fft_xlim = (xc - x_half, xc + x_half)
-            self._fft_ylim = (yc + y_half, yc - y_half)
+            span_y = max(abs(yb - yt) * factor, min_y)
+            span_x = span_y * self._axes_aspect()
+            fx = (xc - xl) / (xr - xl) if xr != xl else 0.5
+            fy = (yc - yt) / (yb - yt) if yb != yt else 0.5
+            new_xl = xc - fx * span_x
+            new_yt = yc - fy * span_y
+            self._fft_xlim = (new_xl, new_xl + span_x)
+            self._fft_ylim = (new_yt + span_y, new_yt)
         self._ax_fft.set_xlim(*self._fft_xlim)
         self._ax_fft.set_ylim(*self._fft_ylim)
         self._canvas_fft.draw_idle()

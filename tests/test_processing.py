@@ -751,41 +751,28 @@ class TestComputeJumpProfile:
         assert float(np.max(np.abs(diffs))) < 0.1
 
 
-class TestEliminateProfileJumpsSymmetry:
-    """Regression for review numerical #8 — jump elimination must be
-    approximately symmetric.  Before the fix, a single noise spike
-    near the start of a profile permanently shifted every subsequent
-    value; an identical spike near the end of the profile had no
-    such cascade.  After the fix (forward + backward pass averaged)
-    the result is order-invariant up to a small symmetric residual."""
+class TestComputeJumpProfileSpikeSymmetry:
+    """Regression (originally review numerical #8) — a single-row spike must
+    be handled symmetrically regardless of its position in the profile.
 
-    def test_early_vs_late_spike_have_symmetric_effect(self):
-        from probeflow.processing.background import _eliminate_profile_jumps
-        # Flat profile of length 100 with a single spike of +5 at idx 5.
-        profile_early = np.zeros(100, dtype=np.float64)
-        profile_early[5] = 5.0
-        # Same profile but with the spike at idx 94 (mirror image).
-        profile_late = np.zeros(100, dtype=np.float64)
-        profile_late[94] = 5.0
-        # Threshold = 3 → both spikes are jumps to detect.
-        out_early = _eliminate_profile_jumps(profile_early, threshold=3.0)
-        out_late = _eliminate_profile_jumps(profile_late, threshold=3.0)
-        # After the fix, the means of the two results should be close
-        # to each other (both spikes are equally well-handled).
-        mean_early = float(np.nanmean(out_early))
-        mean_late = float(np.nanmean(out_late))
-        assert abs(mean_early - mean_late) < 0.05, (
-            f"Early spike vs late spike give asymmetric jump-elimination: "
-            f"mean_early={mean_early}, mean_late={mean_late}.  Forward+"
-            f"backward averaging should make these comparable."
-        )
+    The detect-subtract-fit-add-back staircase (_compute_jump_profile) records
+    both the up-jump into the spike and the down-jump out of it, so subtracting
+    the staircase removes the spike entirely no matter where it sits."""
 
-    def test_no_threshold_returns_copy(self):
-        from probeflow.processing.background import _eliminate_profile_jumps
-        profile = np.array([1.0, 2.0, np.nan, 3.0])
-        out = _eliminate_profile_jumps(profile, threshold=None)
-        np.testing.assert_array_equal(out, profile)
-        assert out is not profile
+    def test_early_vs_late_spike_handled_identically(self):
+        from probeflow.processing.background import _compute_jump_profile
+        early = np.zeros(100, dtype=np.float64)
+        early[5] = 5.0
+        late = np.zeros(100, dtype=np.float64)
+        late[94] = 5.0
+        j_early, _, _ = _compute_jump_profile(early, threshold=3.0)
+        j_late, _, _ = _compute_jump_profile(late, threshold=3.0)
+        corr_early = early - j_early
+        corr_late = late - j_late
+        # Both spikes are fully removed; the corrected profiles are flat.
+        assert float(np.max(np.abs(corr_early))) < 1e-9
+        assert float(np.max(np.abs(corr_late))) < 1e-9
+        assert abs(float(np.mean(corr_early)) - float(np.mean(corr_late))) < 1e-9
 
 
 # ─── align_rows ──────────────────────────────────────────────────────────────
