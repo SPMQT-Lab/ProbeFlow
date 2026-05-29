@@ -1282,6 +1282,29 @@ class TestPiezoCreepBackground:
         assert out.shape == arr.shape
         assert np.isfinite(out).any()
 
+    def test_piezo_creep_si_units_not_flat(self):
+        # Regression: optimizer previously converged to flat solution when the
+        # profile mean (~1e-7 m) dwarfed the creep variation (~1e-9 m).  The
+        # fix (centering + explicit x_scale) must remove >80 % of the variation.
+        N = 64
+        y = np.linspace(-1.0, 1.0, N)
+        eps = 1e-6
+        profile = 1e-7 + 5e-10 * y + 8e-10 * np.log(np.abs(y - (-1.5)) + eps)
+        arr = np.tile(profile[:, None], (1, N)).astype(np.float64)
+        result = preview_stm_background(arr, STMBackgroundParams(model="piezo_creep"))
+        row_medians = np.median(result.corrected, axis=1)
+        assert float(np.std(row_medians)) < 0.2 * float(np.std(profile))
+
+    def test_sqrt_creep_si_units_not_flat(self):
+        # Same SI-unit regression for sqrt_creep.
+        N = 64
+        y = np.linspace(-1.0, 1.0, N)
+        profile = 1e-7 + 5e-10 * y + 8e-10 * np.sqrt(np.abs(y - (-1.5)))
+        arr = np.tile(profile[:, None], (1, N)).astype(np.float64)
+        result = preview_stm_background(arr, STMBackgroundParams(model="sqrt_creep"))
+        row_medians = np.median(result.corrected, axis=1)
+        assert float(np.std(row_medians)) < 0.2 * float(np.std(profile))
+
     def test_order5_via_cli_rejected(self, first_sample_dat, tmp_path):
         with pytest.raises(SystemExit):
             cli_main(["plane-bg", str(first_sample_dat), "--order", "5"])

@@ -197,6 +197,11 @@ class STMBackgroundDialog(QDialog):
 
         self._fig = Figure(figsize=(4.2, 3.0), dpi=100)
         self._canvas = FigureCanvasQTAgg(self._fig)
+        self._canvas.setToolTip(
+            "Each dot is the per-row median (or mean) height — one point per scan line.\n"
+            "The orange line is the background model fitted to those row statistics.\n"
+            "Applying subtracts that 1-D curve from every column of the 2-D image."
+        )
         body.addWidget(self._canvas, 1)
         root.addLayout(body, 1)
 
@@ -327,6 +332,7 @@ class STMBackgroundDialog(QDialog):
         ax.plot(y, fitted, "-", linewidth=1.5, label="fitted background")
         ax.set_xlabel("scan line")
         ax.set_ylabel("height")
+        ax.set_title("row statistics → fitted background", fontsize=7, color="gray")
         ax.legend(loc="best", fontsize=8)
         ax.grid(True, alpha=0.25)
         self._fig.tight_layout()
