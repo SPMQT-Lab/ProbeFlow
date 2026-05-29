@@ -45,6 +45,8 @@ class STMBackgroundResult:
     fitted_profile: np.ndarray
     params: STMBackgroundParams
     fit_status: str
+    jump_positions: tuple[int, ...] = ()
+    jump_sizes: tuple[float, ...] = ()
 
 
 def _normalise_stm_background_model(model: str) -> str:
@@ -206,13 +208,59 @@ def _eliminate_profile_jumps(profile: np.ndarray, threshold: float | None) -> np
     return out
 
 
+def _compute_jump_profile(
+    profile: np.ndarray, threshold: float | None
+) -> tuple[np.ndarray, tuple[int, ...], tuple[float, ...]]:
+    """Detect abrupt jumps in a 1-D profile and return a cumulative staircase.
+
+    Compares raw adjacent differences against ``threshold``.  Each detected
+    jump contributes to a step offset that is applied to all subsequent rows.
+
+    Returns
+    -------
+    jump_profile
+        Array of the same length as *profile*; ``jump_profile[y]`` is the
+        cumulative height offset at row *y* due to all detected jumps at
+        rows ≤ *y*.
+    positions
+        Tuple of row indices where a jump was detected (the row *after* the
+        step, i.e. where the profile first reflects the new level).
+    sizes
+        Signed jump sizes in profile units at each detected position.
+    """
+    if threshold is None:
+        return np.zeros(len(profile), dtype=np.float64), (), ()
+    threshold = _positive_finite(threshold, "jump_threshold")
+    p = np.asarray(profile, dtype=np.float64)
+    n = p.size
+    j = np.zeros(n, dtype=np.float64)
+    positions: list[int] = []
+    sizes: list[float] = []
+    cumulative = 0.0
+    prev_finite: float | None = None
+    for y in range(n):
+        if not np.isfinite(p[y]):
+            j[y] = cumulative
+            continue
+        current = float(p[y])
+        if prev_finite is not None:
+            delta = current - prev_finite
+            if abs(delta) > threshold:
+                cumulative += delta
+                positions.append(y)
+                sizes.append(delta)
+        j[y] = cumulative
+        prev_finite = current
+    return j, tuple(positions), tuple(sizes)
+
+
 def _fit_scanline_background(
     profile: np.ndarray,
     model: str = "linear",
     *,
     blur_length: float | None = None,
     jump_threshold: float | None = None,
-) -> np.ndarray:
+) -> tuple[np.ndarray, tuple[int, ...], tuple[float, ...]]:
     """Fit or smooth a 1-D scan-line background profile.
 
     Models
@@ -243,16 +291,21 @@ def _fit_scanline_background(
     the singularity off-scan.
     """
     model = _normalise_stm_background_model(model)
-    working = _eliminate_profile_jumps(profile, jump_threshold)
+    # Detect abrupt jumps from raw adjacent differences, build staircase j(y).
+    # Fit the smooth model to profile - j, then add j back so that the
+    # returned background includes both the smooth drift and the discrete steps.
+    j, jump_positions, jump_sizes = _compute_jump_profile(profile, jump_threshold)
+    working = np.asarray(profile, dtype=np.float64) - j
+
     if model == "line_by_line":
-        return _interp_nan_profile(working)
+        return _interp_nan_profile(working) + j, jump_positions, jump_sizes
     if model == "low_pass":
         sigma = 5.0 if blur_length is None else float(blur_length)
-        return _smooth_profile_ignore_nan(working, sigma=sigma)
+        return _smooth_profile_ignore_nan(working, sigma=sigma) + j, jump_positions, jump_sizes
 
     if model in {"piezo_creep", "piezo_creep_x2", "piezo_creep_x3", "sqrt_creep"}:
         from scipy.optimize import curve_fit, OptimizeWarning
-        p = np.asarray(working, dtype=np.float64)
+        p = working
         y = np.linspace(-1.0, 1.0, p.size, dtype=np.float64)
         finite = np.isfinite(p)
         if int(finite.sum()) < 4:
@@ -306,9 +359,10 @@ def _fit_scanline_background(
             raise ValueError(f"{model} background fit did not converge: {exc}") from exc
         # Convert fitted normalised values back to original units: multiply by
         # p_scale (un-normalise) then add p_mean (un-centre).
-        return (_model(y, *popt) * p_scale + p_mean).astype(np.float64, copy=False)
+        smooth = (_model(y, *popt) * p_scale + p_mean).astype(np.float64, copy=False)
+        return smooth + j, jump_positions, jump_sizes
 
-    p = np.asarray(working, dtype=np.float64)
+    p = working
     x = np.linspace(-1.0, 1.0, p.size, dtype=np.float64)
     finite = np.isfinite(p)
     degree = {"linear": 1, "poly2": 2, "poly3": 3}[model]
@@ -317,7 +371,8 @@ def _fit_scanline_background(
             f"not enough finite scan-line values for {model} background fit"
         )
     coeff = np.polyfit(x[finite], p[finite], degree)
-    return np.polyval(coeff, x).astype(np.float64, copy=False)
+    smooth = np.polyval(coeff, x).astype(np.float64, copy=False)
+    return smooth + j, jump_positions, jump_sizes
 
 
 def _linear_x_background(image: np.ndarray, mask: np.ndarray | None = None) -> np.ndarray:
@@ -412,7 +467,7 @@ def preview_stm_background(
     x_bg = _linear_x_background(a, m) if params.linear_x_first else None
     working = a - x_bg if x_bg is not None else a
     profile = compute_scanline_profile(working, m, statistic)
-    fitted = _fit_scanline_background(
+    fitted, jump_positions, jump_sizes = _fit_scanline_background(
         profile,
         model,
         blur_length=params.blur_length,
@@ -440,6 +495,8 @@ def preview_stm_background(
         fitted_profile=fitted,
         params=resolved,
         fit_status="success",
+        jump_positions=jump_positions,
+        jump_sizes=jump_sizes,
     )
 
 

@@ -198,12 +198,15 @@ class STMBackgroundDialog(QDialog):
         self._jump_spin.setValue(0.0)
         self._jump_spin.setEnabled(False)
         self._jump_spin.setToolTip(
-            "Optional profile-jump suppression before fitting; units match the image data."
+            "Detect abrupt row-to-row changes in the median/mean height profile. "
+            "The threshold is in image height units. "
+            "Detected jumps are removed before fitting the smooth background, "
+            "then added back to the fitted background before subtraction."
         )
         self._jump_cb.toggled.connect(self._jump_spin.setEnabled)
         jump_row.addWidget(self._jump_cb)
         jump_row.addWidget(self._jump_spin, 1)
-        controls.addRow("Eliminate jumps above:", jump_row)
+        controls.addRow("Handle profile jumps above:", jump_row)
 
         root.addLayout(controls)
 
@@ -354,7 +357,11 @@ class STMBackgroundDialog(QDialog):
                 )
                 grey_profile = np.where(excluded, full_prof, np.nan)
 
-        self._plot_profile(result.line_profile, result.fitted_profile, grey_profile=grey_profile)
+        self._plot_profile(
+            result.line_profile, result.fitted_profile,
+            grey_profile=grey_profile,
+            jump_positions=result.jump_positions,
+        )
         self._update_stats(result)
 
         label = "background" if mode == "background" else "corrected image"
@@ -396,6 +403,7 @@ class STMBackgroundDialog(QDialog):
         fitted: np.ndarray,
         *,
         grey_profile: np.ndarray | None = None,
+        jump_positions: tuple[int, ...] = (),
     ) -> None:
         self._fig.clear()
         gs = GridSpec(2, 1, figure=self._fig, height_ratios=[3, 2], hspace=0.5)
@@ -426,6 +434,8 @@ class STMBackgroundDialog(QDialog):
             y, fitted * scale, "-", color="tab:orange", linewidth=1.2,
             label="fitted background", zorder=4,
         )
+        for pos in jump_positions:
+            ax_top.axvline(pos, color="tab:red", linewidth=0.8, linestyle="--", alpha=0.7)
         ax_top.set_ylabel(f"height ({unit})", fontsize=8)
         ax_top.legend(loc="best", fontsize=7, markerscale=2.5, handlelength=1.5)
         ax_top.grid(True, alpha=0.25)
@@ -499,6 +509,22 @@ class STMBackgroundDialog(QDialog):
             f"Residual RMS:     {res_rms * res_scale:.3g} {res_unit}",
             f"Max |residual|:   {res_max * res_scale:.3g} {res_unit}",
         ]
+
+        jump_threshold = result.params.jump_threshold
+        if jump_threshold is not None:
+            thr_scale, thr_unit = _auto_unit(np.array([jump_threshold]))
+            lines += [
+                f"Jump handling:    on",
+                f"Jump threshold:   {jump_threshold * thr_scale:.3g} {thr_unit}",
+                f"Detected jumps:   {len(result.jump_positions)}",
+            ]
+            if result.jump_sizes:
+                largest = float(np.max(np.abs(result.jump_sizes)))
+                jmp_scale, jmp_unit = _auto_unit(np.array(list(result.jump_sizes)))
+                lines.append(f"Largest jump:     {largest * jmp_scale:.3g} {jmp_unit}")
+        else:
+            lines.append("Jump handling:    off")
+
         self._stats_lbl.setText("\n".join(lines))
 
     def _update_alignment_warning(self) -> None:

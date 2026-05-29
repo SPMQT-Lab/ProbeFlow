@@ -332,6 +332,40 @@ class TestSTMBackground:
         )
         assert result.corrected.shape == arr.shape
 
+    def test_jump_threshold_detects_step_and_includes_in_background(self):
+        # Row medians: 0 for rows 0-4, +1 for rows 5-9 (abrupt step at row 5)
+        arr = np.zeros((10, 8), dtype=float)
+        arr[5:] += 1.0
+        result = preview_stm_background(
+            arr, STMBackgroundParams(model="linear", jump_threshold=0.5)
+        )
+        # Jump at row 5 is detected
+        assert 5 in result.jump_positions
+        assert len(result.jump_positions) == 1
+        # Step offset is included in the fitted background
+        assert abs(float(result.fitted_profile[5]) - float(result.fitted_profile[4]) - 1.0) < 0.1
+        # Corrected image should have the step removed (both halves flat within ~noise)
+        med_top = float(np.median(result.corrected[:5]))
+        med_bot = float(np.median(result.corrected[5:]))
+        assert abs(med_top - med_bot) < 0.05
+
+    def test_jump_threshold_none_reports_no_jumps(self):
+        arr = np.zeros((10, 8), dtype=float)
+        arr[5:] += 1.0
+        result = preview_stm_background(
+            arr, STMBackgroundParams(model="linear", jump_threshold=None)
+        )
+        assert result.jump_positions == ()
+        assert result.jump_sizes == ()
+
+    def test_jump_threshold_above_step_does_not_detect(self):
+        arr = np.zeros((10, 8), dtype=float)
+        arr[5:] += 0.3  # step smaller than threshold
+        result = preview_stm_background(
+            arr, STMBackgroundParams(model="linear", jump_threshold=0.5)
+        )
+        assert result.jump_positions == ()
+
 
 # ─── subtract_background ────────────────────────────────────────────────────
 
@@ -608,6 +642,60 @@ class TestQuantizeBitDepth:
         assert "quantize_bit_depth" in ops_in_order
         assert "arithmetic" in ops_in_order
         assert ops_in_order.index("arithmetic") < ops_in_order.index("quantize_bit_depth")
+
+
+class TestComputeJumpProfile:
+    def test_single_step_detected(self):
+        from probeflow.processing.background import _compute_jump_profile
+        p = np.array([0.0, 0.0, 0.0, 1.0, 1.0, 1.0])
+        j, positions, sizes = _compute_jump_profile(p, threshold=0.5)
+        assert positions == (3,)
+        assert abs(sizes[0] - 1.0) < 1e-12
+        # j should be 0 before step and 1.0 from step onward
+        np.testing.assert_allclose(j, [0, 0, 0, 1, 1, 1])
+
+    def test_two_steps_cumulative(self):
+        from probeflow.processing.background import _compute_jump_profile
+        p = np.array([0.0, 0.0, 2.0, 2.0, 0.5, 0.5])
+        j, positions, sizes = _compute_jump_profile(p, threshold=0.5)
+        assert len(positions) == 2
+        # After first step (+2) and second step (-1.5), cumulative = 0.5
+        np.testing.assert_allclose(j[-1], 0.5, atol=1e-10)
+
+    def test_no_threshold_returns_zeros(self):
+        from probeflow.processing.background import _compute_jump_profile
+        p = np.array([0.0, 5.0, 0.0])
+        j, positions, sizes = _compute_jump_profile(p, threshold=None)
+        np.testing.assert_array_equal(j, [0, 0, 0])
+        assert positions == ()
+        assert sizes == ()
+
+    def test_below_threshold_not_detected(self):
+        from probeflow.processing.background import _compute_jump_profile
+        p = np.array([0.0, 0.3, 0.3])
+        j, positions, sizes = _compute_jump_profile(p, threshold=0.5)
+        assert positions == ()
+
+    def test_nan_rows_propagate_cumulative(self):
+        from probeflow.processing.background import _compute_jump_profile
+        p = np.array([0.0, np.nan, 1.0, 1.0])
+        j, positions, sizes = _compute_jump_profile(p, threshold=0.5)
+        assert positions == (2,)
+        # NaN row gets previous cumulative; step detected between rows 0 and 2
+        assert np.isfinite(j[1])  # NaN row carries the pre-step offset (0)
+        np.testing.assert_allclose(j[2:], 1.0)
+
+    def test_profile_minus_jump_is_smooth(self):
+        from probeflow.processing.background import _compute_jump_profile
+        # Linear drift with step: p = 0.01*y + step_at_50
+        n = 100
+        p = 0.01 * np.arange(n, dtype=float)
+        p[50:] += 2.0
+        j, positions, sizes = _compute_jump_profile(p, threshold=1.0)
+        corrected = p - j
+        # Corrected should be a smooth ramp with no step
+        diffs = np.diff(corrected)
+        assert float(np.max(np.abs(diffs))) < 0.1
 
 
 class TestEliminateProfileJumpsSymmetry:
