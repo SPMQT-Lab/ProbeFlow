@@ -259,54 +259,54 @@ def _fit_scanline_background(
             raise ValueError(
                 f"not enough finite scan-line values for {model} background fit"
             )
-        # Center the profile before fitting so the offset 'a' starts near zero,
-        # and compute an explicit x_scale so TRF steps are sized appropriately.
+        # Normalize the profile to zero mean and unit variance before fitting.
         #
-        # Real STM height data: mean ~1e-7 m, creep variation ~1e-9 m.
-        # Without centering, the large 'a' offset dominates the residual before
-        # b and c depart from zero (trivial flat solution).  Without x_scale,
-        # the 10^9 ratio between d (O(1) normalised coordinate) and b,c (O(1e-9)
-        # SI units) causes TRF's initial trust radius to overshoot b and c by
-        # orders of magnitude, preventing convergence.  Both fixes are required.
+        # Root cause of the flat-line bug: scipy's TRF optimizer stops when the
+        # infinity-norm of the gradient falls below gtol=1.49e-8.  For real STM
+        # data the gradient at the initial flat guess is O(p_scale² × N), where
+        # p_scale is the physical height variation.  When p_scale is small (e.g.
+        # 7e-12 m after pre-processing) this gradient is ~1e-20, far below gtol,
+        # and TRF declares convergence at the initial flat point without taking
+        # any steps.  Normalising to unit variance makes residuals and expected
+        # parameters O(1), so the gradient at the initial point is O(N) >> gtol
+        # regardless of the physical units of the scan data.
         p_mean = float(np.nanmean(p[finite]))
         p_c = p - p_mean
-        # Characteristic scale of the variation in the centered profile.
         p_scale = float(np.nanstd(p_c[finite]))
         if p_scale == 0.0:
-            p_scale = 1.0  # degenerate flat profile — fallback
+            p_scale = 1.0  # degenerate flat profile — fallback, fit stays flat
+        p_n = p_c / p_scale  # unit-variance; parameters at solution are O(1)
         eps = 1e-6
         if model == "piezo_creep":
             def _model(y, a, b, c, d):
                 return a + b * y + c * np.log(np.abs(y - d) + eps)
             p0 = [0.0, 0.0, 0.0, -1.5]
             bounds = ([-np.inf, -np.inf, -np.inf, -3.0], [np.inf, np.inf, np.inf, -0.01])
-            x_scale = [p_scale, p_scale, p_scale, 1.0]
         elif model == "piezo_creep_x2":
             def _model(y, a, b, c, d, e):
                 return a + b * y + c * np.log(np.abs(y - d) + eps) + e * y ** 2
             p0 = [0.0, 0.0, 0.0, -1.5, 0.0]
             bounds = ([-np.inf, -np.inf, -np.inf, -3.0, -np.inf], [np.inf, np.inf, np.inf, -0.01, np.inf])
-            x_scale = [p_scale, p_scale, p_scale, 1.0, p_scale]
         elif model == "piezo_creep_x3":
             def _model(y, a, b, c, d, e):
                 return a + b * y + c * np.log(np.abs(y - d) + eps) + e * y ** 3
             p0 = [0.0, 0.0, 0.0, -1.5, 0.0]
             bounds = ([-np.inf, -np.inf, -np.inf, -3.0, -np.inf], [np.inf, np.inf, np.inf, -0.01, np.inf])
-            x_scale = [p_scale, p_scale, p_scale, 1.0, p_scale]
         else:  # sqrt_creep
             def _model(y, a, b, c, d):
                 return a + b * y + c * np.sqrt(np.abs(y - d))
             p0 = [0.0, 0.0, 0.0, -1.5]
             bounds = ([-np.inf, -np.inf, -np.inf, -3.0], [np.inf, np.inf, np.inf, -0.01])
-            x_scale = [p_scale, p_scale, p_scale, 1.0]
         try:
             popt, _ = curve_fit(
-                _model, y[finite], p_c[finite],
-                p0=p0, bounds=bounds, x_scale=x_scale, maxfev=5000,
+                _model, y[finite], p_n[finite],
+                p0=p0, bounds=bounds, maxfev=5000,
             )
         except (RuntimeError, OptimizeWarning) as exc:
             raise ValueError(f"{model} background fit did not converge: {exc}") from exc
-        return (_model(y, *popt) + p_mean).astype(np.float64, copy=False)
+        # Convert fitted normalised values back to original units: multiply by
+        # p_scale (un-normalise) then add p_mean (un-centre).
+        return (_model(y, *popt) * p_scale + p_mean).astype(np.float64, copy=False)
 
     p = np.asarray(working, dtype=np.float64)
     x = np.linspace(-1.0, 1.0, p.size, dtype=np.float64)

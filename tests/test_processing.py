@@ -1305,6 +1305,20 @@ class TestPiezoCreepBackground:
         row_medians = np.median(result.corrected, axis=1)
         assert float(np.std(row_medians)) < 0.2 * float(np.std(profile))
 
+    def test_piezo_creep_small_variation_not_flat(self):
+        # Regression for pre-processed data where the profile mean (~-2e-9 m)
+        # is large relative to the creep variation (~3e-11 m).  The gradient at
+        # the initial flat guess is O(p_scale² * N) which falls below scipy's
+        # default gtol unless the data is normalised to unit variance first.
+        N = 320
+        y = np.linspace(-1.0, 1.0, N)
+        eps = 1e-6
+        profile = -2.035e-9 + 7e-12 * y + 5e-12 * np.log(np.abs(y - (-1.5)) + eps)
+        arr = np.tile(profile[:, None], (1, N)).astype(np.float64)
+        result = preview_stm_background(arr, STMBackgroundParams(model="piezo_creep"))
+        row_medians = np.median(result.corrected, axis=1)
+        assert float(np.std(row_medians)) < 0.2 * float(np.std(profile))
+
     def test_order5_via_cli_rejected(self, first_sample_dat, tmp_path):
         with pytest.raises(SystemExit):
             cli_main(["plane-bg", str(first_sample_dat), "--order", "5"])
