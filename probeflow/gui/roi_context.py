@@ -117,6 +117,30 @@ def area_roi_mask(
     return mask
 
 
+def active_area_roi_bounds(
+    roi_set: Any = None,
+    image_shape: tuple[int, int] | None = None,
+) -> tuple[int, int, int, int] | None:
+    """Return the active area ROI's pixel bounds, or None.
+
+    Bounds are ``(row_min, row_max, col_min, col_max)`` inclusive and clipped to
+    *image_shape* (matching :meth:`probeflow.core.roi.ROI.bounds`). Returns None
+    when there is no active area ROI or its mask is empty, so callers can fall
+    back to the whole image.
+    """
+    if image_shape is None:
+        return None
+    ctx = active_area_roi_context(roi_set)
+    mask = area_roi_mask(ctx.roi, image_shape)
+    if mask is None:
+        return None
+    rows = np.flatnonzero(np.any(mask, axis=1))
+    cols = np.flatnonzero(np.any(mask, axis=0))
+    if rows.size == 0 or cols.size == 0:
+        return None
+    return (int(rows[0]), int(rows[-1]), int(cols[0]), int(cols[-1]))
+
+
 def collect_point_source_records(
     *,
     pixel_size_x_m: float,

@@ -1900,22 +1900,9 @@ class ImageViewerDialog(
             if self._image_roi_set is not None and roi_id is not None
             else self._active_image_roi()
         )
-        roi_mask = None
-        roi_id = None
-        roi_name = None
-        if (
-            active_roi is not None
-            and active_roi.kind in AREA_ROI_KINDS
-        ):
-            try:
-                roi_mask = active_roi.to_mask(arr.shape[:2])
-                if not roi_mask.any():
-                    roi_mask = None
-                else:
-                    roi_id = active_roi.id
-                    roi_name = active_roi.name
-            except Exception:
-                roi_mask = None
+        roi_mask = area_roi_mask(active_roi, arr.shape[:2])
+        roi_id = active_roi.id if roi_mask is not None else None
+        roi_name = active_roi.name if roi_mask is not None else None
         dlg = STMBackgroundDialog(
             arr,
             theme=self._t,
