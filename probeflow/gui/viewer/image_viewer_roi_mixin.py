@@ -19,7 +19,7 @@ from probeflow.gui.viewer import (
     rename_roi,
     roi_canvas_created,
     roi_canvas_moved,
-    roi_line_endpoint_changed,
+    roi_geometry_changed,
     roi_line_set_width,
     save_roi_set,
     select_nth_roi,
@@ -240,17 +240,15 @@ class ImageViewerRoiMixin:
         if hasattr(self, "_status_lbl"):
             self._status_lbl.setText(f"Line profile shown for ROI '{roi.name}'.")
 
-    def _on_line_roi_preview(
-        self, roi_id: str, x1: float, y1: float, x2: float, y2: float,
-    ) -> None:
-        """Live endpoint drag: update profile without touching the data model."""
-        if self._display_arr is None:
+    def _on_roi_geometry_preview(self, roi_id: str, geometry: dict) -> None:
+        """Live resize-handle drag: update the line profile, no data-model change.
+
+        Only line ROIs drive a live profile preview; other kinds need none.
+        """
+        if self._display_arr is None or "x1" not in geometry:
             return
         from probeflow.core.roi import ROI as _ROI
-        tmp_roi = _ROI(
-            id=roi_id, name="", kind="line",
-            geometry={"x1": x1, "y1": y1, "x2": x2, "y2": y2},
-        )
+        tmp_roi = _ROI(id=roi_id, name="", kind="line", geometry=dict(geometry))
         plot_roi_line_profile(
             tmp_roi, self._display_arr,
             self._pixel_size_xy_m(),
@@ -259,12 +257,10 @@ class ImageViewerRoiMixin:
             self._t,
         )
 
-    def _on_line_roi_geometry_changed(
-        self, roi_id: str, x1: float, y1: float, x2: float, y2: float,
-    ) -> None:
-        """Endpoint drag released: commit new geometry and persist."""
-        roi_line_endpoint_changed(
-            self._image_roi_set, roi_id, x1, y1, x2, y2,
+    def _on_roi_geometry_changed(self, roi_id: str, geometry: dict) -> None:
+        """Resize-handle drag released: commit new geometry and persist."""
+        roi_geometry_changed(
+            self._image_roi_set, roi_id, geometry,
             self._on_image_roi_set_changed,
         )
 

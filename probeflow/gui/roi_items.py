@@ -84,15 +84,15 @@ def _build_line(roi: "ROI") -> QGraphicsLineItem:
     return QGraphicsLineItem(g["x1"], g["y1"], g["x2"], g["y2"])
 
 
-def _make_endpoint_handle(x: float, y: float) -> QGraphicsEllipseItem:
-    """Fixed-screen-size filled circle for dragging a line ROI endpoint."""
+def _make_resize_handle(x: float, y: float) -> QGraphicsEllipseItem:
+    """Fixed-screen-size filled circle for dragging a ROI resize handle."""
     h = QGraphicsEllipseItem(-6, -6, 12, 12)
     h.setPos(QPointF(x, y))
     h.setPen(QPen(QColor("#ffffff"), 1.5))
     h.setBrush(QBrush(QColor("#22D3EE")))
     h.setFlag(QGraphicsItem.ItemIgnoresTransformations, True)
     h.setZValue(14)
-    h.setToolTip("Drag to edit line endpoint")
+    h.setToolTip("Drag to resize")
     return h
 
 
@@ -284,18 +284,22 @@ def make_roi_item(roi: "ROI", active: bool = False) -> QGraphicsItemGroup:
                     pen.setWidthF(float(line_width))
                     child.setPen(pen)
                     break
-        h1 = _make_endpoint_handle(float(g["x1"]), float(g["y1"]))
-        h2 = _make_endpoint_handle(float(g["x2"]), float(g["y2"]))
-        h1.setParentItem(group)  # transfers C++ ownership to parent (invariant 2)
-        h2.setParentItem(group)
-        h1.setVisible(active)
-        h2.setVisible(active)
-        group.setData(2, h1)
-        group.setData(3, h2)
-        # Explicit Python refs for consistency with the PointROI pattern and
-        # defence-in-depth — see docstring invariant note above.
-        group._h1_endpoint_ref = h1
-        group._h2_endpoint_ref = h2
+
+    # Resize handles — generic across kinds. resize_handles() returns the
+    # ordered draggable handles for this ROI (rectangle: 8, ellipse: 4, line: 2;
+    # empty for non-resizable kinds). Each handle item must be kept alive past
+    # this function: setParentItem(group) transfers C++ ownership (invariant 2),
+    # and we also keep an explicit Python dict ref (group._resize_handles) used
+    # both as a name→item map for live repositioning during drag and for
+    # defence-in-depth against the setData lifetime pitfall described above.
+    from probeflow.core.roi import resize_handles
+    handle_map: dict = {}
+    for h in resize_handles(roi):
+        item = _make_resize_handle(h.x, h.y)
+        item.setParentItem(group)  # transfers C++ ownership to parent (invariant 2)
+        item.setVisible(active)
+        handle_map[h.name] = item
+    group._resize_handles = handle_map
 
     return group
 
@@ -311,14 +315,15 @@ def update_roi_item_style(item: QGraphicsItemGroup, active: bool,
                 _update_label_style(child, active, hover)
         return
 
-    h1, h2 = item.data(2), item.data(3)
+    handles = getattr(item, "_resize_handles", {}) or {}
+    handle_items = set(handles.values())
     line_width = item.data(4) or 1
 
     for child in item.childItems():
         if isinstance(child, QGraphicsTextItem):
             _update_label_style(child, active, hover)
             continue
-        if child is h1 or child is h2:
+        if child in handle_items:
             continue
         if hover and not active:
             pen = _PEN_HOVER
@@ -333,7 +338,37 @@ def update_roi_item_style(item: QGraphicsItemGroup, active: bool,
             pen.setWidthF(float(line_width))
             child.setPen(pen)
 
-    if h1 is not None:
-        h1.setVisible(active)
-    if h2 is not None:
-        h2.setVisible(active)
+    for handle in handle_items:
+        handle.setVisible(active)
+
+
+def update_roi_item_geometry(item: QGraphicsItemGroup, roi: "ROI") -> None:
+    """Update the shape child and resize-handle positions for new geometry.
+
+    Used for live drag feedback without rebuilding the whole item. Mirrors the
+    per-kind builders: rectangle/ellipse reset their QRectF, line resets its
+    endpoints; handles are repositioned from ``resize_handles(roi)`` by name.
+    """
+    from probeflow.core.roi import resize_handles
+    g = roi.geometry
+    handles = getattr(item, "_resize_handles", {}) or {}
+    handle_items = set(handles.values())
+    for child in item.childItems():
+        if child in handle_items:
+            # Handles are themselves QGraphicsEllipseItems — never mistake one
+            # for an ellipse ROI's shape.
+            continue
+        if isinstance(child, QGraphicsRectItem):
+            child.setRect(QRectF(g["x"], g["y"], g["width"], g["height"]))
+            break
+        if isinstance(child, QGraphicsEllipseItem):
+            cx, cy, rx, ry = g["cx"], g["cy"], g["rx"], g["ry"]
+            child.setRect(QRectF(cx - rx, cy - ry, 2 * rx, 2 * ry))
+            break
+        if isinstance(child, QGraphicsLineItem):
+            child.setLine(g["x1"], g["y1"], g["x2"], g["y2"])
+            break
+    for h in resize_handles(roi):
+        handle = handles.get(h.name)
+        if handle is not None:
+            handle.setPos(QPointF(h.x, h.y))

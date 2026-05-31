@@ -40,6 +40,7 @@ _EXPORTS: dict[str, str] = {
     "resolve_channel_unit": "channel_util",
     "roi_canvas_created": "roi_ops",
     "roi_canvas_moved": "roi_ops",
+    "roi_geometry_changed": "roi_ops",
     "roi_line_endpoint_changed": "roi_ops",
     "roi_line_set_width": "roi_ops",
     "save_roi_set": "roi_sidecar",

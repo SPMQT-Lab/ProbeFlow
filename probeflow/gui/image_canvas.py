@@ -31,7 +31,11 @@ from PySide6.QtWidgets import (
     QScrollArea, QToolTip,
 )
 
-from probeflow.gui.roi_items import make_roi_item, update_roi_item_style
+from probeflow.gui.roi_items import (
+    make_roi_item,
+    update_roi_item_geometry,
+    update_roi_item_style,
+)
 
 # ── Preview-item styling ──────────────────────────────────────────────────────
 
@@ -59,9 +63,9 @@ class ImageCanvas(QGraphicsView):
     tool_changed              = Signal(str)
     roi_context_menu_requested = Signal(str, object)  # (roi_id, global_pos)
 
-    # Line-ROI endpoint drag signals
-    roi_line_preview          = Signal(str, float, float, float, float)  # (roi_id, x1, y1, x2, y2) — live
-    roi_line_geometry_changed = Signal(str, float, float, float, float)  # (roi_id, x1, y1, x2, y2) — committed
+    # Generic ROI resize-handle drag signals (rectangle/ellipse/line)
+    roi_geometry_preview      = Signal(str, object)  # (roi_id, geometry dict) — live
+    roi_geometry_changed      = Signal(str, object)  # (roi_id, geometry dict) — committed
 
     # Keyboard action signals (active ROI operations)
     roi_delete_requested      = Signal(str)   # roi_id
@@ -217,10 +221,10 @@ class ImageCanvas(QGraphicsView):
         self._move_item_start_pos: QPointF = QPointF(0, 0)
         self._move_point_start_pos: Optional[QPointF] = None
 
-        # Endpoint drag state (line ROI endpoint editing)
-        self._ep_roi_id: Optional[str] = None
-        self._ep_idx: int = 0
-        self._ep_base_geom: dict = {}
+        # Resize-handle drag state (generic across ROI kinds)
+        self._handle_roi_id: Optional[str] = None
+        self._handle_name: Optional[str] = None
+        self._handle_base_roi = None  # ROI snapshot at press
 
         # Hover state
         self._hover_roi_id: Optional[str] = None
@@ -849,16 +853,16 @@ class ImageCanvas(QGraphicsView):
         self._last_hover_message = message
         self.object_hovered.emit(*message)
 
-    def _active_line_endpoint_hovered(self, view_pos: QPoint) -> bool:
+    def _active_handle_hovered(self, view_pos: QPoint) -> bool:
         active_id = self._image_roi_set.active_roi_id if self._image_roi_set else None
         if not active_id or not self._image_roi_set:
             return False
         roi = self._image_roi_set.get(active_id)
-        if roi is None or roi.kind != "line":
+        if roi is None:
             return False
-        g = roi.geometry
-        for ex, ey in ((g["x1"], g["y1"]), (g["x2"], g["y2"])):
-            vp = self.mapFromScene(QPointF(float(ex), float(ey)))
+        from probeflow.core.roi import resize_handles
+        for h in resize_handles(roi):
+            vp = self.mapFromScene(QPointF(float(h.x), float(h.y)))
             if abs(vp.x() - view_pos.x()) <= 12 and abs(vp.y() - view_pos.y()) <= 12:
                 return True
         return False
@@ -868,10 +872,10 @@ class ImageCanvas(QGraphicsView):
             self.setCursor(self._cursor_for_tool(self._tool))
             return
 
-        if self._ep_roi_id is not None or self._move_roi_id is not None:
+        if self._handle_roi_id is not None or self._move_roi_id is not None:
             return
 
-        if self._active_line_endpoint_hovered(view_pos):
+        if self._active_handle_hovered(view_pos):
             self.setCursor(Qt.CrossCursor)
             return
 
@@ -925,24 +929,23 @@ class ImageCanvas(QGraphicsView):
             roi_id = self._roi_at_pos(event.pos())
             active_id = self._image_roi_set.active_roi_id if self._image_roi_set else None
 
-            # Check for endpoint handle hit on the clicked line ROI (or the
-            # active one when no other ROI is under the cursor).
-            line_candidate_id = roi_id if roi_id else active_id
-            if self._image_roi_set and line_candidate_id:
-                line_roi = self._image_roi_set.get(line_candidate_id)
-                if line_roi and line_roi.kind == "line":
-                    g = line_roi.geometry
+            # Check for a resize-handle hit on the clicked ROI (or the active one
+            # when no other ROI is under the cursor). Generic across kinds via
+            # resize_handles(); 12px view-space (Chebyshev) test.
+            from probeflow.core.roi import resize_handles
+            handle_candidate_id = roi_id if roi_id else active_id
+            if self._image_roi_set and handle_candidate_id:
+                cand_roi = self._image_roi_set.get(handle_candidate_id)
+                if cand_roi is not None:
                     vpos = event.pos()
-                    for ep_idx, (ex, ey) in enumerate(
-                        [(g["x1"], g["y1"]), (g["x2"], g["y2"])]
-                    ):
-                        vp = self.mapFromScene(QPointF(float(ex), float(ey)))
+                    for h in resize_handles(cand_roi):
+                        vp = self.mapFromScene(QPointF(float(h.x), float(h.y)))
                         if abs(vp.x() - vpos.x()) <= 12 and abs(vp.y() - vpos.y()) <= 12:
-                            if line_candidate_id != active_id:
-                                self.roi_activate_requested.emit(line_candidate_id)
-                            self._ep_roi_id = line_candidate_id
-                            self._ep_idx = ep_idx
-                            self._ep_base_geom = dict(g)
+                            if handle_candidate_id != active_id:
+                                self.roi_activate_requested.emit(handle_candidate_id)
+                            self._handle_roi_id = handle_candidate_id
+                            self._handle_name = h.name
+                            self._handle_base_roi = cand_roi
                             self.setCursor(Qt.CrossCursor)
                             event.accept()
                             return
@@ -1025,29 +1028,18 @@ class ImageCanvas(QGraphicsView):
             event.accept()
             # fall through to update pixel readout below (don't return early)
 
-        # ── line-ROI endpoint drag ────────────────────────────────────────────
-        elif self._ep_roi_id is not None and event.buttons() & Qt.LeftButton:
+        # ── ROI resize-handle drag ────────────────────────────────────────────
+        elif self._handle_roi_id is not None and event.buttons() & Qt.LeftButton:
+            from probeflow.core.roi import resize_roi
             scene_pos = self.mapToScene(event.pos())
-            g = self._ep_base_geom
-            if self._ep_idx == 0:
-                x1, y1 = scene_pos.x(), scene_pos.y()
-                x2, y2 = float(g["x2"]), float(g["y2"])
-            else:
-                x1, y1 = float(g["x1"]), float(g["y1"])
-                x2, y2 = scene_pos.x(), scene_pos.y()
-            item = self._roi_items.get(self._ep_roi_id)
+            new_roi = resize_roi(
+                self._handle_base_roi, self._handle_name,
+                scene_pos.x(), scene_pos.y(),
+            )
+            item = self._roi_items.get(self._handle_roi_id)
             if item:
-                for child in item.childItems():
-                    if isinstance(child, QGraphicsLineItem):
-                        child.setLine(x1, y1, x2, y2)
-                        break
-                h1 = item.data(2)
-                h2 = item.data(3)
-                if h1 is not None:
-                    h1.setPos(QPointF(x1, y1))
-                if h2 is not None:
-                    h2.setPos(QPointF(x2, y2))
-            self.roi_line_preview.emit(self._ep_roi_id, x1, y1, x2, y2)
+                update_roi_item_geometry(item, new_roi)
+            self.roi_geometry_preview.emit(self._handle_roi_id, dict(new_roi.geometry))
             event.accept()
             return
 
@@ -1153,22 +1145,20 @@ class ImageCanvas(QGraphicsView):
             super().mouseReleaseEvent(event)
             return
 
-        # ── finish endpoint drag ──────────────────────────────────────────────
-        if self._ep_roi_id is not None:
+        # ── finish resize-handle drag ─────────────────────────────────────────
+        if self._handle_roi_id is not None:
+            from probeflow.core.roi import resize_roi
             scene_pos = self.mapToScene(event.pos())
-            g = self._ep_base_geom
-            if self._ep_idx == 0:
-                x1, y1 = scene_pos.x(), scene_pos.y()
-                x2, y2 = float(g["x2"]), float(g["y2"])
-            else:
-                x1, y1 = float(g["x1"]), float(g["y1"])
-                x2, y2 = scene_pos.x(), scene_pos.y()
-            roi_id = self._ep_roi_id
-            self._ep_roi_id = None
-            self._ep_idx = 0
-            self._ep_base_geom = {}
+            new_roi = resize_roi(
+                self._handle_base_roi, self._handle_name,
+                scene_pos.x(), scene_pos.y(),
+            )
+            roi_id = self._handle_roi_id
+            self._handle_roi_id = None
+            self._handle_name = None
+            self._handle_base_roi = None
             self.setCursor(Qt.ArrowCursor)
-            self.roi_line_geometry_changed.emit(roi_id, x1, y1, x2, y2)
+            self.roi_geometry_changed.emit(roi_id, dict(new_roi.geometry))
             event.accept()
             return
 
