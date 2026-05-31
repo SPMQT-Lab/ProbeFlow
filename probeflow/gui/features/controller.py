@@ -397,26 +397,26 @@ class FeatureCountingController(QObject):
     # ── Export ────────────────────────────────────────────────────────────────
 
     def _on_export(self, mode: str) -> None:
-        # FUTURE OPPORTUNITY: ``write_json`` accepts a ``scan=`` argument that
-        # records scan_range_m, pixel sizes, plane names/units and processing
-        # state into the JSON ``meta`` block for full provenance.  We only have
-        # the raw Browse entry here (not a Scan), so we pass just the source
-        # path.  Threading the loaded Scan into FeaturesPanel would let exports
-        # carry complete physical metadata.  See memory ``project_unimr_review``.
+        # ``write_json`` records full provenance (scan_range_m, pixel sizes,
+        # plane names/units, processing state) into the JSON ``meta`` block when
+        # passed a ``scan=``.  The panel carries the source Scan when one was
+        # available at load time, so GUI exports now match the CLI's provenance;
+        # we fall back to just the source path when loaded without a Scan (e.g.
+        # an array handed over from the image viewer).
         from pathlib import Path
 
         from PySide6.QtWidgets import QFileDialog
 
         if mode == "particles":
             items = self._panel.get_particles()
-            kind, extra = "particles", {"source": None}
+            kind, extra = "particles", {}
         elif mode == "template":
             items = self._panel.get_detections()
-            kind, extra = "detections", {"source": None}
+            kind, extra = "detections", {}
         elif mode == "lattice":
             lat = self._panel.get_lattice()
             items = [lat] if lat is not None else []
-            kind, extra = "lattice", {"source": None}
+            kind, extra = "lattice", {}
         elif mode == "classify":
             items = self._panel.get_classifications()
             kind  = "classifications"
@@ -428,7 +428,11 @@ class FeatureCountingController(QObject):
             return
 
         entry = self._panel.current_entry()
-        if mode != "classify" and entry:
+        scan = self._panel.current_scan()
+        # The Scan, when present, supplies source_path/source_format and the
+        # physical metadata via write_json; only fall back to a bare source path
+        # when we have no Scan, so we never lose that pointer.
+        if scan is None and mode != "classify" and entry:
             extra["source"] = str(entry.path)
 
         if not items:
@@ -446,7 +450,7 @@ class FeatureCountingController(QObject):
             return
         try:
             from probeflow.io.writers.json import write_json
-            write_json(out_path, items, kind=kind, extra_meta=extra)
+            write_json(out_path, items, kind=kind, scan=scan, extra_meta=extra)
             self._sidebar.set_status(f"Exported → {out_path}")
             self._status_cb(f"Exported {kind} → {out_path}")
         except Exception as exc:

@@ -117,9 +117,9 @@ class FeatureCountingWindow(QMainWindow):
     # ── Public API (called by ProbeFlowWindow) ────────────────────────────────
 
     def load_entry(self, entry, plane_idx: int, arr: np.ndarray,
-                   px_m: float, px_x_m: float, px_y_m: float) -> None:
+                   px_m: float, px_x_m: float, px_y_m: float, scan=None) -> None:
         """Load a scan plane from Browse into this window."""
-        self._panel.load_entry(entry, plane_idx, arr, px_m, px_x_m, px_y_m)
+        self._panel.load_entry(entry, plane_idx, arr, px_m, px_x_m, px_y_m, scan=scan)
         self._sidebar.set_status(
             f"Loaded {entry.stem}  (plane {plane_idx},  "
             f"px = {px_m * 1e12:.1f} pm)")

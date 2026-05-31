@@ -467,6 +467,7 @@ class FeaturesPanel(QWidget):
         self._pixel_size_m = 1e-10
         self._pixel_size_x_m = 1e-10
         self._pixel_size_y_m = 1e-10
+        self._scan = None                  # source Scan, when available (for export provenance)
         self._overlay_mode = "none"        # "particles" | "template" | "lattice"
         self._particles  = []
         self._detections = []
@@ -564,10 +565,15 @@ class FeaturesPanel(QWidget):
 
     def load_entry(self, entry, plane_idx: int, arr: np.ndarray,
                     pixel_size_m: float, pixel_size_x_m: float | None = None,
-                    pixel_size_y_m: float | None = None):
+                    pixel_size_y_m: float | None = None, scan=None):
+        # ``scan`` is the source :class:`probeflow.core.scan_model.Scan`, when the
+        # caller has one.  Held only so exports can record full provenance
+        # (scan_range, pixel sizes, plane names/units, processing state) the same
+        # way the CLI does; analysis still runs on ``arr``.
         self._entry        = entry
         self._plane_idx    = plane_idx
         self._arr          = arr
+        self._scan         = scan
         self._pixel_size_m = pixel_size_m
         self._pixel_size_x_m = (
             float(pixel_size_x_m) if pixel_size_x_m is not None else float(pixel_size_m)
@@ -598,6 +604,10 @@ class FeaturesPanel(QWidget):
 
     def current_entry(self):
         return self._entry
+
+    def current_scan(self):
+        """Source Scan for export provenance, or None if loaded without one."""
+        return self._scan
 
     def current_array(self):
         return self._arr

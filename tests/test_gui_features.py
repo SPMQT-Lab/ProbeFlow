@@ -194,3 +194,102 @@ def test_features_window_classify_export_includes_samples(qapp, monkeypatch, tmp
     assert captured["extra_meta"]["classification"]["params"]["encoder"] == "raw"
     win.close()
     win.deleteLater()
+
+
+def _make_scan(arr):
+    """Build a minimal real Scan around a single plane for export-provenance tests."""
+    from pathlib import Path
+
+    from probeflow.core.scan_model import Scan
+
+    Ny, Nx = arr.shape
+    return Scan(
+        planes=[arr],
+        plane_names=["Z forward"],
+        plane_units=["m"],
+        plane_synthetic=[False],
+        header={},
+        scan_range_m=(Nx * 1e-9, Ny * 1e-9),
+        source_path=Path("/tmp/example.sxm"),
+        source_format="sxm",
+    )
+
+
+def test_features_export_passes_scan_for_provenance(qapp, monkeypatch):
+    """When loaded with a Scan, the GUI export forwards it to write_json.
+
+    The CLI export records full provenance (scan range, pixel sizes, plane
+    names/units) by passing ``scan=``; the GUI used to drop it and pass only a
+    source path.  This pins the fix: a Scan threaded through ``load_entry``
+    reaches ``write_json`` so GUI and CLI exports carry the same metadata.
+    """
+    pytest.importorskip("cv2")
+    from probeflow.analysis.features import segment_particles
+    from probeflow.gui.compat import ProbeFlowWindow
+
+    arr = _sample_arr()
+    scan = _make_scan(arr)
+    parts = segment_particles(arr, pixel_size_m=1e-9, min_area_nm2=0.5, size_sigma_clip=None)
+
+    captured = {}
+
+    def _capture_write_json(out_path, items, *, kind, scan=None, extra_meta=None, **kwargs):
+        captured["kind"] = kind
+        captured["scan"] = scan
+        captured["extra_meta"] = dict(extra_meta or {})
+
+    monkeypatch.setattr("probeflow.io.writers.json.write_json", _capture_write_json)
+    monkeypatch.setattr(
+        "PySide6.QtWidgets.QFileDialog.getSaveFileName",
+        lambda *args, **kwargs: ("/tmp/example_particles.json", "JSON (*.json)"),
+    )
+
+    win = ProbeFlowWindow()
+    win._features_sidebar._select_mode("particles")
+    win._features_panel.load_entry(_sample_entry(), 0, arr, 1e-9, 1e-9, 1e-9, scan=scan)
+    win._features_panel.set_particles(parts)
+
+    win._features_ctrl._on_export("particles")
+
+    assert captured["kind"] == "particles"
+    assert captured["scan"] is scan, "the loaded Scan must reach write_json"
+    # With a Scan present, write_json supplies source_path itself, so we must not
+    # also inject a bare/duplicate source key into extra_meta.
+    assert "source" not in captured["extra_meta"]
+    win.close()
+    win.deleteLater()
+
+
+def test_features_export_without_scan_falls_back_to_source(qapp, monkeypatch):
+    """Loaded without a Scan (e.g. an array from the viewer), export still
+    records a source pointer and passes scan=None — no provenance is invented."""
+    pytest.importorskip("cv2")
+    from probeflow.analysis.features import segment_particles
+    from probeflow.gui.compat import ProbeFlowWindow
+
+    arr = _sample_arr()
+    parts = segment_particles(arr, pixel_size_m=1e-9, min_area_nm2=0.5, size_sigma_clip=None)
+
+    captured = {}
+
+    def _capture_write_json(out_path, items, *, kind, scan=None, extra_meta=None, **kwargs):
+        captured["scan"] = scan
+        captured["extra_meta"] = dict(extra_meta or {})
+
+    monkeypatch.setattr("probeflow.io.writers.json.write_json", _capture_write_json)
+    monkeypatch.setattr(
+        "PySide6.QtWidgets.QFileDialog.getSaveFileName",
+        lambda *args, **kwargs: ("/tmp/example_particles.json", "JSON (*.json)"),
+    )
+
+    win = ProbeFlowWindow()
+    win._features_sidebar._select_mode("particles")
+    win._features_panel.load_entry(_sample_entry(), 0, arr, 1e-9)   # no scan
+    win._features_panel.set_particles(parts)
+
+    win._features_ctrl._on_export("particles")
+
+    assert captured["scan"] is None
+    assert captured["extra_meta"].get("source") == "/tmp/example.sxm"
+    win.close()
+    win.deleteLater()

@@ -1030,7 +1030,7 @@ class ProbeFlowWindow(QMainWindow):
                 px_x_m = float(w_m / Nx)
                 px_y_m = float(h_m / Ny)
                 px_m = float(np.sqrt(px_x_m * px_y_m))
-            self._features_panel.load_entry(entry, plane_idx, arr, px_m, px_x_m, px_y_m)
+            self._features_panel.load_entry(entry, plane_idx, arr, px_m, px_x_m, px_y_m, scan=_scan)
             self._features_sidebar.set_status(
                 f"Loaded {entry.stem} (plane {plane_idx})")
             self._status_bar.showMessage(f"{entry.stem} sent to FeatureCounting")
@@ -1107,10 +1107,12 @@ class ProbeFlowWindow(QMainWindow):
     ) -> tuple:
         """Load a scan plane and apply any saved viewer processing.
 
-        Returns ``(arr, px_m, px_x_m, px_y_m, actual_plane_idx)`` or raises.
-        The returned array is the *processed* version — identical to what the
-        user last saw in the image viewer — so Feature Counting and TV-denoise
-        work on the same data the user inspected.
+        Returns ``(arr, px_m, px_x_m, px_y_m, actual_plane_idx, scan)`` or
+        raises.  The returned array is the *processed* version — identical to
+        what the user last saw in the image viewer — so Feature Counting and
+        TV-denoise work on the same data the user inspected.  ``scan`` is the
+        loaded :class:`Scan`, carried through so analysis exports can record the
+        same provenance the CLI does.
         """
         _scan = load_scan(entry.path)
         if plane_idx >= _scan.n_planes:
@@ -1137,7 +1139,7 @@ class ProbeFlowWindow(QMainWindow):
             except Exception:
                 pass   # fall back to raw if processing fails
 
-        return arr, px_m, px_x_m, px_y_m, plane_idx
+        return arr, px_m, px_x_m, px_y_m, plane_idx, _scan
 
     def _on_fc_load_from_browse(self) -> None:
         """Bridge: read Browse selection → load into the floating FC window."""
@@ -1155,12 +1157,12 @@ class ProbeFlowWindow(QMainWindow):
             return
         plane_idx = self._fc_window._sidebar.plane_index()
         try:
-            arr, px_m, px_x_m, px_y_m, plane_idx = \
+            arr, px_m, px_x_m, px_y_m, plane_idx, scan = \
                 self._load_scan_plane_for_analysis(entry, plane_idx)
         except Exception as exc:
             self._fc_window._sidebar.set_status(f"Could not read scan: {exc}")
             return
-        self._fc_window.load_entry(entry, plane_idx, arr, px_m, px_x_m, px_y_m)
+        self._fc_window.load_entry(entry, plane_idx, arr, px_m, px_x_m, px_y_m, scan=scan)
 
     # ── Features tab handlers ──────────────────────────────────────────────────
     def _on_features_load_from_browse(self):
@@ -1174,12 +1176,12 @@ class ProbeFlowWindow(QMainWindow):
             return
         plane_idx = self._features_sidebar.plane_index()
         try:
-            arr, px_m, px_x_m, px_y_m, plane_idx = \
+            arr, px_m, px_x_m, px_y_m, plane_idx, scan = \
                 self._load_scan_plane_for_analysis(entry, plane_idx)
         except Exception as exc:
             self._features_sidebar.set_status(f"Could not read scan: {exc}")
             return
-        self._features_panel.load_entry(entry, plane_idx, arr, px_m, px_x_m, px_y_m)
+        self._features_panel.load_entry(entry, plane_idx, arr, px_m, px_x_m, px_y_m, scan=scan)
         self._features_sidebar.set_status(
             f"Loaded {entry.stem} (plane {plane_idx}, px = {px_m * 1e12:.1f} pm)")
 
@@ -1195,7 +1197,7 @@ class ProbeFlowWindow(QMainWindow):
             return
         plane_idx = self._tv_sidebar.plane_index()
         try:
-            arr, px_m, _px_x_m, _px_y_m, plane_idx = \
+            arr, px_m, _px_x_m, _px_y_m, plane_idx, _scan = \
                 self._load_scan_plane_for_analysis(entry, plane_idx)
         except Exception as exc:
             self._tv_sidebar.set_status(f"Could not read scan: {exc}")
