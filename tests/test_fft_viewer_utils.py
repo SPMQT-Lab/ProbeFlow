@@ -312,7 +312,41 @@ def test_fft_grid_correction_preview_and_apply_hooks(qapp):
         assert applied
         assert applied[0][0] == "affine_lattice_correction"
         assert applied[0][1]["source"] == "fft_reciprocal_grid"
+        assert applied[0][1]["fft_source"] == "whole_image"
+        assert "fft_roi_id" not in applied[0][1]
         assert applied[0][1]["known_structure"]["name"] == "Hexagonal 2.46 Å"
+    finally:
+        dlg.close()
+        dlg.deleteLater()
+        qapp.processEvents()
+
+
+def test_fft_correction_records_roi_source_in_provenance(qapp):
+    import numpy as np
+
+    arr = np.arange(256, dtype=float).reshape(16, 16)
+    applied = []
+    dlg = FFTViewerDialog(
+        arr,
+        (4e-9, 4e-9),
+        get_image_fn=lambda: arr,
+        apply_correction_fn=lambda op, params: applied.append((op, params)),
+        roi_bounds_px=(2, 11, 3, 12), roi_id="roi-7", roi_name="region B",
+    )
+    try:
+        dlg.show()
+        qapp.processEvents()
+        dlg._fft_source_combo.setCurrentIndex(1)  # Active ROI
+        qapp.processEvents()
+        dlg._on_open_fft_lattice()
+        qapp.processEvents()
+        assert dlg._fft_correction is not None
+
+        dlg._on_fft_apply_correction()
+        assert applied
+        params = applied[0][1]
+        assert params["fft_source"] == "active_roi"
+        assert params["fft_roi_id"] == "roi-7"
     finally:
         dlg.close()
         dlg.deleteLater()

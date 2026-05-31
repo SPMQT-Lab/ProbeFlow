@@ -1997,6 +1997,13 @@ class FFTViewerDialog(QDialog):
         if op_params is None:
             return
         op_params["source"] = "fft_reciprocal_grid"
+        # Record which region the FFT (and hence the measured lattice) came from.
+        # The correction itself is valid for the full image — lattice vectors are
+        # physical (nm) — but recording the source removes ambiguity when the
+        # provenance is revisited.
+        op_params["fft_source"] = self._fft_source
+        if self._fft_source == "active_roi" and self._roi_id is not None:
+            op_params["fft_roi_id"] = self._roi_id
         structure = getattr(self, "_active_known_structure", None)
         if isinstance(structure, KnownStructure):
             op_params["known_structure"] = structure.as_dict()
