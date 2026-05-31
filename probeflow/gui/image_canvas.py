@@ -938,17 +938,28 @@ class ImageCanvas(QGraphicsView):
                 cand_roi = self._image_roi_set.get(handle_candidate_id)
                 if cand_roi is not None:
                     vpos = event.pos()
+                    # Pick the NEAREST handle within the 12px box, not the first
+                    # in order — for small ROIs adjacent handles can both fall
+                    # inside the box and an exact hit must win.
+                    best_name = None
+                    best_d2 = None
                     for h in resize_handles(cand_roi):
                         vp = self.mapFromScene(QPointF(float(h.x), float(h.y)))
-                        if abs(vp.x() - vpos.x()) <= 12 and abs(vp.y() - vpos.y()) <= 12:
-                            if handle_candidate_id != active_id:
-                                self.roi_activate_requested.emit(handle_candidate_id)
-                            self._handle_roi_id = handle_candidate_id
-                            self._handle_name = h.name
-                            self._handle_base_roi = cand_roi
-                            self.setCursor(Qt.CrossCursor)
-                            event.accept()
-                            return
+                        dx, dy = vp.x() - vpos.x(), vp.y() - vpos.y()
+                        if abs(dx) <= 12 and abs(dy) <= 12:
+                            d2 = dx * dx + dy * dy
+                            if best_d2 is None or d2 < best_d2:
+                                best_d2 = d2
+                                best_name = h.name
+                    if best_name is not None:
+                        if handle_candidate_id != active_id:
+                            self.roi_activate_requested.emit(handle_candidate_id)
+                        self._handle_roi_id = handle_candidate_id
+                        self._handle_name = best_name
+                        self._handle_base_roi = cand_roi
+                        self.setCursor(Qt.CrossCursor)
+                        event.accept()
+                        return
 
             if roi_id and roi_id == active_id:
                 # Start drag-move for active ROI

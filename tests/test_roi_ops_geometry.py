@@ -7,10 +7,7 @@ QApplication is needed.
 from __future__ import annotations
 
 from probeflow.core.roi import ROI, ROISet
-from probeflow.gui.viewer.roi_ops import (
-    roi_geometry_changed,
-    roi_line_endpoint_changed,
-)
+from probeflow.gui.viewer.roi_ops import roi_geometry_changed
 
 
 def _set_with(roi: ROI) -> ROISet:
@@ -64,24 +61,16 @@ class TestRoiGeometryChanged:
         # Must not raise.
         roi_geometry_changed(None, "any", {"x": 1.0}, lambda: None)
 
-
-class TestRoiLineEndpointChanged:
-    def test_updates_endpoints_and_preserves_width(self):
+    def test_commits_line_geometry_preserving_width(self):
+        # Line endpoints + width now flow through the generic helper (the canvas
+        # builds the geometry dict via resize_roi, which preserves extra keys).
         line = ROI.new("line", {"x1": 0.0, "y1": 0.0, "x2": 10.0, "y2": 10.0, "width": 3})
         rs = _set_with(line)
-        calls = []
-
-        roi_line_endpoint_changed(rs, line.id, 1.0, 2.0, 3.0, 4.0, lambda: calls.append(1))
-
-        out = rs.get(line.id)
-        assert out.geometry == {"x1": 1.0, "y1": 2.0, "x2": 3.0, "y2": 4.0, "width": 3}
-        assert calls == [1]
-
-    def test_ignores_non_line_roi(self):
-        rect = ROI.new("rectangle", {"x": 0.0, "y": 0.0, "width": 1.0, "height": 1.0})
-        rs = _set_with(rect)
-        calls = []
-        roi_line_endpoint_changed(rs, rect.id, 1.0, 2.0, 3.0, 4.0, lambda: calls.append(1))
-        # Unchanged geometry, no callback.
-        assert rs.get(rect.id).geometry == {"x": 0.0, "y": 0.0, "width": 1.0, "height": 1.0}
-        assert calls == []
+        roi_geometry_changed(
+            rs, line.id,
+            {"x1": 1.0, "y1": 2.0, "x2": 3.0, "y2": 4.0, "width": 3},
+            lambda: None,
+        )
+        assert rs.get(line.id).geometry == {
+            "x1": 1.0, "y1": 2.0, "x2": 3.0, "y2": 4.0, "width": 3,
+        }

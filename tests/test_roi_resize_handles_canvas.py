@@ -135,6 +135,39 @@ class TestResizeDragCommits:
             qapp.processEvents()
 
 
+class TestEllipseResizable:
+    def test_ellipse_shows_four_cardinal_handles(self, qapp):
+        from probeflow.core.roi import ROI
+        roi = ROI.new("ellipse", {"cx": 30.0, "cy": 30.0, "rx": 10.0, "ry": 10.0})
+        canvas = _canvas_with_roi(roi)
+        try:
+            item = canvas._roi_items[roi.id]
+            assert set(item._resize_handles) == {"n", "e", "s", "w"}
+            assert all(h.isVisible() for h in item._resize_handles.values())
+        finally:
+            canvas.deleteLater()
+            qapp.processEvents()
+
+    def test_dragging_east_handle_grows_rx_about_centre(self, qapp):
+        from probeflow.core.roi import ROI
+        roi = ROI.new("ellipse", {"cx": 30.0, "cy": 30.0, "rx": 10.0, "ry": 10.0})
+        canvas = _canvas_with_roi(roi)
+        committed = []
+        canvas.roi_geometry_changed.connect(lambda rid, g: committed.append((rid, g)))
+        try:
+            # East handle at scene (40,30); drag to (55,30) → rx=25, centre fixed.
+            _press_move_release(canvas, qapp, (40, 30), (55, 30))
+            assert committed
+            _, geom = committed[-1]
+            assert geom["cx"] == pytest.approx(30.0)
+            assert geom["cy"] == pytest.approx(30.0)
+            assert geom["rx"] == pytest.approx(25.0)
+            assert geom["ry"] == pytest.approx(10.0)
+        finally:
+            canvas.deleteLater()
+            qapp.processEvents()
+
+
 class TestLineStillEditable:
     def test_line_shows_two_handles_and_resizes(self, qapp):
         from probeflow.core.roi import ROI

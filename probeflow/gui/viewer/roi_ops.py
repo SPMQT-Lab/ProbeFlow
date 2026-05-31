@@ -182,31 +182,6 @@ def roi_geometry_changed(
     on_changed()
 
 
-def roi_line_endpoint_changed(
-    roi_set,
-    roi_id: str,
-    x1: float,
-    y1: float,
-    x2: float,
-    y2: float,
-    on_changed: Callable,
-) -> None:
-    """Handle an endpoint drag on a line ROI: update geometry in place.
-
-    Thin wrapper over :func:`roi_geometry_changed` kept during the handle-system
-    migration; preserves the line's non-endpoint keys (e.g. ``width``).
-    """
-    if roi_set is None:
-        return
-    roi = roi_set.get(roi_id)
-    if roi is None or roi.kind != "line":
-        return
-    new_geom = {k: v for k, v in roi.geometry.items()
-                if k not in ("x1", "y1", "x2", "y2")}
-    new_geom.update({"x1": x1, "y1": y1, "x2": x2, "y2": y2})
-    roi_geometry_changed(roi_set, roi_id, new_geom, on_changed)
-
-
 # ── Pure queries ──────────────────────────────────────────────────────────────
 
 def active_roi_id(roi_set) -> str | None:
