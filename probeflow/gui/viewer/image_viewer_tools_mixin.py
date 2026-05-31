@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QDialog, QDockWidget
 from probeflow.gui.dialogs.fft_viewer import FFTViewerDialog
 from probeflow.gui.dialogs.periodic_filter import PeriodicFilterDialog
 from probeflow.gui.roi_context import (
+    active_area_roi_bounds,
     active_area_roi_context,
     area_roi_mask,
     collect_point_source_records,
@@ -499,6 +500,16 @@ class ImageViewerToolsMixin:
             self._refresh_processing_display()
             self._status_lbl.setText("Applied FFT-derived lattice correction.")
 
+        # Resolve the active area ROI (if any) so the FFT can optionally be
+        # computed from its bounding box. The dialog still defaults to the whole
+        # image; the ROI is opt-in via its "Source" selector.
+        roi_ctx = active_area_roi_context(self._image_roi_set)
+        roi_bounds = active_area_roi_bounds(self._image_roi_set, arr.shape[:2])
+        roi_id = roi_ctx.roi_id if roi_bounds is not None else None
+        roi_name = (
+            getattr(roi_ctx.roi, "name", None) if roi_bounds is not None else None
+        )
+
         dlg = FFTViewerDialog(
             arr,
             self._display_scan_range_m or self._scan_range_m or (1e-9, 1e-9),
@@ -509,6 +520,9 @@ class ImageViewerToolsMixin:
             apply_correction_fn=_apply_fft_correction,
             preview_image_fn=_preview_fft_correction,
             clear_preview_fn=_clear_fft_correction_preview,
+            roi_bounds_px=roi_bounds,
+            roi_id=roi_id,
+            roi_name=roi_name,
             parent=self,
         )
         self._track_modeless_child(dlg)

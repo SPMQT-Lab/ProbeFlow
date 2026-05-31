@@ -247,6 +247,95 @@ def test_viewer_stm_background_apply_records_processing_state(qapp, monkeypatch)
     dlg.deleteLater()
 
 
+class _FakeFFTDialog:
+    """Captures the kwargs the opener passes; behaves enough like a dialog."""
+
+    last_kwargs: dict = {}
+
+    def __init__(self, *args, **kwargs):
+        _FakeFFTDialog.last_kwargs = dict(kwargs)
+        _FakeFFTDialog.last_args = tuple(args)
+
+    def show(self):
+        pass
+
+    def raise_(self):
+        pass
+
+    def activateWindow(self):
+        pass
+
+
+def test_open_fft_viewer_passes_active_area_roi_bounds(qapp, monkeypatch):
+    from probeflow.core.roi import ROI, ROISet
+    from probeflow.gui import ImageViewerDialog, SxmFile, THEMES
+
+    monkeypatch.setattr(ImageViewerDialog, "_load_current", lambda self: None)
+    monkeypatch.setattr(
+        "probeflow.gui.viewer.image_viewer_tools_mixin.FFTViewerDialog",
+        _FakeFFTDialog,
+    )
+    monkeypatch.setattr(ImageViewerDialog, "_track_modeless_child", lambda self, d: None)
+
+    entry = SxmFile(path=Path("/tmp/example.sxm"), stem="example", Nx=10, Ny=10)
+    dlg = ImageViewerDialog(entry, [entry], "gray", THEMES["dark"])
+    dlg._raw_arr = np.ones((10, 10), dtype=float)
+    dlg._display_arr = dlg._raw_arr
+    dlg._scan_range_m = (10e-9, 10e-9)
+    dlg._display_scan_range_m = (10e-9, 10e-9)
+    roi_set = ROISet(image_id="img1")
+    roi = ROI.new("rectangle", {"x": 1.0, "y": 2.0, "width": 4.0, "height": 5.0},
+                  name="region A")
+    roi_set.add(roi)
+    roi_set.set_active(roi.id)
+    dlg._image_roi_set = roi_set
+
+    dlg._on_open_fft_viewer()
+
+    kw = _FakeFFTDialog.last_kwargs
+    # inclusive bounds: rows 2..6, cols 1..4
+    assert kw["roi_bounds_px"] == (2, 6, 1, 4)
+    assert kw["roi_id"] == roi.id
+    assert kw["roi_name"] == "region A"
+
+    dlg.close()
+    dlg.deleteLater()
+
+
+def test_open_fft_viewer_passes_no_roi_when_none_active(qapp, monkeypatch):
+    from probeflow.core.roi import ROI, ROISet
+    from probeflow.gui import ImageViewerDialog, SxmFile, THEMES
+
+    monkeypatch.setattr(ImageViewerDialog, "_load_current", lambda self: None)
+    monkeypatch.setattr(
+        "probeflow.gui.viewer.image_viewer_tools_mixin.FFTViewerDialog",
+        _FakeFFTDialog,
+    )
+    monkeypatch.setattr(ImageViewerDialog, "_track_modeless_child", lambda self, d: None)
+
+    entry = SxmFile(path=Path("/tmp/example.sxm"), stem="example", Nx=10, Ny=10)
+    dlg = ImageViewerDialog(entry, [entry], "gray", THEMES["dark"])
+    dlg._raw_arr = np.ones((10, 10), dtype=float)
+    dlg._display_arr = dlg._raw_arr
+    dlg._scan_range_m = (10e-9, 10e-9)
+    # Only a line ROI is active — not an area ROI, so no ROI source.
+    roi_set = ROISet(image_id="img1")
+    line = ROI.new("line", {"x1": 0, "y1": 0, "x2": 5, "y2": 5})
+    roi_set.add(line)
+    roi_set.set_active(line.id)
+    dlg._image_roi_set = roi_set
+
+    dlg._on_open_fft_viewer()
+
+    kw = _FakeFFTDialog.last_kwargs
+    assert kw["roi_bounds_px"] is None
+    assert kw["roi_id"] is None
+    assert kw["roi_name"] is None
+
+    dlg.close()
+    dlg.deleteLater()
+
+
 def test_image_arithmetic_dialog_builds_constant_spec(qapp):
     from probeflow.gui import SxmFile
     from probeflow.gui.dialogs.image_arithmetic import ImageArithmeticDialog
