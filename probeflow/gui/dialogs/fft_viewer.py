@@ -109,6 +109,9 @@ class FFTViewerDialog(QDialog):
         apply_correction_fn=None,
         preview_image_fn=None,
         clear_preview_fn=None,
+        roi_bounds_px: tuple[int, int, int, int] | None = None,
+        roi_id: str | None = None,
+        roi_name: str | None = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -117,8 +120,17 @@ class FFTViewerDialog(QDialog):
         self.resize(1180, 820)
         self.setAttribute(Qt.WA_DeleteOnClose, False)
 
-        self._arr = arr.astype(np.float64, copy=True)
-        self._scan_range_m = scan_range_m
+        # Full image is the canonical source; _arr/_scan_range_m are the *working*
+        # source that every downstream consumer reads. They equal the full image
+        # unless the user selects the ROI source, in which case _resolve_source_array
+        # crops to the ROI bbox (pixel size preserved → q-grid stays correct).
+        self._full_arr = arr.astype(np.float64, copy=True)
+        self._full_scan_range_m = scan_range_m
+        self._roi_bounds_px = roi_bounds_px
+        self._roi_id = roi_id
+        self._roi_name = roi_name
+        self._fft_source = "whole_image"  # default; ROI is opt-in via the selector
+        self._arr, self._scan_range_m = self._resolve_source_array()
         self._colormap = colormap
         self._theme = theme or {}
         self._ch_unit = channel_unit  # (scale, unit, axis_label) or None
@@ -239,6 +251,25 @@ class FFTViewerDialog(QDialog):
         )
         self._dc_combo.currentIndexChanged.connect(self._on_dc_changed)
         tb.addWidget(self._dc_combo)
+
+        tb.addWidget(_lbl("Source:"))
+        self._fft_source_combo = _combo(["Whole image", "Active ROI"], 104)
+        self._fft_source_combo.setToolTip(
+            "Region the FFT is computed from. 'Whole image' uses the full scan; "
+            "'Active ROI' uses the active area ROI's bounding box (q-resolution "
+            "then reflects the smaller region)."
+        )
+        if not self._has_roi_source():
+            # No ROI was passed — disable the ROI entry so the control is honest.
+            self._fft_source_combo.model().item(1).setEnabled(False)
+            self._fft_source_combo.setToolTip(
+                "Activate an area ROI before opening the FFT to enable ROI-sourced FFTs."
+            )
+        self._fft_source_combo.setCurrentIndex(
+            1 if self._fft_source == "active_roi" else 0
+        )
+        self._fft_source_combo.currentIndexChanged.connect(self._on_fft_source_changed)
+        tb.addWidget(self._fft_source_combo)
 
         tb.addStretch(1)
 
@@ -914,6 +945,37 @@ class FFTViewerDialog(QDialog):
         if self._window_mode == "tukey":
             return np.outer(self._tukey_1d(Ny), self._tukey_1d(Nx))
         return np.ones((Ny, Nx), dtype=np.float64)
+
+    # ── FFT source (whole image vs active ROI) ──────────────────────────────────
+
+    def _has_roi_source(self) -> bool:
+        return self._roi_bounds_px is not None
+
+    def _resolve_source_array(self) -> tuple[np.ndarray, tuple[float, float]]:
+        """Return the working (array, scan_range_m) for the current FFT source.
+
+        Whole image → the full array/range. Active ROI → the ROI bbox crop with a
+        proportionally-scaled scan range (pixel size preserved), via
+        :func:`crop_to_bounds`.
+        """
+        if self._fft_source == "active_roi" and self._roi_bounds_px is not None:
+            return crop_to_bounds(
+                self._full_arr, self._roi_bounds_px, self._full_scan_range_m,
+            )
+        return (
+            self._full_arr,
+            (float(self._full_scan_range_m[0]), float(self._full_scan_range_m[1])),
+        )
+
+    def _on_fft_source_changed(self, *_args) -> None:
+        source = "active_roi" if self._fft_source_combo.currentIndex() == 1 else "whole_image"
+        if source == self._fft_source:
+            return
+        self._fft_source = source
+        self._arr, self._scan_range_m = self._resolve_source_array()
+        self._recompute_fft()
+        self._update_info_panel()
+        self._redraw()
 
     def _recompute_fft(self, reset_view: bool = True):
         """Recompute the FFT magnitude and reciprocal-space axes.
@@ -1945,13 +2007,23 @@ class FFTViewerDialog(QDialog):
                 # while Nx/Ny grew, _recompute_fft would divide the same physical
                 # range over more pixels, computing a smaller dx/dy and a
                 # spuriously higher Nyquist frequency in the expanded direction.
-                orig_ny, orig_nx = self._arr.shape
-                px_x_nm = self._scan_range_m[0] * 1e9 / orig_nx if orig_nx > 0 else 1.0
-                px_y_nm = self._scan_range_m[1] * 1e9 / orig_ny if orig_ny > 0 else 1.0
-                self._arr = np.asarray(updated, dtype=np.float64)
-                new_ny, new_nx = self._arr.shape
-                self._scan_range_m = (px_x_nm * new_nx * 1e-9,
-                                      px_y_nm * new_ny * 1e-9)
+                orig_ny, orig_nx = self._full_arr.shape
+                px_x_nm = self._full_scan_range_m[0] * 1e9 / orig_nx if orig_nx > 0 else 1.0
+                px_y_nm = self._full_scan_range_m[1] * 1e9 / orig_ny if orig_ny > 0 else 1.0
+                self._full_arr = np.asarray(updated, dtype=np.float64)
+                new_ny, new_nx = self._full_arr.shape
+                self._full_scan_range_m = (px_x_nm * new_nx * 1e-9,
+                                           px_y_nm * new_ny * 1e-9)
+                # The corrected (possibly canvas-expanded) image invalidates the
+                # ROI bbox fitted on the pre-correction image; revert to whole image.
+                self._roi_bounds_px = None
+                self._fft_source = "whole_image"
+                if hasattr(self, "_fft_source_combo"):
+                    self._fft_source_combo.blockSignals(True)
+                    self._fft_source_combo.setCurrentIndex(0)
+                    self._fft_source_combo.model().item(1).setEnabled(False)
+                    self._fft_source_combo.blockSignals(False)
+                self._arr, self._scan_range_m = self._resolve_source_array()
                 self._recompute_fft()
                 self._redraw()
                 self._update_info_panel()

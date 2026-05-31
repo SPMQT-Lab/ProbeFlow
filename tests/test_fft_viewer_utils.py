@@ -577,3 +577,93 @@ class TestCropToBounds:
         import numpy as np
         with pytest.raises(ValueError):
             crop_to_bounds(np.zeros((4, 4, 3)), (0, 1, 0, 1), (1e-9, 1e-9))
+
+
+# ── FFT source selector (whole image vs active ROI) ──────────────────────────
+class TestFftSourceSelector:
+    def test_no_roi_disables_roi_entry_and_defaults_whole_image(self, qapp):
+        import numpy as np
+        dlg = FFTViewerDialog(np.ones((32, 32)), (8e-9, 8e-9))
+        try:
+            assert dlg._fft_source == "whole_image"
+            assert dlg._arr.shape == (32, 32)
+            # ROI entry disabled when no ROI bounds were supplied.
+            assert not dlg._fft_source_combo.model().item(1).isEnabled()
+        finally:
+            dlg.close()
+            dlg.deleteLater()
+            qapp.processEvents()
+
+    def test_roi_passed_defaults_whole_image_but_enables_roi(self, qapp):
+        import numpy as np
+        dlg = FFTViewerDialog(
+            np.ones((32, 32)), (8e-9, 8e-9),
+            roi_bounds_px=(4, 19, 8, 23), roi_id="r1", roi_name="ROI 1",
+        )
+        try:
+            # Default is still whole image (opt-in ROI).
+            assert dlg._fft_source == "whole_image"
+            assert dlg._arr.shape == (32, 32)
+            assert dlg._fft_source_combo.model().item(1).isEnabled()
+        finally:
+            dlg.close()
+            dlg.deleteLater()
+            qapp.processEvents()
+
+    def test_switching_to_roi_crops_array_and_scales_range(self, qapp):
+        import numpy as np
+        # 32x32 over 8 nm → 0.25 nm/px.
+        dlg = FFTViewerDialog(
+            np.random.default_rng(0).normal(size=(32, 32)), (8e-9, 8e-9),
+            roi_bounds_px=(4, 19, 8, 23), roi_id="r1", roi_name="ROI 1",
+        )
+        try:
+            dlg._fft_source_combo.setCurrentIndex(1)  # Active ROI
+            qapp.processEvents()
+            assert dlg._fft_source == "active_roi"
+            # rows 4..19 = 16, cols 8..23 = 16
+            assert dlg._arr.shape == (16, 16)
+            # pixel size preserved: 16 * 0.25 nm = 4 nm on each axis
+            assert dlg._scan_range_m[0] == pytest.approx(4e-9)
+            assert dlg._scan_range_m[1] == pytest.approx(4e-9)
+            # q-grid reflects the crop (Nyquist unchanged, finer resolution).
+            assert dlg._qx is not None and dlg._qx.size == 16
+
+            # Switching back restores the full source.
+            dlg._fft_source_combo.setCurrentIndex(0)
+            qapp.processEvents()
+            assert dlg._fft_source == "whole_image"
+            assert dlg._arr.shape == (32, 32)
+            assert dlg._scan_range_m[0] == pytest.approx(8e-9)
+        finally:
+            dlg.close()
+            dlg.deleteLater()
+            qapp.processEvents()
+
+    def test_pixel_spacing_preserved_between_sources(self, qapp):
+        import numpy as np
+        dlg = FFTViewerDialog(
+            np.random.default_rng(1).normal(size=(32, 32)), (8e-9, 8e-9),
+            roi_bounds_px=(4, 19, 8, 23),
+        )
+        try:
+            # The q-grid is fftfreq(N, d) with d = scan_range/N (in nm). The
+            # physical invariant across sources is the pixel spacing d (hence the
+            # true Nyquist 1/2d) — not the discrete max bin, which differs for
+            # even N because the Nyquist sample sits at the negative end.
+            def _d_nm(dlg):
+                nx = dlg._arr.shape[1]
+                return float(dlg._scan_range_m[0]) * 1e9 / nx
+            whole_d = _d_nm(dlg)
+            dlg._fft_source_combo.setCurrentIndex(1)
+            qapp.processEvents()
+            roi_d = _d_nm(dlg)
+            assert roi_d == pytest.approx(whole_d)
+            # q-resolution (grid step) is finer for the smaller ROI extent.
+            whole_dq = 1.0 / (32 * whole_d)
+            roi_dq = 1.0 / (16 * roi_d)
+            assert roi_dq > whole_dq
+        finally:
+            dlg.close()
+            dlg.deleteLater()
+            qapp.processEvents()
