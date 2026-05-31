@@ -153,6 +153,35 @@ def roi_line_set_width(
     on_changed()
 
 
+def roi_geometry_changed(
+    roi_set,
+    roi_id: str,
+    geometry: dict,
+    on_changed: Callable,
+) -> None:
+    """Commit a new geometry for *roi_id*, rebuilding the ROI immutably.
+
+    Generic across ROI kinds — used by the canvas handle-drag commit. Replaces
+    the dragged ROI in place (remove/add/set_active) and persists via the
+    *on_changed* callback. No-op when the ROI is missing.
+    """
+    if roi_set is None:
+        return
+    roi = roi_set.get(roi_id)
+    if roi is None:
+        return
+    from probeflow.core.roi import ROI as _ROI
+    new_roi = _ROI(
+        id=roi.id, name=roi.name, kind=roi.kind,
+        geometry=dict(geometry),
+        coord_system=roi.coord_system, linked_file=roi.linked_file,
+    )
+    roi_set.remove(roi_id)
+    roi_set.add(new_roi)
+    roi_set.set_active(roi_id)
+    on_changed()
+
+
 def roi_line_endpoint_changed(
     roi_set,
     roi_id: str,
@@ -162,25 +191,20 @@ def roi_line_endpoint_changed(
     y2: float,
     on_changed: Callable,
 ) -> None:
-    """Handle an endpoint drag on a line ROI: update geometry in place."""
+    """Handle an endpoint drag on a line ROI: update geometry in place.
+
+    Thin wrapper over :func:`roi_geometry_changed` kept during the handle-system
+    migration; preserves the line's non-endpoint keys (e.g. ``width``).
+    """
     if roi_set is None:
         return
     roi = roi_set.get(roi_id)
     if roi is None or roi.kind != "line":
         return
-    from probeflow.core.roi import ROI as _ROI
     new_geom = {k: v for k, v in roi.geometry.items()
                 if k not in ("x1", "y1", "x2", "y2")}
     new_geom.update({"x1": x1, "y1": y1, "x2": x2, "y2": y2})
-    new_roi = _ROI(
-        id=roi.id, name=roi.name, kind="line",
-        geometry=new_geom,
-        coord_system=roi.coord_system, linked_file=roi.linked_file,
-    )
-    roi_set.remove(roi_id)
-    roi_set.add(new_roi)
-    roi_set.set_active(roi_id)
-    on_changed()
+    roi_geometry_changed(roi_set, roi_id, new_geom, on_changed)
 
 
 # ── Pure queries ──────────────────────────────────────────────────────────────
