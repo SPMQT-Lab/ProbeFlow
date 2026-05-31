@@ -504,3 +504,66 @@ class TestResizeRoi:
         out = resize_roi(rect, "se", 25, 30)
         se = {h.name: (h.x, h.y) for h in resize_handles(out)}["se"]
         assert se == (25.0, 30.0)
+
+
+class TestResizeRoiKeepAspect:
+    def test_corner_width_dominant_preserves_aspect(self):
+        # 20x10 rectangle (aspect 2.0), drag SE far in x → width drives.
+        rect = rect_roi(x=10, y=10, w=20, h=10)
+        out = resize_roi(rect, "se", 60, 30, keep_aspect=True)
+        assert out.geometry["width"] / out.geometry["height"] == pytest.approx(2.0)
+        # Anchored at the NW corner.
+        assert out.geometry["x"] == 10.0
+        assert out.geometry["y"] == 10.0
+        assert out.geometry["width"] == pytest.approx(50.0)
+        assert out.geometry["height"] == pytest.approx(25.0)
+
+    def test_corner_height_dominant_preserves_aspect(self):
+        rect = rect_roi(x=10, y=10, w=20, h=10)
+        out = resize_roi(rect, "se", 30, 40, keep_aspect=True)
+        assert out.geometry["width"] / out.geometry["height"] == pytest.approx(2.0)
+        assert out.geometry["height"] == pytest.approx(30.0)
+        assert out.geometry["width"] == pytest.approx(60.0)
+
+    def test_corner_anchors_opposite_for_each_corner(self):
+        rect = rect_roi(x=10, y=10, w=20, h=10)  # right=30, bottom=20
+        # NW keeps SE (30,20) fixed.
+        nw = resize_roi(rect, "nw", -10, 0, keep_aspect=True)
+        assert nw.geometry["x"] + nw.geometry["width"] == pytest.approx(30.0)
+        assert nw.geometry["y"] + nw.geometry["height"] == pytest.approx(20.0)
+        assert nw.geometry["width"] / nw.geometry["height"] == pytest.approx(2.0)
+
+    def test_edge_scales_perpendicular_about_centre(self):
+        rect = rect_roi(x=10, y=10, w=20, h=10)  # centre (20,15), aspect 2.0
+        # East edge to x=50 → width 40, height 20, centred vertically about 15.
+        e = resize_roi(rect, "e", 50, 999, keep_aspect=True)
+        assert e.geometry["width"] == pytest.approx(40.0)
+        assert e.geometry["height"] == pytest.approx(20.0)
+        assert e.geometry["x"] == pytest.approx(10.0)
+        assert e.geometry["y"] == pytest.approx(5.0)  # 15 - 20/2
+        # North edge drives height; width scales about centre x=20.
+        n = resize_roi(rect, "n", 999, 0, keep_aspect=True)
+        assert n.geometry["height"] == pytest.approx(20.0)
+        assert n.geometry["width"] == pytest.approx(40.0)
+        assert n.geometry["x"] == pytest.approx(0.0)  # 20 - 40/2
+
+    def test_ellipse_keeps_aspect_about_centre(self):
+        el = ellipse_roi(cx=50, cy=50, rx=20, ry=10)  # ratio rx/ry = 2.0
+        n = resize_roi(el, "n", 50, 20, keep_aspect=True)  # ry=30 → rx=60
+        assert n.geometry["cx"] == 50.0
+        assert n.geometry["cy"] == 50.0
+        assert n.geometry["ry"] == pytest.approx(30.0)
+        assert n.geometry["rx"] == pytest.approx(60.0)
+        e = resize_roi(el, "e", 70, 50, keep_aspect=True)  # rx=20 → ry=10
+        assert e.geometry["rx"] == pytest.approx(20.0)
+        assert e.geometry["ry"] == pytest.approx(10.0)
+
+    def test_line_ignores_keep_aspect(self):
+        ln = ROI.new("line", {"x1": 0.0, "y1": 0.0, "x2": 10.0, "y2": 10.0, "width": 2})
+        out = resize_roi(ln, "p2", 20, 5, keep_aspect=True)
+        assert out.geometry == {"x1": 0.0, "y1": 0.0, "x2": 20.0, "y2": 5.0, "width": 2}
+
+    def test_keep_aspect_false_matches_freeform(self):
+        rect = rect_roi(x=10, y=10, w=20, h=10)
+        assert resize_roi(rect, "se", 60, 30, keep_aspect=False).geometry == \
+            resize_roi(rect, "se", 60, 30).geometry

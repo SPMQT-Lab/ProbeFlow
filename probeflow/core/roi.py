@@ -839,6 +839,7 @@ def resize_roi(
     y: float,
     *,
     min_size_px: float = 1.0,
+    keep_aspect: bool = False,
 ) -> "ROI":
     """Return a copy of *roi* with *handle_name* dragged to pixel ``(x, y)``.
 
@@ -847,6 +848,14 @@ def resize_roi(
     the anchor cannot produce a zero/negative or inverted ROI. Unknown handle
     names or non-resizable kinds return *roi* unchanged. Extra geometry keys
     (e.g. a line's ``width``) are preserved.
+
+    When ``keep_aspect`` is True the ROI's original aspect ratio is preserved
+    (rectangle and ellipse only; lines have no aspect and ignore the flag):
+      • corner drag — the dragged corner moves to the aspect-locked size that
+        contains the cursor (dominant axis wins), anchored at the opposite
+        corner;
+      • edge drag — the dragged dimension follows the cursor and the
+        perpendicular dimension scales proportionally about the ROI centre.
     """
     g = roi.geometry
     k = roi.kind
@@ -854,7 +863,50 @@ def resize_roi(
 
     if k == "rectangle":
         left, top = float(g["x"]), float(g["y"])
-        right, bottom = left + float(g["width"]), top + float(g["height"])
+        w0, h0 = float(g["width"]), float(g["height"])
+        right, bottom = left + w0, top + h0
+        if keep_aspect:
+            aspect = (w0 / h0) if h0 > 0 else 1.0  # width per unit height
+            cx0, cy0 = left + w0 / 2.0, top + h0 / 2.0
+            is_corner = len(handle_name) == 2
+            if is_corner:
+                anchor_x = right if "w" in handle_name else left
+                anchor_y = bottom if "n" in handle_name else top
+                cand_w = max(abs(x - anchor_x), min_size_px)
+                cand_h = max(abs(y - anchor_y), min_size_px)
+                # Dominant axis wins so the box contains the cursor.
+                if cand_w / cand_h >= aspect:
+                    new_w = cand_w
+                    new_h = new_w / aspect
+                else:
+                    new_h = cand_h
+                    new_w = new_h * aspect
+                new_left = anchor_x - new_w if "w" in handle_name else anchor_x
+                new_top = anchor_y - new_h if "n" in handle_name else anchor_y
+            elif handle_name in ("e", "w"):
+                if handle_name == "e":
+                    new_w = max(x - left, min_size_px)
+                    new_left = left
+                else:  # "w"
+                    new_w = max(right - x, min_size_px)
+                    new_left = right - new_w
+                new_h = new_w / aspect
+                new_top = cy0 - new_h / 2.0
+            elif handle_name in ("n", "s"):
+                if handle_name == "s":
+                    new_h = max(y - top, min_size_px)
+                    new_top = top
+                else:  # "n"
+                    new_h = max(bottom - y, min_size_px)
+                    new_top = bottom - new_h
+                new_w = new_h * aspect
+                new_left = cx0 - new_w / 2.0
+            else:
+                return roi
+            new_g = {**g, "x": new_left, "y": new_top,
+                     "width": new_w, "height": new_h}
+            return ROI(id=roi.id, name=roi.name, kind=roi.kind, geometry=new_g,
+                       coord_system=roi.coord_system, linked_file=roi.linked_file)
         # Move the dragged edge(s); anchor the opposite side(s).
         if "w" in handle_name:   # nw, sw, w
             left = min(x, right - min_size_px)
@@ -875,10 +927,15 @@ def resize_roi(
     if k == "ellipse":
         cx, cy = float(g["cx"]), float(g["cy"])
         rx, ry = float(g["rx"]), float(g["ry"])
+        ratio = (rx / ry) if ry > 0 else 1.0  # rx per unit ry
         if handle_name in ("e", "w"):
             rx = max(abs(x - cx), half_min)
+            if keep_aspect:
+                ry = rx / ratio
         elif handle_name in ("n", "s"):
             ry = max(abs(y - cy), half_min)
+            if keep_aspect:
+                rx = ry * ratio
         else:
             return roi
         new_g = {**g, "rx": rx, "ry": ry}

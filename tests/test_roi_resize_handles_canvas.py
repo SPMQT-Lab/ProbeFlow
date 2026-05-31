@@ -48,16 +48,18 @@ def _canvas_with_roi(roi):
     return canvas
 
 
-def _press_move_release(canvas, qapp, press_xy, release_xy):
+def _press_move_release(canvas, qapp, press_xy, release_xy, modifiers=None):
     """Drive a left-button press→move→release at the given view positions."""
     from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
     from PySide6.QtGui import QMouseEvent
+
+    mods = Qt.NoModifier if modifiers is None else modifiers
 
     def _evt(kind, xy):
         return QMouseEvent(
             kind, QPointF(*xy), Qt.LeftButton,
             Qt.LeftButton if kind != QEvent.MouseButtonRelease else Qt.NoButton,
-            Qt.NoModifier,
+            mods,
         )
 
     canvas.mousePressEvent(_evt(QEvent.MouseButtonPress, press_xy))
@@ -187,6 +189,47 @@ class TestLineStillEditable:
             assert geom["x2"] == pytest.approx(40.0)
             assert geom["y2"] == pytest.approx(30.0)
             assert geom["width"] == 2  # preserved
+        finally:
+            canvas.deleteLater()
+            qapp.processEvents()
+
+
+class TestShiftKeepsAspect:
+    def test_shift_corner_drag_preserves_rectangle_aspect(self, qapp):
+        from PySide6.QtCore import Qt
+        from probeflow.core.roi import ROI
+        # 20x10 rectangle (aspect 2.0) at (8,8) → SE corner at (28,18).
+        roi = ROI.new("rectangle", {"x": 8.0, "y": 8.0, "width": 20.0, "height": 10.0})
+        canvas = _canvas_with_roi(roi)
+        committed = []
+        canvas.roi_geometry_changed.connect(lambda rid, g: committed.append((rid, g)))
+        try:
+            _press_move_release(
+                canvas, qapp, (28, 18), (58, 40), modifiers=Qt.ShiftModifier,
+            )
+            assert committed
+            _, geom = committed[-1]
+            # Aspect locked at 2.0; anchored at NW (8,8).
+            assert geom["width"] / geom["height"] == pytest.approx(2.0)
+            assert geom["x"] == pytest.approx(8.0)
+            assert geom["y"] == pytest.approx(8.0)
+        finally:
+            canvas.deleteLater()
+            qapp.processEvents()
+
+    def test_no_shift_corner_drag_is_freeform(self, qapp):
+        from probeflow.core.roi import ROI
+        roi = ROI.new("rectangle", {"x": 8.0, "y": 8.0, "width": 20.0, "height": 10.0})
+        canvas = _canvas_with_roi(roi)
+        committed = []
+        canvas.roi_geometry_changed.connect(lambda rid, g: committed.append((rid, g)))
+        try:
+            # Same drag without Shift → free aspect (width 50, height 32).
+            _press_move_release(canvas, qapp, (28, 18), (58, 40))
+            assert committed
+            _, geom = committed[-1]
+            assert geom["width"] == pytest.approx(50.0)
+            assert geom["height"] == pytest.approx(32.0)
         finally:
             canvas.deleteLater()
             qapp.processEvents()

@@ -1043,9 +1043,11 @@ class ImageCanvas(QGraphicsView):
         elif self._handle_roi_id is not None and event.buttons() & Qt.LeftButton:
             from probeflow.core.roi import resize_roi
             scene_pos = self.mapToScene(event.pos())
+            keep_aspect = bool(event.modifiers() & Qt.ShiftModifier)
             new_roi = resize_roi(
                 self._handle_base_roi, self._handle_name,
                 scene_pos.x(), scene_pos.y(),
+                keep_aspect=keep_aspect,
             )
             item = self._roi_items.get(self._handle_roi_id)
             if item:
@@ -1160,9 +1162,11 @@ class ImageCanvas(QGraphicsView):
         if self._handle_roi_id is not None:
             from probeflow.core.roi import resize_roi
             scene_pos = self.mapToScene(event.pos())
+            keep_aspect = bool(event.modifiers() & Qt.ShiftModifier)
             new_roi = resize_roi(
                 self._handle_base_roi, self._handle_name,
                 scene_pos.x(), scene_pos.y(),
+                keep_aspect=keep_aspect,
             )
             roi_id = self._handle_roi_id
             self._handle_roi_id = None
