@@ -667,3 +667,26 @@ class TestFftSourceSelector:
             dlg.close()
             dlg.deleteLater()
             qapp.processEvents()
+
+    def test_info_panel_and_real_title_reflect_source(self, qapp):
+        import numpy as np
+        dlg = FFTViewerDialog(
+            np.random.default_rng(2).normal(size=(32, 32)), (8e-9, 8e-9),
+            roi_bounds_px=(4, 19, 8, 23), roi_id="r1", roi_name="region A",
+        )
+        try:
+            # Whole image by default.
+            assert "Source:   Whole image" in dlg._info_lbl.text()
+            assert dlg._ax_real.get_title() == "Real space"
+
+            dlg._fft_source_combo.setCurrentIndex(1)  # Active ROI
+            qapp.processEvents()
+            info = dlg._info_lbl.text()
+            assert "Source:   ROI (region A)" in info
+            # Size line reflects the crop: 16 px * 0.25 nm = 4 nm.
+            assert "4 × 4 nm" in info or "4 x 4 nm" in info
+            assert dlg._ax_real.get_title() == "Real space (ROI)"
+        finally:
+            dlg.close()
+            dlg.deleteLater()
+            qapp.processEvents()

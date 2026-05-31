@@ -1059,7 +1059,8 @@ class FFTViewerDialog(QDialog):
             self._arr, cmap=self._colormap, origin="upper",
             extent=[0, w_nm, h_nm, 0], aspect="equal",
         )
-        ax.set_title("Real space", fontsize=9, color=fg)
+        title = "Real space (ROI)" if self._fft_source == "active_roi" else "Real space"
+        ax.set_title(title, fontsize=9, color=fg)
         ax.set_xlabel("")
         ax.set_ylabel("")
         ax.set_xticks([])
@@ -1527,7 +1528,13 @@ class FFTViewerDialog(QDialog):
             dx_nm = 1.0
         dqx = 1.0 / w_nm if w_nm > 0 else 0.0
         q_ny = 1.0 / (2.0 * dx_nm) if dx_nm > 0 else 0.0
+        if self._fft_source == "active_roi":
+            label = self._roi_name or "active ROI"
+            source_line = f"Source:   ROI ({label})\n"
+        else:
+            source_line = "Source:   Whole image\n"
         self._info_lbl.setText(
+            f"{source_line}"
             f"Image:    {Nx} × {Ny} px\n"
             f"Size:     {w_nm:.3g} × {h_nm:.3g} nm\n"
             f"px size:  {dx_nm:.4g} nm\n"
