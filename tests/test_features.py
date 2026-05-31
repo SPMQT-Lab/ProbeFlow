@@ -253,8 +253,15 @@ class TestClassifyParticles:
             threshold_method="distribution",
         )
         assert len(classifs) == len(parts)
-        names = {c.class_name for c in classifs}
-        assert {"small", "large"} <= names or "other" in names
+        # Strong check: every particle must take its *correct* class, not merely
+        # "a label".  The previous ``{"small","large"} <= names or "other" in
+        # names`` passed even when everything collapsed to "other", so it could
+        # not catch a broken threshold (see test_features_realistic.py).
+        by_index = {p.index: p for p in parts}
+        for c in classifs:
+            p = by_index[c.particle_index]
+            expected = "small" if p.centroid_y_m < 32e-9 else "large"
+            assert c.class_name == expected
 
     def test_no_samples_all_other(self):
         arr = _disk((64, 64), 32, 32, r=5, height=1.0)
@@ -280,3 +287,13 @@ class TestClassifyParticles:
             threshold_method="gmm",
         )
         assert len(classifs) == len(parts)
+        # Beyond the count: labels must be valid, similarities in range, and a
+        # particle must match its own sample (self-consistency).  (Note: the
+        # PCA encoder spreads even identical blobs enough that the GMM cutoff
+        # can mark some as "other" — a known characterisation of that path.)
+        assert all(c.class_name in {"blob", "other"} for c in classifs)
+        assert all(-1.0001 <= c.similarity <= 1.0001 for c in classifs)
+        self_label = next(
+            c.class_name for c in classifs if c.particle_index == parts[0].index
+        )
+        assert self_label == "blob"
