@@ -121,6 +121,24 @@ def _cmd_particles(args) -> int:
         log.error("Scan has no physical pixel size — cannot segment.")
         return 1
 
+    # Optional reproducible step-edge exclusion: drop molecules sitting on a
+    # substrate step, computed from the raw plane (see analysis.step_edges).
+    exclude_mask = None
+    if getattr(args, "exclude_step_edges", False):
+        from probeflow.analysis.step_edges import step_edge_mask
+        exclude_mask = step_edge_mask(
+            scan.planes[args.plane],
+            pixel_size_x_m=dx_m, pixel_size_y_m=dy_m,
+            molecule_diameter_m=args.step_molecule_size * 1e-9,
+            threshold_deg=args.step_angle,
+            dilate_m=args.step_margin * 1e-9,
+            min_step_height_m=(args.step_min_height * 1e-9
+                               if args.step_min_height > 0 else None),
+            suppress_dark=args.invert,
+        )
+        log.info("Step-edge band covers %.1f%% of the plane",
+                 100.0 * float(exclude_mask.mean()))
+
     from probeflow.analysis.features import segment_particles
     particles = segment_particles(
         scan.planes[args.plane],
@@ -135,6 +153,8 @@ def _cmd_particles(args) -> int:
         size_sigma_clip=None if args.no_sigma_clip else args.sigma_clip,
         clip_low=args.clip_low,
         clip_high=args.clip_high,
+        exclude_mask=exclude_mask,
+        max_exclude_overlap=getattr(args, "step_max_overlap", 0.25),
     )
 
     if args.output:

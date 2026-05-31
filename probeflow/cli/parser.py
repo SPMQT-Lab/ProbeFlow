@@ -289,6 +289,20 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Max particles printed to stdout (table mode)")
     particles.add_argument("--json", action="store_true")
     particles.add_argument("--verbose", action="store_true")
+    # Reproducible step-edge exclusion (analysis.step_edges.step_edge_mask)
+    particles.add_argument("--exclude-step-edges", action="store_true",
+        help="Drop molecules sitting on substrate step edges (algorithmic, "
+             "reproducible alternative to hand-painting a mask)")
+    particles.add_argument("--step-angle", type=float, default=20.0,
+        help="Step slope angle in degrees (default 20)")
+    particles.add_argument("--step-molecule-size", type=float, default=1.0,
+        help="Molecule diameter in nm, suppressed before step detection (default 1.0)")
+    particles.add_argument("--step-margin", type=float, default=0.3,
+        help="Extra margin grown around the step band, nm (default 0.3)")
+    particles.add_argument("--step-min-height", type=float, default=0.0,
+        help="Only exclude at steps at least this tall, nm (0 = any steep edge)")
+    particles.add_argument("--step-max-overlap", type=float, default=0.25,
+        help="Reject a particle when more than this fraction overlaps the step band")
     particles.set_defaults(func=_cmd_particles)
 
     count = sub.add_parser("count",

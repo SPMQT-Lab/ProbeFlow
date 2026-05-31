@@ -13,6 +13,7 @@ from probeflow.cli.commands.analysis import (
     _cmd_fft_spectrum,
     _cmd_grains,
     _cmd_histogram,
+    _cmd_particles,
     _cmd_periodicity,
 )
 from probeflow.cli.commands.conversion import _cmd_dat2sxm
@@ -265,3 +266,40 @@ class TestFftSpectrum:
     def test_missing_plane_returns_one(self):
         rc = _cmd_fft_spectrum(self._make_args(plane=999))
         assert rc == 1
+
+
+# ─── _cmd_particles (incl. algorithmic step-edge exclusion) ──────────────────
+
+
+class TestParticles:
+    def _make_args(self, **overrides):
+        defaults = dict(
+            input=SAMPLE_SXM, output=None, plane=0, threshold="otsu",
+            manual_value=None, invert=False, min_area=0.5, max_area=None,
+            sigma_clip=2.0, no_sigma_clip=False, clip_low=1.0, clip_high=99.0,
+            limit=20, json=False, verbose=False,
+            exclude_step_edges=False, step_angle=20.0, step_molecule_size=1.0,
+            step_margin=0.3, step_min_height=0.0, step_max_overlap=0.25,
+        )
+        defaults.update(overrides)
+        return argparse.Namespace(**defaults)
+
+    def test_smoke_exit_zero(self, capsys):
+        pytest.importorskip("cv2")
+        assert _cmd_particles(self._make_args()) == 0
+        assert "particle" in capsys.readouterr().out.lower()
+
+    def test_exclude_step_edges_runs(self, capsys):
+        """The --exclude-step-edges path computes a band and still exits 0."""
+        pytest.importorskip("cv2")
+        rc = _cmd_particles(self._make_args(exclude_step_edges=True, verbose=True))
+        assert rc == 0
+
+    def test_json_output_written(self, tmp_path):
+        pytest.importorskip("cv2")
+        out = tmp_path / "particles.json"
+        rc = _cmd_particles(self._make_args(output=out, exclude_step_edges=True))
+        assert rc == 0
+        assert out.exists() and out.stat().st_size > 0
+        payload = json.loads(out.read_text())
+        assert payload["meta"]["kind"] == "particles"
