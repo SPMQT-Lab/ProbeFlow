@@ -2054,7 +2054,9 @@ def test_tv_load_from_browse_reuses_processed_scan_helper(qapp, monkeypatch):
     def fake_load_scan_plane_for_analysis(self, got_entry, plane_idx):
         assert got_entry is entry
         assert plane_idx == 3
-        return processed, 2.5e-10, 2.0e-10, 3.0e-10, 1
+        # Helper now also returns the source Scan (for export provenance); the
+        # TV path ignores it. None is fine here.
+        return processed, 2.5e-10, 2.0e-10, 3.0e-10, 1, None
 
     monkeypatch.setattr(
         ProbeFlowWindow,
