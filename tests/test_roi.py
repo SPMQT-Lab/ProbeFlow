@@ -8,7 +8,15 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
-from probeflow.core.roi import ROI, ROISet, combine_masks, invert_mask, translate
+from probeflow.core.roi import (
+    ROI,
+    ROISet,
+    combine_masks,
+    invert_mask,
+    resize_handles,
+    resize_roi,
+    translate,
+)
 
 
 SHAPE = (100, 100)  # (Ny, Nx)
@@ -374,3 +382,125 @@ def test_roi_set_provenance_contract():
 
     assert build_scan_export_provenance(scan, roi_set=roi_set).to_dict()["rois"]["rois"]
     assert build_scan_export_provenance(scan).to_dict()["rois"] is None
+
+
+# ── resize handles ──────────────────────────────────────────────────────────
+
+
+class TestResizeHandles:
+    def test_rectangle_returns_eight_ordered_handles(self):
+        # x=10,y=20,w=30,h=40 → right=40, bottom=60, centre=(25,40)
+        handles = resize_handles(rect_roi(x=10, y=20, w=30, h=40))
+        assert [h.name for h in handles] == [
+            "nw", "ne", "se", "sw", "n", "e", "s", "w",
+        ]
+        by_name = {h.name: (h.x, h.y) for h in handles}
+        assert by_name["nw"] == (10.0, 20.0)
+        assert by_name["ne"] == (40.0, 20.0)
+        assert by_name["se"] == (40.0, 60.0)
+        assert by_name["sw"] == (10.0, 60.0)
+        assert by_name["n"] == (25.0, 20.0)
+        assert by_name["e"] == (40.0, 40.0)
+        assert by_name["s"] == (25.0, 60.0)
+        assert by_name["w"] == (10.0, 40.0)
+
+    def test_ellipse_returns_four_cardinal_handles(self):
+        handles = resize_handles(ellipse_roi(cx=50, cy=50, rx=10, ry=20))
+        assert [h.name for h in handles] == ["n", "e", "s", "w"]
+        by_name = {h.name: (h.x, h.y) for h in handles}
+        assert by_name["n"] == (50.0, 30.0)
+        assert by_name["e"] == (60.0, 50.0)
+        assert by_name["s"] == (50.0, 70.0)
+        assert by_name["w"] == (40.0, 50.0)
+
+    def test_line_returns_two_endpoint_handles(self):
+        handles = resize_handles(line_roi())  # (5,5)-(15,15)
+        assert [(h.name, h.x, h.y) for h in handles] == [
+            ("p1", 5.0, 5.0), ("p2", 15.0, 15.0),
+        ]
+
+    def test_non_resizable_kinds_return_empty(self):
+        assert resize_handles(point_roi()) == []
+        assert resize_handles(polygon_roi()) == []
+        assert resize_handles(freehand_roi()) == []
+
+
+class TestResizeRoi:
+    def test_corner_drag_anchors_opposite_corner(self):
+        rect = rect_roi(x=10, y=20, w=30, h=40)  # right=40, bottom=60
+        # SE corner to (50,70): top-left fixed at (10,20).
+        se = resize_roi(rect, "se", 50, 70)
+        assert se.geometry == {"x": 10.0, "y": 20.0, "width": 40.0, "height": 50.0}
+        # NW corner to (5,5): bottom-right fixed at (40,60).
+        nw = resize_roi(rect, "nw", 5, 5)
+        assert nw.geometry == {"x": 5.0, "y": 5.0, "width": 35.0, "height": 55.0}
+        # NE corner to (55,0): bottom-left fixed at (10,60).
+        ne = resize_roi(rect, "ne", 55, 0)
+        assert ne.geometry == {"x": 10.0, "y": 0.0, "width": 45.0, "height": 60.0}
+        # SW corner to (0,75): top-right fixed at (40,20).
+        sw = resize_roi(rect, "sw", 0, 75)
+        assert sw.geometry == {"x": 0.0, "y": 20.0, "width": 40.0, "height": 55.0}
+
+    def test_edge_drag_changes_one_dimension_only(self):
+        rect = rect_roi(x=10, y=20, w=30, h=40)
+        # East edge: width changes, x/y/height fixed (y arg ignored).
+        e = resize_roi(rect, "e", 100, 999)
+        assert e.geometry == {"x": 10.0, "y": 20.0, "width": 90.0, "height": 40.0}
+        # North edge: top moves, x/width fixed (x arg ignored).
+        n = resize_roi(rect, "n", 999, 0)
+        assert n.geometry == {"x": 10.0, "y": 0.0, "width": 30.0, "height": 60.0}
+
+    def test_min_size_clamp_prevents_inversion(self):
+        rect = rect_roi(x=10, y=20, w=30, h=40)
+        # Drag SE far past the NW anchor → clamps to min, never inverts.
+        clamped = resize_roi(rect, "se", -100, -100, min_size_px=2.0)
+        assert clamped.geometry["x"] == 10.0
+        assert clamped.geometry["y"] == 20.0
+        assert clamped.geometry["width"] == 2.0
+        assert clamped.geometry["height"] == 2.0
+
+    def test_ellipse_resizes_about_fixed_centre(self):
+        el = ellipse_roi(cx=50, cy=50, rx=10, ry=20)
+        e = resize_roi(el, "e", 75, 50)
+        assert e.geometry == {"cx": 50.0, "cy": 50.0, "rx": 25.0, "ry": 20.0}
+        n = resize_roi(el, "n", 50, 20)
+        assert n.geometry == {"cx": 50.0, "cy": 50.0, "rx": 10.0, "ry": 30.0}
+        # Min-size clamp on radius (half of min_size_px).
+        tiny = resize_roi(el, "e", 50, 50, min_size_px=1.0)
+        assert tiny.geometry["rx"] == 0.5
+
+    def test_line_endpoint_preserves_extra_keys(self):
+        ln = ROI.new("line", {"x1": 0.0, "y1": 0.0, "x2": 10.0, "y2": 10.0, "width": 3})
+        moved = resize_roi(ln, "p2", 20, 25)
+        assert moved.geometry == {"x1": 0.0, "y1": 0.0, "x2": 20.0, "y2": 25.0, "width": 3}
+        moved1 = resize_roi(ln, "p1", -5, -5)
+        assert moved1.geometry == {"x1": -5.0, "y1": -5.0, "x2": 10.0, "y2": 10.0, "width": 3}
+
+    def test_preserves_identity_fields(self):
+        rect = rect_roi(x=10, y=20, w=30, h=40)
+        rect.coord_system = "physical"
+        rect.linked_file = "scan_001.sxm"
+        out = resize_roi(rect, "se", 60, 80)
+        assert out.id == rect.id
+        assert out.name == rect.name
+        assert out.kind == "rectangle"
+        assert out.coord_system == "physical"
+        assert out.linked_file == "scan_001.sxm"
+
+    def test_unknown_handle_or_kind_returns_unchanged(self):
+        rect = rect_roi()
+        # Unknown handle on an ellipse returns the same object.
+        el = ellipse_roi()
+        assert resize_roi(el, "nw", 5, 5) is el
+        # Non-resizable kind returns the same object.
+        pt = point_roi()
+        assert resize_roi(pt, "se", 5, 5) is pt
+        # Rectangle is genuinely resized (sanity that it's not a no-op path).
+        assert resize_roi(rect, "se", 999, 999).geometry["width"] > rect.geometry["width"]
+
+    def test_resize_then_handles_roundtrip(self):
+        # After resizing, the dragged handle sits at the new cursor position.
+        rect = rect_roi(x=0, y=0, w=10, h=10)
+        out = resize_roi(rect, "se", 25, 30)
+        se = {h.name: (h.x, h.y) for h in resize_handles(out)}["se"]
+        assert se == (25.0, 30.0)

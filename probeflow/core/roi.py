@@ -774,6 +774,130 @@ def translate(roi: "ROI", dx: float, dy: float) -> "ROI":
                coord_system=roi.coord_system, linked_file=roi.linked_file)
 
 
+# ── Resize handles ──────────────────────────────────────────────────────────────
+
+@dataclass(frozen=True)
+class ResizeHandle:
+    """One draggable resize handle for an ROI, in pixel coordinates.
+
+    *name* identifies the handle for a given ROI kind:
+      • rectangle/ellipse: compass points ``nw ne se sw n e s w`` (corners then
+        edge midpoints for rectangle; ``n e s w`` for ellipse).
+      • line: ``p1`` (x1,y1) and ``p2`` (x2,y2).
+    """
+
+    name: str
+    x: float
+    y: float
+
+
+# Ordered handle names per kind (corners first for rectangle, then edges).
+_RECT_HANDLE_NAMES = ("nw", "ne", "se", "sw", "n", "e", "s", "w")
+_ELLIPSE_HANDLE_NAMES = ("n", "e", "s", "w")
+_LINE_HANDLE_NAMES = ("p1", "p2")
+
+
+def resize_handles(roi: "ROI") -> list[ResizeHandle]:
+    """Return the ordered resize handles for *roi*, or ``[]`` if not resizable.
+
+    Coordinates are pixel-space and match the geometry convention (x=col,
+    y=row). Point, polygon, freehand, and multipolygon ROIs return ``[]`` —
+    they are not resizable via bounding-box handles in this pass.
+    """
+    g = roi.geometry
+    k = roi.kind
+    if k == "rectangle":
+        x, y = float(g["x"]), float(g["y"])
+        w, h = float(g["width"]), float(g["height"])
+        cx, cy = x + w / 2.0, y + h / 2.0
+        x1, y1 = x + w, y + h
+        pos = {
+            "nw": (x, y), "ne": (x1, y), "se": (x1, y1), "sw": (x, y1),
+            "n": (cx, y), "e": (x1, cy), "s": (cx, y1), "w": (x, cy),
+        }
+        return [ResizeHandle(n, *pos[n]) for n in _RECT_HANDLE_NAMES]
+    if k == "ellipse":
+        cx, cy = float(g["cx"]), float(g["cy"])
+        rx, ry = float(g["rx"]), float(g["ry"])
+        pos = {
+            "n": (cx, cy - ry), "e": (cx + rx, cy),
+            "s": (cx, cy + ry), "w": (cx - rx, cy),
+        }
+        return [ResizeHandle(n, *pos[n]) for n in _ELLIPSE_HANDLE_NAMES]
+    if k == "line":
+        return [
+            ResizeHandle("p1", float(g["x1"]), float(g["y1"])),
+            ResizeHandle("p2", float(g["x2"]), float(g["y2"])),
+        ]
+    return []
+
+
+def resize_roi(
+    roi: "ROI",
+    handle_name: str,
+    x: float,
+    y: float,
+    *,
+    min_size_px: float = 1.0,
+) -> "ROI":
+    """Return a copy of *roi* with *handle_name* dragged to pixel ``(x, y)``.
+
+    The opposite corner/edge stays anchored; edge handles change one dimension
+    only. Width/height (or rx/ry) are clamped to ``min_size_px`` so a drag past
+    the anchor cannot produce a zero/negative or inverted ROI. Unknown handle
+    names or non-resizable kinds return *roi* unchanged. Extra geometry keys
+    (e.g. a line's ``width``) are preserved.
+    """
+    g = roi.geometry
+    k = roi.kind
+    half_min = min_size_px / 2.0
+
+    if k == "rectangle":
+        left, top = float(g["x"]), float(g["y"])
+        right, bottom = left + float(g["width"]), top + float(g["height"])
+        # Move the dragged edge(s); anchor the opposite side(s).
+        if "w" in handle_name:   # nw, sw, w
+            left = min(x, right - min_size_px)
+        if "e" in handle_name:   # ne, se, e
+            right = max(x, left + min_size_px)
+        if "n" in handle_name:   # nw, ne, n
+            top = min(y, bottom - min_size_px)
+        if "s" in handle_name:   # se, sw, s
+            bottom = max(y, top + min_size_px)
+        new_g = {
+            **g,
+            "x": left, "y": top,
+            "width": right - left, "height": bottom - top,
+        }
+        return ROI(id=roi.id, name=roi.name, kind=roi.kind, geometry=new_g,
+                   coord_system=roi.coord_system, linked_file=roi.linked_file)
+
+    if k == "ellipse":
+        cx, cy = float(g["cx"]), float(g["cy"])
+        rx, ry = float(g["rx"]), float(g["ry"])
+        if handle_name in ("e", "w"):
+            rx = max(abs(x - cx), half_min)
+        elif handle_name in ("n", "s"):
+            ry = max(abs(y - cy), half_min)
+        else:
+            return roi
+        new_g = {**g, "rx": rx, "ry": ry}
+        return ROI(id=roi.id, name=roi.name, kind=roi.kind, geometry=new_g,
+                   coord_system=roi.coord_system, linked_file=roi.linked_file)
+
+    if k == "line":
+        if handle_name == "p1":
+            new_g = {**g, "x1": float(x), "y1": float(y)}
+        elif handle_name == "p2":
+            new_g = {**g, "x2": float(x), "y2": float(y)}
+        else:
+            return roi
+        return ROI(id=roi.id, name=roi.name, kind=roi.kind, geometry=new_g,
+                   coord_system=roi.coord_system, linked_file=roi.linked_file)
+
+    return roi
+
+
 # ── ROISet ────────────────────────────────────────────────────────────────────
 
 @dataclass
