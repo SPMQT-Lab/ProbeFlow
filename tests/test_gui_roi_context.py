@@ -9,8 +9,9 @@ import pytest
 
 from probeflow.core.roi import ROI, ROISet
 from probeflow.gui.roi_context import (
-    active_area_roi_context,
     active_area_roi_area_m2,
+    active_area_roi_bounds,
+    active_area_roi_context,
     active_line_roi_context,
     area_roi_mask,
     collect_point_source_records,
@@ -177,3 +178,54 @@ def test_selected_area_roi_contexts_returns_only_selected_area_rois():
     )
 
     assert [ctx.roi_id for ctx in contexts] == [rect_a.id, rect_b.id]
+
+
+class TestActiveAreaRoiBounds:
+    def test_bounds_for_active_rectangle(self):
+        roi_set = ROISet(image_id="scan")
+        # x=1, y=2, width=4, height=5 → inclusive bounds rows 2..6, cols 1..4
+        rect = ROI.new("rectangle", {"x": 1, "y": 2, "width": 4, "height": 5})
+        roi_set.add(rect)
+        roi_set.set_active(rect.id)
+
+        assert active_area_roi_bounds(roi_set, (10, 10)) == (2, 6, 1, 4)
+
+    def test_none_when_active_is_not_area(self):
+        roi_set = ROISet(image_id="scan")
+        line = ROI.new("line", {"x1": 0, "y1": 0, "x2": 4, "y2": 0})
+        roi_set.add(line)
+        roi_set.set_active(line.id)
+
+        assert active_area_roi_bounds(roi_set, (10, 10)) is None
+
+    def test_none_when_no_roi_set(self):
+        assert active_area_roi_bounds(None, (10, 10)) is None
+
+    def test_none_when_shape_missing(self):
+        roi_set = ROISet(image_id="scan")
+        rect = ROI.new("rectangle", {"x": 1, "y": 2, "width": 4, "height": 5})
+        roi_set.add(rect)
+        roi_set.set_active(rect.id)
+
+        assert active_area_roi_bounds(roi_set, None) is None
+
+    def test_none_when_roi_outside_image(self):
+        roi_set = ROISet(image_id="scan")
+        rect = ROI.new("rectangle", {"x": 100, "y": 100, "width": 2, "height": 2})
+        roi_set.add(rect)
+        roi_set.set_active(rect.id)
+
+        assert active_area_roi_bounds(roi_set, (10, 10)) is None
+
+    def test_bounds_match_area_roi_mask_extent(self):
+        # The bbox must equal the True-extent of area_roi_mask for the same ROI.
+        roi_set = ROISet(image_id="scan")
+        ellipse = ROI.new("ellipse", {"cx": 5.0, "cy": 6.0, "rx": 3.0, "ry": 2.0})
+        roi_set.add(ellipse)
+        roi_set.set_active(ellipse.id)
+
+        bounds = active_area_roi_bounds(roi_set, (16, 16))
+        mask = area_roi_mask(ellipse, (16, 16))
+        rows = np.flatnonzero(mask.any(axis=1))
+        cols = np.flatnonzero(mask.any(axis=0))
+        assert bounds == (int(rows[0]), int(rows[-1]), int(cols[0]), int(cols[-1]))
