@@ -42,6 +42,108 @@ def _sample_entry():
     return SimpleNamespace(stem="example", path=Path("/tmp/example.sxm"))
 
 
+def _stepped_arr(n=256, step_col=None):
+    """Two-terrace surface with a vertical 0.235 nm step."""
+    step_col = step_col if step_col is not None else n // 2
+    a = np.zeros((n, n), dtype=float)
+    a[:, step_col:] = 0.235e-9
+    return a
+
+
+def _step_widgets(qapp):
+    from PySide6.QtCore import QThreadPool
+    from probeflow.gui.features import FeaturesPanel, FeaturesSidebar
+    from probeflow.gui.features.controller import FeatureCountingController
+
+    panel = FeaturesPanel({})
+    sidebar = FeaturesSidebar({})
+    ctrl = FeatureCountingController(
+        panel, sidebar, QThreadPool.globalInstance(), status_cb=lambda *_: None,
+    )
+    return panel, sidebar, ctrl
+
+
+class TestStepEdgeExclusionGUI:
+    PX = 1.5e-10
+
+    def test_off_by_default_builds_no_mask(self, qapp):
+        panel, sidebar, ctrl = _step_widgets(qapp)
+        assert sidebar.step_exclude_params()["enabled"] is False
+        panel.load_entry(_sample_entry(), 0, _stepped_arr(), self.PX, self.PX, self.PX)
+        assert ctrl._build_exclude_mask() is None
+        assert panel.step_mask() is None
+        panel.deleteLater(); sidebar.deleteLater()
+
+    def test_enabled_builds_localized_band_and_overlay(self, qapp):
+        panel, sidebar, ctrl = _step_widgets(qapp)
+        panel.load_entry(_sample_entry(), 0, _stepped_arr(), self.PX, self.PX, self.PX)
+        sidebar._step_exclude_cb.setChecked(True)
+        sidebar._step_molsize_spin.setValue(1.0)
+        sidebar._step_angle_spin.setValue(20.0)
+
+        mask = ctrl._build_exclude_mask()
+        assert mask is not None and mask.any(), "step band should be computed"
+        cols = np.where(mask.any(axis=0))[0]
+        assert abs(cols.mean() - 128) < 12, "band should hug the step column"
+        assert panel._step_overlay_item is not None, "amber overlay should be shown"
+        panel.deleteLater(); sidebar.deleteLater()
+
+    def test_segment_injects_exclude_mask(self, qapp, monkeypatch):
+        panel, sidebar, ctrl = _step_widgets(qapp)
+        panel.load_entry(_sample_entry(), 0, _stepped_arr(), self.PX, self.PX, self.PX)
+        sidebar._step_exclude_cb.setChecked(True)
+        sidebar._step_molsize_spin.setValue(1.0)
+
+        captured = {}
+        monkeypatch.setattr(ctrl._pool, "start", lambda w: captured.setdefault("worker", w))
+        ctrl._on_segment()
+
+        params = captured["worker"]._params
+        assert params["exclude_mask"] is not None
+        assert params["exclude_mask"].shape == captured["worker"]._arr.shape
+        panel.deleteLater(); sidebar.deleteLater()
+
+    def test_disabled_segment_passes_no_mask(self, qapp, monkeypatch):
+        panel, sidebar, ctrl = _step_widgets(qapp)
+        panel.load_entry(_sample_entry(), 0, _stepped_arr(), self.PX, self.PX, self.PX)
+        captured = {}
+        monkeypatch.setattr(ctrl._pool, "start", lambda w: captured.setdefault("worker", w))
+        ctrl._on_segment()
+        assert captured["worker"]._params["exclude_mask"] is None
+        panel.deleteLater(); sidebar.deleteLater()
+
+    def test_preview_mask_sliced_to_match_array(self, qapp, monkeypatch):
+        """Regression: the preview step-slices the array, so the mask must be
+        sliced the same way or segment_particles raises on a shape mismatch."""
+        panel, sidebar, ctrl = _step_widgets(qapp)
+        big = _stepped_arr(1040)              # ≥ 1024 → preview step-slices by 2
+        panel.load_entry(_sample_entry(), 0, big, self.PX, self.PX, self.PX)
+        sidebar._step_exclude_cb.setChecked(True)
+        sidebar._step_molsize_spin.setValue(1.0)
+
+        captured = {}
+        monkeypatch.setattr(ctrl._preview_pool, "start",
+                            lambda w: captured.setdefault("worker", w))
+        ctrl._on_preview()
+
+        w = captured["worker"]
+        assert w._arr.shape[0] < 1040, "preview should have downsampled"
+        assert w._params["exclude_mask"] is not None
+        assert w._params["exclude_mask"].shape == w._arr.shape
+        panel.deleteLater(); sidebar.deleteLater()
+
+    def test_painted_mask_behaviour_unchanged(self, qapp):
+        """The painted brush still zeroes pixels in get_analysis_array (untouched)."""
+        panel, _sidebar, _ctrl = _step_widgets(qapp)
+        arr = _sample_arr()
+        panel.load_entry(_sample_entry(), 0, arr, self.PX, self.PX, self.PX)
+        panel._on_mask_painted(24.0, 24.0)    # paint over the first disk
+        out = panel.get_analysis_array()
+        assert out is not arr, "painted mask should still produce a modified array"
+        assert panel.has_exclusion_mask()
+        _sidebar.deleteLater()
+
+
 def test_features_panel_sample_label_flow(qapp, monkeypatch):
     pytest.importorskip("cv2")
     from probeflow.analysis.features import segment_particles

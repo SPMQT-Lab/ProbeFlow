@@ -408,6 +408,8 @@ class _FeaturesWorker(QRunnable):
                     min_area_nm2=self._params.get("min_area_nm2", 0.5),
                     max_area_nm2=self._params.get("max_area_nm2"),
                     size_sigma_clip=self._params.get("size_sigma_clip", 2.0),
+                    exclude_mask=self._params.get("exclude_mask"),
+                    max_exclude_overlap=self._params.get("max_exclude_overlap", 0.25),
                 )
             elif self._mode == "template":
                 from probeflow.analysis.features import count_features
@@ -494,6 +496,10 @@ class FeaturesPanel(QWidget):
         self._mask_brush_radius: int = 10
         self._mask_color: tuple[int, int, int] = (220, 50, 50)   # R, G, B
         self._mask_overlay_item = None     # QGraphicsPixmapItem — lives outside _overlay_items
+        # Algorithmic step-edge exclusion (separate from the painted mask above).
+        self._step_mask: np.ndarray | None = None        # computed step band, bool
+        self._step_mask_sig = None                       # params signature for caching
+        self._step_overlay_item = None                   # amber band overlay item
         self._build()
 
     def _build(self):
@@ -593,6 +599,7 @@ class FeaturesPanel(QWidget):
         self._overlay_toggle_btn.setVisible(False)
         self._overlay_toggle_btn.setText("👁 Original")
         self.clear_exclusion_mask()   # discard any mask from the previous image
+        self.clear_step_mask()        # discard any computed step band too
         self._redraw(reset_view=True)
         self._results_table.setRowCount(0)
         plane_lbl = PLANE_NAMES[plane_idx] if 0 <= plane_idx < len(PLANE_NAMES) else f"plane {plane_idx}"
@@ -944,6 +951,73 @@ class FeaturesPanel(QWidget):
         else:
             self._mask_overlay_item.setPixmap(pixmap)
 
+    # ── Algorithmic step-edge exclusion ───────────────────────────────────────
+
+    def compute_step_mask(
+        self, *, threshold_deg: float, molecule_diameter_m: float,
+        dilate_m: float, min_step_height_m: float | None,
+        suppress_dark: bool = False,
+    ) -> np.ndarray | None:
+        """Compute (and cache) the step-edge band from the RAW scan plane.
+
+        Computed on ``self._arr`` — the raw, unmasked array — so the painted
+        mask's artificial cliffs never read as fake steps.  Cached against the
+        parameter signature so dragging a slider doesn't recompute every tick.
+        Returns the boolean band, or None when no scan is loaded.
+        """
+        if self._arr is None:
+            return None
+        sig = (threshold_deg, molecule_diameter_m, dilate_m,
+               min_step_height_m, suppress_dark, id(self._arr))
+        if sig != self._step_mask_sig:
+            from probeflow.analysis.step_edges import step_edge_mask
+            px_x, px_y = self.current_pixel_sizes()
+            self._step_mask = step_edge_mask(
+                self._arr,
+                pixel_size_x_m=px_x, pixel_size_y_m=px_y,
+                molecule_diameter_m=molecule_diameter_m,
+                threshold_deg=threshold_deg, dilate_m=dilate_m,
+                min_step_height_m=min_step_height_m, suppress_dark=suppress_dark,
+            )
+            self._step_mask_sig = sig
+        self._update_step_overlay()
+        return self._step_mask
+
+    def step_mask(self) -> np.ndarray | None:
+        """The most recently computed step band (without recomputing)."""
+        return self._step_mask
+
+    def clear_step_mask(self) -> None:
+        """Drop the computed step band and its overlay."""
+        self._step_mask = None
+        self._step_mask_sig = None
+        if self._step_overlay_item is not None:
+            self._view._scene.removeItem(self._step_overlay_item)
+            self._step_overlay_item = None
+
+    def _update_step_overlay(self) -> None:
+        """Render the step band as a translucent amber overlay (distinct from the
+        red painted mask), so the user sees exactly what will be excluded."""
+        mask = self._step_mask
+        if mask is None or not mask.any():
+            if self._step_overlay_item is not None:
+                self._view._scene.removeItem(self._step_overlay_item)
+                self._step_overlay_item = None
+            return
+        h, w = mask.shape
+        rgba = np.zeros((h, w, 4), dtype=np.uint8)
+        rgba[mask] = [250, 179, 135, 150]   # amber, semi-transparent
+        data = np.ascontiguousarray(rgba).tobytes()
+        qimg = QImage(data, w, h, 4 * w, QImage.Format_RGBA8888)
+        pixmap = QPixmap.fromImage(qimg)
+        if self._step_overlay_item is None:
+            self._step_overlay_item = QGraphicsPixmapItem(pixmap)
+            self._step_overlay_item.setPos(0, 0)
+            self._step_overlay_item.setZValue(6)   # above painted mask, below particles
+            self._view._scene.addItem(self._step_overlay_item)
+        else:
+            self._step_overlay_item.setPixmap(pixmap)
+
         self._view.viewport().update()   # force immediate repaint
 
     # ── Events from _FeatureView ──────────────────────────────────────────────
@@ -1116,6 +1190,7 @@ class FeaturesSidebar(QWidget):
     mask_paint_toggled         = Signal(bool)  # True = start painting
     mask_clear_requested       = Signal()
     mask_color_changed         = Signal(int, int, int)  # R, G, B
+    step_exclude_changed       = Signal()      # algorithmic step-edge controls changed
 
     MASK_COLORS: dict[str, tuple[int, int, int]] = {
         "Red":     (220,  50,  50),
@@ -1301,6 +1376,54 @@ class FeaturesSidebar(QWidget):
         mask_hint.setWordWrap(True)
         mask_hint.setStyleSheet("color: #888;")
         lay.addWidget(mask_hint)
+
+        # ── Algorithmic step-edge exclusion (reproducible alternative to painting) ─
+        self._step_exclude_cb = QCheckBox("Exclude step edges (auto)")
+        self._step_exclude_cb.setFont(QFont("Helvetica", 9))
+        self._step_exclude_cb.setToolTip(_tip(
+            "Detect substrate step edges from the topography and drop molecules "
+            "sitting on them — a reproducible alternative to painting over the "
+            "step by hand. The computed band is shown in amber."))
+        self._step_exclude_cb.toggled.connect(lambda _: self.step_exclude_changed.emit())
+        lay.addWidget(self._step_exclude_cb)
+
+        def _step_spin(label, lo, hi, val, step, decimals, suffix, tip):
+            row = QHBoxLayout()
+            lab = QLabel(label)
+            lab.setFont(QFont("Helvetica", 9))
+            row.addWidget(lab)
+            row.addStretch(1)
+            sp = QDoubleSpinBox()
+            sp.setRange(lo, hi)
+            sp.setSingleStep(step)
+            sp.setDecimals(decimals)
+            sp.setValue(val)
+            if suffix:
+                sp.setSuffix(suffix)
+            sp.setToolTip(_tip(tip))
+            sp.valueChanged.connect(lambda _: self.step_exclude_changed.emit())
+            row.addWidget(sp)
+            lay.addLayout(row)
+            return sp
+
+        self._step_angle_spin = _step_spin(
+            "Step sensitivity:", 5.0, 45.0, 20.0, 1.0, 0, "°",
+            "Surface-slope angle above which a pixel counts as a step. A "
+            "monatomic step is far steeper than terrace tilt, so the 20° "
+            "default separates them with margin. Lower = more sensitive.")
+        self._step_molsize_spin = _step_spin(
+            "Molecule size:", 0.2, 20.0, 1.0, 0.1, 2, " nm",
+            "Approximate molecule diameter. Molecules are suppressed before the "
+            "step is detected so their own steep edges don't self-trigger; set "
+            "this to roughly your molecule width.")
+        self._step_margin_spin = _step_spin(
+            "Edge margin:", 0.0, 5.0, 0.3, 0.1, 2, " nm",
+            "Extra margin grown around the step band, so molecules sitting next "
+            "to (not only squarely on) the step are also excluded.")
+        self._step_minheight_spin = _step_spin(
+            "Min step height:", 0.0, 5.0, 0.0, 0.05, 2, " nm",
+            "Only exclude at steps at least this tall (0 = any steep edge). "
+            "Distinguishes a real atomic step from a shallow undulation.")
 
         brush_row = QHBoxLayout()
         brush_row.addWidget(QLabel("Brush (px):"))
@@ -1830,6 +1953,20 @@ class FeaturesSidebar(QWidget):
             "min_area_pct":    self._min_area_slider.value() * 0.001,  # 0–0.100 %
             "max_area_pct":    self._max_area_slider.value() * 0.001,  # 0–1.000 %
             "size_sigma_clip": None,
+        }
+
+    def step_exclude_params(self) -> dict:
+        """Algorithmic step-edge exclusion settings (physical units in metres).
+
+        ``min_step_height_m`` is ``None`` when the spin is at 0 (slope-only).
+        """
+        return {
+            "enabled":             self._step_exclude_cb.isChecked(),
+            "threshold_deg":       float(self._step_angle_spin.value()),
+            "molecule_diameter_m": float(self._step_molsize_spin.value()) * 1e-9,
+            "dilate_m":            float(self._step_margin_spin.value()) * 1e-9,
+            "min_step_height_m":   (float(self._step_minheight_spin.value()) * 1e-9
+                                    if self._step_minheight_spin.value() > 0 else None),
         }
 
     def template_params(self) -> dict:

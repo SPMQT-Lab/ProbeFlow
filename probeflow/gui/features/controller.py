@@ -124,6 +124,33 @@ class FeatureCountingController(QObject):
         sidebar.mode_changed.connect(self._on_mode_changed)
         sidebar.mask_paint_toggled.connect(self._on_mask_paint_toggled)
         sidebar.mask_clear_requested.connect(self._on_mask_clear)
+        sidebar.step_exclude_changed.connect(self._on_step_exclude_changed)
+
+    # ── Algorithmic step-edge exclusion ───────────────────────────────────────
+
+    def _build_exclude_mask(self):
+        """Compute the step-edge band when the sidebar toggle is on, else None.
+
+        Returns a full-resolution boolean mask (or None). Computed by the panel
+        from the RAW scan plane so the painted mask never reads as a fake step.
+        """
+        params = self._sidebar.step_exclude_params()
+        if not params.get("enabled"):
+            self._panel.clear_step_mask()
+            return None
+        invert = bool(self._sidebar.particles_params().get("invert", False))
+        return self._panel.compute_step_mask(
+            threshold_deg=params["threshold_deg"],
+            molecule_diameter_m=params["molecule_diameter_m"],
+            dilate_m=params["dilate_m"],
+            min_step_height_m=params["min_step_height_m"],
+            suppress_dark=invert,
+        )
+
+    def _on_step_exclude_changed(self) -> None:
+        """Recompute/clear the step band overlay and refresh the live preview."""
+        self._build_exclude_mask()
+        self._sidebar.preview_requested.emit()
 
     # ── Mode / classify params ────────────────────────────────────────────────
 
@@ -202,6 +229,7 @@ class FeatureCountingController(QObject):
         params["max_area_nm2"] = (
             _pct_to_nm2(max_pct, arr, px_x_m, px_y_m) if max_pct > 0 else None
         )
+        full_mask = self._build_exclude_mask()   # full-res, or None
 
         step = max(1, max(arr.shape) // 512)
         if step > 1:
@@ -209,8 +237,11 @@ class FeatureCountingController(QObject):
             px_x_prev = px_x_m * step
             px_y_prev = px_y_m * step
             px_prev   = float(np.sqrt(px_x_prev * px_y_prev))
+            # Slice the mask identically so it matches the step-sliced array.
+            params["exclude_mask"] = None if full_mask is None else full_mask[::step, ::step]
         else:
             arr_prev, px_x_prev, px_y_prev, px_prev = arr, px_x_m, px_y_m, px_m
+            params["exclude_mask"] = full_mask
 
         self._preview_generation += 1
         gen = self._preview_generation
@@ -256,6 +287,7 @@ class FeatureCountingController(QObject):
         params["max_area_nm2"] = (
             _pct_to_nm2(max_pct, arr, px_x_m, px_y_m) if max_pct > 0 else None
         )
+        params["exclude_mask"] = self._build_exclude_mask()
         self._sidebar.set_status("Segmenting…")
         worker = _FeaturesWorker("particles", arr, px_m, px_x_m, px_y_m, params)
         worker.signals.finished.connect(self._on_segment_finished)
@@ -310,6 +342,7 @@ class FeatureCountingController(QObject):
             params["max_area_nm2"] = (
                 _pct_to_nm2(max_pct, arr, px_x_m, px_y_m) if max_pct > 0 else None
             )
+            params["exclude_mask"] = self._build_exclude_mask()
         elif mode == "template":
             tmpl = self._panel.get_template()
             if tmpl is None:
