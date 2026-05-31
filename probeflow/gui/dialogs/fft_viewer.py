@@ -44,6 +44,57 @@ from probeflow.gui.viewer.display_sliders import DisplaySliderController
 from probeflow.gui.viewer.histogram import HistogramPanel
 
 
+def crop_to_bounds(
+    arr: np.ndarray,
+    bounds: tuple[int, int, int, int],
+    scan_range_m: tuple[float, float],
+) -> tuple[np.ndarray, tuple[float, float]]:
+    """Crop *arr* to inclusive pixel *bounds* and scale the scan range to match.
+
+    Parameters
+    ----------
+    arr
+        2-D image, shape ``(Ny, Nx)`` = (rows, cols).
+    bounds
+        ``(row_min, row_max, col_min, col_max)`` inclusive, as returned by
+        :meth:`probeflow.core.roi.ROI.bounds` / ``active_area_roi_bounds``.
+    scan_range_m
+        ``(width_x_m, height_y_m)`` physical extent of the full image.
+
+    Returns
+    -------
+    (cropped_arr, cropped_scan_range_m)
+        The cropped sub-array and its physical extent. The scan range is scaled
+        by the crop's pixel-count ratio so the **pixel size is preserved**
+        (``range / count`` is unchanged on each axis). This is what keeps the
+        reciprocal-space q-grid correct when the FFT is recomputed on the crop:
+        q-resolution scales with the smaller extent, Nyquist is unchanged.
+
+    The bounds are clipped to the array; an empty or degenerate crop falls back
+    to the full array and range so callers never produce a zero-size FFT.
+    """
+    a = np.asarray(arr)
+    if a.ndim != 2:
+        raise ValueError("crop_to_bounds requires a 2-D array")
+    ny, nx = a.shape
+    r0, r1, c0, c1 = (int(v) for v in bounds)
+    # Clip inclusive bounds to valid index range.
+    r0 = max(0, min(r0, ny - 1))
+    r1 = max(0, min(r1, ny - 1))
+    c0 = max(0, min(c0, nx - 1))
+    c1 = max(0, min(c1, nx - 1))
+    if r1 < r0 or c1 < c0:
+        return a, (float(scan_range_m[0]), float(scan_range_m[1]))
+
+    cropped = a[r0:r1 + 1, c0:c1 + 1]
+    crop_ny, crop_nx = cropped.shape
+    width_m, height_m = float(scan_range_m[0]), float(scan_range_m[1])
+    # Preserve pixel size: new_range = full_range * (crop_count / full_count).
+    new_width_m = width_m * (crop_nx / nx) if nx > 0 else width_m
+    new_height_m = height_m * (crop_ny / ny) if ny > 0 else height_m
+    return cropped, (new_width_m, new_height_m)
+
+
 class FFTViewerDialog(QDialog):
     """Side-by-side real-space / FFT inspection window."""
 

@@ -15,7 +15,7 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from probeflow.gui.dialogs.fft_viewer import FFTViewerDialog
+from probeflow.gui.dialogs.fft_viewer import FFTViewerDialog, crop_to_bounds
 
 _interval_with_min_span = FFTViewerDialog._interval_with_min_span
 _scroll_has_zoom_modifier = FFTViewerDialog._scroll_has_zoom_modifier
@@ -517,3 +517,63 @@ class TestScrollHasZoomModifier:
     def test_none_key_returns_false(self, qapp):
         # None is normalised to "" by `getattr(event, "key", "") or ""`.
         assert _scroll_has_zoom_modifier(_MockScrollEvent(key=None)) is False
+
+
+# ── crop_to_bounds ───────────────────────────────────────────────────────────
+class TestCropToBounds:
+    def test_crop_shape_is_inclusive(self):
+        import numpy as np
+        a = np.arange(100.0).reshape(10, 10)
+        cropped, _ = crop_to_bounds(a, (2, 6, 1, 4), (10e-9, 10e-9))
+        # rows 2..6 inclusive = 5, cols 1..4 inclusive = 4
+        assert cropped.shape == (5, 4)
+        np.testing.assert_array_equal(cropped, a[2:7, 1:5])
+
+    def test_scan_range_scales_preserving_pixel_size(self):
+        import numpy as np
+        a = np.zeros((10, 10))
+        # 10 nm over 10 px = 1 nm/px on both axes.
+        _, (w, h) = crop_to_bounds(a, (2, 6, 1, 4), (10e-9, 10e-9))
+        # crop is 4 cols wide, 5 rows tall → 4 nm × 5 nm, still 1 nm/px.
+        assert w == pytest.approx(4e-9)
+        assert h == pytest.approx(5e-9)
+        crop_nx, crop_ny = 4, 5
+        assert (w / crop_nx) == pytest.approx(10e-9 / 10)  # px size x preserved
+        assert (h / crop_ny) == pytest.approx(10e-9 / 10)  # px size y preserved
+
+    def test_non_square_image_uses_correct_axes(self):
+        import numpy as np
+        # 20 rows (Ny), 10 cols (Nx); range = (width_x=5nm, height_y=20nm).
+        a = np.zeros((20, 10))
+        _, (w, h) = crop_to_bounds(a, (0, 9, 0, 4), (5e-9, 20e-9))
+        # cols 0..4 = 5 of 10 → width 2.5 nm; rows 0..9 = 10 of 20 → height 10 nm
+        assert w == pytest.approx(2.5e-9)
+        assert h == pytest.approx(10e-9)
+
+    def test_full_bounds_returns_full_range(self):
+        import numpy as np
+        a = np.zeros((8, 12))
+        cropped, (w, h) = crop_to_bounds(a, (0, 7, 0, 11), (12e-9, 8e-9))
+        assert cropped.shape == (8, 12)
+        assert w == pytest.approx(12e-9)
+        assert h == pytest.approx(8e-9)
+
+    def test_bounds_clipped_to_array(self):
+        import numpy as np
+        a = np.zeros((10, 10))
+        # Over-range bounds get clipped to the array extent.
+        cropped, _ = crop_to_bounds(a, (-5, 99, -5, 99), (10e-9, 10e-9))
+        assert cropped.shape == (10, 10)
+
+    def test_degenerate_bounds_fall_back_to_full(self):
+        import numpy as np
+        a = np.arange(100.0).reshape(10, 10)
+        # r1 < r0 after the swap is impossible here, but c1<c0 triggers fallback.
+        cropped, (w, h) = crop_to_bounds(a, (5, 5, 8, 2), (10e-9, 10e-9))
+        np.testing.assert_array_equal(cropped, a)
+        assert (w, h) == (10e-9, 10e-9)
+
+    def test_rejects_non_2d(self):
+        import numpy as np
+        with pytest.raises(ValueError):
+            crop_to_bounds(np.zeros((4, 4, 3)), (0, 1, 0, 1), (1e-9, 1e-9))
