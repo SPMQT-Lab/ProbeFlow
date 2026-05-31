@@ -464,11 +464,6 @@ def _crop_particle(arr: np.ndarray, particle: "Particle",
     Reflect-pads near the edges so downstream encoders see a fixed shape.
     """
     Ny, Nx = arr.shape
-    cx = int(round(particle.centroid_x_m
-                   / (particle.bbox_m[2] - particle.bbox_m[0])
-                   * (particle.bbox_px[2] - particle.bbox_px[0]))) \
-        if (particle.bbox_m[2] - particle.bbox_m[0]) > 0 else particle.bbox_px[0]
-    # Simpler: recover centroid pixel from bbox midpoint.
     cx = (particle.bbox_px[0] + particle.bbox_px[2]) // 2
     cy = (particle.bbox_px[1] + particle.bbox_px[3]) // 2
 
@@ -489,7 +484,19 @@ def _crop_particle(arr: np.ndarray, particle: "Particle",
 
 
 def _embed_raw(crops: np.ndarray) -> np.ndarray:
-    """Flattened, per-crop z-score-normalised embedding (N, D)."""
+    """Flattened, per-crop z-score-normalised embedding (N, D).
+
+    FUTURE OPPORTUNITY (biggest classify win): the crop is a fixed square that,
+    for a small particle on a flat terrace, is mostly background.  Flattening
+    the whole crop lets that shared background dominate the vector, so cosine
+    similarities between *any* two particles crush toward ~1.0 and barely
+    spread — which is why outlier rejection is unreliable and the auto-threshold
+    in ``_threshold_similarities`` has to fall back to argmax-only (see the note
+    there).  A particle-region-weighted / masked embedding — e.g. weight pixels
+    by the segmentation mask, or crop tightly to the bounding box and resample
+    to a common size — would let the actual shape drive the similarity and make
+    genuine 'other' detection work.  See memory ``project_unimr_review``.
+    """
     flat = crops.reshape(crops.shape[0], -1).astype(np.float64)
     # Per-crop normalisation to be brightness-invariant.
     mu = flat.mean(axis=1, keepdims=True)
@@ -532,17 +539,51 @@ def _rotate_crop(crop: np.ndarray, angle_deg: float) -> np.ndarray:
         return crop
 
 
+# Minimum best-similarity spread (cosine units) that can plausibly hold two
+# distinct populations — a cluster of genuine matches and a cluster of
+# non-matches ('other').  Below this the scene has no real outliers and any
+# data-driven cutoff would land inside a single tight cluster, wrongly
+# rejecting real matches.  Genuine 'other' molecules sit far below same-class
+# matches, so a true bimodal distribution spreads well past this floor.
+_MIN_SIMILARITY_SPREAD = 0.10
+
+
 def _threshold_similarities(sims: np.ndarray, method: str) -> float:
-    """Return the similarity cutoff above which a particle is 'a match'."""
+    """Return the similarity cutoff above which a particle is 'a match'.
+
+    The data-driven methods (``gmm`` / ``otsu`` / ``distribution``) all assume
+    the best-match similarities are *bimodal*.  When the scene contains only
+    particles the user cares about (no genuine outliers), the similarities form
+    a single tight cluster and any cutoff placed inside it rejects most real
+    matches as ``"other"``.  Guard against that: when the spread is too small to
+    hold two populations — or when the GMM's two components are not genuinely
+    separated — return a *permissive* cutoff (the minimum similarity) so every
+    particle is classified by its nearest labelled sample (argmax only).
+
+    Note: the raw pixel embedding is dominated by flat background, so even
+    genuine outliers can sit inside this tight band; reliable outlier rejection
+    needs a particle-region-weighted embedding (a separate, deeper change).
+    """
     if sims.size == 0:
         return 0.0
+
+    permissive = float(sims.min())   # cutoff ≤ every sim ⇒ classify all by argmax
+    if float(np.ptp(sims)) < _MIN_SIMILARITY_SPREAD:
+        return permissive
+
     if method == "gmm":
         _sklearn()
         from sklearn.mixture import GaussianMixture
-        if sims.size < 4 or np.ptp(sims) < 1e-9:
-            return float(sims.mean())
+        if sims.size < 4:
+            return permissive
         gmm = GaussianMixture(n_components=2, random_state=0).fit(sims.reshape(-1, 1))
-        mus = np.sort(gmm.means_.ravel())
+        order = np.argsort(gmm.means_.ravel())
+        mus = gmm.means_.ravel()[order]
+        sds = np.sqrt(gmm.covariances_.ravel()[order])
+        # Trust the split only if the components are genuinely separated:
+        # their means differ by more than the sum of their standard deviations.
+        if (mus[1] - mus[0]) < (sds[0] + sds[1]):
+            return permissive
         return float((mus[0] + mus[1]) / 2.0)
     if method == "otsu":
         # Otsu on a 256-bin histogram of the similarities.

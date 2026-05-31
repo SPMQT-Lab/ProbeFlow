@@ -20,6 +20,8 @@ Future Codex/Claude/readthrough note:
 
 from __future__ import annotations
 
+import textwrap
+
 import numpy as np
 import os as _os
 _os.environ.setdefault("QT_API", "pyside6")
@@ -59,8 +61,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from probeflow.processing.display import clip_range_from_array as _clip_range_from_array
-
 
 # ── Auto-color palette for classify results ───────────────────────────────────
 # Catppuccin Mocha-inspired: perceptually distinct, SPM-dark-background-friendly.
@@ -98,15 +98,8 @@ def _auto_class_colors(class_names: list) -> dict:
 
 def _arr_to_pixmap(arr: np.ndarray) -> QPixmap:
     """Convert a 2-D float array to a grayscale QPixmap (no PIL dependency)."""
-    try:
-        vmin, vmax = _clip_range_from_array(arr, 1.0, 99.0)
-    except ValueError:
-        vmin, vmax = float(arr.min()), float(arr.max())
-    rng = vmax - vmin
-    if rng == 0:
-        u8 = np.zeros(arr.shape, dtype=np.uint8)
-    else:
-        u8 = np.clip((arr - vmin) / rng * 255.0, 0, 255).astype(np.uint8)
+    from probeflow.processing.display import array_to_uint8
+    u8 = array_to_uint8(arr, clip_percentiles=(1.0, 99.0))
     u8 = np.ascontiguousarray(u8)
     h, w = u8.shape
     data = u8.tobytes()
@@ -123,6 +116,28 @@ def _sep() -> QFrame:
     line.setFrameShadow(QFrame.Sunken)
     line.setFixedHeight(1)
     return line
+
+
+def _tip(text: str, width: int = 50) -> str:
+    """Word-wrap tooltip text into short lines that stay near the cursor.
+
+    Qt renders a plain-text tooltip that contains no newlines as a single very
+    long line, which can stretch right across the screen and away from the
+    pointer.  Wrapping every tooltip to a fixed column keeps the explanation
+    compact and anchored under the cursor no matter how long it is.
+
+    Any explicit newlines the caller writes are preserved as line breaks, so
+    deliberately separated sentences / paragraphs stay separated; each such
+    segment is independently wrapped to ``width`` columns.  Blank lines are
+    kept as paragraph gaps.
+    """
+    out_lines: list[str] = []
+    for segment in text.split("\n"):
+        if segment.strip() == "":
+            out_lines.append("")
+        else:
+            out_lines.append(textwrap.fill(segment.strip(), width=width))
+    return "\n".join(out_lines)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -470,6 +485,10 @@ class FeaturesPanel(QWidget):
         self._label_history: list = []     # undo stack for sample labels
         self._show_overlay: bool = True    # toggle: show/hide classify overlay
         self._class_colors: dict = {}      # class_name → hex color string
+        # FUTURE OPPORTUNITY: this is a raw bool ndarray.  Representing it as a
+        # ProbeFlow ROI (a freehand/multipolygon with .to_mask()) would let the
+        # exclusion region be saved, restored, and shared with the rest of the
+        # ROI tooling instead of being a one-off per-session array.
         self._exclusion_mask: np.ndarray | None = None   # bool mask, same shape as _arr
         self._mask_brush_radius: int = 10
         self._mask_color: tuple[int, int, int] = (220, 50, 50)   # R, G, B
@@ -542,11 +561,6 @@ class FeaturesPanel(QWidget):
         self._results_table.setFont(QFont("Helvetica", 9))
         lay.addWidget(self._results_table)
 
-        powered = QLabel("Powered by UniMR")
-        powered.setFont(QFont("Helvetica", 8))
-        powered.setAlignment(Qt.AlignCenter)
-        powered.setStyleSheet("color: #888;")
-        lay.addWidget(powered)
 
     def load_entry(self, entry, plane_idx: int, arr: np.ndarray,
                     pixel_size_m: float, pixel_size_x_m: float | None = None,
@@ -1161,6 +1175,10 @@ class FeaturesSidebar(QWidget):
         load_btn.setFixedHeight(30)
         load_btn.setCursor(QCursor(Qt.PointingHandCursor))
         load_btn.setObjectName("accentBtn")
+        load_btn.setToolTip(_tip(
+            "Pull the scan currently selected in the Browse tab into this "
+            "workspace, with any Viewer processing already applied. Select a "
+            "different thumbnail in Browse, then click here to swap it in."))
         load_btn.clicked.connect(self.load_from_browse_requested.emit)
         lay.addWidget(load_btn)
 
@@ -1169,6 +1187,10 @@ class FeaturesSidebar(QWidget):
         self._plane_cb = QComboBox()
         self._plane_cb.addItems(PLANE_NAMES)
         self._plane_cb.setCurrentIndex(0)
+        self._plane_cb.setToolTip(_tip(
+            "Which acquired data channel to analyse: Z = topography (height), "
+            "I = tunnelling current; fwd / bwd are the forward and backward "
+            "scan directions. Most particle work uses Z fwd."))
         plane_row.addWidget(self._plane_cb, 1)
         lay.addLayout(plane_row)
         lay.addWidget(_sep())
@@ -1191,9 +1213,11 @@ class FeaturesSidebar(QWidget):
         self._thr_slider = QSlider(Qt.Horizontal)
         self._thr_slider.setRange(0, 255)
         self._thr_slider.setValue(128)
-        self._thr_slider.setToolTip(
-            "Normalised image intensity threshold (0–255).\n"
-            "Pixels above this value are segmented as particle foreground.")
+        self._thr_slider.setToolTip(_tip(
+            "Normalised image intensity threshold (0–255). Pixels brighter "
+            "than this become particle foreground; everything darker is "
+            "background. Lower it to capture faint features, raise it to keep "
+            "only the strongest. With 'Invert' on, the comparison flips."))
         self._thr_slider.valueChanged.connect(self._on_thr_slider_changed)
         self._thr_slider.valueChanged.connect(
             lambda _: self.classify_params_changed.emit())
@@ -1212,9 +1236,11 @@ class FeaturesSidebar(QWidget):
         self._min_area_slider = QSlider(Qt.Horizontal)
         self._min_area_slider.setRange(0, 100)   # each unit = 0.001%  →  0–0.100%
         self._min_area_slider.setValue(1)
-        self._min_area_slider.setToolTip(
-            "Minimum particle area as % of total image area (0–0.100%).\n"
-            "Particles smaller than this are discarded.")
+        self._min_area_slider.setToolTip(_tip(
+            "Minimum particle area, as a percentage of the whole image "
+            "(0–0.100%). Anything smaller is treated as noise and discarded. "
+            "Raise this to clear away salt-and-pepper speckle; lower it to "
+            "keep small particles."))
         self._min_area_slider.valueChanged.connect(self._on_min_area_slider_changed)
         self._min_area_slider.valueChanged.connect(
             lambda _: self.classify_params_changed.emit())
@@ -1233,9 +1259,11 @@ class FeaturesSidebar(QWidget):
         self._max_area_slider = QSlider(Qt.Horizontal)
         self._max_area_slider.setRange(0, 1000)  # each unit = 0.001%  →  0–1.000%
         self._max_area_slider.setValue(0)
-        self._max_area_slider.setToolTip(
-            "Maximum particle area as % of total image area (0–1.000%).\n"
-            "0 = no upper limit.")
+        self._max_area_slider.setToolTip(_tip(
+            "Maximum particle area, as a percentage of the whole image "
+            "(0–1.000%). Anything larger is discarded — useful for rejecting "
+            "merged blobs or whole-terrace artefacts. Set to 0 for no upper "
+            "limit."))
         self._max_area_slider.valueChanged.connect(self._on_max_area_slider_changed)
         self._max_area_slider.valueChanged.connect(
             lambda _: self.classify_params_changed.emit())
@@ -1243,8 +1271,10 @@ class FeaturesSidebar(QWidget):
 
         self._invert_cb = QCheckBox("Invert (segment dark features)")
         self._invert_cb.setFont(QFont("Helvetica", 9))
-        self._invert_cb.setToolTip(
-            "When checked, dark depressions are segmented instead of bright protrusions.")
+        self._invert_cb.setToolTip(_tip(
+            "Segment dark features instead of bright ones. Turn this on to "
+            "find pits, vacancies or depressions; leave it off for adatoms, "
+            "molecules and islands that sit above the surface."))
         self._invert_cb.stateChanged.connect(
             lambda _: self.classify_params_changed.emit())
         lay.addWidget(self._invert_cb)
@@ -1267,7 +1297,10 @@ class FeaturesSidebar(QWidget):
         self._brush_spin = QSpinBox()
         self._brush_spin.setRange(1, 300)
         self._brush_spin.setValue(10)
-        self._brush_spin.setToolTip("Brush radius in image pixels.")
+        self._brush_spin.setToolTip(_tip(
+            "Radius of the exclusion-mask brush, in image pixels. Larger "
+            "values paint over wide regions quickly; smaller values let you "
+            "trace tightly around a step edge."))
         brush_row.addWidget(self._brush_spin, 1)
         lay.addLayout(brush_row)
 
@@ -1277,8 +1310,10 @@ class FeaturesSidebar(QWidget):
         for name in self.MASK_COLORS:
             self._mask_color_cb.addItem(name)
         self._mask_color_cb.setCurrentText("Red")
-        self._mask_color_cb.setToolTip(
-            "Highlight colour for the exclusion mask overlay.")
+        self._mask_color_cb.setToolTip(_tip(
+            "Colour used to draw the exclusion-mask overlay on the image. "
+            "Pick whatever contrasts best with the current scan so the masked "
+            "regions stand out."))
         self._mask_color_cb.currentTextChanged.connect(self._on_mask_color_changed)
         color_row.addWidget(self._mask_color_cb, 1)
         lay.addLayout(color_row)
@@ -1288,6 +1323,11 @@ class FeaturesSidebar(QWidget):
         self._mask_btn.setFont(QFont("Helvetica", 9))
         self._mask_btn.setFixedHeight(28)
         self._mask_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self._mask_btn.setToolTip(_tip(
+            "Toggle brush mode, then click or drag on the image to paint "
+            "regions to ignore during segmentation — e.g. step edges, "
+            "scan glitches, or a busy area you don't want to count. Toggle "
+            "off again to resume panning and clicking particles."))
         self._mask_btn.toggled.connect(self._on_mask_btn_toggled)
         lay.addWidget(self._mask_btn)
 
@@ -1295,6 +1335,9 @@ class FeaturesSidebar(QWidget):
         self._clear_mask_btn.setFont(QFont("Helvetica", 9))
         self._clear_mask_btn.setFixedHeight(26)
         self._clear_mask_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self._clear_mask_btn.setToolTip(_tip(
+            "Erase the entire exclusion mask so the whole image is eligible "
+            "for segmentation again."))
         self._clear_mask_btn.clicked.connect(self.mask_clear_requested.emit)
         lay.addWidget(self._clear_mask_btn)
 
@@ -1322,9 +1365,10 @@ class FeaturesSidebar(QWidget):
         self._segment_btn.setFixedHeight(34)
         self._segment_btn.setObjectName("accentBtn")
         self._segment_btn.setCursor(QCursor(Qt.PointingHandCursor))
-        self._segment_btn.setToolTip(
-            "Run segmentation with the current settings and show the contour\n"
-            "overlay — stays in Phase 1 so you can keep adjusting.")
+        self._segment_btn.setToolTip(_tip(
+            "Run segmentation at full resolution with the current settings and "
+            "draw the particle contours on the image. Stays in Phase 1 so you "
+            "can keep tuning the threshold and area filters before moving on."))
         self._segment_btn.clicked.connect(self.segment_requested.emit)
         lay.addWidget(self._segment_btn)
 
@@ -1332,8 +1376,9 @@ class FeaturesSidebar(QWidget):
         self._clear_seg_btn.setFont(QFont("Helvetica", 9))
         self._clear_seg_btn.setFixedHeight(28)
         self._clear_seg_btn.setCursor(QCursor(Qt.PointingHandCursor))
-        self._clear_seg_btn.setToolTip(
-            "Clear the segmentation overlay and return to the raw image.")
+        self._clear_seg_btn.setToolTip(_tip(
+            "Remove the segmentation contour overlay and show the raw image "
+            "again. Your threshold and area settings are kept."))
         self._clear_seg_btn.clicked.connect(self.clear_segmentation_requested.emit)
         lay.addWidget(self._clear_seg_btn)
 
@@ -1341,9 +1386,10 @@ class FeaturesSidebar(QWidget):
         self._advance_btn.setFont(QFont("Helvetica", 10))
         self._advance_btn.setFixedHeight(30)
         self._advance_btn.setCursor(QCursor(Qt.PointingHandCursor))
-        self._advance_btn.setToolTip(
-            "Advance to the Analysis phase using the particles found by\n"
-            "'Apply Segmentation'.  Run 'Apply Segmentation' at least once first.")
+        self._advance_btn.setToolTip(_tip(
+            "Move on to the Analysis phase, carrying over the particles found "
+            "by 'Apply Segmentation'. Run 'Apply Segmentation' at least once "
+            "first, otherwise there is nothing to analyse."))
         self._advance_btn.clicked.connect(self.advance_phase2_requested.emit)
         lay.addWidget(self._advance_btn)
 
@@ -1364,7 +1410,9 @@ class FeaturesSidebar(QWidget):
         back_btn.setFont(QFont("Helvetica", 9))
         back_btn.setFixedHeight(26)
         back_btn.setCursor(QCursor(Qt.PointingHandCursor))
-        back_btn.setToolTip("Return to Phase 1 segmentation settings.")
+        back_btn.setToolTip(_tip(
+            "Go back to Phase 1 to change the threshold, area filters or "
+            "exclusion mask. Your current particles and labels are kept."))
         back_btn.clicked.connect(self._on_back_to_phase1)
         back_row.addWidget(back_btn)
         back_row.addStretch(1)
@@ -1383,6 +1431,19 @@ class FeaturesSidebar(QWidget):
         self._mode_group = QButtonGroup(self)
         self._mode_group.setExclusive(True)
         self._mode_btns: dict = {}
+        _mode_tips = {
+            "particles": "Count and characterise every segmented particle — "
+                         "area, position, height, orientation and sharpness.",
+            "template":  "Crop one example motif and find every place it "
+                         "repeats by normalised cross-correlation. Good for "
+                         "counting identical atoms or molecules.",
+            "lattice":   "Extract the primitive lattice vectors (a, b and the "
+                         "angle γ) from an atomically-resolved image using "
+                         "SIFT keypoint clustering.",
+            "classify":  "Sort particles into classes you define: label a few "
+                         "examples by clicking them, then match the rest by "
+                         "image similarity.",
+        }
         for key, label in [("particles", "Particles"),
                             ("template",  "Template"),
                             ("lattice",   "Lattice"),
@@ -1392,6 +1453,7 @@ class FeaturesSidebar(QWidget):
             b.setFont(QFont("Helvetica", 9))
             b.setFixedHeight(26)
             b.setCursor(QCursor(Qt.PointingHandCursor))
+            b.setToolTip(_tip(_mode_tips[key]))
             b.clicked.connect(lambda _=False, k=key: self._select_mode(k))
             self._mode_group.addButton(b)
             mode_row.addWidget(b)
@@ -1412,6 +1474,10 @@ class FeaturesSidebar(QWidget):
         self._run_btn.setFixedHeight(32)
         self._run_btn.setObjectName("accentBtn")
         self._run_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self._run_btn.setToolTip(_tip(
+            "Run the analysis for the mode selected above (Particles, "
+            "Template, Lattice or Classify). Runs in the background, so the "
+            "interface stays responsive while it works."))
         self._run_btn.clicked.connect(
             lambda: self.run_requested.emit(self._current_mode()))
         lay.addWidget(self._run_btn)
@@ -1420,8 +1486,10 @@ class FeaturesSidebar(QWidget):
         self._clear_cls_btn.setFont(QFont("Helvetica", 9))
         self._clear_cls_btn.setFixedHeight(28)
         self._clear_cls_btn.setCursor(QCursor(Qt.PointingHandCursor))
-        self._clear_cls_btn.setToolTip(
-            "Clear classification results and return to the particle contour view.")
+        self._clear_cls_btn.setToolTip(_tip(
+            "Discard the classification result and colours, returning to the "
+            "plain particle contours. Your sample labels are kept so you can "
+            "re-run without re-labelling."))
         self._clear_cls_btn.clicked.connect(self.clear_classification_requested.emit)
         lay.addWidget(self._clear_cls_btn)
 
@@ -1429,6 +1497,10 @@ class FeaturesSidebar(QWidget):
         self._export_btn.setFont(QFont("Helvetica", 9))
         self._export_btn.setFixedHeight(28)
         self._export_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self._export_btn.setToolTip(_tip(
+            "Save the current mode's results to a JSON file — all values in SI "
+            "units, with the source scan recorded for provenance. Run an "
+            "analysis first so there is something to export."))
         self._export_btn.clicked.connect(
             lambda: self.export_requested.emit(self._current_mode()))
         lay.addWidget(self._export_btn)
@@ -1464,6 +1536,10 @@ class FeaturesSidebar(QWidget):
         crop_btn.setFont(QFont("Helvetica", 9))
         crop_btn.setFixedHeight(28)
         crop_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        crop_btn.setToolTip(_tip(
+            "Draw a tight rectangle over one example of the motif you want to "
+            "count. That crop becomes the template matched across the whole "
+            "image when you press Run."))
         crop_btn.clicked.connect(self.crop_template_requested.emit)
         l.addWidget(crop_btn)
 
@@ -1474,6 +1550,11 @@ class FeaturesSidebar(QWidget):
         self._corr_spin.setDecimals(2)
         self._corr_spin.setSingleStep(0.05)
         self._corr_spin.setValue(0.5)
+        self._corr_spin.setToolTip(_tip(
+            "How closely a spot must match the template to count as a hit "
+            "(0–1). Higher is stricter and finds fewer, cleaner matches; "
+            "lower finds more but risks false positives. 0.4–0.6 is a good "
+            "starting range."))
         row.addWidget(self._corr_spin)
         l.addLayout(row)
 
@@ -1483,6 +1564,10 @@ class FeaturesSidebar(QWidget):
         self._dist_spin.setRange(0.0, 1e4)
         self._dist_spin.setDecimals(3)
         self._dist_spin.setValue(0.0)   # 0 → auto
+        self._dist_spin.setToolTip(_tip(
+            "Smallest allowed spacing between two matches, in nanometres. "
+            "Stops a single feature being counted several times. Set to 0 to "
+            "let it choose automatically from the template size."))
         row2.addWidget(self._dist_spin)
         l.addLayout(row2)
 
@@ -1533,16 +1618,37 @@ class FeaturesSidebar(QWidget):
         self._cls_manual_spin.setSingleStep(0.05)
         self._cls_manual_spin.setValue(0.5)
         self._cls_manual_spin.setEnabled(False)   # only active in "Manual" mode
+        self._cls_manual_spin.setToolTip(_tip(
+            "Similarity cutoff used only in Manual mode (0–1). A particle is "
+            "given its nearest sample's class when its best similarity is at "
+            "or above this value, otherwise it is labelled 'other'. Lower it "
+            "to label more particles, raise it to be stricter."))
         man_row.addWidget(self._cls_manual_spin)
         thr_box_lay.addLayout(man_row)
 
         self._cls_thr_group = QButtonGroup(thr_box)
         self._cls_thr_group.setExclusive(True)
         self._cls_thr_btns: dict = {}
+        _thr_tips = {
+            "manual": "Use the fixed cutoff set above. Best when you know the "
+                      "similarity scale and want full, repeatable control.",
+            "otsu":   "Pick the cutoff automatically by splitting the "
+                      "similarity histogram (Otsu's method). Needs a genuine "
+                      "spread between matches and outliers.",
+            "gmm":    "Pick the cutoff automatically by fitting two Gaussians "
+                      "to the similarities and cutting between them. If the "
+                      "two groups are not clearly separated — e.g. every "
+                      "particle is the same kind of thing — it falls back to "
+                      "labelling them all by nearest sample rather than "
+                      "wrongly dumping most into 'other'.",
+            "distribution": "Set the cutoff one standard deviation above the "
+                            "mean similarity. A simple, permissive choice.",
+        }
         for key, label in [("manual", "Manual"), ("otsu", "Otsu"),
                             ("gmm", "GMM"), ("distribution", "Distribution")]:
             rb = QRadioButton(label)
             rb.setFont(QFont("Helvetica", 9))
+            rb.setToolTip(_tip(_thr_tips[key]))
             rb.toggled.connect(
                 lambda checked, k=key:
                     self._on_cls_thr_mode_changed(k) if checked else None)
@@ -1561,11 +1667,23 @@ class FeaturesSidebar(QWidget):
         self._enc_group = QButtonGroup(enc_box)
         self._enc_group.setExclusive(True)
         self._enc_btns: dict = {}
+        _enc_tips = {
+            "raw":        "Compare particles by their raw pixel patterns "
+                          "(brightness-normalised). Simplest and usually a "
+                          "good default for small particles.",
+            "pca_kmeans": "Reduce each particle crop to its main components "
+                          "with PCA before comparing. Can be more robust to "
+                          "noise when you have many particles.",
+            "auto":       "Let ProbeFlow choose the encoding. Currently falls "
+                          "back to Raw Features (the learned encoder is not "
+                          "bundled).",
+        }
         for key, label in [("raw",       "Raw Features"),
                             ("pca_kmeans", "PCA + KMeans"),
                             ("auto",      "Auto Select")]:
             rb = QRadioButton(label)
             rb.setFont(QFont("Helvetica", 9))
+            rb.setToolTip(_tip(_enc_tips[key]))
             self._enc_group.addButton(rb)
             enc_box_lay.addWidget(rb)
             self._enc_btns[key] = rb
@@ -1575,10 +1693,10 @@ class FeaturesSidebar(QWidget):
         # ── Augmentation & options ─────────────────────────────────────────────
         self._rotate_aug_cb = QCheckBox("Rotation Augmentation")
         self._rotate_aug_cb.setFont(QFont("Helvetica", 9))
-        self._rotate_aug_cb.setToolTip(
-            "Generate 36 rotated versions (0–350°, step 10°) of each labelled\n"
-            "sample before matching.  Improves classification of molecules at\n"
-            "arbitrary orientations.  Slightly slower to run.")
+        self._rotate_aug_cb.setToolTip(_tip(
+            "Generate 36 rotated copies (0–350°, every 10°) of each labelled "
+            "sample before matching, so a molecule is recognised whatever its "
+            "orientation. Slightly slower to run."))
         l.addWidget(self._rotate_aug_cb)
 
         rot_hint = QLabel("36 rotations × 10° — orientation-invariant matching.")
@@ -1589,9 +1707,10 @@ class FeaturesSidebar(QWidget):
 
         self._sharpness_cb = QCheckBox("Sharpness-sensitive")
         self._sharpness_cb.setFont(QFont("Helvetica", 9))
-        self._sharpness_cb.setToolTip(
-            "Adds Laplacian-variance (sharpness) as an extra feature.\n"
-            "Use when one class is fuzzy and the other is sharp.")
+        self._sharpness_cb.setToolTip(_tip(
+            "Add edge sharpness (variance of the Laplacian) as an extra "
+            "matching feature. Use it when two classes have the same shape "
+            "but one is crisp and the other blurred."))
         l.addWidget(self._sharpness_cb)
 
         l.addWidget(_sep())
@@ -1600,6 +1719,10 @@ class FeaturesSidebar(QWidget):
         undo_btn.setFont(QFont("Helvetica", 9))
         undo_btn.setFixedHeight(26)
         undo_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        undo_btn.setToolTip(_tip(
+            "Remove the most recently assigned sample label. Use it to step "
+            "back through labels one at a time if you click the wrong "
+            "particle."))
         undo_btn.clicked.connect(self.undo_label_requested.emit)
         l.addWidget(undo_btn)
 

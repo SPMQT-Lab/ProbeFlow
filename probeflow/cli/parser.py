@@ -233,8 +233,9 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Detect grains / islands by threshold and print statistics")
     grains.add_argument("input", type=Path)
     grains.add_argument("--plane", type=int, default=0)
-    grains.add_argument("--threshold", type=float, default=50.0,
-        help="Percentile of data used as threshold")
+    grains.add_argument("--threshold", type=float, default=90.0,
+        help="Percentile of data used as threshold (default 90: islands on a "
+             "flat terrace; lower it for dense/rough scans)")
     grains.add_argument("--below", action="store_true",
         help="Detect depressions (below threshold) instead of islands")
     grains.add_argument("--min-px", type=int, default=5)

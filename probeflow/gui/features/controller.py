@@ -397,6 +397,12 @@ class FeatureCountingController(QObject):
     # ── Export ────────────────────────────────────────────────────────────────
 
     def _on_export(self, mode: str) -> None:
+        # FUTURE OPPORTUNITY: ``write_json`` accepts a ``scan=`` argument that
+        # records scan_range_m, pixel sizes, plane names/units and processing
+        # state into the JSON ``meta`` block for full provenance.  We only have
+        # the raw Browse entry here (not a Scan), so we pass just the source
+        # path.  Threading the loaded Scan into FeaturesPanel would let exports
+        # carry complete physical metadata.  See memory ``project_unimr_review``.
         from pathlib import Path
 
         from PySide6.QtWidgets import QFileDialog

@@ -128,7 +128,7 @@ def gmm_autoclip(arr: np.ndarray, n_samples: int = 2000) -> tuple[float, float]:
 
 def detect_grains(
     arr:                np.ndarray,
-    threshold_pct:      float = 50.0,
+    threshold_pct:      float = 90.0,
     above:              bool  = True,
     min_grain_px:       int   = 5,
 ) -> tuple[np.ndarray, int, dict]:
@@ -138,7 +138,10 @@ def detect_grains(
     Parameters
     ----------
     arr             : 2-D float array (height data)
-    threshold_pct   : percentile of data used as threshold (0–100)
+    threshold_pct   : percentile of data used as threshold (0–100).  Default 90
+                      suits the common 'islands on a flat terrace' case where
+                      grains occupy a small fraction of the scan; a median
+                      (50) threshold would flood a sparse scan with background.
     above           : True = grains are above threshold (islands on flat terrace)
                       False = grains are below (holes/depressions)
     min_grain_px    : grains smaller than this many pixels are discarded
@@ -155,6 +158,11 @@ def detect_grains(
         empty = np.zeros(a.shape, dtype=np.int32)
         return empty, 0, {}
 
+    # FUTURE OPPORTUNITY: this is a fixed-percentile cut, so the right value
+    # depends on how much of the scan the grains cover (the default was bumped
+    # 50→90 for the common sparse-island case).  A data-driven cut — Otsu, or
+    # the 2-component GMM already in ``gmm_autoclip`` — would pick the
+    # foreground/background split automatically and remove the guesswork.
     thresh = float(np.percentile(finite, threshold_pct))
 
     if above:
@@ -210,6 +218,12 @@ def measure_periodicity(
 
     Returns a list (length ≤ n_peaks) of dicts:
         {'period_m': float, 'angle_deg': float, 'strength': float}
+
+    Note: the list is padded up to ``n_peaks`` even when fewer real peaks exist;
+    the filler entries carry ``strength`` ≈ 0, so consumers should rank/filter
+    by ``strength``.  FUTURE OPPORTUNITY: stop early once ``strength`` falls
+    below a noise-floor fraction of the first peak so callers get only genuine
+    periodicities.
     """
     arr = arr.astype(np.float64, copy=True)
     if arr.ndim != 2 or arr.size == 0:
