@@ -127,6 +127,8 @@ def segment_particles(
     size_sigma_clip: Optional[float] = 2.0,
     clip_low: float = 1.0,
     clip_high: float = 99.0,
+    exclude_mask: Optional[np.ndarray] = None,
+    max_exclude_overlap: float = 0.25,
 ) -> List[Particle]:
     """Segment bright features on a scan plane into a list of Particles.
 
@@ -157,6 +159,17 @@ def segment_particles(
         pepper tiny blobs and full-image artefacts that Otsu can let through.
     clip_low, clip_high
         Percentile range for the float→uint8 rescale.
+    exclude_mask
+        Optional boolean array, same shape as ``arr``. A segmented particle is
+        rejected wholesale when more than ``max_exclude_overlap`` of its pixels
+        fall inside the mask. Use it to drop molecules sitting on a step edge
+        (see :func:`probeflow.analysis.step_edges.step_edge_mask`) or in any
+        other algorithmically-defined exclusion zone — cleaner than zeroing
+        pixels, which can split a molecule across the boundary.
+    max_exclude_overlap
+        Overlap fraction (0–1) above which a particle is rejected when
+        ``exclude_mask`` is supplied. Default 0.25: a particle whose edge merely
+        grazes the zone is kept; one sitting squarely on it is dropped.
 
     Returns
     -------
@@ -166,6 +179,11 @@ def segment_particles(
     if arr.ndim != 2:
         raise ValueError("segment_particles expects a 2-D array")
     dx_m, dy_m, _ = _pixel_scales(pixel_size_m, pixel_size_x_m, pixel_size_y_m)
+
+    if exclude_mask is not None:
+        exclude_mask = np.asarray(exclude_mask, dtype=bool)
+        if exclude_mask.shape != arr.shape:
+            raise ValueError("exclude_mask must have the same shape as arr")
 
     # Constant or empty planes carry no features. OpenCV's Otsu threshold on
     # a flat image is undefined (newer versions return a full-image foreground
@@ -210,6 +228,14 @@ def segment_particles(
         n_pix = int(p_mask.sum())
         if n_pix == 0:
             continue
+
+        # Whole-particle exclusion: drop a particle that sits substantially in
+        # the exclusion zone (e.g. on a step edge). Done here, before the heavier
+        # PCA/Laplacian work, so it short-circuits cheaply.
+        if exclude_mask is not None:
+            overlap = int((p_mask.astype(bool) & exclude_mask).sum()) / n_pix
+            if overlap > max_exclude_overlap:
+                continue
 
         area_m2 = n_pix * px_area
         area_nm2 = area_m2 * 1e18
