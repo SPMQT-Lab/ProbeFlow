@@ -45,6 +45,10 @@ _MINIMAL_PARAMS: dict[str, dict] = {
     "fourier_filter": {"mode": "low_pass", "cutoff": 0.1},
     "fft_soft_border": {"mode": "low_pass", "cutoff": 0.1, "border_frac": 0.12},
     "periodic_notch_filter": {"peaks": [(2, 0)], "radius_px": 1.0},
+    "mains_pickup_suppression": {
+        "scan_speed_m_per_s": 1e-8, "scan_range_m": (1e-8, 1e-8),
+        "mains_frequency_hz": 50.0, "harmonics": 1, "notch_radius_px": 1.0,
+    },
     "linear_undistort": {"shear_x": 0.0, "scale_y": 1.0},
     "affine_lattice_correction": {
         "matrix": [[1.0, 0.0], [0.0, 1.0]], "expand_canvas": False,
