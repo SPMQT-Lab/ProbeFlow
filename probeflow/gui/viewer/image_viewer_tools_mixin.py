@@ -510,9 +510,18 @@ class ImageViewerToolsMixin:
             getattr(roi_ctx.roi, "name", None) if roi_bounds is not None else None
         )
 
+        fft_scan_range = self._display_scan_range_m or self._scan_range_m or (1e-9, 1e-9)
+        # Estimate the fast-scan speed from the header so the Mains tab can
+        # predict where 50/60 Hz pickup lands (None → the user enters it).
+        from probeflow.processing.mains_pickup import estimate_fast_scan_speed_m_per_s
+        scan_speed = estimate_fast_scan_speed_m_per_s(
+            getattr(self, "_scan_header", None) or {},
+            scan_range_m=fft_scan_range, image_shape=arr.shape[:2],
+        )
+
         dlg = FFTViewerDialog(
             arr,
-            self._display_scan_range_m or self._scan_range_m or (1e-9, 1e-9),
+            fft_scan_range,
             colormap=self._colormap,
             theme=self._t,
             channel_unit=self._channel_unit(),
@@ -523,6 +532,7 @@ class ImageViewerToolsMixin:
             roi_bounds_px=roi_bounds,
             roi_id=roi_id,
             roi_name=roi_name,
+            scan_speed_m_per_s=scan_speed,
             parent=self,
         )
         self._track_modeless_child(dlg)

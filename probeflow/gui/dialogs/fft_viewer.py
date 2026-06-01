@@ -28,6 +28,7 @@ from probeflow.analysis.lattice_distortion import (
     compute_correction,
 )
 from probeflow.analysis.lattice_grid import direct_lattice_vectors_from_reciprocal_grid
+from probeflow.gui._tooltips import tip as _tip
 from probeflow.gui.lattice_correction_ui import (
     KnownStructure,
     correction_main_lines,
@@ -112,6 +113,7 @@ class FFTViewerDialog(QDialog):
         roi_bounds_px: tuple[int, int, int, int] | None = None,
         roi_id: str | None = None,
         roi_name: str | None = None,
+        scan_speed_m_per_s: float | None = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -165,6 +167,11 @@ class FFTViewerDialog(QDialog):
         self._cmap_options = ["gray", "gray_r", "inferno", "hot", "viridis", "plasma", "turbo"]
         self._bragg_artists: list = []
         self._calib_picks: list = []   # (qx_nm, qy_nm) in nm⁻¹
+        # Mains-pickup diagnostic/removal (⚡ Mains tab).
+        self._scan_speed_m_per_s = scan_speed_m_per_s
+        self._mains_artists: list = []
+        self._mains_preview_active = False
+        self._mains_fast_axis = "x"
 
         self._fft_drs = DisplayRangeController(clip_low=0.0, clip_high=100.0, parent=self)
 
@@ -828,6 +835,10 @@ class FFTViewerDialog(QDialog):
         advanced_scroll.setWidget(advanced_inner)
         self._tab_widget.addTab(advanced_scroll, "⚙ Expert")
 
+        # Append the Mains tab last so existing tab indices (e.g. _grid_tab_index)
+        # are unaffected.
+        self._tab_widget.addTab(self._build_mains_tab(), "⚡ Mains")
+
         self._fft_splitter = QSplitter(Qt.Vertical)
         self._fft_splitter.addWidget(fft_top)
         self._fft_splitter.addWidget(self._tab_widget)
@@ -1154,6 +1165,7 @@ class FFTViewerDialog(QDialog):
         ax.axvline(0, color=fg, lw=0.4, alpha=0.35)
         self._bragg_artists = []
         self._draw_bragg_overlay()
+        self._draw_mains_overlay()
         self._update_histogram(disp)
         self._update_radial_profile(disp)
         self._canvas_fft.draw_idle()
@@ -1419,10 +1431,19 @@ class FFTViewerDialog(QDialog):
             else:
                 d_str = "∞"
             theta = np.degrees(np.arctan2(qy, qx))
-            self._set_status_text(
+            status = (
                 f"q_x={qx:+.3f}  q_y={qy:+.3f}  |q|={q:.3f} nm⁻¹  "
                 f"d={d_str}  θ={theta:.1f}°"
             )
+            # Equivalent time-domain frequency along the fast axis (mains check):
+            # f = q_fast · v. Only meaningful when the scan speed is known.
+            if self._scan_speed_m_per_s and self._scan_speed_m_per_s > 0:
+                from probeflow.processing.mains_pickup import equivalent_frequency_hz
+                fast_q = qx if getattr(self, "_mains_fast_axis", "x") == "x" else qy
+                f_hz = equivalent_frequency_hz(abs(fast_q), self._scan_speed_m_per_s)
+                if f_hz is not None:
+                    status += f"   ≈ {f_hz:.1f} Hz"
+            self._set_status_text(status)
         elif event.inaxes is self._radial_ax and event.xdata is not None:
             q = event.xdata
             val = event.ydata
@@ -2156,6 +2177,289 @@ class FFTViewerDialog(QDialog):
             self._clear_grid_btn.setEnabled(True)
         self._refresh_grid_measure_lbl()
         self._refresh_fft_correction_ui()
+
+    # ── ⚡ Mains-pickup diagnostic + removal ───────────────────────────────────
+
+    def _build_mains_tab(self) -> QWidget:
+        """Predict / overlay / inspect / preview / apply 50–60 Hz mains pickup."""
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(8, 8, 8, 8)
+        lay.setSpacing(6)
+
+        intro = QLabel(
+            "Mains pickup (50/60 Hz) appears at a predictable spot in the FFT "
+            "set by the fast-scan speed. Mark it, check the cursor frequency, "
+            "then preview and apply a symmetric notch.")
+        intro.setWordWrap(True)
+        intro.setFont(QFont("Helvetica", 9))
+        intro.setToolTip(_tip(
+            "Find and remove mains pickup — the 50/60 Hz electrical hum that "
+            "appears as faint, regularly-spaced stripes. Use it when a scan "
+            "shows fine periodic banding that may line up with the power-line "
+            "frequency."))
+        lay.addWidget(intro)
+
+        # ── overlay + prediction controls ──────────────────────────────────────
+        grp = QGroupBox("Predict & overlay")
+        gl = QVBoxLayout(grp)
+        gl.setSpacing(4)
+
+        self._mains_overlay_cb = QCheckBox("Show mains-pickup overlay")
+        self._mains_overlay_cb.setToolTip(_tip(
+            "Mark where 50/60 Hz pickup and its harmonics should appear in this "
+            "FFT, from the fast-scan speed. Nothing is changed — it's a "
+            "diagnostic guide. Turn it on to check whether a suspicious FFT "
+            "spot is really mains before removing anything."))
+        self._mains_overlay_cb.toggled.connect(self._on_mains_changed)
+        gl.addWidget(self._mains_overlay_cb)
+
+        freq_row = QHBoxLayout()
+        freq_row.addWidget(QLabel("Frequency:"))
+        self._mains_freq_combo = QComboBox()
+        self._mains_freq_combo.addItems(["50 Hz", "60 Hz"])
+        self._mains_freq_combo.setToolTip(_tip(
+            "Your local mains frequency — 50 Hz (most of the world) or 60 Hz "
+            "(North America). Choose the one for where the data was taken."))
+        self._mains_freq_combo.currentIndexChanged.connect(self._on_mains_changed)
+        freq_row.addWidget(self._mains_freq_combo, 1)
+        gl.addLayout(freq_row)
+
+        harm_row = QHBoxLayout()
+        harm_row.addWidget(QLabel("Harmonics:"))
+        self._mains_harm_spin = QSpinBox()
+        self._mains_harm_spin.setRange(1, 4)
+        self._mains_harm_spin.setValue(3)
+        self._mains_harm_spin.setToolTip(_tip(
+            "How many multiples of the mains frequency to mark (50, 100, "
+            "150 Hz …). Pickup often shows several harmonics; raise this if you "
+            "see a row of evenly-spaced spots. Harmonics past the FFT's Nyquist "
+            "limit are dropped automatically."))
+        self._mains_harm_spin.valueChanged.connect(self._on_mains_changed)
+        harm_row.addWidget(self._mains_harm_spin, 1)
+        gl.addLayout(harm_row)
+
+        speed_row = QHBoxLayout()
+        speed_row.addWidget(QLabel("Scan speed:"))
+        self._mains_speed_spin = QDoubleSpinBox()
+        self._mains_speed_spin.setRange(0.0, 1e6)
+        self._mains_speed_spin.setDecimals(3)
+        self._mains_speed_spin.setSuffix(" nm/s")
+        if self._scan_speed_m_per_s and self._scan_speed_m_per_s > 0:
+            self._mains_speed_spin.setValue(self._scan_speed_m_per_s * 1e9)
+        self._mains_speed_spin.setToolTip(_tip(
+            "Fast-scan tip speed, read from the file when available — it sets "
+            "where mains lands in the FFT. If blank or wrong, type the value "
+            "from your scan parameters; the overlay needs it."))
+        self._mains_speed_spin.valueChanged.connect(self._on_mains_changed)
+        speed_row.addWidget(self._mains_speed_spin, 1)
+        gl.addLayout(speed_row)
+
+        axis_row = QHBoxLayout()
+        axis_row.addWidget(QLabel("Fast axis:"))
+        self._mains_fast_combo = QComboBox()
+        self._mains_fast_combo.addItems(["Horizontal", "Vertical"])
+        self._mains_fast_combo.setToolTip(_tip(
+            "Which image direction was scanned fast. Mains stripes run across "
+            "this direction. Leave on Horizontal unless the scan was rotated "
+            "or transposed."))
+        self._mains_fast_combo.currentIndexChanged.connect(self._on_mains_changed)
+        axis_row.addWidget(self._mains_fast_combo, 1)
+        gl.addLayout(axis_row)
+
+        self._mains_status_lbl = QLabel("")
+        self._mains_status_lbl.setWordWrap(True)
+        self._mains_status_lbl.setFont(QFont("Helvetica", 8))
+        gl.addWidget(self._mains_status_lbl)
+        lay.addWidget(grp)
+
+        # ── suppression controls ────────────────────────────────────────────────
+        sgrp = QGroupBox("Suppress")
+        sl = QVBoxLayout(sgrp)
+        sl.setSpacing(4)
+
+        rad_row = QHBoxLayout()
+        rad_row.addWidget(QLabel("Notch radius:"))
+        self._mains_radius_spin = QSpinBox()
+        self._mains_radius_spin.setRange(1, 20)
+        self._mains_radius_spin.setValue(3)
+        self._mains_radius_spin.setSuffix(" px")
+        self._mains_radius_spin.setToolTip(_tip(
+            "Size of the suppression spot placed on each mains peak. Start "
+            "small and widen only until the stripe disappears — too wide also "
+            "removes nearby real signal."))
+        rad_row.addWidget(self._mains_radius_spin, 1)
+        sl.addLayout(rad_row)
+
+        self._mains_residual_cb = QCheckBox("Show residual (removed signal)")
+        self._mains_residual_cb.setToolTip(_tip(
+            "Preview the residual (original − filtered) instead of the filtered "
+            "image. Check it looks like noise/stripes, not real features, "
+            "before applying."))
+        sl.addWidget(self._mains_residual_cb)
+
+        btn_row = QHBoxLayout()
+        self._mains_preview_btn = QPushButton("Preview")
+        self._mains_preview_btn.setToolTip(_tip(
+            "Show the filtered result (or the residual) without changing your "
+            "image. Check the residual looks like noise, not real features, "
+            "before applying."))
+        self._mains_preview_btn.clicked.connect(self._on_mains_preview)
+        self._mains_clear_btn = QPushButton("Clear preview")
+        self._mains_clear_btn.setEnabled(False)
+        self._mains_clear_btn.clicked.connect(self._on_mains_clear)
+        self._mains_apply_btn = QPushButton("Apply")
+        self._mains_apply_btn.setObjectName("accentBtn")
+        self._mains_apply_btn.setToolTip(_tip(
+            "Apply the previewed mains suppression and record the frequency, "
+            "harmonics, scan speed and notch settings in the processing "
+            "history, so the removal is reproducible."))
+        self._mains_apply_btn.clicked.connect(self._on_mains_apply)
+        btn_row.addWidget(self._mains_preview_btn)
+        btn_row.addWidget(self._mains_clear_btn)
+        btn_row.addStretch(1)
+        btn_row.addWidget(self._mains_apply_btn)
+        sl.addLayout(btn_row)
+        lay.addWidget(sgrp)
+
+        lay.addStretch(1)
+        scroll.setWidget(page)
+        self._update_mains_status()
+        return scroll
+
+    def _mains_speed_m_per_s(self) -> float | None:
+        v = float(self._mains_speed_spin.value()) * 1e-9
+        return v if v > 0 else None
+
+    def _mains_predictions(self) -> list:
+        v = self._mains_speed_m_per_s()
+        if not v or self._arr is None:
+            return []
+        from probeflow.processing.mains_pickup import predict_mains_fft_positions
+        fast = self._mains_fast_axis
+        n_fast = self._arr.shape[1] if fast == "x" else self._arr.shape[0]
+        width = self._scan_range_m[0] if fast == "x" else self._scan_range_m[1]
+        f = 50.0 if self._mains_freq_combo.currentIndex() == 0 else 60.0
+        return predict_mains_fft_positions(
+            n_fast, width, v, mains_frequency_hz=f,
+            harmonics=int(self._mains_harm_spin.value()), fast_axis=fast)
+
+    def _draw_mains_overlay(self) -> None:
+        """Vertical (or horizontal) lines at the predicted mains q positions.
+
+        Rebuilt on every FFT redraw (the axes are cleared by ``ax.cla()``).
+        """
+        self._mains_artists = []
+        if not getattr(self, "_mains_overlay_cb", None):
+            return
+        if not self._mains_overlay_cb.isChecked() or self._qx is None:
+            return
+        for p in self._mains_predictions():
+            q = p["q_nm_inv"]
+            for qq in (q, -q):
+                if self._mains_fast_axis == "x":
+                    art = self._ax_fft.axvline(qq, color="#f9e2af", lw=0.9,
+                                               ls="--", alpha=0.85, zorder=7)
+                else:
+                    art = self._ax_fft.axhline(qq, color="#f9e2af", lw=0.9,
+                                               ls="--", alpha=0.85, zorder=7)
+                self._mains_artists.append(art)
+
+    def _on_mains_changed(self) -> None:
+        """Fast path: refresh the overlay + status when a control changes."""
+        self._mains_fast_axis = "x" if self._mains_fast_combo.currentIndex() == 0 else "y"
+        for art in self._mains_artists:
+            try:
+                art.remove()
+            except Exception:
+                pass
+        self._mains_artists = []
+        self._draw_mains_overlay()
+        self._canvas_fft.draw_idle()
+        self._update_mains_status()
+
+    def _update_mains_status(self) -> None:
+        if not getattr(self, "_mains_status_lbl", None):
+            return
+        if self._mains_speed_m_per_s() is None:
+            self._mains_status_lbl.setText(
+                "Scan speed unavailable; enter nm/s to show the mains overlay.")
+            return
+        preds = self._mains_predictions()
+        if not preds:
+            self._mains_status_lbl.setText(
+                "No mains harmonics fall within this FFT (check speed/frequency).")
+            return
+        src = "ROI" if self._fft_source == "active_roi" else "whole image"
+        parts = [f"{p['freq_hz']:.0f} Hz → q={p['q_nm_inv']:.2f} nm⁻¹" for p in preds]
+        self._mains_status_lbl.setText(f"FFT source: {src}.  " + " · ".join(parts))
+
+    def _mains_op_params(self) -> dict:
+        params = {
+            "scan_speed_m_per_s": self._mains_speed_m_per_s(),
+            "scan_range_m": [float(self._full_scan_range_m[0]),
+                             float(self._full_scan_range_m[1])],
+            "mains_frequency_hz": 50.0 if self._mains_freq_combo.currentIndex() == 0 else 60.0,
+            "harmonics": int(self._mains_harm_spin.value()),
+            "notch_radius_px": float(self._mains_radius_spin.value()),
+            "fast_axis": self._mains_fast_axis,
+            "snap_window_px": 2,
+            "fft_source": self._fft_source,
+        }
+        if self._fft_source == "active_roi" and self._roi_id is not None:
+            params["fft_roi_id"] = self._roi_id
+        return params
+
+    def _on_mains_preview(self) -> None:
+        v = self._mains_speed_m_per_s()
+        if not v:
+            self._mains_status_lbl.setText("Enter a scan speed (nm/s) first.")
+            return
+        arr = self._get_image_fn() if self._get_image_fn is not None else self._full_arr
+        if arr is None:
+            return
+        from probeflow.processing.mains_pickup import mains_pickup_suppression
+        p = self._mains_op_params()
+        try:
+            filtered = mains_pickup_suppression(
+                np.asarray(arr, dtype=np.float64),
+                scan_speed_m_per_s=v, scan_range_m=tuple(self._full_scan_range_m),
+                mains_frequency_hz=p["mains_frequency_hz"], harmonics=p["harmonics"],
+                notch_radius_px=p["notch_radius_px"], fast_axis=p["fast_axis"])
+        except Exception as exc:
+            self._mains_status_lbl.setText(f"Preview failed: {exc}")
+            return
+        if self._mains_residual_cb.isChecked():
+            self._show_fft_preview(np.asarray(arr, dtype=np.float64) - filtered)
+            self._mains_status_lbl.setText("Residual preview (what would be removed).")
+        else:
+            self._show_fft_preview(filtered)
+            self._mains_status_lbl.setText("Filtered preview shown.")
+        self._mains_preview_active = True
+        self._mains_clear_btn.setEnabled(True)
+
+    def _on_mains_clear(self) -> None:
+        self._hide_fft_preview()
+        self._mains_preview_active = False
+        self._mains_clear_btn.setEnabled(False)
+        self._update_mains_status()
+
+    def _on_mains_apply(self) -> None:
+        if self._apply_correction_fn is None:
+            self._mains_status_lbl.setText("Apply is unavailable in this context.")
+            return
+        if self._mains_speed_m_per_s() is None:
+            self._mains_status_lbl.setText("Enter a scan speed (nm/s) first.")
+            return
+        if self._mains_preview_active:
+            self._hide_fft_preview()
+            self._mains_preview_active = False
+            self._mains_clear_btn.setEnabled(False)
+        self._apply_correction_fn("mains_pickup_suppression", self._mains_op_params())
+        self._mains_status_lbl.setText("Applied mains-pickup suppression.")
 
     # ── Bragg ring overlay ─────────────────────────────────────────────────────
 
