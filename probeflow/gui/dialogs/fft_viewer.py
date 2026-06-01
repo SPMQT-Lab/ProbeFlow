@@ -12,7 +12,7 @@ from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFileDialog, QFrame,
-    QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit,
+    QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
     QInputDialog, QPushButton, QScrollArea, QSizePolicy, QSpinBox, QSplitter,
     QTabWidget, QVBoxLayout, QWidget,
 )
@@ -35,6 +35,7 @@ from probeflow.gui.lattice_correction_ui import (
     delete_structure,
     ideal_lattice_from_structure,
     load_known_structures,
+    piezo_constant_recommendation,
     save_known_structures,
     structure_display_value_nm,
     upsert_structure,
@@ -166,7 +167,6 @@ class FFTViewerDialog(QDialog):
         self._fft_cmap = "gray"
         self._cmap_options = ["gray", "gray_r", "inferno", "hot", "viridis", "plasma", "turbo"]
         self._bragg_artists: list = []
-        self._calib_picks: list = []   # (qx_nm, qy_nm) in nm⁻¹
         # Mains-pickup diagnostic/removal (⚡ Mains tab).
         self._scan_speed_m_per_s = scan_speed_m_per_s
         self._mains_artists: list = []
@@ -678,6 +678,43 @@ class FFTViewerDialog(QDialog):
         action_row.addStretch(1)
         action_row.addWidget(self._fft_apply_btn)
         corr_lay.addLayout(action_row)
+
+        piezo_grp = QGroupBox("Piezo constants")
+        piezo_grp.setFont(QFont("Helvetica", 9))
+        piezo_lay = QVBoxLayout(piezo_grp)
+        piezo_lay.setContentsMargins(8, 8, 8, 6)
+        piezo_lay.setSpacing(5)
+        piezo_row = QHBoxLayout()
+        piezo_row.addWidget(QLabel("Current X:"))
+        self._piezo_x_edit = QLineEdit("96.52")
+        self._piezo_x_edit.setFixedWidth(72)
+        self._piezo_x_edit.setToolTip("Current X piezo constant.")
+        self._piezo_x_edit.textChanged.connect(self._refresh_piezo_advisor)
+        piezo_row.addWidget(self._piezo_x_edit)
+        piezo_row.addWidget(QLabel("Current Y:"))
+        self._piezo_y_edit = QLineEdit("96.52")
+        self._piezo_y_edit.setFixedWidth(72)
+        self._piezo_y_edit.setToolTip("Current Y piezo constant.")
+        self._piezo_y_edit.textChanged.connect(self._refresh_piezo_advisor)
+        piezo_row.addWidget(self._piezo_y_edit)
+        piezo_row.addStretch(1)
+        self._piezo_copy_btn = QPushButton("Copy recommendation")
+        self._piezo_copy_btn.setFont(QFont("Helvetica", 9))
+        self._piezo_copy_btn.setFixedHeight(22)
+        self._piezo_copy_btn.setEnabled(False)
+        self._piezo_copy_btn.clicked.connect(self._copy_piezo_recommendation)
+        piezo_row.addWidget(self._piezo_copy_btn)
+        piezo_lay.addLayout(piezo_row)
+        self._piezo_result_lbl = QLabel(
+            "Align a reciprocal grid to get X/Y piezo recommendations."
+        )
+        self._piezo_result_lbl.setFont(QFont("Courier", 8))
+        self._piezo_result_lbl.setWordWrap(True)
+        self._piezo_result_lbl.setMinimumHeight(48)
+        self._piezo_result_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        piezo_lay.addWidget(self._piezo_result_lbl)
+        corr_lay.addWidget(piezo_grp)
+
         self._apply_known_structure_to_fft(self._active_known_structure, refresh=False)
         corr_lay.addStretch(1)
         self._tab_widget.addTab(corr_tab, "Correction")
@@ -742,78 +779,6 @@ class FFTViewerDialog(QDialog):
         opts_adv_row.addStretch(1)
         opts_lay_outer.addLayout(opts_adv_row)
         advanced_lay.addWidget(correction_opts_grp)
-
-        piezo_grp, piezo_lay = _collapsible_group(
-            "Scanner calibration (expert)", checked=False,
-        )
-        piezo_info_lbl = QLabel(
-            "Measures piezo scan-speed constants from Bragg picks.\n"
-            "This is for scanner calibration — not needed for image undistortion."
-        )
-        piezo_info_lbl.setFont(QFont("Helvetica", 8))
-        piezo_info_lbl.setWordWrap(True)
-        piezo_info_lbl.setStyleSheet("color: gray; font-style: italic;")
-        piezo_lay.addWidget(piezo_info_lbl)
-        peak_btn_row = QHBoxLayout()
-        self._bragg_detect_btn = QPushButton("Detect peaks")
-        self._bragg_detect_btn.setFont(QFont("Helvetica", 9))
-        self._bragg_detect_btn.setFixedHeight(24)
-        self._bragg_detect_btn.setToolTip("Auto-detect compact first-shell Bragg peaks as visual picks.")
-        self._bragg_detect_btn.clicked.connect(self._detect_bragg_peaks)
-        peak_btn_row.addWidget(self._bragg_detect_btn)
-        self._bragg_clear_btn = QPushButton("Clear picks")
-        self._bragg_clear_btn.setFont(QFont("Helvetica", 9))
-        self._bragg_clear_btn.setFixedHeight(24)
-        self._bragg_clear_btn.clicked.connect(self._clear_bragg_picks)
-        peak_btn_row.addWidget(self._bragg_clear_btn)
-        peak_btn_row.addStretch(1)
-        piezo_lay.addLayout(peak_btn_row)
-
-        pick_row = QHBoxLayout()
-        self._bragg_pick_cb = QCheckBox("Pick peaks")
-        self._bragg_pick_cb.setFont(QFont("Helvetica", 9))
-        self._bragg_pick_cb.setToolTip("When enabled, clicks on the FFT add/remove Bragg calibration picks.")
-        self._bragg_pick_cb.toggled.connect(self._update_calib_ui)
-        pick_row.addWidget(self._bragg_pick_cb)
-        self._bragg_snap_cb = QCheckBox("Snap picks to compact peak")
-        self._bragg_snap_cb.setFont(QFont("Helvetica", 9))
-        self._bragg_snap_cb.setChecked(True)
-        self._bragg_snap_cb.setToolTip("Move manual picks to nearby compact local maxima rather than streak pixels.")
-        pick_row.addWidget(self._bragg_snap_cb)
-        pick_row.addStretch(1)
-        piezo_lay.addLayout(pick_row)
-        self._bragg_picks_lbl = QLabel("Picks: 0  (enable Pick peaks to edit)")
-        self._bragg_picks_lbl.setFont(QFont("Helvetica", 9))
-        piezo_lay.addWidget(self._bragg_picks_lbl)
-        piezo_row = QHBoxLayout()
-        piezo_row.addWidget(QLabel("Piezo X:"))
-        self._bragg_cx_edit = QLineEdit("96.52")
-        self._bragg_cx_edit.setFixedWidth(72)
-        piezo_row.addWidget(self._bragg_cx_edit)
-        piezo_row.addWidget(QLabel("Piezo Y:"))
-        self._bragg_cy_edit = QLineEdit("96.52")
-        self._bragg_cy_edit.setFixedWidth(72)
-        piezo_row.addWidget(self._bragg_cy_edit)
-        self._bragg_compute_btn = QPushButton("Compute piezo constants")
-        self._bragg_compute_btn.setFont(QFont("Helvetica", 9))
-        self._bragg_compute_btn.setFixedHeight(24)
-        self._bragg_compute_btn.setEnabled(False)
-        self._bragg_compute_btn.clicked.connect(self._compute_bragg_correction)
-        piezo_row.addWidget(self._bragg_compute_btn)
-        piezo_row.addStretch(1)
-        piezo_lay.addLayout(piezo_row)
-        self._bragg_results_txt = QPlainTextEdit()
-        self._bragg_results_txt.setReadOnly(True)
-        self._bragg_results_txt.setFont(QFont("Courier", 9))
-        self._bragg_results_txt.setFixedHeight(76)
-        self._bragg_results_txt.setPlaceholderText("Piezo results will appear here.")
-        piezo_lay.addWidget(self._bragg_results_txt)
-        self._bragg_copy_btn = QPushButton("Copy piezo results")
-        self._bragg_copy_btn.setFont(QFont("Helvetica", 9))
-        self._bragg_copy_btn.setFixedHeight(22)
-        self._bragg_copy_btn.clicked.connect(self._copy_bragg_results)
-        piezo_lay.addWidget(self._bragg_copy_btn)
-        advanced_lay.addWidget(piezo_grp)
 
         display_grp = QGroupBox("Display")
         display_grp.setFont(QFont("Helvetica", 9))
@@ -1394,9 +1359,6 @@ class FFTViewerDialog(QDialog):
             and event.xdata is not None
             and event.ydata is not None
         ):
-            if self._bragg_pick_mode_active():
-                self._on_bragg_pick_click(event)
-                return
             if not self._fft_lattice_overlay_wants_event(event):
                 self._pan_anchor = (
                     event.xdata, event.ydata,
@@ -1894,6 +1856,7 @@ class FFTViewerDialog(QDialog):
             )
             if status_lbl is not None:
                 status_lbl.setText("No reciprocal grid yet")
+            self._refresh_piezo_advisor()
             return
 
         a_vec, b_vec = vectors
@@ -1920,6 +1883,7 @@ class FFTViewerDialog(QDialog):
             corr_lbl.setText(f"Cannot compute correction:\n{result}")
             if status_lbl is not None:
                 status_lbl.setText("Correction unavailable")
+            self._refresh_piezo_advisor()
             return
 
         self._fft_correction = result
@@ -1937,6 +1901,61 @@ class FFTViewerDialog(QDialog):
             self._fft_preview_btn.setEnabled(True)
         if self._apply_correction_fn is not None:
             self._fft_apply_btn.setEnabled(True)
+        self._refresh_piezo_advisor()
+
+    @staticmethod
+    def _input_decimal_count(text: str) -> int:
+        body = text.strip().split("e", 1)[0].split("E", 1)[0]
+        return len(body.split(".", 1)[1]) if "." in body else 0
+
+    def _refresh_piezo_advisor(self, *_args) -> None:
+        lbl = getattr(self, "_piezo_result_lbl", None)
+        copy_btn = getattr(self, "_piezo_copy_btn", None)
+        if lbl is None:
+            return
+        if copy_btn is not None:
+            copy_btn.setEnabled(False)
+        if self._fft_correction is None:
+            lbl.setText("Align a reciprocal grid to get X/Y piezo recommendations.")
+            return
+
+        x_text = self._piezo_x_edit.text().strip()
+        y_text = self._piezo_y_edit.text().strip()
+        try:
+            x_current = float(x_text)
+            y_current = float(y_text)
+            rec = piezo_constant_recommendation(
+                self._fft_correction,
+                x_current=x_current,
+                y_current=y_current,
+            )
+        except (TypeError, ValueError):
+            lbl.setText("Enter positive current X/Y piezo constants.")
+            return
+
+        x_dec = self._input_decimal_count(x_text)
+        y_dec = self._input_decimal_count(y_text)
+        lines = [
+            (
+                f"X: {x_current:.{x_dec}f} -> {rec.x_new:.{x_dec}f}  "
+                f"({rec.x_percent_change:+.2f}%, x{rec.x_multiplier:.5f})"
+            ),
+            (
+                f"Y: {y_current:.{y_dec}f} -> {rec.y_new:.{y_dec}f}  "
+                f"({rec.y_percent_change:+.2f}%, x{rec.y_multiplier:.5f})"
+            ),
+            rec.residual_text,
+        ]
+        if rec.warning:
+            lines.append(rec.warning)
+        lbl.setText("\n".join(lines))
+        if copy_btn is not None:
+            copy_btn.setEnabled(True)
+
+    def _copy_piezo_recommendation(self) -> None:
+        lbl = getattr(self, "_piezo_result_lbl", None)
+        if lbl is not None and lbl.text():
+            QApplication.clipboard().setText(lbl.text())
 
     def _fft_correction_options(self) -> dict:
         interp_map = {"Bilinear": "bilinear", "Nearest": "nearest", "Bicubic": "bicubic"}
@@ -2486,10 +2505,8 @@ class FFTViewerDialog(QDialog):
             return
         if not self._bragg_enable_cb.isChecked():
             self._bragg_radius_lbl.setText("Shells hidden")
-            self._draw_calib_pick_artists()
             return
         if self._qx is None or self._qy is None:
-            self._draw_calib_pick_artists()
             return
 
         # ── user inputs ──────────────────────────────────────────────────────
@@ -2537,185 +2554,3 @@ class FFTViewerDialog(QDialog):
 
         suffix = " nm^-1" if shells else ""
         self._bragg_radius_lbl.setText("Shells: " + "; ".join(label_bits) + suffix)
-        self._draw_calib_pick_artists()
-
-    # ── calibration helpers ────────────────────────────────────────────────────
-
-    def _bragg_pick_mode_active(self) -> bool:
-        """True when clicks on the FFT canvas should add/remove calibration picks."""
-        cb = getattr(self, "_bragg_enable_cb", None)
-        pick_cb = getattr(self, "_bragg_pick_cb", None)
-        return bool(
-            cb is not None and cb.isChecked()
-            and pick_cb is not None and pick_cb.isChecked()
-        )
-
-    def _draw_calib_pick_artists(self) -> None:
-        """Draw calibration pick dots on the FFT axes (always, if any picks exist)."""
-        for qx, qy in self._calib_picks:
-            art, = self._ax_fft.plot(
-                qx, qy, "o",
-                color="#a6e3a1", markerfacecolor="none",
-                markersize=9, markeredgewidth=1.8, zorder=8,
-            )
-            self._bragg_artists.append(art)
-
-    def _update_calib_ui(self, *_args) -> None:
-        """Refresh the picks label and the compute-button enabled state."""
-        n = len(self._calib_picks)
-        mode = "click FFT to add/remove" if self._bragg_pick_mode_active() else "enable Pick peaks to edit"
-        self._bragg_picks_lbl.setText(f"Picks: {n}  ({mode})")
-        self._bragg_compute_btn.setEnabled(n >= 3)
-        self._bragg_compute_btn.setToolTip(
-            "Fit ellipse and compute piezo correction"
-            if n >= 3
-            else f"Need at least 3 picks ({n} so far)"
-        )
-
-    def _on_bragg_pick_click(self, event) -> None:
-        """Add or remove a calibration pick at the clicked FFT position."""
-        qx_click, qy_click = float(event.xdata), float(event.ydata)
-
-        # Check if clicking near an existing pick (10 screen pixels = hit)
-        click_disp = self._ax_fft.transData.transform((qx_click, qy_click))
-        for i, (qx, qy) in enumerate(self._calib_picks):
-            pt_disp = self._ax_fft.transData.transform((qx, qy))
-            dist = float(np.hypot(click_disp[0] - pt_disp[0],
-                                  click_disp[1] - pt_disp[1]))
-            if dist < 10.0:
-                self._calib_picks.pop(i)
-                self._update_calib_ui()
-                self._on_bragg_changed()
-                return
-
-        if getattr(self, "_bragg_snap_cb", None) is not None and self._bragg_snap_cb.isChecked():
-            try:
-                from probeflow.processing.filters import snap_to_compact_peak_q
-                snapped = snap_to_compact_peak_q(
-                    self._fft_mag, self._qx, self._qy, qx_click, qy_click,
-                )
-                if snapped is not None:
-                    qx_click, qy_click = snapped
-            except Exception:
-                pass
-
-        # No existing pick nearby — add a new one
-        self._calib_picks.append((qx_click, qy_click))
-        self._update_calib_ui()
-        self._on_bragg_changed()
-
-    def _detect_bragg_peaks(self) -> None:
-        """Auto-detect first-order Bragg peaks and store them as calibration picks."""
-        from probeflow.processing.filters import (
-            find_bragg_peaks_in_q_annulus,
-            first_bragg_q,
-        )
-        if self._fft_mag is None or self._qx is None or self._qy is None:
-            return
-
-        symmetry = "square" if self._bragg_sym_combo.currentIndex() == 0 else "hex"
-        a_val = self._bragg_a_spin.value()
-        unit = self._bragg_unit_combo.currentText()
-        a_m = a_val * 1e-10 if unit == "Å" else a_val * 1e-9
-
-        try:
-            q_predicted = first_bragg_q(a_m, symmetry) * 1e-9
-        except ValueError:
-            return
-
-        expected = 4 if symmetry == "square" else 6
-        peaks_q = find_bragg_peaks_in_q_annulus(
-            self._fft_mag, self._qx, self._qy, q_predicted, expected_count=expected,
-        )
-
-        if peaks_q.size == 0:
-            self._bragg_picks_lbl.setText("Peaks: none found in annulus")
-            return
-
-        self._calib_picks = [(float(qx), float(qy)) for qx, qy in peaks_q]
-        self._update_calib_ui()
-        if len(self._calib_picks) < expected:
-            self._bragg_picks_lbl.setText(
-                f"Picks: {len(self._calib_picks)}  "
-                "(some sectors skipped; add missing picks manually)"
-            )
-        self._on_bragg_changed()
-
-    def _clear_bragg_picks(self) -> None:
-        self._calib_picks = []
-        self._update_calib_ui()
-        self._on_bragg_changed()
-
-    def _compute_bragg_correction(self) -> None:
-        """Fit an axis-aligned ellipse to the picks and report piezo corrections."""
-        from probeflow.processing.filters import (
-            fit_axis_aligned_ellipse,
-            first_bragg_q,
-            piezo_correction,
-        )
-        if len(self._calib_picks) < 3:
-            return
-
-        symmetry = "square" if self._bragg_sym_combo.currentIndex() == 0 else "hex"
-        a_val = self._bragg_a_spin.value()
-        unit = self._bragg_unit_combo.currentText()
-        a_m = a_val * 1e-10 if unit == "Å" else a_val * 1e-9
-
-        try:
-            r_predicted_nm = first_bragg_q(a_m, symmetry) * 1e-9
-        except ValueError as exc:
-            self._bragg_results_txt.setPlainText(f"Error: {exc}")
-            return
-
-        # ── parse piezo values, tracking user precision ──────────────────────
-        cx_str = self._bragg_cx_edit.text().strip()
-        cy_str = self._bragg_cy_edit.text().strip()
-
-        def _count_dec(s: str) -> int:
-            return len(s.split(".")[1]) if "." in s else 0
-
-        try:
-            cx_old = float(cx_str)
-            cy_old = float(cy_str)
-        except ValueError:
-            self._bragg_results_txt.setPlainText("Error: invalid piezo values")
-            return
-        if cx_old <= 0 or cy_old <= 0:
-            self._bragg_results_txt.setPlainText("Error: piezo values must be positive")
-            return
-        cx_dec = _count_dec(cx_str)
-        cy_dec = _count_dec(cy_str)
-
-        # ── fit ellipse in nm⁻¹ ──────────────────────────────────────────────
-        pts = np.array(self._calib_picks, dtype=np.float64)
-        try:
-            r_x_nm, r_y_nm, rms_nm = fit_axis_aligned_ellipse(pts)
-        except ValueError as exc:
-            self._bragg_results_txt.setPlainText(f"Fit error: {exc}")
-            return
-
-        # ── compute corrections ──────────────────────────────────────────────
-        try:
-            cx_new, cy_new = piezo_correction(
-                r_x_nm, r_y_nm, r_predicted_nm, cx_old, cy_old,
-            )
-        except ValueError as exc:
-            self._bragg_results_txt.setPlainText(f"Correction error: {exc}")
-            return
-
-        # ── format results ───────────────────────────────────────────────────
-        lines = [
-            f"r_predicted:  {r_predicted_nm:.4f} nm⁻¹",
-            f"r_x_obs:      {r_x_nm:.4f} nm⁻¹",
-            f"r_y_obs:      {r_y_nm:.4f} nm⁻¹",
-            f"fit RMS:      {rms_nm:.4f} nm⁻¹",
-            "",
-            f"Piezo X:  {cx_old:.{cx_dec}f}  →  {cx_new:.{cx_dec}f}",
-            f"Piezo Y:  {cy_old:.{cy_dec}f}  →  {cy_new:.{cy_dec}f}",
-        ]
-        self._bragg_results_txt.setPlainText("\n".join(lines))
-
-    def _copy_bragg_results(self) -> None:
-        text = self._bragg_results_txt.toPlainText()
-        if text:
-            QApplication.clipboard().setText(text)

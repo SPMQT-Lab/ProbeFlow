@@ -13,6 +13,7 @@ from probeflow.gui.lattice_correction_ui import (
     correction_main_lines,
     delete_structure,
     ideal_lattice_from_structure,
+    piezo_constant_recommendation,
     structure_from_period,
     structures_from_config,
     structures_to_config,
@@ -84,3 +85,65 @@ def test_correction_display_values_include_imagej_style_shear_angle():
     assert values["shear_angle_deg"] == pytest.approx(math.degrees(math.atan(correction.shear)))
     assert "Undistort: y/x=" in lines[0]
     assert "shear=" in lines[0]
+
+
+def test_piezo_recommendation_identity_keeps_constants():
+    correction = compute_correction(
+        MeasuredLattice(a_nm=(1.0, 0.0), b_nm=(0.0, 1.0)),
+        IdealLattice(a_nm=1.0, b_nm=1.0, angle_deg=90.0),
+    )
+    assert not isinstance(correction, str)
+
+    rec = piezo_constant_recommendation(correction, x_current=96.52, y_current=88.3)
+
+    assert rec.x_multiplier == pytest.approx(1.0)
+    assert rec.y_multiplier == pytest.approx(1.0)
+    assert rec.x_new == pytest.approx(96.52)
+    assert rec.y_new == pytest.approx(88.3)
+    assert rec.warning == ""
+
+
+def test_piezo_recommendation_uses_stretch_diagonal():
+    correction = compute_correction(
+        MeasuredLattice(a_nm=(2.0, 0.0), b_nm=(0.0, 0.5)),
+        IdealLattice(a_nm=1.0, b_nm=1.0, angle_deg=90.0),
+    )
+    assert not isinstance(correction, str)
+
+    rec = piezo_constant_recommendation(correction, x_current=100.0, y_current=100.0)
+
+    assert rec.x_multiplier == pytest.approx(0.5)
+    assert rec.y_multiplier == pytest.approx(2.0)
+    assert rec.x_new == pytest.approx(50.0)
+    assert rec.y_new == pytest.approx(200.0)
+    assert rec.x_percent_change == pytest.approx(-50.0)
+    assert rec.y_percent_change == pytest.approx(100.0)
+    assert ">10% change" in rec.warning
+
+
+def test_piezo_recommendation_reports_shear_as_residual():
+    correction = compute_correction(
+        MeasuredLattice(a_nm=(1.0, 0.0), b_nm=(0.05, 1.0)),
+        IdealLattice(a_nm=1.0, b_nm=1.0, angle_deg=90.0),
+    )
+    assert not isinstance(correction, str)
+
+    rec = piezo_constant_recommendation(correction, x_current=100.0, y_current=100.0)
+
+    assert rec.x_new == pytest.approx(100.0, rel=2e-3)
+    assert rec.y_new == pytest.approx(100.0, rel=2e-3)
+    assert abs(rec.residual_shear_angle_deg) > 0.1
+    assert "Residual shear" in rec.residual_text
+
+
+def test_piezo_recommendation_rejects_invalid_constants():
+    correction = compute_correction(
+        MeasuredLattice(a_nm=(1.0, 0.0), b_nm=(0.0, 1.0)),
+        IdealLattice(a_nm=1.0, b_nm=1.0, angle_deg=90.0),
+    )
+    assert not isinstance(correction, str)
+
+    with pytest.raises(ValueError, match="x_current"):
+        piezo_constant_recommendation(correction, x_current=0.0, y_current=1.0)
+    with pytest.raises(ValueError, match="y_current"):
+        piezo_constant_recommendation(correction, x_current=1.0, y_current=-1.0)

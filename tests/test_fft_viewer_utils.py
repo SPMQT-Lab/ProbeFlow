@@ -42,14 +42,6 @@ class _MockScrollEvent:
         self.key = key
 
 
-class _MockFftClick:
-    def __init__(self, ax, xdata=0.1, ydata=0.0):
-        self.inaxes = ax
-        self.button = 1
-        self.xdata = xdata
-        self.ydata = ydata
-
-
 class _FakeWheelEvent:
     def __init__(self, delta_y=-120):
         from PySide6.QtCore import QEvent
@@ -185,7 +177,7 @@ def test_fft_lattice_panel_embeds_in_grid_tab_and_clear_removes_overlay(qapp):
 def test_tab_layout_and_content(qapp):
     """Verify tab order and that key controls live in the expected tabs."""
     import numpy as np
-    from PySide6.QtWidgets import QCheckBox, QGroupBox, QPushButton
+    from PySide6.QtWidgets import QGroupBox, QPushButton
 
     dlg = FFTViewerDialog(np.ones((16, 16)), (1e-9, 1e-9))
     try:
@@ -210,18 +202,22 @@ def test_tab_layout_and_content(qapp):
         assert "Known structure" in grid_group_titles
         assert "Compare with known structure" in grid_group_titles
 
-        # Correction tab: correction label + preview + apply buttons
+        # Correction tab: correction label, preview/apply buttons, and piezo advisor
         corr_tab = dlg._tab_widget.widget(2)
         corr_btn_texts = {btn.text() for btn in corr_tab.findChildren(QPushButton)}
+        corr_group_titles = {grp.title() for grp in corr_tab.findChildren(QGroupBox)}
         assert "Preview corrected image" in corr_btn_texts
         assert "Apply correction" in corr_btn_texts
+        assert "Copy recommendation" in corr_btn_texts
+        assert "Piezo constants" in corr_group_titles
 
-        # Expert tab: no grid panel section, has scanner calibration
+        # Expert tab keeps advanced display/correction options, not scanner calibration.
         expert_tab = dlg._tab_widget.widget(3)
         expert_btn_texts = {btn.text() for btn in expert_tab.findChildren(QPushButton)}
-        expert_cb_texts = {cb.text() for cb in expert_tab.findChildren(QCheckBox)}
-        assert "Detect peaks" in expert_btn_texts
-        assert "Pick peaks" in expert_cb_texts
+        expert_group_titles = {grp.title() for grp in expert_tab.findChildren(QGroupBox)}
+        assert "Detect peaks" not in expert_btn_texts
+        assert "Clear picks" not in expert_btn_texts
+        assert "Scanner calibration (expert)" not in expert_group_titles
     finally:
         dlg.close()
         dlg.deleteLater()
@@ -353,24 +349,31 @@ def test_fft_correction_records_roi_source_in_provenance(qapp):
         qapp.processEvents()
 
 
-def test_predicted_lattice_clicks_do_not_pick_unless_pick_mode_enabled(qapp):
+def test_piezo_recommendation_is_independent_of_canvas_zoom(qapp):
     import numpy as np
 
     dlg = FFTViewerDialog(np.ones((16, 16)), (1e-9, 1e-9))
     try:
         dlg.show()
         qapp.processEvents()
-        dlg._bragg_enable_cb.setChecked(True)
-        dlg._bragg_snap_cb.setChecked(False)
+        dlg._on_open_fft_lattice()
         qapp.processEvents()
 
-        event = _MockFftClick(dlg._ax_fft, xdata=0.1, ydata=0.0)
-        dlg._on_press(event)
-        assert dlg._calib_picks == []
+        dlg._piezo_x_edit.setText("100.00")
+        dlg._piezo_y_edit.setText("100.00")
+        qapp.processEvents()
+        original = dlg._piezo_result_lbl.text()
+        assert "X:" in original
+        assert "Y:" in original
 
-        dlg._bragg_pick_cb.setChecked(True)
-        dlg._on_press(event)
-        assert len(dlg._calib_picks) == 1
+        dlg.resize(1400, 760)
+        qapp.processEvents()
+        dlg._zoom_by(0.5, 0.0, 0.0)
+        qapp.processEvents()
+        dlg._fft_equal_aspect_cb.setChecked(True)
+        qapp.processEvents()
+
+        assert dlg._piezo_result_lbl.text() == original
     finally:
         dlg.close()
         dlg.deleteLater()

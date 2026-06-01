@@ -33,6 +33,23 @@ class KnownStructure:
         }
 
 
+@dataclass(frozen=True)
+class PiezoConstantRecommendation:
+    """X/Y-only piezo constant update derived from a lattice correction."""
+
+    x_multiplier: float
+    y_multiplier: float
+    x_new: float
+    y_new: float
+    x_percent_change: float
+    y_percent_change: float
+    residual_shear: float
+    residual_shear_angle_deg: float
+    residual_rotation_deg: float
+    residual_text: str
+    warning: str
+
+
 DEFAULT_STRUCTURE = KnownStructure(
     name="Hexagonal 2.46 Å",
     symmetry="hexagonal",
@@ -206,3 +223,62 @@ def correction_main_lines(
             f"rotation {values['rotation_deg']:.3f}° {values['rotation_state']}"
         ),
     ]
+
+
+def piezo_constant_recommendation(
+    correction: LatticeCorrection,
+    *,
+    x_current: float,
+    y_current: float,
+) -> PiezoConstantRecommendation:
+    """Recommend X/Y piezo constants from the orientation-preserving stretch.
+
+    Piezo constants only expose independent X and Y scale terms.  The full
+    lattice correction can also contain shear and rotation, so this helper uses
+    the diagonal of ``stretch_matrix`` as the closest X/Y-only update and reports
+    the off-diagonal part as residual distortion.
+    """
+    for name, value in (("x_current", x_current), ("y_current", y_current)):
+        if not math.isfinite(float(value)) or float(value) <= 0.0:
+            raise ValueError(f"{name} must be a positive finite value")
+
+    stretch = correction.stretch_matrix
+    x_multiplier = float(stretch[0, 0])
+    y_multiplier = float(stretch[1, 1])
+    for name, value in (("x_multiplier", x_multiplier), ("y_multiplier", y_multiplier)):
+        if not math.isfinite(value) or value <= 0.0:
+            raise ValueError(f"{name} must be a positive finite value")
+
+    residual_shear = float(stretch[0, 1] / x_multiplier)
+    residual_shear_angle_deg = math.degrees(math.atan(residual_shear))
+    residual_rotation_deg = float(correction.polar_rotation_deg)
+    if math.isfinite(residual_rotation_deg):
+        rotation_text = f"rotation {residual_rotation_deg:+.3f}° ignored"
+    else:
+        rotation_text = "rotation/reflection ignored"
+    residual_text = (
+        f"Residual shear {residual_shear_angle_deg:+.3f}°; "
+        f"{rotation_text}"
+    )
+
+    x_new = float(x_current) * x_multiplier
+    y_new = float(y_current) * y_multiplier
+    x_percent_change = (x_multiplier - 1.0) * 100.0
+    y_percent_change = (y_multiplier - 1.0) * 100.0
+    warning = ""
+    if max(abs(x_percent_change), abs(y_percent_change)) > 10.0:
+        warning = "Warning: >10% change; verify grid alignment and scan calibration."
+
+    return PiezoConstantRecommendation(
+        x_multiplier=x_multiplier,
+        y_multiplier=y_multiplier,
+        x_new=x_new,
+        y_new=y_new,
+        x_percent_change=x_percent_change,
+        y_percent_change=y_percent_change,
+        residual_shear=residual_shear,
+        residual_shear_angle_deg=residual_shear_angle_deg,
+        residual_rotation_deg=residual_rotation_deg,
+        residual_text=residual_text,
+        warning=warning,
+    )
