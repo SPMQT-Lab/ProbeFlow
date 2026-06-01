@@ -53,6 +53,24 @@ class TestEstimateSpeed:
         assert estimate_fast_scan_speed_m_per_s({"Bias": "1.0"}, scan_range_m=(1e-8, 1e-8)) is None
         assert estimate_fast_scan_speed_m_per_s(None) is None
 
+    @pytest.mark.parametrize("fname", [
+        "sxm_moire_10nm.sxm",            # Nanonis: Scan>speed forw. (m/s)
+        "createc_scan_atomic_11nm.dat",  # Createc: Sec/line:
+    ])
+    def test_real_sample_headers(self, fname):
+        from pathlib import Path
+        from probeflow.core.scan_loader import load_scan
+
+        path = Path(__file__).parent.parent / "test_data" / fname
+        if not path.exists():
+            pytest.skip(f"test_data/{fname} not available")
+        scan = load_scan(str(path))
+        v = estimate_fast_scan_speed_m_per_s(
+            scan.header or {}, scan_range_m=scan.scan_range_m,
+            image_shape=scan.planes[0].shape,
+        )
+        assert v is not None and v > 0, "fast-scan speed should parse from the header"
+
 
 # ─── predict_mains_fft_positions ─────────────────────────────────────────────
 
