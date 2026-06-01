@@ -153,3 +153,13 @@ class TestReconstructTab:
                   dlg._recon_preview_btn, dlg._recon_apply_btn):
             tt = w.toolTip()
             assert tt and max(len(line) for line in tt.split("\n")) <= 52
+
+    def test_fields_are_content_width_not_stretched(self, qapp):
+        """Spin boxes / combos must not stretch across the row (arrows would be
+        pushed to the far edge, away from the value)."""
+        from PySide6.QtWidgets import QSizePolicy
+        dlg, _ = _dialog(qapp)
+        for w in (dlg._recon_mode_combo, dlg._recon_soft_spin, dlg._recon_view_combo,
+                  dlg._mains_harm_spin, dlg._mains_speed_spin, dlg._mains_freq_combo,
+                  dlg._mains_radius_spin):
+            assert w.sizePolicy().horizontalPolicy() == QSizePolicy.Maximum

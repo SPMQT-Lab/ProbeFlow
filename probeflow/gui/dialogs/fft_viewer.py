@@ -820,8 +820,23 @@ class FFTViewerDialog(QDialog):
         self._fft_splitter.setSizes([420, 360])
         right_col.addWidget(self._fft_splitter, 1)
         install_no_wheel_spinboxes(self._tab_widget)
+        self._compact_fft_tab_fields()
 
         return right_col
+
+    def _compact_fft_tab_fields(self) -> None:
+        """Stop spin boxes / combos in the tabs from stretching across the row.
+
+        Several tab layouts add fields with a stretch factor, so a short value
+        sits next to its label on the far left while the spin arrows / dropdown
+        are pushed to the far right edge.  Capping each field at its content
+        width (``QSizePolicy.Maximum``) keeps the arrows next to the value; the
+        spare space goes to the right of the field.
+        """
+        from PySide6.QtWidgets import QAbstractSpinBox, QComboBox, QSizePolicy
+        for cls in (QAbstractSpinBox, QComboBox):
+            for w in self._tab_widget.findChildren(cls):
+                w.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
 
     def _connect_canvas_events(self) -> None:
         """Wire mpl events for the FFT canvas and radial panel."""
