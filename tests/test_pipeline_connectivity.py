@@ -49,6 +49,10 @@ _MINIMAL_PARAMS: dict[str, dict] = {
         "scan_speed_m_per_s": 1e-8, "scan_range_m": (1e-8, 1e-8),
         "mains_frequency_hz": 50.0, "harmonics": 1, "notch_radius_px": 1.0,
     },
+    "inverse_fft_filter": {
+        "selections": [{"dx": 2, "dy": 0, "rx": 1.0, "ry": 1.0, "angle_deg": 0.0}],
+        "mode": "remove_selected", "conjugate_symmetric": True, "soft_px": 0.0,
+    },
     "linear_undistort": {"shear_x": 0.0, "scale_y": 1.0},
     "affine_lattice_correction": {
         "matrix": [[1.0, 0.0], [0.0, 1.0]], "expand_canvas": False,
