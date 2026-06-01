@@ -510,6 +510,28 @@ class ImageViewerToolsMixin:
             getattr(roi_ctx.roi, "name", None) if roi_bounds is not None else None
         )
 
+        def _open_fft_result_image(result_arr, result_scan_range_m, provenance) -> None:
+            """Open generated ROI inverse-FFT output in its own lightweight viewer."""
+            try:
+                from probeflow.gui.dialogs.array_image import ArrayImageDialog
+
+                label = f" - {roi_name}" if roi_name else ""
+                result_dlg = ArrayImageDialog(
+                    result_arr,
+                    scan_range_m=tuple(result_scan_range_m),
+                    title=f"Inverse FFT result{label}",
+                    colormap=getattr(self, "_viewer_colormap", self._colormap),
+                    theme=self._t,
+                    provenance=provenance,
+                    parent=self,
+                )
+            except Exception as exc:
+                self._status_lbl.setText(f"Could not open inverse FFT result: {exc}")
+                return
+            self._track_modeless_child(result_dlg)
+            result_dlg.show()
+            self._status_lbl.setText("Opened inverse FFT result image.")
+
         fft_scan_range = self._display_scan_range_m or self._scan_range_m or (1e-9, 1e-9)
         # Estimate the fast-scan speed from the header so the Mains tab can
         # predict where 50/60 Hz pickup lands (None → the user enters it).
@@ -533,6 +555,7 @@ class ImageViewerToolsMixin:
             roi_id=roi_id,
             roi_name=roi_name,
             scan_speed_m_per_s=scan_speed,
+            new_image_fn=_open_fft_result_image,
             parent=self,
         )
         self._track_modeless_child(dlg)

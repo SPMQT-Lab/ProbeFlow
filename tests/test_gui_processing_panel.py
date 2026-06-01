@@ -297,6 +297,7 @@ def test_open_fft_viewer_passes_active_area_roi_bounds(qapp, monkeypatch):
     assert kw["roi_bounds_px"] == (2, 6, 1, 4)
     assert kw["roi_id"] == roi.id
     assert kw["roi_name"] == "region A"
+    assert callable(kw["new_image_fn"])
 
     dlg.close()
     dlg.deleteLater()

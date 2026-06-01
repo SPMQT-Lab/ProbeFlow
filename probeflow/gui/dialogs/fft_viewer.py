@@ -193,14 +193,10 @@ class FFTViewerDialog(QDialog):
             lambda: (1.0, "", "Intensity"),
         )
         self._fft_drs.rangeChanged.connect(self._apply_intensity_from_drs)
-        self._hist_panel.minReleased.connect(
-            lambda v: self._display_slider_ctrl.on_min_changed(v))
-        self._hist_panel.maxReleased.connect(
-            lambda v: self._display_slider_ctrl.on_max_changed(v))
-        self._hist_panel.brightnessReleased.connect(
-            lambda v: self._display_slider_ctrl.on_brightness_changed(v))
-        self._hist_panel.contrastReleased.connect(
-            lambda v: self._display_slider_ctrl.on_contrast_changed(v))
+        self._hist_panel.minReleased.connect(self._on_fft_hist_min_released)
+        self._hist_panel.maxReleased.connect(self._on_fft_hist_max_released)
+        self._hist_panel.brightnessReleased.connect(self._on_fft_hist_brightness_released)
+        self._hist_panel.contrastReleased.connect(self._on_fft_hist_contrast_released)
         self._hist_panel.rangeReleased.connect(self._on_fft_hist_range_released)
         self._hist_panel.resetRequested.connect(self._reset_intensity)
         self._hist_panel.autoClipRequested.connect(self._reset_intensity)
@@ -1033,8 +1029,11 @@ class FFTViewerDialog(QDialog):
         if self._fft_display_mode == "phase":
             # Phase view: radians in [−π, π], no log / no percentile range.
             phase = self._fft_phase.astype(np.float64, copy=True)
-            if self._dc_mode == "mask":
-                phase[y0:y1, x0:x1] = np.nan   # DC phase is meaningless
+            if self._dc_mode in {"zero", "mask"}:
+                # DC phase is meaningless.  Magnitude can distinguish "zero"
+                # from "mask"; phase should hide the same central patch for both
+                # non-keep modes instead of painting arbitrary zero-radian color.
+                phase[y0:y1, x0:x1] = np.nan
             self._disp_range = (-np.pi, np.pi)
             self._last_fft_disp = phase
             return phase
@@ -1512,6 +1511,8 @@ class FFTViewerDialog(QDialog):
         for combo in (getattr(self, "_scale_combo", None), getattr(self, "_cmap_combo", None)):
             if combo is not None:
                 combo.setEnabled(magnitude)
+        if getattr(self, "_hist_panel", None) is not None:
+            self._hist_panel.setEnabled(magnitude)
         self._redraw()   # phase is already stored; no FFT recompute needed
 
     def _on_scale_changed(self, idx: int):
@@ -1541,6 +1542,26 @@ class FFTViewerDialog(QDialog):
             self._hist_panel.clear(self._theme)
             return
         lo, hi = self._disp_range
+        if self._fft_display_mode == "phase":
+            self._hist_panel.render(
+                flat_phys=finite.ravel(),
+                lo_phys=-np.pi,
+                hi_phys=np.pi,
+                unit="rad",
+                axis_label="Phase",
+                theme=self._theme,
+                scale=1.0,
+                data_min_phys=-np.pi,
+                data_max_phys=np.pi,
+            )
+            self._hist_panel.set_slider_positions(0, 1000, 500, 0)
+            self._hist_panel.set_slider_labels(
+                f"{-np.pi:.3g} rad",
+                f"{np.pi:.3g} rad",
+                "0 rad",
+                f"{2 * np.pi:.3g} rad",
+            )
+            return
         vmin, vmax = self._fft_drs.resolve(disp)
         if vmin is None:
             vmin, vmax = lo, hi
@@ -1564,6 +1585,11 @@ class FFTViewerDialog(QDialog):
         disp = self._last_fft_disp
         if disp is None:
             return
+        if self._fft_display_mode == "phase":
+            self._fft_im.set_clim(-np.pi, np.pi)
+            self._canvas_fft.draw_idle()
+            self._hist_panel.update_drag_lines(-np.pi, np.pi)
+            return
         vmin, vmax = self._fft_drs.resolve(disp)
         if vmin is None:
             return
@@ -1576,10 +1602,33 @@ class FFTViewerDialog(QDialog):
         """Convenience alias for _apply_intensity_from_drs."""
         self._apply_intensity_from_drs()
 
+    def _fft_histogram_is_adjustable(self) -> bool:
+        return self._fft_display_mode != "phase"
+
+    def _on_fft_hist_min_released(self, value: int) -> None:
+        if self._fft_histogram_is_adjustable():
+            self._display_slider_ctrl.on_min_changed(value)
+
+    def _on_fft_hist_max_released(self, value: int) -> None:
+        if self._fft_histogram_is_adjustable():
+            self._display_slider_ctrl.on_max_changed(value)
+
+    def _on_fft_hist_brightness_released(self, value: int) -> None:
+        if self._fft_histogram_is_adjustable():
+            self._display_slider_ctrl.on_brightness_changed(value)
+
+    def _on_fft_hist_contrast_released(self, value: int) -> None:
+        if self._fft_histogram_is_adjustable():
+            self._display_slider_ctrl.on_contrast_changed(value)
+
     def _on_fft_hist_range_released(self, lo_phys: float, hi_phys: float) -> None:
+        if not self._fft_histogram_is_adjustable():
+            return
         self._fft_drs.set_manual(lo_phys, hi_phys)
 
     def _reset_intensity(self) -> None:
+        if not self._fft_histogram_is_adjustable():
+            return
         self._fft_drs.reset(0.0, 100.0)
 
     def _update_info_panel(self):

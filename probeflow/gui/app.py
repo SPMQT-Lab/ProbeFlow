@@ -1117,29 +1117,84 @@ class ProbeFlowWindow(QMainWindow):
         _scan = load_scan(entry.path)
         if plane_idx >= _scan.n_planes:
             plane_idx = 0
-        arr = _scan.planes[plane_idx]
+        raw_arr = _scan.planes[plane_idx]
         w_m, h_m = _scan.scan_range_m
-        if arr is None:
+        if raw_arr is None:
             raise ValueError("Scan returned no array for that plane.")
-        Ny, Nx = arr.shape
-        if Nx > 0 and Ny > 0 and w_m > 0 and h_m > 0:
-            px_x_m = float(w_m / Nx)
-            px_y_m = float(h_m / Ny)
-            px_m   = float(np.sqrt(px_x_m * px_y_m))
-        else:
-            px_x_m = px_y_m = px_m = 1e-10
+
+        arr = np.asarray(raw_arr, dtype=np.float64)
+        analysis_range = (float(w_m), float(h_m))
+        processing_state = None
 
         # Apply saved processing (align rows, background, etc.) so Feature
-        # Counting sees the same image the user processed in the viewer.
+        # Counting sees the same image the user processed in the viewer.  Use
+        # the calibrated state walker, not the display thumbnail helper, so any
+        # shape-changing step updates scan_range_m and therefore the pixel sizes
+        # exported with downstream feature JSON.
         saved_proc = self._saved_processing_get(entry)
         if saved_proc:
             try:
-                from probeflow.gui.rendering import _apply_processing
-                arr = _apply_processing(arr, saved_proc)
+                from probeflow.processing.gui_adapter import processing_state_from_gui
+                from probeflow.processing.state import apply_processing_state_with_calibration
+
+                processing_state = processing_state_from_gui(saved_proc)
+                if processing_state.steps:
+                    arr, new_range = apply_processing_state_with_calibration(
+                        arr,
+                        processing_state,
+                        scan_range_m=analysis_range,
+                    )
+                    if new_range is not None:
+                        analysis_range = (float(new_range[0]), float(new_range[1]))
             except Exception:
+                processing_state = None
+                arr = np.asarray(raw_arr, dtype=np.float64)
+                analysis_range = (float(w_m), float(h_m))
                 pass   # fall back to raw if processing fails
 
-        return arr, px_m, px_x_m, px_y_m, plane_idx, _scan
+        Ny, Nx = arr.shape
+        if Nx > 0 and Ny > 0 and analysis_range[0] > 0 and analysis_range[1] > 0:
+            px_x_m = float(analysis_range[0] / Nx)
+            px_y_m = float(analysis_range[1] / Ny)
+            px_m = float(np.sqrt(px_x_m * px_y_m))
+        else:
+            px_x_m = px_y_m = px_m = 1e-10
+
+        # Hand Features a scan that describes the exact plane it will analyze.
+        # A one-plane wrapper avoids scan.dims reporting plane 0 when the user
+        # analyzed another channel, and keeps exported pixels/range in lockstep
+        # with the processed array.
+        from probeflow.core.scan_model import Scan
+
+        plane_name = (
+            _scan.plane_names[plane_idx]
+            if plane_idx < len(_scan.plane_names) else f"plane {plane_idx}"
+        )
+        plane_unit = (
+            _scan.plane_units[plane_idx]
+            if plane_idx < len(_scan.plane_units) else ""
+        )
+        plane_synth = (
+            bool(_scan.plane_synthetic[plane_idx])
+            if plane_idx < len(_scan.plane_synthetic) else False
+        )
+        analysis_scan = Scan(
+            planes=[np.asarray(arr, dtype=np.float64).copy()],
+            plane_names=[plane_name],
+            plane_units=[plane_unit],
+            plane_synthetic=[plane_synth],
+            header=dict(_scan.header or {}),
+            scan_range_m=analysis_range,
+            source_path=_scan.source_path,
+            source_format=_scan.source_format,
+            processing_state=_scan.processing_state,
+            experiment_metadata=dict(getattr(_scan, "experiment_metadata", {}) or {}),
+            warnings=tuple(getattr(_scan, "warnings", ()) or ()),
+        )
+        if processing_state is not None and processing_state.steps:
+            analysis_scan.record_processing_state(processing_state)
+
+        return arr, px_m, px_x_m, px_y_m, plane_idx, analysis_scan
 
     def _on_fc_load_from_browse(self) -> None:
         """Bridge: read Browse selection → load into the floating FC window."""

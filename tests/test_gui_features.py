@@ -395,3 +395,50 @@ def test_features_export_without_scan_falls_back_to_source(qapp, monkeypatch):
     assert captured["extra_meta"].get("source") == "/tmp/example.sxm"
     win.close()
     win.deleteLater()
+
+
+def test_load_scan_plane_for_analysis_scan_matches_processed_plane(qapp, monkeypatch):
+    """Feature-analysis provenance must describe the processed plane, not raw scan 0."""
+    from probeflow.core.scan_model import Scan
+    from probeflow.gui.app import ProbeFlowWindow
+
+    raw_forward = np.zeros((4, 5), dtype=float)
+    raw_backward = np.arange(35, dtype=float).reshape(5, 7)
+    loaded_scan = Scan(
+        planes=[raw_forward, raw_backward],
+        plane_names=["Z forward", "Z backward"],
+        plane_units=["m", "m"],
+        plane_synthetic=[False, False],
+        header={"SCAN_PIXELS": "5 4"},
+        scan_range_m=(14e-9, 10e-9),
+        source_path=Path("/tmp/example.sxm"),
+        source_format="sxm",
+    )
+
+    monkeypatch.setattr("probeflow.gui.app.load_scan", lambda _path: loaded_scan)
+
+    saved_processing = {
+        "geometric_ops": [
+            {
+                "op": "scale_image",
+                "params": {"new_height": 6, "new_width": 8, "order": 1},
+            }
+        ]
+    }
+    win = ProbeFlowWindow.__new__(ProbeFlowWindow)
+    win._saved_processing_get = lambda _entry: saved_processing
+
+    arr, px_m, px_x_m, px_y_m, plane_idx, analysis_scan = (
+        ProbeFlowWindow._load_scan_plane_for_analysis(win, _sample_entry(), 1)
+    )
+
+    assert plane_idx == 1
+    assert arr.shape == (6, 8)
+    assert analysis_scan.planes[0].shape == arr.shape
+    assert analysis_scan.dims == (8, 6)
+    assert analysis_scan.plane_names == ["Z backward"]
+    assert analysis_scan.scan_range_m == pytest.approx((14e-9, 10e-9))
+    assert px_x_m == pytest.approx(14e-9 / 8)
+    assert px_y_m == pytest.approx(10e-9 / 6)
+    assert px_m == pytest.approx(np.sqrt(px_x_m * px_y_m))
+    assert [step.op for step in analysis_scan.processing_state.steps] == ["scale_image"]

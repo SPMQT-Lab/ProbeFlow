@@ -66,6 +66,38 @@ class TestPhaseView:
         assert lo == pytest.approx(-np.pi) and hi == pytest.approx(np.pi)
         dlg.deleteLater()
 
+    def test_phase_hides_dc_for_zero_and_mask_modes(self, qapp):
+        dlg = _dialog(qapp)
+        _set_view(dlg, "Phase")
+        cy, cx = (n // 2 for n in dlg._fft_phase.shape)
+
+        dlg._dc_combo.setCurrentIndex(1)  # Keep DC
+        keep = dlg._compute_display_fft()
+        assert np.isfinite(keep[cy, cx])
+
+        dlg._dc_combo.setCurrentIndex(0)  # Zero DC
+        zero = dlg._compute_display_fft()
+        assert np.isnan(zero[cy, cx])
+
+        dlg._dc_combo.setCurrentIndex(2)  # Mask DC
+        mask = dlg._compute_display_fft()
+        assert np.isnan(mask[cy, cx])
+        dlg.deleteLater()
+
+    def test_phase_range_controls_are_fixed(self, qapp):
+        dlg = _dialog(qapp)
+        _set_view(dlg, "Phase")
+        assert not dlg._hist_panel.isEnabled()
+
+        dlg._on_fft_hist_range_released(-1.0, 1.0)
+        assert dlg._fft_drs.mode != "manual"
+
+        dlg._fft_drs.set_manual(-1.0, 1.0)
+        lo, hi = dlg._fft_im.get_clim()
+        assert lo == pytest.approx(-np.pi)
+        assert hi == pytest.approx(np.pi)
+        dlg.deleteLater()
+
     def test_scale_and_lut_disabled_in_phase(self, qapp):
         dlg = _dialog(qapp)
         assert dlg._scale_combo.isEnabled() and dlg._cmap_combo.isEnabled()

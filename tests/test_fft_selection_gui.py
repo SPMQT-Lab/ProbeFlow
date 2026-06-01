@@ -32,7 +32,7 @@ def _scene():
     return np.exp(-(((xx - 40) ** 2 + (yy - 70) ** 2) / 400.0)) + 0.5 * np.sin(2 * np.pi * 8 * xx / N)
 
 
-def _dialog(qapp, captured=None, roi=False):
+def _dialog(qapp, captured=None, roi=False, new_image_fn=None):
     from probeflow.gui.dialogs.fft_viewer import FFTViewerDialog
     img = _scene()
     apply_fn = (lambda op, p: captured.update(op=op, params=p)) if captured is not None else None
@@ -40,7 +40,7 @@ def _dialog(qapp, captured=None, roi=False):
     if roi:
         kw = dict(roi_bounds_px=(10, 90, 10, 90), roi_id="roi1", roi_name="r")
     dlg = FFTViewerDialog(img, (10e-9, 10e-9), apply_correction_fn=apply_fn,
-                          get_image_fn=lambda: img, **kw)
+                          get_image_fn=lambda: img, new_image_fn=new_image_fn, **kw)
     dlg._tab_widget.setCurrentIndex(dlg._reconstruct_tab_index)
     return dlg, img
 
@@ -136,6 +136,29 @@ class TestReconstructTab:
         dlg._on_reconstruct_apply()
         assert "op" not in captured                     # no whole-image op routed
         assert "export" in dlg._recon_status_lbl.text().lower()
+
+    def test_roi_apply_uses_new_image_host_when_available(self, qapp):
+        opened = {}
+
+        def _open_new_image(arr, scan_range_m, provenance):
+            opened["arr"] = arr
+            opened["scan_range_m"] = scan_range_m
+            opened["provenance"] = provenance
+
+        captured: dict = {}
+        dlg, _ = _dialog(qapp, captured=captured, roi=True, new_image_fn=_open_new_image)
+        dlg._fft_source = "active_roi"
+        dlg._arr, dlg._scan_range_m = dlg._resolve_source_array()
+        dlg._recompute_fft()
+        dlg._on_add_selection("circle")
+        dlg._on_reconstruct_apply()
+
+        assert "op" not in captured
+        assert opened["arr"].shape == dlg._arr.shape
+        assert opened["scan_range_m"] == pytest.approx(tuple(dlg._scan_range_m))
+        assert opened["provenance"]["op"] == "inverse_fft_filter"
+        assert opened["provenance"]["params"]["fft_source"] == "active_roi"
+        assert opened["provenance"]["params"]["fft_roi_id"] == "roi1"
 
     def test_export_writes_file(self, qapp, monkeypatch, tmp_path):
         dlg, _ = _dialog(qapp)
