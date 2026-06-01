@@ -150,11 +150,14 @@ class FFTViewerDialog(QDialog):
         self._active_known_structure = self._known_structures[0]
 
         self._fft_mag: np.ndarray | None = None
+        self._fft_phase: np.ndarray | None = None   # angle(F), for the phase view
         self._qx: np.ndarray | None = None
         self._qy: np.ndarray | None = None
         self._fft_xlim: tuple = (0.0, 1.0)
         self._fft_ylim: tuple = (1.0, 0.0)
         self._scale_mode = "log"
+        self._fft_display_mode = "magnitude"         # "magnitude" | "phase"
+        self._phase_cmap = "twilight"                # cyclic map for the phase view
         self._window_mode = "hann"
         self._dc_mode = "keep"
         self._pan_anchor: tuple | None = None
@@ -226,6 +229,14 @@ class FFTViewerDialog(QDialog):
             c.setFixedHeight(24)
             c.setMinimumWidth(min_width)
             return c
+
+        tb.addWidget(_lbl("View:"))
+        self._fft_view_combo = _combo(["Magnitude", "Phase"], 96)
+        self._fft_view_combo.setToolTip(_tip(
+            "Show the FFT magnitude (default) or phase. Phase is in radians "
+            "(−π…π) on a cyclic colour map; most analysis uses magnitude."))
+        self._fft_view_combo.currentIndexChanged.connect(self._on_fft_view_changed)
+        tb.addWidget(self._fft_view_combo)
 
         tb.addWidget(_lbl("Scale:"))
         self._scale_combo = _combo(["Log", "Linear"], 80)
@@ -995,6 +1006,7 @@ class FFTViewerDialog(QDialog):
 
         F = np.fft.fftshift(np.fft.fft2(arr))
         self._fft_mag = np.abs(F)
+        self._fft_phase = np.angle(F)   # radians, −π…π (same windowed F as the magnitude)
 
         Ny, Nx = arr.shape
         try:
@@ -1012,12 +1024,22 @@ class FFTViewerDialog(QDialog):
             self._fft_ylim = (float(self._qy[-1]), float(self._qy[0]))
 
     def _compute_display_fft(self) -> np.ndarray:
-        mag = self._fft_mag.copy()
-        Ny, Nx = mag.shape
+        Ny, Nx = self._fft_mag.shape
         cy, cx = Ny // 2, Nx // 2
         r = max(1, min(Ny, Nx) // 60)
         y0, y1 = max(0, cy - r), min(Ny, cy + r + 1)
         x0, x1 = max(0, cx - r), min(Nx, cx + r + 1)
+
+        if self._fft_display_mode == "phase":
+            # Phase view: radians in [−π, π], no log / no percentile range.
+            phase = self._fft_phase.astype(np.float64, copy=True)
+            if self._dc_mode == "mask":
+                phase[y0:y1, x0:x1] = np.nan   # DC phase is meaningless
+            self._disp_range = (-np.pi, np.pi)
+            self._last_fft_disp = phase
+            return phase
+
+        mag = self._fft_mag.copy()
         if self._dc_mode == "zero":
             mag[y0:y1, x0:x1] = 0.0
         elif self._dc_mode == "mask":
@@ -1118,16 +1140,24 @@ class FFTViewerDialog(QDialog):
         ax.cla()
         ax.set_facecolor(bg)
         disp = self._compute_display_fft()
-        lo, hi = self._disp_range
-        vmin_val, vmax_val = self._fft_drs.resolve(disp)
-        if vmin_val is None:
-            vmin_val, vmax_val = lo, hi
+        phase_view = self._fft_display_mode == "phase"
+        if phase_view:
+            # Fixed −π…π range on a cyclic colour map; ignore the magnitude-only
+            # percentile range controller.
+            cmap_name = self._phase_cmap
+            vmin_val, vmax_val = -np.pi, np.pi
+        else:
+            cmap_name = self._fft_cmap
+            lo, hi = self._disp_range
+            vmin_val, vmax_val = self._fft_drs.resolve(disp)
+            if vmin_val is None:
+                vmin_val, vmax_val = lo, hi
         extent_q = [
             float(self._qx[0]), float(self._qx[-1]),
             float(self._qy[-1]), float(self._qy[0]),
         ]
         self._fft_im = ax.imshow(
-            disp, cmap=self._fft_cmap, origin="upper",
+            disp, cmap=cmap_name, origin="upper",
             extent=extent_q, aspect="auto",
             vmin=vmin_val, vmax=vmax_val,
         )
@@ -1142,8 +1172,11 @@ class FFTViewerDialog(QDialog):
             self._aspect_correct_xlim()
         ax.set_xlim(*self._fft_xlim)
         ax.set_ylim(*self._fft_ylim)
-        scale_lbl = "log₁₀|FFT|" if self._scale_mode == "log" else "|FFT|"
-        ax.set_title(f"FFT  ({scale_lbl})", fontsize=10, color=fg)
+        if phase_view:
+            title_lbl = "phase, rad"
+        else:
+            title_lbl = "log₁₀|FFT|" if self._scale_mode == "log" else "|FFT|"
+        ax.set_title(f"FFT  ({title_lbl})", fontsize=10, color=fg)
         ax.set_xlabel("q_x  (nm⁻¹)", fontsize=9, color=fg)
         ax.set_ylabel("q_y  (nm⁻¹)", fontsize=9, color=fg)
         ax.tick_params(colors=fg, labelsize=8)
@@ -1440,6 +1473,11 @@ class FFTViewerDialog(QDialog):
                 f_hz = equivalent_frequency_hz(abs(fast_q), self._scan_speed_m_per_s)
                 if f_hz is not None:
                     status += f"   ≈ {f_hz:.1f} Hz"
+            # In the phase view, report the phase under the cursor.
+            if self._fft_display_mode == "phase" and self._fft_phase is not None:
+                col = int(np.argmin(np.abs(self._qx - qx)))
+                row = int(np.argmin(np.abs(self._qy - qy)))
+                status += f"   φ={self._fft_phase[row, col]:+.2f} rad"
             self._set_status_text(status)
         elif event.inaxes is self._radial_ax and event.xdata is not None:
             q = event.xdata
@@ -1466,6 +1504,15 @@ class FFTViewerDialog(QDialog):
             )
 
     # ── toolbar callbacks ──────────────────────────────────────────────────────
+
+    def _on_fft_view_changed(self, idx: int):
+        self._fft_display_mode = "phase" if idx == 1 else "magnitude"
+        # Scale / colour map are magnitude-only; disable them in the phase view.
+        magnitude = self._fft_display_mode == "magnitude"
+        for combo in (getattr(self, "_scale_combo", None), getattr(self, "_cmap_combo", None)):
+            if combo is not None:
+                combo.setEnabled(magnitude)
+        self._redraw()   # phase is already stored; no FFT recompute needed
 
     def _on_scale_changed(self, idx: int):
         self._scale_mode = "log" if idx == 0 else "linear"
@@ -1567,6 +1614,16 @@ class FFTViewerDialog(QDialog):
         ax.cla()
         ax.set_facecolor(bg)
         if self._qx is None or self._qy is None:
+            self._radial_canvas.draw_idle()
+            return
+        if self._fft_display_mode == "phase":
+            # Azimuthal averaging of phase is not meaningful.
+            ax.set_xticks([]); ax.set_yticks([])
+            ax.text(0.5, 0.5, "Radial profile:\nmagnitude only",
+                    ha="center", va="center", color=fg, fontsize=8,
+                    transform=ax.transAxes)
+            for sp in ax.spines.values():
+                sp.set_color(fg)
             self._radial_canvas.draw_idle()
             return
         qx_2d = self._qx[np.newaxis, :]
