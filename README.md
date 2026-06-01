@@ -7,28 +7,18 @@
 ProbeFlow is a lab workflow tool for scanning tunnelling microscopy and related
 SPM data. It helps you browse folders of scans and spectra, apply routine image
 corrections, draw ROIs, make common measurements, and export figures or data
-with enough context to understand how they were produced.
+with enough context to understand how they were produced. It reads Createc,
+Nanonis, and RHK files and runs from a desktop GUI (with a command-line
+interface for scripting and batch work).
 
-It currently supports Createc, Nanonis, and RHK workflows:
+> **Beta software.** ProbeFlow is `0.0.0b0`: the GUI, CLI, Python API, and JSON
+> sidecar formats may still change. Raw microscope files are treated as
+> read-only — processing and exports always write new files, with provenance
+> sidecars where supported.
 
-- Open Createc `.dat`, Nanonis `.sxm`, and RHK `.sm4` scan images.
-- Open Createc `.VERT` and Nanonis spectroscopy `.dat` traces.
-- Convert Createc `.dat` scans to Nanonis-compatible `.sxm`.
-- Process scans with row alignment, bad-line correction, background
-  subtraction, smoothing, FFT filters, notch filters, denoising, zeroing, and
-  simple geometry transforms.
-- Measure line profiles, periodicity, ROI statistics, FFTs, feature points,
-  pair correlations, lattice grids, unit cells, and spectroscopy traces.
-- Export PNG, PDF, CSV, JSON, SXM, and optional Gwyddion `.gwy` outputs.
+## Quick start
 
-ProbeFlow is beta software. The GUI, CLI, Python API, and JSON sidecar formats
-may still change. Raw microscope files are treated as read-only; processing and
-export steps write separate output files and provenance sidecars where
-supported.
-
-## Quick Start
-
-Install from a checkout:
+Install from a checkout (Python 3.11+):
 
 ```bash
 git clone https://github.com/SPMQT-Lab/ProbeFlow.git
@@ -42,56 +32,58 @@ Launch the GUI:
 probeflow gui
 ```
 
-Typical first GUI workflow:
+A typical first session:
 
-1. Open a folder containing `.dat`, `.sxm`, `.sm4`, or spectroscopy files.
-2. Select a scan or spectrum from the browser.
-3. Adjust display contrast and colormap.
-4. Draw an ROI or line profile if needed.
-5. Apply a correction or measurement.
+1. Open a folder of `.dat`, `.sxm`, `.sm4`, or spectroscopy files.
+2. Pick a scan or spectrum from the thumbnail browser.
+3. Choose a channel, colormap, and display range.
+4. Draw an ROI or line profile if you need one.
+5. Apply a correction, open the FFT viewer, or take a measurement.
 6. Export the image, table, profile, spectrum, or processed scan.
 
-Inspect or convert files from the command line:
+Prefer the command line for inspection, conversion, and batch pipelines? See the
+[command-line guide](docs/cli.md).
 
-```bash
-probeflow info scan.dat
-probeflow info scan.sxm --json
-probeflow convert scan.dat scan.sxm
-```
+## Main features
 
-Apply a small processing pipeline and export a PNG:
+ProbeFlow is honest about being a focused toolkit rather than a do-everything
+suite. What it does today:
 
-```bash
-probeflow pipeline scan.dat \
-    --steps align-rows:median plane-bg:1 \
-    --png --colormap gray \
-    -o scan_processed.png
-```
+- **Browse** folders of scans and spectra in a thumbnail grid; switch channels
+  (Z / current, forward / backward), colormaps, and display contrast.
+- **Process images** — row alignment, bad-line detection and repair, background
+  subtraction (plane fit, STM line-by-line, facet levelling), Gaussian
+  smoothing and high-pass, edge detection, Fourier low/high-pass filters,
+  periodic-spot notch filters, TV denoising, point/plane zeroing, lossless and
+  arbitrary geometry transforms, and derived arithmetic channels. Steps are
+  recorded as a processing state so an export can be reproduced.
+- **FFT tools** (the FFT viewer) — inspect the magnitude and radial profile with
+  q in nm⁻¹; overlay a draggable reciprocal-lattice grid and apply an affine
+  lattice correction; show Bragg-shell rings for a known structure; predict and
+  notch out **mains pickup** (50/60 Hz); and use the **inverse-FFT /
+  Fourier-reconstruction** tool to select circle/ellipse features, *remove* or
+  *keep* them, preview the reconstructed image and the residual, then apply.
+- **ROIs and measurements** — rectangle, ellipse, polygon, freehand, line, and
+  point ROIs; ROI-scoped processing; line profiles, periodicity, ROI
+  statistics, step heights, distances and angles, feature points, point-mask
+  FFTs, pair correlation, and lattice / grid / unit-cell measurements. ROIs save
+  to a `<scan>.rois.json` sidecar.
+- **Feature analysis** *(optional)* — a Feature Counting tool for particle /
+  molecule segmentation, counting, few-shot classification, template-match
+  counting, lattice extraction, and reproducible step-edge exclusion. Requires
+  the `features` extra (OpenCV + scikit-learn).
+- **Spectroscopy** — inspect single traces or overlays / waterfalls. Smoothing,
+  derivative, normalization, outlier masking, and offsets operate on derived
+  display data; the raw loaded arrays are left intact.
+- **Convert** Createc `.dat` scans to Nanonis-compatible `.sxm` (and PNG).
+- **Export with context** — PNG, PDF, CSV, JSON, SXM, and optional Gwyddion
+  `.gwy`. Many exports also write a JSON provenance sidecar (source file and
+  channel, display settings, processing state, ROIs, and warnings). It is not a
+  full electronic lab notebook, but it makes exported figures and data easier to
+  interpret later. Exports never overwrite an existing file unless you ask
+  (CLI `--force` / writer `overwrite=True`).
 
-More CLI examples are in [docs/cli.md](docs/cli.md).
-
-## Installation Notes
-
-Python 3.11 or newer is required.
-
-Optional feature and export dependencies:
-
-```bash
-python -m pip install -e ".[features]"  # OpenCV / scikit-learn feature tools
-python -m pip install -e ".[gwyddion]"  # optional .gwy writer dependency
-```
-
-Development install:
-
-```bash
-python -m pip install -e ".[dev,features]"
-pytest
-```
-
-The experimental ScanFlow survey/PPTX integration is optional and is not
-installed with ProbeFlow by default.
-
-## Supported Files
+## Supported files
 
 | Direction | File type | Use |
 |---|---|---|
@@ -101,55 +93,32 @@ installed with ProbeFlow by default.
 | Input | Nanonis `.dat` | Point spectroscopy |
 | Input | RHK `.sm4` | STM/SPM image scan |
 | Output | `.sxm` | Converted or processed scan data |
-| Output | `.png`, `.pdf` | Figure/image export |
+| Output | `.png`, `.pdf` | Figure / image export |
 | Output | `.csv`, `.json` | Numerical data, metadata, or provenance |
 | Output | `.gwy` | Optional Gwyddion export when `gwyfile` is installed |
 
-Createc `.dat` reader details, including interrupted-scan handling and stored
-payload conventions, live in [docs/createc_dat_reader.md](docs/createc_dat_reader.md).
+Createc `.dat` reader details (interrupted-scan handling, payload conventions)
+are in [docs/createc_dat_reader.md](docs/createc_dat_reader.md).
 
-## Key Workflows
+## Installation notes
 
-### Browse And Process Scans
+Python 3.11 or newer is required. The core install pulls in numpy, scipy,
+Pillow, PySide6, matplotlib, and shapely.
 
-Use the GUI to browse scan folders, inspect channels, adjust display ranges,
-draw ROIs, and apply common corrections. Processing operations are recorded as
-processing state where supported so exported files can be audited later.
+Optional extras:
 
-### Measure Images
-
-ProbeFlow supports rectangle, ellipse, polygon, freehand, line, and point ROIs.
-Common image measurements include line profiles, periodicity estimates, ROI
-statistics, feature points, point-mask FFTs, pair correlation, feature-to-lattice
-comparison, and lattice/grid measurements.
-
-ROIs are stored in pixel coordinates with `(x, y) = (column, row)` and origin at
-the top-left of the displayed image. The default ROI sidecar is:
-
-```text
-<scan-stem>.rois.json
+```bash
+python -m pip install -e ".[features]"   # particle/feature + lattice tools (OpenCV, scikit-learn)
+python -m pip install -e ".[gwyddion]"   # Gwyddion .gwy writer (gwyfile)
+python -m pip install -e ".[dev]"        # test + lint tooling
 ```
 
-### Inspect Spectroscopy
+The Feature Counting and lattice-extraction tools are inactive until the
+`features` extra is installed; everything else works with the core install.
 
-The spectroscopy viewer can inspect individual traces or overlays/waterfalls.
-Smoothing, derivative, normalization, outlier masking, and offsets operate on
-derived display data rather than overwriting the raw loaded arrays.
+## Using ProbeFlow from Python
 
-### Export With Context
-
-ProbeFlow writes JSON sidecars for many exports. These records can include
-source file, source channel, display settings, processing state, warnings, and
-ROI data where relevant. They are not a full electronic lab notebook, but they
-make exported figures and data easier to interpret later.
-
-Export paths are conservative by default. Existing output artifacts and
-provenance sidecars are not overwritten unless overwrite options are used
-explicitly, such as CLI `--force` or writer API `overwrite=True`.
-
-## Python Use
-
-ProbeFlow can also be used from Python:
+ProbeFlow can also be driven as a library:
 
 ```python
 from probeflow import load_scan, processing
@@ -160,8 +129,6 @@ scan.planes[0] = processing.subtract_background(scan.planes[0], order=1)
 scan.save("processed.sxm")
 scan.save("processed.png", colormap="gray")
 ```
-
-Spectroscopy:
 
 ```python
 from probeflow.io.spectroscopy import read_spec_file
@@ -182,23 +149,10 @@ dzdv = numeric_derivative(spec.x_array, z_smooth)
 
 ## Development
 
-Run the test suite:
-
 ```bash
-pytest
-```
-
-Run the current lint check:
-
-```bash
-ruff check probeflow tests
-```
-
-Useful development scripts:
-
-```bash
-vulture probeflow/ tests/ whitelist.py --min-confidence 80
-python scripts/find_orphan_modules.py
+python -m pip install -e ".[dev,features]"
+pytest                          # run the test suite
+ruff check probeflow tests      # lint
 ```
 
 Repository layout:
@@ -206,8 +160,6 @@ Repository layout:
 ```text
 probeflow/
 |-- core/        # Scan model, loading dispatch, metadata, ROI, validation
-|-- assets/      # Packaged logo and GUI assets
-|-- data/        # Packaged runtime resources
 |-- io/          # File sniffing, readers, writers, converters, sidecars
 |-- processing/  # Numerical processing and ProcessingState
 |-- analysis/    # Image, lattice, feature, and spectroscopy analysis helpers
@@ -217,7 +169,7 @@ probeflow/
 `-- plugins/     # Plugin API and registry groundwork
 
 tests/           # pytest suite
-test_data/       # sample/manual input data
+test_data/       # sample input data
 docs/            # additional documentation
 ```
 
@@ -229,4 +181,4 @@ University of Queensland.
 The original Createc-decoding work was written by
 [Rohan Platts](https://github.com/rohanplatts). ProbeFlow builds on that
 foundation with browsing, conversion, processing, ROI workflows, spectroscopy
-handling, and export provenance.
+handling, FFT tools, and export provenance.
