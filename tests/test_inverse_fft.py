@@ -151,3 +151,27 @@ class TestProcessingStateOp:
         d = state.to_dict()["steps"][0]
         assert d["op"] == "inverse_fft_filter"
         assert d["params"]["selections"][0]["dx"] == KX
+
+    def test_gui_apply_path_persists(self):
+        """Regression: the FFT viewer's Apply stores the op under
+        _processing["geometric_ops"]; processing_state_from_gui must emit it
+        (it was silently dropped by the geometric-ops allowlist, so Apply did
+        nothing and closing the viewer left the image unchanged)."""
+        from probeflow.processing.gui_adapter import processing_state_from_gui
+        from probeflow.processing.state import apply_processing_state
+
+        _b, _s, img = _scene()
+        gui_state = {
+            "geometric_ops": [{
+                "op": "inverse_fft_filter",
+                "params": {
+                    "selections": [{"dx": KX, "dy": 0, "rx": 3.0, "ry": 3.0, "angle_deg": 0.0}],
+                    "mode": "remove_selected", "conjugate_symmetric": True,
+                    "soft_px": 0.0, "fft_source": "whole_image",
+                },
+            }],
+        }
+        state = processing_state_from_gui(gui_state)
+        assert [s.op for s in state.steps] == ["inverse_fft_filter"]
+        out = apply_processing_state(img, state)
+        assert _bin_power(out) < 1e-6 * _bin_power(img)

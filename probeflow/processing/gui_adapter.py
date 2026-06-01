@@ -41,6 +41,16 @@ NUMERIC_PROC_KEYS: tuple[str, ...] = (
     "arithmetic_ops",
 )
 
+# Value-filter ops routed through the FFT viewer's generic apply channel
+# (apply_correction_fn → ``geometric_ops``).  Their params are already in
+# canonical form for ``apply_processing_state``, so they pass straight through.
+# Without this, the geometric_ops dispatch below would silently drop them and
+# "Apply" would do nothing.
+_FILTER_OPS_PASSTHROUGH: frozenset[str] = frozenset({
+    "mains_pickup_suppression",
+    "inverse_fft_filter",
+})
+
 
 def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
     """Convert a GUI processing dict into a canonical :class:`ProcessingState`.
@@ -369,6 +379,12 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
             if op_params.get("vmax") is not None:
                 q_params["vmax"] = float(op_params["vmax"])
             deferred_quantize_specs.append(q_params)
+        elif op_name in _FILTER_OPS_PASSTHROUGH:
+            # FFT value-filters (mains pickup, inverse-FFT reconstruction): the
+            # stored params are already canonical for apply_processing_state.
+            _append_step(ProcessingStep(op_name, op_params))
+        else:
+            _warn_skipped_step("geometric_ops", f"unhandled op {op_name!r}")
 
     for op_spec in gui_state.get("arithmetic_ops") or []:
         try:

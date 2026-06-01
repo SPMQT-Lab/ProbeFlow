@@ -193,3 +193,24 @@ class TestProcessingStateOp:
         step = d["steps"][0]
         assert step["op"] == "mains_pickup_suppression"
         assert step["params"]["mains_frequency_hz"] == 50.0
+
+    def test_gui_apply_path_persists(self):
+        """Regression: the Mains tab's Apply stores the op under
+        _processing["geometric_ops"]; processing_state_from_gui must emit it
+        (it was silently dropped by the geometric-ops allowlist)."""
+        from probeflow.processing.gui_adapter import processing_state_from_gui
+        from probeflow.processing.state import apply_processing_state
+
+        gui_state = {"geometric_ops": [{
+            "op": "mains_pickup_suppression",
+            "params": {
+                "scan_speed_m_per_s": V, "scan_range_m": [W_M, W_M],
+                "mains_frequency_hz": 50.0, "harmonics": 1, "notch_radius_px": 3.0,
+                "fast_axis": "x", "snap_window_px": 2,
+            },
+        }]}
+        state = processing_state_from_gui(gui_state)
+        assert [s.op for s in state.steps] == ["mains_pickup_suppression"]
+        img = _scan_with_mains()
+        out = apply_processing_state(img, state)
+        assert _column_power(out, NPX // 2 + 25) < 0.5 * _column_power(img, NPX // 2 + 25)
