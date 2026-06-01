@@ -54,6 +54,9 @@ class TestMainsTab:
         labels = [dlg._tab_widget.tabText(i) for i in range(dlg._tab_widget.count())]
         assert any("Mains" in t for t in labels)
         assert dlg._mains_speed_spin.value() == pytest.approx(V * 1e9)   # nm/s
+        assert dlg._mains_auto_cb.isChecked() is True
+        assert dlg._mains_harm_spin.isEnabled() is False
+        assert dlg._mains_min_q_spin.value() == pytest.approx(0.0)
         dlg.deleteLater()
 
     def test_predicts_expected_positions(self, qapp):
@@ -72,6 +75,21 @@ class TestMainsTab:
         assert dlg._mains_artists == []
         dlg.deleteLater()
 
+    def test_overlay_obeys_minimum_q_floor(self, qapp):
+        dlg = _dialog(qapp)
+        dlg._mains_auto_cb.setChecked(False)
+        dlg._mains_harm_spin.setValue(1)
+        dlg._mains_min_q_spin.setValue(3.0)
+        dlg._mains_overlay_cb.setChecked(True)
+
+        assert len(dlg._mains_artists) == 4
+        gap = np.sqrt(3.0 ** 2 - 2.5 ** 2)
+        for art in dlg._mains_artists:
+            y0, y1 = art.get_ydata()
+            assert max(abs(float(y0)), abs(float(y1))) >= gap
+            assert not (float(y0) < 0.0 < float(y1))
+        dlg.deleteLater()
+
     def test_unavailable_speed_shows_note_and_no_overlay(self, qapp):
         dlg = _dialog(qapp, scan_speed=None)
         assert dlg._mains_speed_spin.value() == 0.0
@@ -80,18 +98,34 @@ class TestMainsTab:
         assert dlg._mains_artists == []            # nothing to draw without speed
         dlg.deleteLater()
 
-    def test_apply_routes_op_and_params(self, qapp):
+    def test_apply_routes_default_streak_params(self, qapp):
         captured: dict = {}
         dlg = _dialog(qapp, captured=captured)
-        dlg._mains_freq_combo.setCurrentIndex(1)   # 60 Hz
-        dlg._mains_harm_spin.setValue(2)
         dlg._on_mains_apply()
         assert captured["op"] == "mains_pickup_suppression"
         p = captured["params"]
-        assert p["mains_frequency_hz"] == 60.0
-        assert p["harmonics"] == 2
+        assert p["mains_frequency_hz"] == 50.0
+        assert p["harmonics"] is None
+        assert p["notch_shape"] == "streak"
+        assert p["min_q_nm_inv"] == pytest.approx(0.0)
         assert p["scan_speed_m_per_s"] == pytest.approx(V)
         assert p["scan_range_m"] == [pytest.approx(W_M), pytest.approx(W_M)]
+        dlg.deleteLater()
+
+    def test_manual_harmonics_route_when_auto_is_off(self, qapp):
+        captured: dict = {}
+        dlg = _dialog(qapp, captured=captured)
+        dlg._mains_auto_cb.setChecked(False)
+        dlg._mains_freq_combo.setCurrentIndex(1)   # 60 Hz
+        dlg._mains_harm_spin.setValue(2)
+        dlg._mains_min_q_spin.setValue(1.25)
+        dlg._on_mains_apply()
+
+        p = captured["params"]
+        assert p["mains_frequency_hz"] == 60.0
+        assert p["harmonics"] == 2
+        assert p["min_q_nm_inv"] == pytest.approx(1.25)
+        assert dlg._mains_harm_spin.isEnabled() is True
         dlg.deleteLater()
 
     def test_preview_and_clear(self, qapp):
@@ -104,8 +138,11 @@ class TestMainsTab:
 
     def test_controls_have_wrapped_tooltips(self, qapp):
         dlg = _dialog(qapp)
-        for w in (dlg._mains_overlay_cb, dlg._mains_freq_combo, dlg._mains_harm_spin,
-                  dlg._mains_speed_spin, dlg._mains_radius_spin, dlg._mains_apply_btn):
+        for w in (
+            dlg._mains_overlay_cb, dlg._mains_freq_combo, dlg._mains_auto_cb,
+            dlg._mains_harm_spin, dlg._mains_speed_spin, dlg._mains_radius_spin,
+            dlg._mains_min_q_spin, dlg._mains_apply_btn,
+        ):
             tt = w.toolTip()
             assert tt, "control must have a tooltip"
             assert max(len(line) for line in tt.split("\n")) <= 52

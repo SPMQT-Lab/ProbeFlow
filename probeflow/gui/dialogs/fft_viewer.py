@@ -2723,14 +2723,18 @@ class FFTViewerDialog(QDialog):
 
         harm_row = QHBoxLayout()
         harm_row.addWidget(QLabel("Harmonics:"))
+        self._mains_auto_cb = QCheckBox("Auto to Nyquist")
+        self._mains_auto_cb.setChecked(True)
+        self._mains_auto_cb.setToolTip(_tip(
+            "Mark every mains harmonic that fits before the FFT Nyquist limit."))
+        self._mains_auto_cb.toggled.connect(self._on_mains_changed)
+        harm_row.addWidget(self._mains_auto_cb)
         self._mains_harm_spin = QSpinBox()
-        self._mains_harm_spin.setRange(1, 4)
+        self._mains_harm_spin.setRange(1, 20)
         self._mains_harm_spin.setValue(3)
+        self._mains_harm_spin.setEnabled(False)
         self._mains_harm_spin.setToolTip(_tip(
-            "How many multiples of the mains frequency to mark (50, 100, "
-            "150 Hz …). Pickup often shows several harmonics; raise this if you "
-            "see a row of evenly-spaced spots. Harmonics past the FFT's Nyquist "
-            "limit are dropped automatically."))
+            "Manual number of mains harmonics to mark when Auto is off."))
         self._mains_harm_spin.valueChanged.connect(self._on_mains_changed)
         harm_row.addWidget(self._mains_harm_spin, 1)
         gl.addLayout(harm_row)
@@ -2781,11 +2785,23 @@ class FFTViewerDialog(QDialog):
         self._mains_radius_spin.setValue(3)
         self._mains_radius_spin.setSuffix(" px")
         self._mains_radius_spin.setToolTip(_tip(
-            "Size of the suppression spot placed on each mains peak. Start "
-            "small and widen only until the stripe disappears — too wide also "
-            "removes nearby real signal."))
+            "Width of each mains streak notch in FFT pixels."))
         rad_row.addWidget(self._mains_radius_spin, 1)
         sl.addLayout(rad_row)
+
+        min_q_row = QHBoxLayout()
+        min_q_row.addWidget(QLabel("Minimum |q|:"))
+        self._mains_min_q_spin = QDoubleSpinBox()
+        self._mains_min_q_spin.setRange(0.0, 1e6)
+        self._mains_min_q_spin.setDecimals(3)
+        self._mains_min_q_spin.setSingleStep(0.1)
+        self._mains_min_q_spin.setSuffix(" nm⁻¹")
+        self._mains_min_q_spin.setValue(0.0)
+        self._mains_min_q_spin.setToolTip(_tip(
+            "Protect low-q signal by leaving a central circle unchanged."))
+        self._mains_min_q_spin.valueChanged.connect(self._on_mains_changed)
+        min_q_row.addWidget(self._mains_min_q_spin, 1)
+        sl.addLayout(min_q_row)
 
         self._mains_residual_cb = QCheckBox("Show residual (removed signal)")
         self._mains_residual_cb.setToolTip(_tip(
@@ -2827,6 +2843,16 @@ class FFTViewerDialog(QDialog):
         v = float(self._mains_speed_spin.value()) * 1e-9
         return v if v > 0 else None
 
+    def _mains_harmonics(self) -> int | None:
+        auto = getattr(self, "_mains_auto_cb", None)
+        if auto is not None and auto.isChecked():
+            return None
+        return int(self._mains_harm_spin.value())
+
+    def _mains_min_q_nm_inv(self) -> float:
+        spin = getattr(self, "_mains_min_q_spin", None)
+        return max(0.0, float(spin.value())) if spin is not None else 0.0
+
     def _mains_predictions(self) -> list:
         v = self._mains_speed_m_per_s()
         if not v or self._arr is None:
@@ -2838,7 +2864,29 @@ class FFTViewerDialog(QDialog):
         f = 50.0 if self._mains_freq_combo.currentIndex() == 0 else 60.0
         return predict_mains_fft_positions(
             n_fast, width, v, mains_frequency_hz=f,
-            harmonics=int(self._mains_harm_spin.value()), fast_axis=fast)
+            harmonics=self._mains_harmonics(), fast_axis=fast)
+
+    @staticmethod
+    def _axis_segments_with_radial_floor(
+        fixed_q: float,
+        axis_values: np.ndarray,
+        min_q: float,
+    ) -> list[tuple[float, float]]:
+        if axis_values is None or len(axis_values) == 0:
+            return []
+        lo = float(np.nanmin(axis_values))
+        hi = float(np.nanmax(axis_values))
+        if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
+            return []
+        if min_q <= abs(float(fixed_q)):
+            return [(lo, hi)]
+        gap = math.sqrt(max(0.0, min_q * min_q - float(fixed_q) * float(fixed_q)))
+        segments: list[tuple[float, float]] = []
+        if lo < -gap:
+            segments.append((lo, min(hi, -gap)))
+        if hi > gap:
+            segments.append((max(lo, gap), hi))
+        return [(a, b) for a, b in segments if b > a]
 
     def _draw_mains_overlay(self) -> None:
         """Vertical (or horizontal) lines at the predicted mains q positions.
@@ -2848,22 +2896,33 @@ class FFTViewerDialog(QDialog):
         self._mains_artists = []
         if not getattr(self, "_mains_overlay_cb", None):
             return
-        if not self._mains_overlay_cb.isChecked() or self._qx is None:
+        if not self._mains_overlay_cb.isChecked() or self._qx is None or self._qy is None:
             return
+        min_q = self._mains_min_q_nm_inv()
         for p in self._mains_predictions():
             q = p["q_nm_inv"]
             for qq in (q, -q):
                 if self._mains_fast_axis == "x":
-                    art = self._ax_fft.axvline(qq, color="#f9e2af", lw=0.9,
-                                               ls="--", alpha=0.85, zorder=7)
+                    for y0, y1 in self._axis_segments_with_radial_floor(qq, self._qy, min_q):
+                        art, = self._ax_fft.plot(
+                            [qq, qq], [y0, y1], color="#f9e2af", lw=0.9,
+                            ls="--", alpha=0.85, zorder=7,
+                        )
+                        self._mains_artists.append(art)
                 else:
-                    art = self._ax_fft.axhline(qq, color="#f9e2af", lw=0.9,
-                                               ls="--", alpha=0.85, zorder=7)
-                self._mains_artists.append(art)
+                    for x0, x1 in self._axis_segments_with_radial_floor(qq, self._qx, min_q):
+                        art, = self._ax_fft.plot(
+                            [x0, x1], [qq, qq], color="#f9e2af", lw=0.9,
+                            ls="--", alpha=0.85, zorder=7,
+                        )
+                        self._mains_artists.append(art)
 
     def _on_mains_changed(self) -> None:
         """Fast path: refresh the overlay + status when a control changes."""
         self._mains_fast_axis = "x" if self._mains_fast_combo.currentIndex() == 0 else "y"
+        auto = getattr(self, "_mains_auto_cb", None)
+        if auto is not None and hasattr(self, "_mains_harm_spin"):
+            self._mains_harm_spin.setEnabled(not auto.isChecked())
         for art in self._mains_artists:
             try:
                 art.remove()
@@ -2887,8 +2946,17 @@ class FFTViewerDialog(QDialog):
                 "No mains harmonics fall within this FFT (check speed/frequency).")
             return
         src = "ROI" if self._fft_source == "active_roi" else "whole image"
-        parts = [f"{p['freq_hz']:.0f} Hz → q={p['q_nm_inv']:.2f} nm⁻¹" for p in preds]
-        self._mains_status_lbl.setText(f"FFT source: {src}.  " + " · ".join(parts))
+        if self._mains_harmonics() is None and len(preds) > 4:
+            parts = [
+                f"{len(preds)} harmonics",
+                f"{preds[0]['freq_hz']:.0f}-{preds[-1]['freq_hz']:.0f} Hz",
+                f"q={preds[0]['q_nm_inv']:.2f}-{preds[-1]['q_nm_inv']:.2f} nm⁻¹",
+            ]
+        else:
+            parts = [f"{p['freq_hz']:.0f} Hz → q={p['q_nm_inv']:.2f} nm⁻¹" for p in preds]
+        min_q = self._mains_min_q_nm_inv()
+        floor = f"  |q|≥{min_q:.2f} nm⁻¹." if min_q > 0 else ""
+        self._mains_status_lbl.setText(f"FFT source: {src}.  " + " · ".join(parts) + floor)
 
     def _mains_op_params(self) -> dict:
         params = {
@@ -2896,10 +2964,12 @@ class FFTViewerDialog(QDialog):
             "scan_range_m": [float(self._full_scan_range_m[0]),
                              float(self._full_scan_range_m[1])],
             "mains_frequency_hz": 50.0 if self._mains_freq_combo.currentIndex() == 0 else 60.0,
-            "harmonics": int(self._mains_harm_spin.value()),
+            "harmonics": self._mains_harmonics(),
             "notch_radius_px": float(self._mains_radius_spin.value()),
             "fast_axis": self._mains_fast_axis,
             "snap_window_px": 2,
+            "notch_shape": "streak",
+            "min_q_nm_inv": self._mains_min_q_nm_inv(),
             "fft_source": self._fft_source,
         }
         if self._fft_source == "active_roi" and self._roi_id is not None:
@@ -2921,7 +2991,9 @@ class FFTViewerDialog(QDialog):
                 np.asarray(arr, dtype=np.float64),
                 scan_speed_m_per_s=v, scan_range_m=tuple(self._full_scan_range_m),
                 mains_frequency_hz=p["mains_frequency_hz"], harmonics=p["harmonics"],
-                notch_radius_px=p["notch_radius_px"], fast_axis=p["fast_axis"])
+                notch_radius_px=p["notch_radius_px"], fast_axis=p["fast_axis"],
+                snap_window_px=p["snap_window_px"], notch_shape=p["notch_shape"],
+                min_q_nm_inv=p["min_q_nm_inv"])
         except Exception as exc:
             self._mains_status_lbl.setText(f"Preview failed: {exc}")
             return

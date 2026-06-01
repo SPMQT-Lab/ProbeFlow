@@ -536,10 +536,12 @@ def apply_processing_state(
                 scan_speed_m_per_s=p.get("scan_speed_m_per_s"),
                 scan_range_m=tuple(sr) if sr else (0.0, 0.0),
                 mains_frequency_hz=float(p.get("mains_frequency_hz", 50.0)),
-                harmonics=int(p.get("harmonics", 3)),
+                harmonics=None if p.get("harmonics", 3) is None else int(p.get("harmonics", 3)),
                 notch_radius_px=float(p.get("notch_radius_px", 3.0)),
                 fast_axis=str(p.get("fast_axis", "x")),
                 snap_window_px=int(p.get("snap_window_px", 2)),
+                notch_shape=str(p.get("notch_shape", "spot")),
+                min_q_nm_inv=float(p.get("min_q_nm_inv", 0.0)),
             )
         elif step.op == "inverse_fft_filter":
             # Selection geometry is stored in FFT-pixel offsets (exact for the

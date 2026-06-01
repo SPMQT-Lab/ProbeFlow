@@ -82,6 +82,10 @@ class TestPredict:
         assert preds[0]["q_nm_inv"] == pytest.approx(2.5)
         assert preds[0]["dx"] == 25 and preds[0]["dy"] == 0
 
+    def test_auto_harmonics_runs_to_fft_limit(self):
+        preds = predict_mains_fft_positions(NPX, W_M, V, mains_frequency_hz=50.0, harmonics=None)
+        assert [p["fft_index"] for p in preds] == [25, 50, 75]
+
     def test_fft_index_equals_f_times_line_time(self):
         preds = predict_mains_fft_positions(NPX, W_M, V, mains_frequency_hz=50.0, harmonics=1)
         assert preds[0]["fft_index"] == round(50.0 * T_LINE)
@@ -128,6 +132,24 @@ def _column_power(a, col, halfw=2):
     return m[:, col - halfw:col + halfw + 1].sum()
 
 
+def _fft_pixel_power(a, dx, dy, halfw=1):
+    m = np.abs(np.fft.fftshift(np.fft.fft2(a - a.mean())))
+    cy, cx = np.array(m.shape) // 2
+    y0, y1 = cy + dy - halfw, cy + dy + halfw + 1
+    x0, x1 = cx + dx - halfw, cx + dx + halfw + 1
+    return m[y0:y1, x0:x1].sum()
+
+
+def _vertical_streak_component(dx=25, dy=30):
+    yy, xx = np.mgrid[:NPX, :NPX]
+    return np.sin(2 * np.pi * dx * xx / NPX) * np.cos(2 * np.pi * dy * yy / NPX)
+
+
+def _horizontal_streak_component(dy=25, dx=30):
+    yy, xx = np.mgrid[:NPX, :NPX]
+    return np.sin(2 * np.pi * dy * yy / NPX) * np.cos(2 * np.pi * dx * xx / NPX)
+
+
 class TestSuppression:
     def test_suppresses_injected_mains_preserves_rest(self):
         img = _scan_with_mains()
@@ -164,6 +186,46 @@ class TestSuppression:
             mains_frequency_hz=50.0, harmonics=1, snap_window_px=2,
         )
         assert _column_power(out, col_true) < 0.6 * _column_power(img, col_true)
+
+    def test_streak_mode_removes_off_axis_vertical_energy(self):
+        img = _vertical_streak_component(dx=25, dy=30)
+        before = _fft_pixel_power(img, dx=25, dy=30)
+        legacy = mains_pickup_suppression(
+            img, scan_speed_m_per_s=V, scan_range_m=(W_M, W_M),
+            mains_frequency_hz=50.0, harmonics=1, snap_window_px=0,
+        )
+        out = mains_pickup_suppression(
+            img, scan_speed_m_per_s=V, scan_range_m=(W_M, W_M),
+            mains_frequency_hz=50.0, harmonics=1, snap_window_px=0,
+            notch_shape="streak", notch_radius_px=2.0,
+        )
+
+        assert _fft_pixel_power(legacy, dx=25, dy=30) > 0.85 * before
+        assert _fft_pixel_power(out, dx=25, dy=30) < 0.2 * before
+
+    def test_streak_mode_respects_radial_min_q(self):
+        img = _vertical_streak_component(dx=25, dy=0) + _vertical_streak_component(dx=25, dy=30)
+        low_before = _fft_pixel_power(img, dx=25, dy=0)
+        high_before = _fft_pixel_power(img, dx=25, dy=30)
+        out = mains_pickup_suppression(
+            img, scan_speed_m_per_s=V, scan_range_m=(W_M, W_M),
+            mains_frequency_hz=50.0, harmonics=1, snap_window_px=0,
+            notch_shape="streak", notch_radius_px=2.0, min_q_nm_inv=3.0,
+        )
+
+        assert _fft_pixel_power(out, dx=25, dy=0) > 0.85 * low_before
+        assert _fft_pixel_power(out, dx=25, dy=30) < 0.2 * high_before
+
+    def test_streak_mode_handles_vertical_fast_axis(self):
+        img = _horizontal_streak_component(dy=25, dx=30)
+        before = _fft_pixel_power(img, dx=30, dy=25)
+        out = mains_pickup_suppression(
+            img, scan_speed_m_per_s=V, scan_range_m=(W_M, W_M),
+            mains_frequency_hz=50.0, harmonics=1, snap_window_px=0,
+            notch_shape="streak", notch_radius_px=2.0, fast_axis="y",
+        )
+
+        assert _fft_pixel_power(out, dx=30, dy=25) < 0.2 * before
 
     def test_rejects_non_2d(self):
         with pytest.raises(ValueError):
