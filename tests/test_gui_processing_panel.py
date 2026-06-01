@@ -876,6 +876,25 @@ def test_viewer_line_profile_uses_display_array_and_physical_units(qapp):
     assert dlg._line_profile_panel.source.startswith("Line ROI:")
 
 
+def test_line_profile_panel_scales_to_negative_profile_range(qapp):
+    from probeflow.gui.viewer.widgets import LineProfilePanel
+
+    panel = LineProfilePanel()
+    panel.plot_profile(
+        np.arange(4, dtype=np.float64),
+        np.array([-138.6, -138.4, -138.5, -138.3], dtype=np.float64),
+        y_label="Z [nm]",
+        theme={},
+    )
+
+    ymin, ymax = panel._ax.get_ylim()
+    assert ymin < -138.6
+    assert ymax > -138.3
+    assert ymax < -130.0
+
+    panel.deleteLater()
+
+
 def test_viewer_adds_roi_statistics_to_measurement_table(qapp):
     from probeflow.core.roi import ROI, ROISet
     from probeflow.gui import ImageViewerDialog, SxmFile

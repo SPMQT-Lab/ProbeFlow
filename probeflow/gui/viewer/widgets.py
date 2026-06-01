@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from typing import Optional
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
@@ -360,7 +361,7 @@ class LineProfilePanel(QWidget):
         self._ax.set_yticks([])
         for spine in self._ax.spines.values():
             spine.set_edgecolor(sep)
-        self._fig.tight_layout(pad=0.35)
+        self._apply_layout()
         self._setup_crosshair()
         self._canvas.draw_idle()
         self._x_vals = None
@@ -390,7 +391,7 @@ class LineProfilePanel(QWidget):
         self._ax.tick_params(colors=fg, labelsize=7)
         for spine in self._ax.spines.values():
             spine.set_edgecolor(sep)
-        self._fig.tight_layout(pad=0.35)
+        self._apply_layout()
         self._setup_crosshair()
         self._canvas.draw_idle()
         self._x_vals = x_vals
@@ -410,24 +411,39 @@ class LineProfilePanel(QWidget):
         self._source_label = str(source_label or "")
         fg = (theme or {}).get("fg", "#cdd6f4")
         self._ax.set_title(self._source_label, fontsize=8, color=fg)
-        self._fig.tight_layout(pad=0.35)
+        self._apply_layout()
         self._canvas.draw_idle()
+
+    def _apply_layout(self) -> None:
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message="This figure includes Axes that are not compatible with tight_layout.*",
+                category=UserWarning,
+            )
+            self._fig.tight_layout(pad=0.35)
 
     # ── crosshair ─────────────────────────────────────────────────────────────
 
     def _setup_crosshair(self) -> None:
         """(Re-)create crosshair Line2D artists after each axes.cla() call."""
         from matplotlib.transforms import blended_transform_factory
+        xlim = self._ax.get_xlim()
+        ylim = self._ax.get_ylim()
         tv = blended_transform_factory(self._ax.transData, self._ax.transAxes)
         th = blended_transform_factory(self._ax.transAxes,  self._ax.transData)
         (self._crosshair_v,) = self._ax.plot(
             [0, 0], [0, 1], transform=tv,
             color="#585b70", lw=0.9, ls="--", visible=False,
+            scalex=False, scaley=False,
         )
         (self._crosshair_h,) = self._ax.plot(
             [0, 1], [0, 0], transform=th,
             color="#585b70", lw=0.9, ls="--", visible=False,
+            scalex=False, scaley=False,
         )
+        self._ax.set_xlim(xlim)
+        self._ax.set_ylim(ylim)
 
     def _on_profile_motion(self, event) -> None:
         if self._crosshair_v is None or self._x_vals is None:
