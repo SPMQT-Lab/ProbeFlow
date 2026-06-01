@@ -34,6 +34,7 @@ _SUPPORTED_OPS: frozenset[str] = frozenset({
     "fourier_filter",
     "fft_soft_border",
     "periodic_notch_filter",
+    "mains_pickup_suppression",
     "linear_undistort",
     "affine_lattice_correction",
     "arithmetic",

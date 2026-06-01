@@ -524,6 +524,23 @@ def apply_processing_state(
                 p.get("peaks", ()),
                 radius_px=float(p.get("radius_px", 3.0)),
             )
+        elif step.op == "mains_pickup_suppression":
+            # All inputs (speed, geometry, frequency, harmonics, notch) are in
+            # the step params so the removal is fully reproducible from provenance.
+            sr = p.get("scan_range_m")
+            if sr is None and pixel_size_x_m and pixel_size_y_m:
+                sr = (float(pixel_size_x_m) * a.shape[1],
+                      float(pixel_size_y_m) * a.shape[0])
+            a = _proc.mains_pickup_suppression(
+                a,
+                scan_speed_m_per_s=p.get("scan_speed_m_per_s"),
+                scan_range_m=tuple(sr) if sr else (0.0, 0.0),
+                mains_frequency_hz=float(p.get("mains_frequency_hz", 50.0)),
+                harmonics=int(p.get("harmonics", 3)),
+                notch_radius_px=float(p.get("notch_radius_px", 3.0)),
+                fast_axis=str(p.get("fast_axis", "x")),
+                snap_window_px=int(p.get("snap_window_px", 2)),
+            )
         elif step.op == "linear_undistort":
             a = _proc.linear_undistort(
                 a,
