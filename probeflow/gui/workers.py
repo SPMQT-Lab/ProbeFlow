@@ -43,7 +43,11 @@ def _cached_thumbnail_pixmap(key: Optional[str]) -> Optional[QPixmap]:
     if data is None:
         return None
     pm = QPixmap()
-    if pm.loadFromData(data, b"PNG"):
+    # Let Qt auto-detect the format from the PNG header. Passing an explicit
+    # positional format (b"PNG") trips PySide6's loadFromData overload
+    # resolution on some versions ("wrong argument values"), which made every
+    # cache hit fall back to a full re-render.
+    if pm.loadFromData(data):
         return pm
     return None
 

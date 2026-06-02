@@ -12,6 +12,23 @@ from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QTextEdit, QVBoxLayout, QWidget
 
 
+def _preferred_mono_family() -> str:
+    """Return a monospace family that actually exists on this platform.
+
+    macOS has no family literally named "Monospace", so requesting it makes Qt
+    spend time populating font aliases and log a warning on every use. Pick a
+    real family per platform instead.
+    """
+    if sys.platform == "win32":
+        return "Consolas"
+    if sys.platform == "darwin":
+        return "Menlo"
+    return "Monospace"
+
+
+_MONO_FAMILY = _preferred_mono_family()
+
+
 class _TerminalPane(QTextEdit):
     """Single-pane terminal edit: prompt + input + output all in one area.
 
@@ -22,7 +39,7 @@ class _TerminalPane(QTextEdit):
     command_entered = Signal(str)
     interrupt_requested = Signal()
 
-    _MONO = "Cascadia Code, Consolas, Courier New" if sys.platform == "win32" else "Monospace"
+    _MONO = _MONO_FAMILY
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -397,7 +414,7 @@ class _DevSidebar(QWidget):
             "import numpy as np; s = read_dat('scan.dat'); "
             "print(np.nanmin(s.planes[0])*1e10, 'A')\""
         )
-        examples.setFont(QFont("Courier New" if sys.platform == "win32" else "Monospace", 8))
+        examples.setFont(QFont(_MONO_FAMILY, 8))
         examples.setWordWrap(True)
         examples.setStyleSheet("color: #888;")
         lay.addWidget(examples)

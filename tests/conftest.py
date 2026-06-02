@@ -19,6 +19,7 @@ GUI_TEST_MODULES = {
     "test_roi_click_selection_canvas.py",
     "test_viewer_region_levels.py",
     "test_viewer_region_contrast_integration.py",
+    "test_thumbnail_cache_pixmap.py",
 }
 
 MIXED_QT_FIXTURE_MODULES = {
