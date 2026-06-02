@@ -20,6 +20,7 @@ to relocate it.
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import logging
 import os
@@ -30,8 +31,10 @@ from typing import Any, Optional
 
 _log = logging.getLogger(__name__)
 
-# Bump when the pickled ProbeFlowItem layout or thumbnail params change shape.
-_CACHE_VERSION = "1"
+# Bump when the on-disk envelope or thumbnail params change shape.  Dataclass
+# field changes are detected automatically via the schema tag (see _schema_tag),
+# so this only needs bumping for structural changes the tag can't catch.
+_CACHE_VERSION = "2"
 
 # Soft cap on total cache size before least-recently-used entries are evicted.
 _DEFAULT_MAX_BYTES = 512 * 1024 * 1024  # 512 MiB
@@ -82,6 +85,19 @@ def _file_key(path, mtime_ns: int, size: Optional[int]) -> str:
 
 # ── Metadata cache ────────────────────────────────────────────────────────────
 
+def _schema_tag(item: Any) -> Optional[tuple]:
+    """Return a fingerprint of a dataclass item's fields, or None.
+
+    Stored alongside the pickled item so that adding/removing/renaming a field
+    on the cached dataclass auto-invalidates stale entries — an old pickle would
+    otherwise unpickle into an instance missing the new attribute and blow up
+    only later, at access time.
+    """
+    if item is None or not dataclasses.is_dataclass(item):
+        return None
+    return tuple(f.name for f in dataclasses.fields(item))
+
+
 def get_metadata(path, mtime_ns: Optional[int], size: Optional[int]):
     """Return ``(hit, value)`` for a cached ProbeFlowItem (value may be ``None``).
 
@@ -93,19 +109,28 @@ def get_metadata(path, mtime_ns: Optional[int], size: Optional[int]):
     fp = _entry_path("meta", _digest(_file_key(path, mtime_ns, size)))
     try:
         with open(fp, "rb") as fh:
-            return (True, pickle.load(fh))
+            stored = pickle.load(fh)
     except FileNotFoundError:
         return (False, None)
-    except Exception as exc:  # corrupt entry / version skew — treat as miss
+    except Exception as exc:  # corrupt entry / unpicklable — treat as miss
         _log.debug("browse_cache: metadata read failed for %s (%s)", path, exc)
         return (False, None)
+
+    # Envelope is (schema_tag, item); validate the dataclass shape still matches.
+    if not (isinstance(stored, tuple) and len(stored) == 2):
+        return (False, None)
+    tag, item = stored
+    if tag != _schema_tag(item):
+        return (False, None)
+    return (True, item)
 
 
 def put_metadata(path, mtime_ns: Optional[int], size: Optional[int], item: Any) -> None:
     if not enabled() or mtime_ns is None:
         return
     fp = _entry_path("meta", _digest(_file_key(path, mtime_ns, size)))
-    _atomic_write(fp, pickle.dumps(item, protocol=pickle.HIGHEST_PROTOCOL))
+    payload = (_schema_tag(item), item)
+    _atomic_write(fp, pickle.dumps(payload, protocol=pickle.HIGHEST_PROTOCOL))
 
 
 # ── Thumbnail cache ─────────────────────────────────────────────────────────

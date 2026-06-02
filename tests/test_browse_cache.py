@@ -51,6 +51,28 @@ def test_thumbnail_roundtrip_and_key_invalidation(cache_dir):
     assert browse_cache.get_thumbnail(k2) is None
 
 
+def test_metadata_schema_change_invalidates(cache_dir):
+    import pickle
+
+    from probeflow.core.indexing import ProbeFlowItem
+
+    item = ProbeFlowItem(
+        path=Path("/x.sxm"),
+        display_name="x",
+        source_format="nanonis_sxm",
+        item_type="scan",
+    )
+    browse_cache.put_metadata("/x.sxm", 1, 2, item)
+    assert browse_cache.get_metadata("/x.sxm", 1, 2) == (True, item)
+
+    # Simulate a dataclass field change by overwriting the entry with a stale tag.
+    fp = browse_cache._entry_path(
+        "meta", browse_cache._digest(browse_cache._file_key("/x.sxm", 1, 2))
+    )
+    fp.write_bytes(pickle.dumps((("path", "display_name", "BOGUS_NEW_FIELD"), item)))
+    assert browse_cache.get_metadata("/x.sxm", 1, 2) == (False, None)
+
+
 def test_disabled_via_env(tmp_path, monkeypatch):
     monkeypatch.setenv("PROBEFLOW_CACHE_DIR", str(tmp_path / "cache"))
     monkeypatch.setenv("PROBEFLOW_DISABLE_BROWSE_CACHE", "1")
@@ -95,3 +117,52 @@ def test_shallow_index_second_pass_hits_cache(cache_dir, monkeypatch):
 
     assert sniffs == []
     assert idx2.files == idx1.files
+
+
+REAL_SM4 = TESTDATA / "VT260430_0004.sm4"
+
+
+@pytest.mark.skipif(not REAL_SM4.exists(), reason="VT260430_0004.sm4 fixture not present")
+def test_end_to_end_sm4_browse_pipeline(cache_dir, monkeypatch):
+    """Exercise the real browse pipeline on a real SM4 file (index + thumbnail)."""
+    from probeflow.gui.rendering import load_thumbnail_plane, render_scan_image
+    from probeflow.gui.workers import _png_bytes
+
+    folder = cache_dir.parent / "net"
+    folder.mkdir()
+    f = folder / REAL_SM4.name
+    shutil.copy(REAL_SM4, f)
+
+    # Indexing produces a usable item with shape + channels.
+    idx = index_folder_shallow(folder)
+    assert len(idx.files) == 1
+    item = idx.files[0]
+    assert item.source_format == "rhk_sm4"
+    assert item.shape and item.shape[0] > 0 and item.shape[1] > 0
+    assert item.channels
+
+    # Second pass is a pure cache hit: no sniff, identical result.
+    import probeflow.core.indexing as indexing
+
+    sniffs: list = []
+    real = indexing.sniff_file_type
+    monkeypatch.setattr(
+        indexing, "sniff_file_type", lambda p: (sniffs.append(p), real(p))[1]
+    )
+    assert index_folder_shallow(folder).files == idx.files
+    assert sniffs == []
+
+    # Thumbnail: single-plane decode renders, and the PNG round-trips the cache.
+    st = f.stat()
+    key = browse_cache.thumbnail_key(
+        f, st.st_mtime_ns, st.st_size,
+        kind="scan", cm="gray", ch="Z", cl=1.0, chh=99.0, w=56, h=56, proc=None,
+    )
+    assert browse_cache.get_thumbnail(key) is None
+    arr, names = load_thumbnail_plane(f, "Z")
+    assert arr is not None and names
+    img = render_scan_image(arr=arr, colormap="gray", clip_low=1.0, clip_high=99.0, size=(56, 56))
+    assert img is not None
+    browse_cache.put_thumbnail(key, _png_bytes(img))
+    data = browse_cache.get_thumbnail(key)
+    assert data is not None and data[:8] == b"\x89PNG\r\n\x1a\n"
