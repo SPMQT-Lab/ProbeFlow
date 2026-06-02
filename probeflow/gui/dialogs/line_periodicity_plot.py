@@ -95,15 +95,51 @@ class PeriodicityPlotDialog(QDialog):
     def _draw_profile(self, ax, fg, accent) -> None:
         diag = self._diag
         s_nm = diag.s_m * 1e9
+        z_raw = np.asarray(diag.z_raw, dtype=float)
+        z_proc = np.asarray(diag.z_processed, dtype=float)
 
-        ax.plot(s_nm, diag.z_raw, color=fg, alpha=0.4, lw=0.8, label="raw")
-        ax.plot(s_nm, diag.z_processed, color=accent, lw=1.2, label="processed")
+        # The raw trace keeps the full absolute-height offset and tilt, while the
+        # processed trace is background-removed and typically orders of magnitude
+        # smaller. Sharing one y-axis lets the raw offset dominate the autoscale
+        # and flattens the corrugation we actually want to see, so give the raw
+        # trace its own twin axis whenever it differs from the processed one.
+        show_raw_twin = (
+            z_raw.shape == z_proc.shape
+            and z_raw.size > 0
+            and not np.allclose(z_raw, z_proc, equal_nan=True)
+        )
 
-        # Mark detected peaks if available
+        handles: list = []
+        proc_line, = ax.plot(s_nm, z_proc, color=accent, lw=1.2, label="processed")
+        handles.append(proc_line)
+
+        # Mark detected peaks on the processed (analysed) trace.
         if diag.peak_positions_m is not None and len(diag.peak_positions_m) > 0:
-            interp_z = np.interp(diag.peak_positions_m, diag.s_m, diag.z_processed)
-            ax.plot(diag.peak_positions_m * 1e9, interp_z, "v", color="tab:orange",
-                    ms=5, zorder=5, label="peaks")
+            interp_z = np.interp(diag.peak_positions_m, diag.s_m, z_proc)
+            peak_line, = ax.plot(
+                diag.peak_positions_m * 1e9, interp_z, "v", color="tab:orange",
+                ms=5, zorder=5, label="peaks",
+            )
+            handles.append(peak_line)
+
+        if show_raw_twin:
+            ax2 = ax.twinx()
+            ax2.set_facecolor(self._theme.get("bg", "#ffffff"))
+            raw_line, = ax2.plot(s_nm, z_raw, color=fg, alpha=0.4, lw=0.8, label="raw")
+            handles.append(raw_line)
+            ax2.set_ylabel("z raw (data units)", fontsize=9, color=fg)
+            ax2.tick_params(axis="y", colors=fg, labelsize=8)
+            for spine in ax2.spines.values():
+                spine.set_color(fg)
+            ax.set_ylabel("z processed (data units)", fontsize=9)
+        else:
+            # Raw and processed coincide (no background removal): one trace, one
+            # axis — no need for a second scale.
+            if z_raw.size > 0:
+                raw_line, = ax.plot(
+                    s_nm, z_raw, color=fg, alpha=0.35, lw=0.8, label="raw")
+                handles.append(raw_line)
+            ax.set_ylabel("z (data units)", fontsize=9)
 
         # Period marker
         r = self._result
@@ -121,8 +157,7 @@ class PeriodicityPlotDialog(QDialog):
             ax.set_title(f"Profile  |  {r.quality}: {r.message[:60]}", fontsize=9, color=fg)
 
         ax.set_xlabel("Distance (nm)", fontsize=9)
-        ax.set_ylabel("z (data units)", fontsize=9)
-        ax.legend(fontsize=7, framealpha=0.3)
+        ax.legend(handles, [h.get_label() for h in handles], fontsize=7, framealpha=0.3)
 
     def _draw_autocorr(self, ax, fg, accent) -> None:
         diag = self._diag
