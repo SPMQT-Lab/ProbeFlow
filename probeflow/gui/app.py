@@ -438,7 +438,7 @@ class ProbeFlowWindow(QMainWindow):
         refresh_action.setToolTip(
             "Rescan the current Browse folder for new files.\n"
             "Use this when the STM has written new scans while ProbeFlow is open.")
-        refresh_action.triggered.connect(self._grid.refresh)
+        refresh_action.triggered.connect(lambda: self._grid.refresh())
         file_menu.addAction(refresh_action)
         recent_action = QAction("Open recent", self)
         recent_action.setEnabled(False)
