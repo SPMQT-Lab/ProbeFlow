@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -73,11 +73,19 @@ class MeasurementResultsTable(QWidget):
 
     _HEADERS = ["ID", "Kind", "Channel", "Main value", "Units", "Notes"]
 
+    # Emitted whenever the set of results changes; carries the new count.  A
+    # measurement was just added when ``added`` is True (used to auto-focus).
+    resultsChanged = Signal(int, bool)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._results: list[MeasurementResult] = []
         self._next_index = 1
         self._build()
+
+    def count(self) -> int:
+        """Return the number of results currently in the table."""
+        return len(self._results)
 
     def next_measurement_id(self) -> str:
         """Return the next stable measurement identifier for this table."""
@@ -89,6 +97,7 @@ class MeasurementResultsTable(QWidget):
         """Append one measurement result."""
         self._results.append(result)
         self._append_row(result)
+        self.resultsChanged.emit(len(self._results), True)
 
     def update_result(self, result: MeasurementResult) -> bool:
         """Replace an existing result (matched by measurement_id) in place.
@@ -121,6 +130,7 @@ class MeasurementResultsTable(QWidget):
         self._results.clear()
         self._table.setRowCount(0)
         self._details.clear()
+        self.resultsChanged.emit(0, False)
 
     def _build(self) -> None:
         lay = QVBoxLayout(self)
@@ -233,6 +243,7 @@ class MeasurementResultsTable(QWidget):
             if 0 <= row < len(self._results):
                 del self._results[row]
                 self._table.removeRow(row)
+        self.resultsChanged.emit(len(self._results), False)
 
     def _copy_results(self, results: list[MeasurementResult]) -> None:
         if not results:

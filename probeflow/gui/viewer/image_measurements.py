@@ -187,7 +187,7 @@ class ImageMeasurementController:
 
     def selected_roi_ids(self) -> list[str]:
         """Return selected ROI IDs from the dock, falling back to active ROI."""
-        return selected_roi_ids_for_context(self._roi_set(), self._roi_dock())
+        return selected_roi_ids_for_context(self._roi_set(), self._roi_panel())
 
     def add_active_roi_stats_measurement(self) -> None:
         roi_ctx = self._selected_or_active_area_roi_context()
@@ -1011,19 +1011,19 @@ class ImageMeasurementController:
                 roi=self._roi(roi_id),
                 source="viewer" if roi_id else "none",
             )
-        return selected_or_active_roi_context(self._roi_set(), self._roi_dock())
+        return selected_or_active_roi_context(self._roi_set(), self._roi_panel())
 
     def _selected_or_active_area_roi_context(self):
-        return selected_or_active_area_roi_context(self._roi_set(), self._roi_dock())
+        return selected_or_active_area_roi_context(self._roi_set(), self._roi_panel())
 
     def _selected_area_rois(self):
-        return selected_area_roi_contexts(self._roi_set(), self._roi_dock())
+        return selected_area_roi_contexts(self._roi_set(), self._roi_panel())
 
     def _roi_set(self):
         return getattr(self._viewer, "_image_roi_set", None)
 
-    def _roi_dock(self):
-        return getattr(self._viewer, "_roi_dock", None)
+    def _roi_panel(self):
+        return getattr(self._viewer, "_roi_panel", None)
 
     def _set_status(self, message: str) -> None:
         status = getattr(self._viewer, "_status_lbl", None)

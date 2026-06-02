@@ -1,14 +1,18 @@
 """
-ROI manager dock widget for ImageViewerDialog.
+ROI manager for ImageViewerDialog.
 
-Wraps in a QDockWidget for use inside a QMainWindow that is embedded in
-the viewer dialog.  Displays the ROIs of the active scan and provides:
+``ROIManagerPanel`` is a plain ``QWidget`` that lists the ROIs of the active
+scan and provides:
 
   • rename, delete, set active via toolbar / context menu
   • invert (single ROI) and combine (multi-ROI, mode dropdown)
   • operation context menu: background subtract (fit / exclude), FFT, histogram, line profile
 
-The dock communicates via a shared ROISet object and a callback API.
+It is embedded directly in the viewer's ROI tab.  ``ROIManagerDock`` is a thin
+``QDockWidget`` wrapper kept for backward compatibility and optional floating use;
+it simply hosts an ``ROIManagerPanel`` and forwards the public API.
+
+The panel communicates via a shared ROISet object and a callback API.
 """
 
 from __future__ import annotations
@@ -35,33 +39,18 @@ _KIND_PREFIX = {
 }
 
 
-class ROIManagerDock(QDockWidget):
-    """Dock widget that lists ROIs and provides editing actions."""
+class ROIManagerPanel(QWidget):
+    """Widget that lists ROIs and provides editing actions."""
 
     def __init__(self, roi_set_getter: Callable, callbacks: dict, parent=None):
-        super().__init__("ROI Manager", parent)
-        self.setObjectName("roiManagerDock")
+        super().__init__(parent)
+        self.setObjectName("roiManagerPanel")
         self._roi_set_getter = roi_set_getter
         self._cb = callbacks
-        self.setFeatures(
-            QDockWidget.DockWidgetClosable
-            | QDockWidget.DockWidgetMovable
-            | QDockWidget.DockWidgetFloatable
-        )
-        self.setMinimumWidth(160)
-        self.setMaximumWidth(280)
-        self.resize(200, self.height())
 
-        contents = QWidget()
-        contents.setMinimumWidth(150)
-        contents.setMaximumWidth(270)
-        lay = QVBoxLayout(contents)
+        lay = QVBoxLayout(self)
         lay.setContentsMargins(6, 6, 6, 6)
         lay.setSpacing(4)
-
-        title = QLabel("ROI")
-        title.setAlignment(Qt.AlignCenter)
-        lay.addWidget(title)
 
         self._rename_btn = QPushButton("Rename")
         self._rename_btn.setFixedHeight(22)
@@ -118,8 +107,6 @@ class ROIManagerDock(QDockWidget):
         self._list.customContextMenuRequested.connect(self._show_context_menu)
         self._list.installEventFilter(self)
         lay.addWidget(self._list)
-
-        self.setWidget(contents)
 
     # ── event filter ─────────────────────────────────────────────────────────
 
@@ -325,3 +312,30 @@ class ROIManagerDock(QDockWidget):
         )
 
         menu.exec(self._list.mapToGlobal(pos))
+
+
+class ROIManagerDock(QDockWidget):
+    """Thin dock wrapper around :class:`ROIManagerPanel` (optional floating use)."""
+
+    def __init__(self, roi_set_getter: Callable, callbacks: dict, parent=None):
+        super().__init__("ROI Manager", parent)
+        self.setObjectName("roiManagerDock")
+        self.setFeatures(
+            QDockWidget.DockWidgetClosable
+            | QDockWidget.DockWidgetMovable
+            | QDockWidget.DockWidgetFloatable
+        )
+        self.setMinimumWidth(160)
+        self.setMaximumWidth(280)
+        self.resize(200, self.height())
+
+        self.panel = ROIManagerPanel(roi_set_getter, callbacks, parent=self)
+        self.setWidget(self.panel)
+
+    # ── forwarded API ──────────────────────────────────────────────────────────
+
+    def refresh(self, roi_set) -> None:
+        self.panel.refresh(roi_set)
+
+    def selected_roi_ids(self) -> list[str]:
+        return self.panel.selected_roi_ids()

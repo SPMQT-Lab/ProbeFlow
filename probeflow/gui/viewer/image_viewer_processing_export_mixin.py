@@ -588,8 +588,7 @@ class ImageViewerProcessingExportMixin:
         # preventing queued HistogramPanel signals from firing into
         # partially-destroyed viewer widgets.
         self._threshold_dialog = dlg
-        self._track_modeless_child(dlg)
-        dlg.show()
+        self._present_modal_tool(dlg)
 
     def _on_threshold_applied(self, params: dict) -> None:
         ops = list(self._processing.get("geometric_ops") or [])

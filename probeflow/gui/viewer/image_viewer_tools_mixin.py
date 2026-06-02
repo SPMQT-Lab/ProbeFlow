@@ -150,7 +150,7 @@ class ImageViewerToolsMixin:
         roi_mask = None
         roi_ctx = selected_or_active_area_roi_context(
             self._image_roi_set,
-            getattr(self, "_roi_dock", None),
+            getattr(self, "_roi_panel", None),
         )
         if roi_ctx.roi is not None:
             roi_mask = area_roi_mask(roi_ctx.roi, arr.shape[:2])
@@ -164,8 +164,7 @@ class ImageViewerToolsMixin:
             parent=self,
         )
         self._feature_finder_dlg = dlg
-        self._track_modeless_child(dlg)
-        dlg.show()
+        self._present_modal_tool(dlg)
 
     def _on_open_image_operations(self) -> None:
         arr = self._display_arr if self._display_arr is not None else self._raw_arr
@@ -245,8 +244,7 @@ class ImageViewerToolsMixin:
             channel=ch_unit,
         )
         self._measurement_table.add_result(result)
-        self._measurement_dock.show()
-        self._measurement_dock.raise_()
+        self._show_measurements()
         self._status_lbl.setText(str(result.context.get("summary") or ""))
 
     def _on_measure_angle(self) -> None:
@@ -282,8 +280,7 @@ class ImageViewerToolsMixin:
         mid = self._measurement_table.next_measurement_id()
         self._angle_measurement_id = mid
         self._measurement_table.add_result(self._angle_measurement_result(mid, deg))
-        self._measurement_dock.show()
-        self._measurement_dock.raise_()
+        self._show_measurements()
         self._sync_viewer_menu_actions()
         self._status_lbl.setText(
             f"Angle: {deg:.2f}°  — drag handles to adjust, then 'Update angle "
@@ -310,8 +307,7 @@ class ImageViewerToolsMixin:
         if not self._measurement_table.update_result(result):
             # Row was removed from the table — re-add it.
             self._measurement_table.add_result(result)
-        self._measurement_dock.show()
-        self._measurement_dock.raise_()
+        self._show_measurements()
         self._status_lbl.setText(f"Updated angle measurement {mid}: {deg:.2f}°.")
 
     def _on_measure_roi_stats(self) -> None:
@@ -326,7 +322,7 @@ class ImageViewerToolsMixin:
             return
         roi_ctx = selected_or_active_area_roi_context(
             roi_set,
-            getattr(self, "_roi_dock", None),
+            getattr(self, "_roi_panel", None),
         )
         roi = roi_ctx.roi
         if roi is None:
@@ -353,8 +349,7 @@ class ImageViewerToolsMixin:
             roi_name=roi.name,
         )
         self._measurement_table.add_result(result)
-        self._measurement_dock.show()
-        self._measurement_dock.raise_()
+        self._show_measurements()
         self._status_lbl.setText(str(result.context.get("summary") or ""))
 
     def _on_show_image_info(self) -> None:
@@ -390,8 +385,7 @@ class ImageViewerToolsMixin:
             current_shape=current_shape,
             parent=self,
         )
-        self._track_modeless_child(dlg)
-        dlg.show()
+        self._present_modal_tool(dlg)
 
     def _source_label(self) -> str:
         """Short label for the currently loaded file, for measurement provenance."""
@@ -404,7 +398,7 @@ class ImageViewerToolsMixin:
         px_x, px_y = self._pixel_size_xy_m()
         ff_dlg = getattr(self, "_feature_finder_dlg", None)
         measure_ctrl = getattr(self, "_image_measurements", None)
-        dock = getattr(self, "_roi_dock", None)
+        dock = getattr(self, "_roi_panel", None)
         sel_ids = list(dock.selected_roi_ids()) if dock and hasattr(dock, "selected_roi_ids") else []
         return collect_point_source_records(
             pixel_size_x_m=px_x,
@@ -462,9 +456,8 @@ class ImageViewerToolsMixin:
             theme=self._t,
             parent=self,
         )
-        self._track_modeless_child(dlg)
-        dlg.show()
-        self._status_lbl.setText("FFT viewer opened.")
+        self._present_modal_tool(dlg)
+        self._status_lbl.setText("Pair correlation opened.")
 
     def _on_open_feature_lattice(self) -> None:
         item = getattr(self, "_lattice_grid_item", None)
@@ -505,8 +498,7 @@ class ImageViewerToolsMixin:
             theme=self._t,
             parent=self,
         )
-        self._track_modeless_child(dlg)
-        dlg.show()
+        self._present_modal_tool(dlg)
 
     def _on_open_fft_viewer(self):
         arr = self._display_arr if self._display_arr is not None else self._raw_arr

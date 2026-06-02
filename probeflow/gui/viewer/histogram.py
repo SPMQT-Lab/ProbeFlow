@@ -95,7 +95,7 @@ class HistogramPanel(QWidget):
             rl.setContentsMargins(0, 0, 0, 0)
             lbl = QLabel(label)
             lbl.setFont(QFont("Helvetica", 8))
-            lbl.setFixedWidth(58)
+            lbl.setFixedWidth(74)
             sl = QSlider(Qt.Horizontal)
             sl.setRange(0, 1000)
             val_lbl = QLabel("—")

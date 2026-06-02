@@ -50,8 +50,8 @@ class ImageViewerRoiMixin:
         """Load ROIs from <stem>.rois.json sidecar if it exists, else create empty set."""
         self._image_roi_set, _err = load_roi_set(entry.path)
         self._zoom_lbl.set_roi_set(self._image_roi_set)
-        if hasattr(self, "_roi_dock"):
-            self._roi_dock.refresh(self._image_roi_set)
+        if hasattr(self, "_roi_panel"):
+            self._roi_panel.refresh(self._image_roi_set)
         self._sync_viewer_menu_actions()
 
     def _save_image_roi_set(self) -> None:
@@ -66,8 +66,8 @@ class ImageViewerRoiMixin:
     def _on_image_roi_set_changed(self) -> None:
         self._zoom_lbl.set_roi_set(self._image_roi_set)
         self._save_image_roi_set()
-        if hasattr(self, "_roi_dock"):
-            self._roi_dock.refresh(self._image_roi_set)
+        if hasattr(self, "_roi_panel"):
+            self._roi_panel.refresh(self._image_roi_set)
         self._sync_line_profile_visibility()
         self._sync_viewer_menu_actions()
         # In per-ROI contrast scope the sliders follow the active area ROI, so
@@ -183,8 +183,7 @@ class ImageViewerRoiMixin:
         else:
             dock_result = self._to_dock_result(result, mid)
         self._measurement_table.add_result(dock_result)
-        self._measurement_dock.show()
-        self._measurement_dock.raise_()
+        self._show_measurements()
 
     def _invert_image_roi(self, roi_id: str) -> None:
         roi = self._image_roi_set.get(roi_id) if self._image_roi_set else None
@@ -440,7 +439,7 @@ class ImageViewerRoiMixin:
 
     def _selected_or_active_image_roi_id(self) -> "str | None":
         return selected_or_active_roi_id(
-            getattr(self, "_image_roi_set", None), getattr(self, "_roi_dock", None),
+            getattr(self, "_image_roi_set", None), getattr(self, "_roi_panel", None),
         )
 
     def _rename_active_image_roi(self) -> None:

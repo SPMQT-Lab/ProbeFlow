@@ -217,7 +217,7 @@ class ImageViewerToolbarMixin:
         """Apply ROI-scoped filter mask from the active area ROI."""
         roi_ctx = selected_or_active_area_roi_context(
             self._image_roi_set,
-            getattr(self, "_roi_dock", None),
+            getattr(self, "_roi_panel", None),
         )
         if roi_ctx.roi is None:
             if hasattr(self, "_status_lbl"):

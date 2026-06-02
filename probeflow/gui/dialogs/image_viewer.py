@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QMainWindow, QMenu, QPushButton,
     QScrollArea, QSizePolicy, QSplitter, QStackedWidget,
     QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView,
-    QVBoxLayout, QWidget,
+    QToolButton, QVBoxLayout, QWidget,
 )
 
 from probeflow.gui.config import (
@@ -76,7 +76,8 @@ from probeflow.gui.viewer import (
 )
 from probeflow.gui.widgets import ImageMeasurementsPanel
 from probeflow.gui.image_canvas import ImageCanvas
-from probeflow.gui.roi_manager_dock import ROIManagerDock
+from probeflow.gui.roi_manager_dock import ROIManagerPanel
+from probeflow.gui.viewer.floating_panel import FloatingPanelManager, ModalOverlay
 from probeflow.processing.gui_adapter import processing_state_from_gui
 from probeflow.processing.state import (
     apply_processing_state_with_calibration,
@@ -165,6 +166,9 @@ class ImageViewerDialog(
     # Emitted by "→ Feature Counting" / "→ TV Denoising" buttons so the
     # parent can act immediately without the viewer closing.
     immediate_action_requested = Signal(str)   # "features" | "tv"
+
+    # Width of the collapsed-sidebar rail (px).
+    _SIDEBAR_RAIL_W = 46
 
     def __init__(self, entry: SxmFile, entries: list[SxmFile],
                  colormap: str, t: dict, parent=None,
@@ -260,16 +264,20 @@ class ImageViewerDialog(
         root.setSpacing(6)
 
         # title
+        # Compact header: file name and measurement conditions share one row.
+        header_row = QHBoxLayout()
+        header_row.setContentsMargins(2, 0, 2, 0)
+        header_row.setSpacing(10)
         self._title_lbl = QLabel()
         self._title_lbl.setFont(QFont("Helvetica", 12, QFont.Bold))
-        self._title_lbl.setAlignment(Qt.AlignCenter)
-        root.addWidget(self._title_lbl)
-
+        header_row.addWidget(self._title_lbl)
         self._conditions_lbl = QLabel()
         self._conditions_lbl.setFont(QFont("Helvetica", 9))
-        self._conditions_lbl.setAlignment(Qt.AlignCenter)
         self._conditions_lbl.setStyleSheet("color: palette(mid);")
-        root.addWidget(self._conditions_lbl)
+        self._conditions_lbl.setAlignment(Qt.AlignVCenter)
+        header_row.addWidget(self._conditions_lbl)
+        header_row.addStretch(1)
+        root.addLayout(header_row)
 
         # main splitter: image | right panel
         self._viewer_splitter = QSplitter(Qt.Horizontal)
@@ -279,6 +287,8 @@ class ImageViewerDialog(
 
         # ── Left: scrollable zoom image ────────────────────────────────────────
         left = QWidget()
+        # Floating tool panels hover over this canvas column.
+        self._canvas_host = left
         left.setMinimumWidth(600)
         left_lay = QVBoxLayout(left)
         left_lay.setContentsMargins(0, 0, 0, 0)
@@ -402,21 +412,34 @@ class ImageViewerDialog(
 
         # ── Right: task-focused sidebar ───────────────────────────────────────
         right = QWidget()
-        right.setMinimumWidth(380)
-        right.setMaximumWidth(460)
+        right.setMinimumWidth(340)
+        self._sidebar_panel = right
         right_lay = QVBoxLayout(right)
         right_lay.setContentsMargins(8, 4, 8, 4)
         right_lay.setSpacing(6)
 
         self._sidebar_tabs = QTabWidget()
         self._sidebar_tabs.setDocumentMode(True)
-        self._sidebar_tabs.setMinimumWidth(360)
+        self._sidebar_tabs.setMinimumWidth(320)
         self._sidebar_tabs.setElideMode(Qt.ElideNone)
         self._sidebar_tabs.tabBar().setUsesScrollButtons(False)
         right_lay.addWidget(self._sidebar_tabs, 1)
         self._sidebar_tab_indices: dict[str, int] = {}
+        # (key, label, tooltip) in tab order — also drives the collapsed rail.
+        self._sidebar_tab_meta: list[tuple[str, str, str]] = []
 
-        def _sidebar_tab(key: str, label: str) -> tuple[QWidget, QVBoxLayout]:
+        # Collapse chevron lives in the tab bar's corner.
+        self._sidebar_collapse_btn = QToolButton()
+        self._sidebar_collapse_btn.setObjectName("sidebarCollapseBtn")
+        self._sidebar_collapse_btn.setText("›")
+        self._sidebar_collapse_btn.setFixedSize(22, 22)
+        self._sidebar_collapse_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self._sidebar_collapse_btn.setToolTip("Collapse the panel to widen the image")
+        self._sidebar_collapse_btn.setAutoRaise(True)
+        self._sidebar_collapse_btn.clicked.connect(lambda: self._set_sidebar_collapsed(True))
+        self._sidebar_tabs.setCornerWidget(self._sidebar_collapse_btn, Qt.TopRightCorner)
+
+        def _sidebar_tab(key: str, label: str, tip: str = "") -> tuple[QWidget, QVBoxLayout]:
             scroll = QScrollArea()
             scroll.setWidgetResizable(True)
             scroll.setFrameShape(QFrame.NoFrame)
@@ -427,14 +450,32 @@ class ImageViewerDialog(
             lay.setSpacing(6)
             scroll.setWidget(body)
             idx = self._sidebar_tabs.addTab(scroll, label)
+            if tip:
+                self._sidebar_tabs.setTabToolTip(idx, tip)
             self._sidebar_tab_indices[key] = idx
+            self._sidebar_tab_meta.append((key, label, tip))
             return body, lay
 
-        _display_tab, display_lay = _sidebar_tab("display", "View")
-        _processing_tab, processing_lay = _sidebar_tab("processing", "Process")
-        _roi_tab, roi_lay = _sidebar_tab("roi", "ROI")
-        _measurements_tab, measurements_lay = _sidebar_tab("measurements", "Measure")
-        _export_tab, export_lay = _sidebar_tab("export", "Export")
+        _display_tab, display_lay = _sidebar_tab(
+            "display", "View",
+            "Colormap, contrast, histogram and ROI overlay visibility.",
+        )
+        _processing_tab, processing_lay = _sidebar_tab(
+            "processing", "Process",
+            "Line corrections, background subtraction, filters and FFT tools.",
+        )
+        _roi_tab, roi_lay = _sidebar_tab(
+            "roi", "ROI",
+            "Create, edit and combine regions of interest.",
+        )
+        _measurements_tab, measurements_lay = _sidebar_tab(
+            "measurements", "Measure",
+            "Distances, angles, ROI statistics, features and results.",
+        )
+        _export_tab, export_lay = _sidebar_tab(
+            "export", "Export",
+            "Save images (PNG/PDF/SXM/GWY), provenance and hand-off to tools.",
+        )
 
         def _collapsible_section(
             target_lay: QVBoxLayout,
@@ -533,16 +574,14 @@ class ImageViewerDialog(
             self._on_align_rows_changed)
         processing_lay.addWidget(self._processing_panel)
 
-        processing_lay.addWidget(_sep())
-
-        _, self._history_widget, history_lay = _collapsible_section(
-            processing_lay, "Processing history", expanded=False
-        )
-        self._history_text = QLabel("")
+        # Processing history is shown via Image → Info; keep the label alive (hidden,
+        # owned by the dialog) so its existing updaters stay safe without cluttering
+        # the Process tab.
+        self._history_text = QLabel("", self)
         self._history_text.setFont(QFont("Helvetica", 8))
         self._history_text.setWordWrap(True)
         self._history_text.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        history_lay.addWidget(self._history_text)
+        self._history_text.hide()
 
         processing_lay.addWidget(_sep())
 
@@ -744,10 +783,27 @@ class ImageViewerDialog(
         send_tv_btn.clicked.connect(self._on_send_to_tv)
         send_lay.addWidget(send_tv_btn)
 
-        # ── Advanced tools (collapsible) ──────────────────────────────────────
-        _, self._advanced_widget, advanced_lay = _collapsible_section(
-            processing_lay, "Advanced tools", expanded=False
+        # ── Advanced tools (opened as a dismissible overlay) ──────────────────
+        # Built as a standalone, viewer-owned widget; an "Advanced…" button in the
+        # Process tab presents it over the canvas so the tab stays focused on the
+        # core flatten/background/filter workflow.
+        advanced_btn = QPushButton("Advanced…")
+        advanced_btn.setToolTip(
+            "Periodic / radial FFT filters and linear drift undistortion."
         )
+        advanced_btn.clicked.connect(self._open_advanced_tools)
+        processing_lay.addWidget(advanced_btn)
+
+        self._advanced_widget = QWidget(self)
+        self._advanced_widget.setObjectName("advancedToolsPanel")
+        self._advanced_widget.setMinimumWidth(320)
+        advanced_lay = QVBoxLayout(self._advanced_widget)
+        advanced_lay.setContentsMargins(8, 8, 8, 8)
+        advanced_lay.setSpacing(6)
+        self._advanced_widget.hide()
+        _adv_title = QLabel("Advanced tools")
+        _adv_title.setFont(QFont("Helvetica", 10, QFont.Bold))
+        advanced_lay.addWidget(_adv_title)
 
         periodic_btn = QPushButton("Periodic FFT filter…")
         periodic_btn.setFont(QFont("Helvetica", 8))
@@ -847,120 +903,23 @@ class ImageViewerDialog(
         self._line_profile_panel.export_csv_clicked.connect(self._on_export_line_profile_csv)
         self._line_profile_panel.width_changed.connect(self._on_line_profile_width_changed)
 
-        roi_empty_lbl = QLabel(
-            "ROI tools live in the ROI Manager dock. Choose a drawing tool above "
-            "to create an ROI, or reopen the manager here. Click an ROI to select "
+        roi_hint_lbl = QLabel(
+            "Choose a drawing tool above to create an ROI. Click an ROI to select "
             "it, then drag the active ROI (or its handles) to edit. For a split "
             "scan, set the View tab's “Contrast scope” to “Active ROI” to give "
             "each region its own brightness/contrast, and use “Hide ROI "
             "overlays” there to inspect the result."
         )
-        roi_empty_lbl.setFont(QFont("Helvetica", 8))
-        roi_empty_lbl.setWordWrap(True)
-        roi_lay.addWidget(roi_empty_lbl)
-        show_roi_btn = QPushButton("Show ROI Manager")
-        show_roi_btn.setDefault(False)
-        show_roi_btn.setAutoDefault(False)
-        show_roi_btn.clicked.connect(self._show_roi_manager)
-        roi_lay.addWidget(show_roi_btn)
-        roi_lay.addStretch(1)
+        roi_hint_lbl.setFont(QFont("Helvetica", 8))
+        roi_hint_lbl.setWordWrap(True)
+        roi_hint_lbl.setStyleSheet("color: palette(mid);")
+        roi_lay.addWidget(roi_hint_lbl)
+        # The ROI manager panel itself is added to ``roi_lay`` after it is
+        # constructed below (it needs the ROI-set getter and callbacks).
 
-        def _sec_lbl(text: str) -> QLabel:
-            lbl = QLabel(text)
-            lbl.setFont(QFont("Helvetica", 8))
-            lbl.setStyleSheet("font-weight: 600; color: palette(mid);")
-            return lbl
-
-        measurements_lay.addWidget(_sec_lbl("Quick measurements"))
-        distance_btn = QPushButton("Distance (active line ROI)")
-        distance_btn.setFont(QFont("Helvetica", 8))
-        distance_btn.setFixedHeight(26)
-        distance_btn.setToolTip(
-            "Measure the length and angle of the active line ROI."
-        )
-        distance_btn.clicked.connect(self._on_measure_distance)
-        measurements_lay.addWidget(distance_btn)
-
-        angle_btn = QPushButton("Angle (two selected line ROIs)")
-        angle_btn.setFont(QFont("Helvetica", 8))
-        angle_btn.setFixedHeight(26)
-        angle_btn.setToolTip(
-            "Measure the acute angle between two selected line ROIs."
-        )
-        angle_btn.clicked.connect(self._on_measure_angle)
-        measurements_lay.addWidget(angle_btn)
-
-        update_angle_btn = QPushButton("Update angle measurement")
-        update_angle_btn.setFont(QFont("Helvetica", 8))
-        update_angle_btn.setFixedHeight(26)
-        update_angle_btn.setToolTip(
-            "After dragging the angle handles, rewrite the current angle "
-            "measurement with the adjusted value."
-        )
-        update_angle_btn.clicked.connect(self._on_update_angle_measurement)
-        measurements_lay.addWidget(update_angle_btn)
-
-        measurements_lay.addWidget(_sep())
-        measurements_lay.addWidget(_sec_lbl("ROI measurements"))
-        roi_stats_btn = QPushButton("ROI statistics (active area ROI)")
-        roi_stats_btn.setFont(QFont("Helvetica", 8))
-        roi_stats_btn.setFixedHeight(26)
-        roi_stats_btn.setToolTip(
-            "Compute area, mean, RMS roughness, and range for the active area ROI."
-        )
-        roi_stats_btn.clicked.connect(self._on_measure_roi_stats)
-        measurements_lay.addWidget(roi_stats_btn)
-
-        measurements_lay.addWidget(_sep())
-        measurements_lay.addWidget(_sec_lbl("Feature & Lattice"))
-        lattice_btn = QPushButton("Add lattice grid…")
-        lattice_btn.setFont(QFont("Helvetica", 8))
-        lattice_btn.setFixedHeight(26)
-        lattice_btn.setToolTip(
-            "Create an interactive lattice/grid overlay on the current image "
-            "for atomic-lattice measurement."
-        )
-        lattice_btn.clicked.connect(self._on_open_lattice_grid)
-        measurements_lay.addWidget(lattice_btn)
-
-        feature_finder_btn = QPushButton("Feature finder…")
-        feature_finder_btn.setFont(QFont("Helvetica", 8))
-        feature_finder_btn.setFixedHeight(26)
-        feature_finder_btn.setToolTip(
-            "Find local maxima or minima, set thresholds, export coordinates, "
-            "and generate a feature image for selective FFT analysis."
-        )
-        feature_finder_btn.clicked.connect(self._on_open_feature_finder)
-        measurements_lay.addWidget(feature_finder_btn)
-
-        measurements_lay.addWidget(_sep())
-        measurements_lay.addWidget(_sec_lbl("Feature measurements"))
-        pair_corr_btn = QPushButton("Pair correlation…")
-        pair_corr_btn.setFont(QFont("Helvetica", 8))
-        pair_corr_btn.setFixedHeight(26)
-        pair_corr_btn.setToolTip(
-            "Compute g(r) radial pair-correlation from feature points or point ROIs."
-        )
-        pair_corr_btn.clicked.connect(self._on_open_pair_correlation)
-        measurements_lay.addWidget(pair_corr_btn)
-
-        feat_lat_btn = QPushButton("Feature-to-lattice…")
-        feat_lat_btn.setFont(QFont("Helvetica", 8))
-        feat_lat_btn.setFixedHeight(26)
-        feat_lat_btn.setToolTip(
-            "Compare detected features to the active lattice grid: "
-            "matching, off-lattice count, RMS displacement and occupancy."
-        )
-        feat_lat_btn.clicked.connect(self._on_open_feature_lattice)
-        measurements_lay.addWidget(feat_lat_btn)
-
-        measurements_lay.addWidget(_sep())
-
-        results_hint = QLabel("Results appear in the Measurements panel →")
-        results_hint.setFont(QFont("Helvetica", 8))
-        results_hint.setWordWrap(True)
-        results_hint.setStyleSheet("color: palette(mid);")
-        measurements_lay.addWidget(results_hint)
+        # The Measure tab is driven entirely by the ImageMeasurementsPanel's own
+        # tool menu (added to ``measurements_lay`` after it is constructed below);
+        # its tool buttons emit signals the viewer connects to its handlers.
 
         self._status_lbl = QLabel("")
         self._status_lbl.setFont(QFont("Helvetica", 8))
@@ -974,13 +933,67 @@ class ImageViewerDialog(
         processing_lay.addStretch(1)
         export_lay.addStretch(1)
 
-        splitter.addWidget(right)
+        # Collapsed sidebar rail: a thin strip of tab buttons shown when the
+        # full panel is hidden, so the image can take the full width.
+        self._sidebar_rail = QWidget()
+        self._sidebar_rail.setObjectName("sidebarRail")
+        self._sidebar_rail.setFixedWidth(self._SIDEBAR_RAIL_W)
+        rail_lay = QVBoxLayout(self._sidebar_rail)
+        rail_lay.setContentsMargins(3, 4, 3, 4)
+        rail_lay.setSpacing(4)
+
+        expand_btn = QToolButton()
+        expand_btn.setObjectName("sidebarExpandBtn")
+        expand_btn.setText("‹")
+        expand_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        expand_btn.setToolTip("Expand the panel")
+        expand_btn.setAutoRaise(True)
+        expand_btn.clicked.connect(lambda: self._set_sidebar_collapsed(False))
+        rail_lay.addWidget(expand_btn)
+
+        rail_sep = QFrame()
+        rail_sep.setFrameShape(QFrame.HLine)
+        rail_sep.setFrameShadow(QFrame.Sunken)
+        rail_lay.addWidget(rail_sep)
+
+        _rail_abbrev = {
+            "View": "View", "Process": "Proc", "ROI": "ROI",
+            "Measure": "Meas", "Export": "Exp",
+        }
+        for _key, _label, _tip in self._sidebar_tab_meta:
+            rail_btn = QToolButton()
+            rail_btn.setObjectName("sidebarRailBtn")
+            rail_btn.setText(_rail_abbrev.get(_label, _label[:4]))
+            rail_btn.setFont(QFont("Helvetica", 8))
+            rail_btn.setToolTip(_tip or _label)
+            rail_btn.setCursor(QCursor(Qt.PointingHandCursor))
+            rail_btn.setAutoRaise(True)
+            rail_btn.setFixedWidth(self._SIDEBAR_RAIL_W - 6)
+            rail_btn.clicked.connect(
+                lambda _c=False, k=_key: self._open_sidebar_from_rail(k)
+            )
+            rail_lay.addWidget(rail_btn)
+        rail_lay.addStretch(1)
+        self._sidebar_rail.setVisible(False)
+
+        sidebar_wrap = QWidget()
+        wrap_lay = QHBoxLayout(sidebar_wrap)
+        wrap_lay.setContentsMargins(0, 0, 0, 0)
+        wrap_lay.setSpacing(0)
+        wrap_lay.addWidget(self._sidebar_rail)
+        wrap_lay.addWidget(right, 1)
+        self._sidebar_wrap = sidebar_wrap
+        self._sidebar_collapsed = False
+
+        splitter.addWidget(sidebar_wrap)
         splitter.setSizes([900, 400])
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 0)
         splitter.setCollapsible(1, False)
 
-        # Embed splitter in a QMainWindow so we can host the ROI dock widget
+        # Embed the splitter in a QMainWindow so transient tool docks (e.g. the
+        # lattice grid) can still be hosted.  The ROI and Measurements panels are
+        # no longer docks — they live directly in the ROI / Measure sidebar tabs.
         self._viewer_main = QMainWindow()
         self._viewer_main.setWindowFlags(Qt.Widget)
         self._viewer_main.setCentralWidget(splitter)
@@ -989,18 +1002,9 @@ class ImageViewerDialog(
         self._image_roi_set = None
         self._copy_roi_buffer = None  # ROI object held for Ctrl+V paste
 
-        self._measurement_panel = ImageMeasurementsPanel(parent=self._viewer_main)
+        self._measurement_panel = ImageMeasurementsPanel(parent=self)
         self._measurement_table = self._measurement_panel.table
         self._feature_detection_panel = self._measurement_panel.feature_panel
-        self._measurement_dock = QDockWidget("Measurements", self._viewer_main)
-        self._measurement_dock.setObjectName("imageViewerMeasurementsDock")
-        self._measurement_dock.setWidget(self._measurement_panel)
-        self._measurement_dock.setFeatures(
-            QDockWidget.DockWidgetClosable
-            | QDockWidget.DockWidgetMovable
-            | QDockWidget.DockWidgetFloatable
-        )
-        self._measurement_dock.setMinimumWidth(240)
         self._image_measurements = ImageMeasurementController(
             self,
             self._measurement_table,
@@ -1017,6 +1021,21 @@ class ImageViewerDialog(
         self._measurement_panel.lineProfileRequested.connect(
             self._image_measurements.add_current_line_profile_measurement
         )
+        # One-shot + dialog tools the panel's menu now hosts: connect each to the
+        # viewer's existing handler (formerly the Measure-tab action buttons).
+        self._measurement_panel.distanceRequested.connect(self._on_measure_distance)
+        self._measurement_panel.angleRequested.connect(self._on_measure_angle)
+        self._measurement_panel.updateAngleRequested.connect(
+            self._on_update_angle_measurement
+        )
+        self._measurement_panel.featureFinderRequested.connect(self._on_open_feature_finder)
+        self._measurement_panel.pairCorrelationRequested.connect(
+            self._on_open_pair_correlation
+        )
+        self._measurement_panel.featureToLatticeRequested.connect(
+            self._on_open_feature_lattice
+        )
+        self._measurement_panel.latticeGridRequested.connect(self._on_open_lattice_grid)
         self._line_profile_panel.add_delta_measurement_clicked.connect(
             self._image_measurements.add_current_line_profile_delta_measurement
         )
@@ -1024,7 +1043,7 @@ class ImageViewerDialog(
             self._image_measurements.add_current_line_profile_measurement
         )
 
-        self._roi_dock = ROIManagerDock(
+        self._roi_panel = ROIManagerPanel(
             roi_set_getter=lambda: self._image_roi_set,
             callbacks={
                 "on_roi_set_changed":    self._on_image_roi_set_changed,
@@ -1039,20 +1058,18 @@ class ImageViewerDialog(
                 "on_roi_selection_changed": self._sync_viewer_menu_actions,
                 "get_image_shape":       self._current_array_shape,
             },
-            parent=self._viewer_main,
+            parent=self,
         )
-        self._roi_dock.setObjectName("imageViewerRoiManagerDock")
+        self._roi_panel.setObjectName("imageViewerRoiManagerPanel")
 
-        # ROI and measurements are powerful but task-specific, so they start
-        # hidden and remain reachable from the sidebar and top menus.
-        self._viewer_main.addDockWidget(Qt.RightDockWidgetArea, self._roi_dock)
-        self._viewer_main.addDockWidget(Qt.RightDockWidgetArea, self._measurement_dock)
-        self._viewer_main.splitDockWidget(self._roi_dock, self._measurement_dock, Qt.Vertical)
-        self._viewer_main.resizeDocks(
-            [self._roi_dock, self._measurement_dock], [220, 220], Qt.Horizontal
-        )
-        self._roi_dock.hide()
-        self._measurement_dock.hide()
+        # ROI manager and measurements now live in their sidebar tabs (built
+        # above) rather than in separate floating docks.
+        roi_lay.addWidget(self._roi_panel, 1)
+        measurements_lay.addWidget(self._measurement_panel, 1)
+
+        # Manager for floating, dismissible tool panels over the canvas.
+        self._floating_panels = FloatingPanelManager(self._canvas_host)
+
         self._build_viewer_menu_bar()
         root.addWidget(self._viewer_main, 1)
 
@@ -1190,13 +1207,6 @@ class ImageViewerDialog(
         )
         view_menu.addAction(export_panel_action)
         view_menu.addSeparator()
-        for label, dock in (
-            ("dock.roi_manager", self._roi_dock),
-            ("dock.measurements", self._measurement_dock),
-        ):
-            action = dock.toggleViewAction()
-            self._configure_viewer_action(action, label)
-            view_menu.addAction(action)
         dock_panels_action = self._viewer_action(
             "view.dock_panels",
             self._dock_panels_into_window,
@@ -1616,6 +1626,9 @@ class ImageViewerDialog(
         if zoom_mode in {"fit", "one_to_one", "manual"} and hasattr(self, "_zoom_lbl"):
             self._zoom_lbl._view_scale_mode = zoom_mode
 
+        if layout.get("sidebar_collapsed") and hasattr(self, "_sidebar_panel"):
+            self._set_sidebar_collapsed(True)
+
         self._show_maximized_on_start = bool(layout.get("was_maximized"))
         if self._show_maximized_on_start:
             self.setWindowState(self.windowState() | Qt.WindowMaximized)
@@ -1629,7 +1642,15 @@ class ImageViewerDialog(
         if hasattr(self, "_viewer_main"):
             layout["state"] = qbytearray_to_b64(self._viewer_main.saveState())
         layout["was_maximized"] = self.isMaximized()
-        layout["splitter_sizes"] = self._viewer_splitter.sizes()
+        # When collapsed the live splitter sizes are not the expanded layout, so
+        # persist the remembered expanded sizes instead.
+        if getattr(self, "_sidebar_collapsed", False):
+            layout["splitter_sizes"] = getattr(
+                self, "_expanded_sidebar_sizes", self._viewer_splitter.sizes()
+            )
+        else:
+            layout["splitter_sizes"] = self._viewer_splitter.sizes()
+        layout["sidebar_collapsed"] = bool(getattr(self, "_sidebar_collapsed", False))
         layout["zoom_mode"] = getattr(getattr(self, "_zoom_lbl", None), "_view_scale_mode", "fit")
 
         if hasattr(self, "_sidebar_tabs") and hasattr(self, "_sidebar_tab_indices"):
@@ -1640,32 +1661,26 @@ class ImageViewerDialog(
                     break
 
     def _dock_panels_into_window(self) -> None:
-        """Re-dock any floating ROI / Measurements panels back into the window.
+        """Re-dock any floating tool docks (e.g. the lattice grid) back in place.
 
-        A QDockWidget that has been dragged out to float has no obvious way back
-        for most users; this pulls every floating panel back into the right dock
-        area and makes sure it is visible.
+        A QDockWidget dragged out to float has no obvious way back for most
+        users; this pulls every floating tool dock back into the right dock area.
+        The ROI and Measurements panels are no longer docks (they live in the
+        sidebar tabs), so they are unaffected.
         """
-        docks = [
-            d for d in (
-                getattr(self, "_roi_dock", None),
-                getattr(self, "_measurement_dock", None),
-            )
-            if d is not None
-        ]
+        if not hasattr(self, "_viewer_main"):
+            return
         restored = 0
-        for dock in docks:
+        for dock in self._viewer_main.findChildren(QDockWidget):
             if dock.isFloating():
                 self._viewer_main.addDockWidget(Qt.RightDockWidgetArea, dock)
                 dock.setFloating(False)
                 restored += 1
-            if not dock.isVisible():
-                dock.show()
         if hasattr(self, "_status_lbl"):
             if restored:
-                self._status_lbl.setText("Panels docked back into the window.")
+                self._status_lbl.setText("Tool panels docked back into the window.")
             else:
-                self._status_lbl.setText("Panels are already docked.")
+                self._status_lbl.setText("No floating tool panels to dock.")
 
     def _reset_viewer_window_layout(self) -> None:
         cfg = load_config()
@@ -1674,6 +1689,7 @@ class ImageViewerDialog(
         save_config(cfg)
         apply_screen_fraction_geometry(self, 0.90)
         self._dock_panels_into_window()
+        self._set_sidebar_collapsed(False)
         self._viewer_splitter.setSizes([900, 400])
         self._sidebar_tabs.setCurrentIndex(self._sidebar_tab_indices.get("display", 0))
         self._zoom_lbl._view_scale_mode = "fit"
@@ -1707,23 +1723,67 @@ class ImageViewerDialog(
     def _show_sidebar_tab(self, key: str) -> None:
         if not hasattr(self, "_sidebar_tabs"):
             return
+        # A request to show a tab implies the panel should be visible.
+        if getattr(self, "_sidebar_collapsed", False):
+            self._set_sidebar_collapsed(False)
         idx = self._sidebar_tab_indices.get(key)
         if idx is not None:
             self._sidebar_tabs.setCurrentIndex(idx)
 
+    def _set_sidebar_collapsed(self, collapsed: bool) -> None:
+        """Collapse the task sidebar to a thin rail (image takes full width)."""
+        if not hasattr(self, "_sidebar_panel"):
+            return
+        collapsed = bool(collapsed)
+        if collapsed:
+            sizes = self._viewer_splitter.sizes()
+            total = sum(sizes)
+            if len(sizes) == 2 and sizes[1] > 0:
+                self._expanded_sidebar_sizes = sizes
+            self._sidebar_panel.setVisible(False)
+            self._sidebar_rail.setVisible(True)
+            # Shrink the sidebar pane to the rail width so the image reclaims the
+            # freed space (otherwise the splitter leaves an empty band).
+            rail_w = self._SIDEBAR_RAIL_W
+            if total > rail_w:
+                self._viewer_splitter.setSizes([total - rail_w, rail_w])
+        else:
+            self._sidebar_rail.setVisible(False)
+            self._sidebar_panel.setVisible(True)
+            sizes = getattr(self, "_expanded_sidebar_sizes", None)
+            if sizes:
+                self._viewer_splitter.setSizes(sizes)
+        self._sidebar_collapsed = collapsed
+
+    def _toggle_sidebar_collapsed(self) -> None:
+        self._set_sidebar_collapsed(not getattr(self, "_sidebar_collapsed", False))
+
+    def _open_sidebar_from_rail(self, key: str) -> None:
+        self._set_sidebar_collapsed(False)
+        self._show_sidebar_tab(key)
+
+    def _present_modal_tool(self, dialog, *, persistent: bool = False) -> "ModalOverlay":
+        """Show *dialog* as a dimmed, click-outside-to-dismiss overlay.
+
+        The dialog is reused whole (reparented as a child of a scrim overlay) instead
+        of opening as a separate window that can slip behind the viewer.  Transient
+        dialogs are tracked as modeless children so viewer close tears them down;
+        ``persistent`` widgets are reused across opens (state preserved) and are owned
+        by the viewer, so they are not tracked/destroyed here.
+        """
+        if not persistent:
+            self._track_modeless_child(dialog)
+        return ModalOverlay(self, dialog, persistent=persistent)
+
+    def _open_advanced_tools(self) -> None:
+        """Open the advanced-processing controls as a dismissible overlay."""
+        self._present_modal_tool(self._advanced_widget, persistent=True)
+
     def _show_roi_manager(self) -> None:
         self._show_sidebar_tab("roi")
-        if not hasattr(self, "_roi_dock"):
-            return
-        self._roi_dock.show()
-        self._roi_dock.raise_()
 
     def _show_measurements(self) -> None:
         self._show_sidebar_tab("measurements")
-        if not hasattr(self, "_measurement_dock"):
-            return
-        self._measurement_dock.show()
-        self._measurement_dock.raise_()
 
     # ── Navigation ─────────────────────────────────────────────────────────────
     def keyPressEvent(self, event):
@@ -2022,10 +2082,7 @@ class ImageViewerDialog(
         )
         dlg.applied.connect(self._on_stm_background_applied)
         self._stm_background_dialog = dlg
-        self._track_modeless_child(dlg)
-        dlg.show()
-        dlg.raise_()
-        dlg.activateWindow()
+        self._present_modal_tool(dlg)
 
     def _on_stm_background_applied(self, params: dict) -> None:
         self._push_proc_undo_snapshot()

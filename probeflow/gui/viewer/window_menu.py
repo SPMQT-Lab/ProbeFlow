@@ -108,7 +108,7 @@ def owned_viewer_windows(viewer: QWidget) -> list[ViewerWindowItem]:
 
     # Some floating docks are not consistently returned as top-level widgets
     # across Qt platforms, so include known viewer-owned dock attributes too.
-    for attr in ("_lattice_grid_dock", "_roi_dock", "_measurement_dock"):
+    for attr in ("_lattice_grid_dock",):
         dock = getattr(viewer, attr, None)
         if isinstance(dock, QDockWidget):
             widgets.append(dock)
