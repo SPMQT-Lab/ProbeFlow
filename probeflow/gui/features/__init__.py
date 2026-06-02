@@ -740,6 +740,9 @@ class FeaturesPanel(QWidget):
         self._params_signature = params_signature
         self._params_meta = params_meta
         self._overlay_mode = "particles"
+        self._show_overlay = True
+        self._overlay_toggle_btn.setVisible(bool(particles))
+        self._overlay_toggle_btn.setText("👁 Original")
         self._redraw()
         self._results_table.setColumnCount(4)
         self._results_table.setHorizontalHeaderLabels(
@@ -754,6 +757,9 @@ class FeaturesPanel(QWidget):
     def set_detections(self, detections):
         self._detections   = detections
         self._overlay_mode = "template"
+        self._show_overlay = True
+        self._overlay_toggle_btn.setVisible(bool(detections))
+        self._overlay_toggle_btn.setText("👁 Original")
         self._redraw()
         self._results_table.setColumnCount(4)
         self._results_table.setHorizontalHeaderLabels(
@@ -768,6 +774,9 @@ class FeaturesPanel(QWidget):
     def set_lattice(self, lat):
         self._lattice      = lat
         self._overlay_mode = "lattice"
+        self._show_overlay = True
+        self._overlay_toggle_btn.setVisible(lat is not None)
+        self._overlay_toggle_btn.setText("👁 Original")
         self._redraw()
         self._results_table.setColumnCount(2)
         self._results_table.setHorizontalHeaderLabels(["parameter", "value"])
@@ -791,6 +800,9 @@ class FeaturesPanel(QWidget):
         """Remove segmentation overlay — returns the panel to the raw image."""
         self._particles    = []
         self._overlay_mode = "none"
+        self._overlay_toggle_btn.setVisible(False)
+        self._overlay_toggle_btn.setText("👁 Original")
+        self._show_overlay = True
         self._results_table.setRowCount(0)
         self._redraw()
 
@@ -799,7 +811,8 @@ class FeaturesPanel(QWidget):
         self._classifications = []
         self._classification_meta = None
         self._overlay_mode = "particles"
-        self._overlay_toggle_btn.setVisible(False)
+        # Keep the toggle button visible — particle contours are still shown.
+        self._overlay_toggle_btn.setVisible(bool(self._particles))
         self._overlay_toggle_btn.setText("👁 Original")
         self._show_overlay = True
         self._results_table.setRowCount(0)
@@ -835,17 +848,16 @@ class FeaturesPanel(QWidget):
             self._redraw()
 
     def _toggle_overlay(self) -> None:
-        """Switch between original image and classified overlay (compare button)."""
+        """Switch between the raw image and the analysis overlay (compare button)."""
         self._show_overlay = not self._show_overlay
         if self._show_overlay:
             self._overlay_toggle_btn.setText("👁 Original")
             self._overlay_toggle_btn.setToolTip(
-                "Click to hide the overlay and see the original scan.\n"
-                "Compare to judge segmentation accuracy.")
+                "Click to hide the overlay and see the original scan.")
         else:
             self._overlay_toggle_btn.setText("✦ Overlay")
             self._overlay_toggle_btn.setToolTip(
-                "Click to show the classified overlay again.")
+                "Click to show the analysis overlay again.")
         self._redraw()
 
     # ── Exclusion mask ────────────────────────────────────────────────────────
@@ -1050,7 +1062,7 @@ class FeaturesPanel(QWidget):
         self._view.set_pixmap(pixmap, reset_view=reset_view)
 
         # ── Particle overlays ────────────────────────────────────────────────
-        if self._overlay_mode == "particles":
+        if self._overlay_mode == "particles" and self._show_overlay:
             if self._current_mode == "classify":
                 # Labeling step: show contour colored by the label already assigned.
                 # Colors come from the auto-palette keyed by class name.
@@ -1086,11 +1098,11 @@ class FeaturesPanel(QWidget):
                     cy = p.centroid_y_m / self._pixel_size_y_m
                     self._view.add_cross(cx, cy, "#a6e3a1")
 
-        elif self._overlay_mode == "template":
+        elif self._overlay_mode == "template" and self._show_overlay:
             for d in self._detections:
                 self._view.add_circle(d.x_px, d.y_px, 5.0, "#89b4fa")
 
-        elif self._overlay_mode == "lattice" and self._lattice is not None:
+        elif self._overlay_mode == "lattice" and self._lattice is not None and self._show_overlay:
             lat = self._lattice
             Ny, Nx = self._arr.shape
             cx, cy = Nx / 2.0, Ny / 2.0
