@@ -129,6 +129,9 @@ class RHKSM4Page:
     raw_data: np.ndarray
     physical_data: np.ndarray
     metadata: dict[str, Any] = field(default_factory=dict)
+    # Location of this page's PAGE_DATA object, so a single plane can be decoded
+    # later (e.g. for a thumbnail) without re-parsing or decoding other pages.
+    data_object: "RHKObject | None" = None
 
 
 @dataclass(frozen=True)
@@ -255,6 +258,71 @@ def read_sm4_metadata(path):
     from probeflow.core.metadata import metadata_from_rhk_sm4
 
     return metadata_from_rhk_sm4(read_rhk_sm4(path, metadata_only=True))
+
+
+def sm4_image_plane_names(path) -> list[str]:
+    """Return the SM4 image-plane names (same order/filtering as :func:`read_sm4`)."""
+    sm4 = read_rhk_sm4(path, metadata_only=True)
+    return [_page_name(p) for p in _select_image_pages(sm4.pages)]
+
+
+def read_sm4_thumbnail_plane(path, resolve_index):
+    """Decode only the single image plane selected by ``resolve_index``.
+
+    ``resolve_index(plane_names) -> int`` picks the wanted plane.  Headers are
+    parsed once via the ``metadata_only`` path, then only the chosen page's
+    ``PAGE_DATA`` byte range is read and decoded — an N-page SM4 does ~1× rather
+    than ~N× the pixel work (and, paired with seek reads, transfers ~1/N of the
+    image bytes).  Returns ``(arr | None, plane_names)``.
+    """
+    path = Path(path)
+    sm4 = read_rhk_sm4(path, metadata_only=True)
+    pages = _select_image_pages(sm4.pages)
+    names = [_page_name(p) for p in pages]
+    if not pages:
+        return None, names
+    idx = int(resolve_index(names))
+    if idx < 0 or idx >= len(pages):
+        return None, names
+    return _decode_page_plane(path, pages[idx]), names
+
+
+def _select_image_pages(pages: list[RHKSM4Page]) -> list[RHKSM4Page]:
+    """Keep only pages whose dimensions match the first page (matches read_sm4)."""
+    if not pages:
+        return []
+    first = pages[0]
+    shape = (first.y_size, first.x_size)
+    return [p for p in pages if (p.y_size, p.x_size) == shape]
+
+
+def _decode_page_plane(path: Path, page: RHKSM4Page) -> np.ndarray | None:
+    """Read and decode a single page's payload into a scaled (SI) plane.
+
+    Mirrors the per-plane math of :func:`read_sm4`:
+    ``(raw * z_scale + z_offset) * unit_scale``.
+    """
+    obj = page.data_object
+    if obj is None:
+        return None
+    with open(path, "rb") as fh:
+        fh.seek(obj.offset)
+        payload = fh.read(obj.size)
+    raw = _decode_image_payload(
+        payload,
+        x_size=page.x_size,
+        y_size=page.y_size,
+        data_size=int(page.metadata.get("data_size", 0)),
+        notes=[],
+        page_index=page.page_index,
+    )
+    if raw is None:
+        return None
+    z_scale = _finite_or(page.z_scale, 1.0)
+    z_offset = _finite_or(page.z_offset, 0.0)
+    physical = raw.astype(np.float64) * z_scale + z_offset
+    unit_scale, _unit = _normalise_z_unit_for_scan(page.z_unit)
+    return physical * unit_scale
 
 
 def parse_object_table(
@@ -522,6 +590,7 @@ def _parse_page_from_objects(
         raw_data=raw,
         physical_data=physical,
         metadata=meta,
+        data_object=data_obj,
     )
 
 

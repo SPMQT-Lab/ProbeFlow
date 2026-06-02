@@ -315,6 +315,18 @@ def test_sm4_metadata_only_matches_full_decode(tmp_path):
     assert fast == slow
 
 
+def test_sm4_thumbnail_plane_matches_full_load(tmp_path):
+    from probeflow.gui.rendering import load_thumbnail_plane, resolve_thumbnail_plane_index
+
+    path = _synthetic_sm4(tmp_path / "image.sm4")
+    scan = load_scan(path)
+    names = list(scan.plane_names)
+    idx = resolve_thumbnail_plane_index(names, "Z")
+    arr, returned_names = load_thumbnail_plane(path, "Z")
+    assert returned_names == names
+    np.testing.assert_array_equal(arr, scan.planes[idx])
+
+
 def test_index_and_gui_entry_include_sm4(tmp_path):
     path = _synthetic_sm4(tmp_path / "image.sm4")
     items = index_folder(tmp_path)

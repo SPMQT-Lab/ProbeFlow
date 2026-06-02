@@ -17,12 +17,11 @@ from probeflow.core.resources import FILE_CUSHIONS_DIR
 from probeflow.core.scan_loader import SUPPORTED_SUFFIXES as _SCAN_SUFFIXES
 from probeflow.gui.rendering import (
     THUMBNAIL_CHANNEL_DEFAULT,
+    load_thumbnail_plane,
     pil_to_pixmap,
     render_scan_image,
     render_spec_thumbnail,
-    resolve_thumbnail_plane_index,
 )
-from probeflow.core.scan_loader import load_scan
 
 DEFAULT_CUSHION = FILE_CUSHIONS_DIR
 
@@ -63,12 +62,7 @@ class ThumbnailLoader(QRunnable):
 
     def run(self):
         try:
-            scan = load_scan(self.entry.path)
-            plane_idx = resolve_thumbnail_plane_index(
-                list(getattr(scan, "plane_names", []) or []),
-                self.thumbnail_channel,
-            )
-            arr = scan.planes[plane_idx] if plane_idx < scan.n_planes else None
+            arr, _names = load_thumbnail_plane(self.entry.path, self.thumbnail_channel)
         except Exception as exc:
             _log_preview_failure("ThumbnailLoader", "load", self.entry.path, exc)
             arr = None
@@ -117,12 +111,7 @@ class FolderThumbnailLoader(QRunnable):
                 pixmaps.append(None)
                 continue
             try:
-                scan = load_scan(path)
-                plane_idx = resolve_thumbnail_plane_index(
-                    list(getattr(scan, "plane_names", []) or []),
-                    self.thumbnail_channel,
-                )
-                arr = scan.planes[plane_idx] if plane_idx < scan.n_planes else None
+                arr, _names = load_thumbnail_plane(path, self.thumbnail_channel)
             except Exception as exc:
                 _log_preview_failure("FolderThumbnailLoader", "load", path, exc)
                 arr = None

@@ -171,16 +171,17 @@ def metadata_from_rhk_sm4(sm4) -> ScanMetadata:
         _page_metadata,
         _page_name,
         _scan_range_m,
+        _select_image_pages,
     )
 
     if not sm4.pages:
         note = "; ".join(sm4.parser_notes) if sm4.parser_notes else "no image pages found"
         raise ValueError(f"{sm4.path}: no supported RHK SM4 image pages ({note})")
 
-    first = sm4.pages[0]
-    first_shape = (first.y_size, first.x_size)
     # Match read_sm4: keep only pages whose image dimensions match the first.
-    pages = [p for p in sm4.pages if (p.y_size, p.x_size) == first_shape]
+    pages = _select_image_pages(sm4.pages)
+    first = pages[0]
+    first_shape = (first.y_size, first.x_size)
 
     plane_names = tuple(_page_name(p) for p in pages)
     plane_units = tuple(unit for _scale, unit in (_normalise_z_unit_for_scan(p.z_unit) for p in pages))

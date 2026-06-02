@@ -179,6 +179,37 @@ def resolve_thumbnail_plane_index(
     return 0
 
 
+def load_thumbnail_plane(
+    path,
+    semantic: str = THUMBNAIL_CHANNEL_DEFAULT,
+) -> tuple[Optional[np.ndarray], list[str]]:
+    """Load just the plane a browse thumbnail needs, decoding only that plane
+    where the format allows it.
+
+    For RHK SM4 (object-indexed, multi-page) this decodes a single page instead
+    of all of them.  Other formats fall back to a normal full load (their decode
+    is a single read anyway).  Returns ``(arr | None, plane_names)``.
+    """
+    from probeflow.core.loaders import identify_scan_file
+
+    sig = identify_scan_file(path)
+    if sig.source_format == "sm4":
+        from probeflow.io.readers.rhk_sm4 import read_sm4_thumbnail_plane
+
+        return read_sm4_thumbnail_plane(
+            sig.path,
+            lambda names: resolve_thumbnail_plane_index(names, semantic),
+        )
+
+    from probeflow.core.scan_loader import load_scan
+
+    scan = load_scan(sig.path)
+    names = list(getattr(scan, "plane_names", []) or [])
+    idx = resolve_thumbnail_plane_index(names, semantic)
+    arr = scan.planes[idx] if idx < scan.n_planes else None
+    return arr, names
+
+
 def _apply_processing(
     arr: np.ndarray,
     processing: dict,
