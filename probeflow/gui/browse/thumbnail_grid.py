@@ -6,8 +6,8 @@ from pathlib import Path
 from typing import Optional, Union
 
 from PySide6.QtCore import Qt, QThreadPool, QTimer, Signal, Slot
-from PySide6.QtGui import QFont, QPixmap
-from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QScrollArea, QVBoxLayout, QWidget
+from PySide6.QtGui import QCursor, QFont, QPixmap
+from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget
 
 from probeflow.core.scan_loader import load_scan as _default_load_scan
 from probeflow.gui.models import FolderEntry, SxmFile, VertFile, browse_entry_key
@@ -68,7 +68,18 @@ class ThumbnailGrid(QWidget):
         self._path_lbl.setFont(QFont("Helvetica", 10))
         self._path_lbl.setStyleSheet("background: transparent;")
 
+        self._refresh_btn = QPushButton("⟳")
+        self._refresh_btn.setFixedSize(24, 20)
+        self._refresh_btn.setFont(QFont("Helvetica", 11))
+        self._refresh_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self._refresh_btn.setToolTip(
+            "Rescan the current folder for new files (F5).\n"
+            "Use this when the STM has saved new scans while ProbeFlow is open.")
+        self._refresh_btn.setEnabled(False)   # enabled once a folder is open
+        self._refresh_btn.clicked.connect(self.refresh)
+
         tb_lay.addWidget(self._path_lbl, 1)
+        tb_lay.addWidget(self._refresh_btn)
         outer.addWidget(self._toolbar)
 
         # ── Scroll area with grid ────────────────────────────────────────────
@@ -136,6 +147,16 @@ class ThumbnailGrid(QWidget):
     def root(self) -> Optional[Path]:
         return self._root
 
+    def refresh(self) -> None:
+        """Rescan the current folder and update the grid with any new files.
+
+        Does not push the current folder onto the navigation history, so
+        Back / breadcrumb state is unchanged. Safe to call at any time;
+        a no-op if no folder is open yet.
+        """
+        if self._current_dir is not None:
+            self._navigate(self._current_dir)
+
     def _navigate(self, path: Path):
         """Index *path* shallowly and rebuild the grid + breadcrumb."""
         from probeflow.core.indexing import index_folder_shallow
@@ -164,6 +185,7 @@ class ThumbnailGrid(QWidget):
             self._root, self._current_dir,
             can_go_back=bool(self._history),
         )
+        self._refresh_btn.setEnabled(True)
         self._render_entries(entries)
         self.folder_changed.emit(path)
 
