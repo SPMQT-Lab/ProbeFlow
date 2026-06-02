@@ -680,25 +680,28 @@ class FeaturesPanel(QWidget):
 
         total = len(classifications)
 
-        # Build flat list of (label_str, n, pct, hex_color) for table rows
-        table_rows: list[tuple[str, int, float, str]] = []
+        # Build flat list of (label, n, pct, hex_color, is_summary) rows.
+        # Each non-"other" class gets a bold summary row (total) followed by
+        # indented sub-rows for each non-empty 15° orientation bin.
+        table_rows: list[tuple[str, int, float, str, bool]] = []
 
         for cls_name in sorted(class_angles.keys()):
             angles = class_angles[cls_name]
             hex_color = self._class_colors.get(cls_name, _CLASSIFY_OTHER_COLOR)
+            n_total = len(angles)
+            pct_total = 100.0 * n_total / total if total > 0 else 0.0
 
+            # "other" — single summary row only (no orientation breakdown).
             if cls_name == "other":
-                n = len(angles)
-                pct = 100.0 * n / total if total > 0 else 0.0
-                table_rows.append(("other", n, pct, hex_color))
+                table_rows.append(("other", n_total, pct_total, hex_color, True))
                 continue
+
+            # Summary row for this class (bold, all orientations combined).
+            table_rows.append((cls_name, n_total, pct_total, hex_color, True))
 
             valid = np.array([a for a in angles if not math.isnan(a)],
                              dtype=np.float64)
             if valid.size == 0:
-                n = len(angles)
-                pct = 100.0 * n / total if total > 0 else 0.0
-                table_rows.append((cls_name, n, pct, hex_color))
                 continue
 
             # Assign each angle to a 15° bin
@@ -715,20 +718,29 @@ class FeaturesPanel(QWidget):
                 # Mean angle of the particles in this bin (arithmetic ok for
                 # a 15° window — no wrap issue within such a narrow range).
                 mean_ang = float(bin_angles.mean())
-                label = f"{cls_name} ({mean_ang:.0f}°)"
-                table_rows.append((label, n_bin, pct, hex_color))
+                label = f"  {cls_name} ({mean_ang:.0f}°)"   # indented sub-row
+                table_rows.append((label, n_bin, pct, hex_color, False))
 
         # Populate the table — 3 columns: class (angle) | N | %
+        _bold_font   = QFont("Helvetica", 9, QFont.Bold)
+        _normal_font = QFont("Helvetica", 9)
         self._results_table.setColumnCount(3)
         self._results_table.setHorizontalHeaderLabels(["class (angle)", "N", "%"])
         self._results_table.setRowCount(len(table_rows))
 
-        for i, (label, n, pct, hex_color) in enumerate(table_rows):
-            name_item = QTableWidgetItem(f"● {label}")
+        for i, (label, n, pct, hex_color, is_summary) in enumerate(table_rows):
+            font = _bold_font if is_summary else _normal_font
+            prefix = "●" if is_summary else " "
+            name_item = QTableWidgetItem(f"{prefix} {label}")
             name_item.setForeground(QBrush(QColor(hex_color)))
+            name_item.setFont(font)
+            n_item = QTableWidgetItem(str(n))
+            n_item.setFont(font)
+            pct_item = QTableWidgetItem(f"{pct:.1f}")
+            pct_item.setFont(font)
             self._results_table.setItem(i, 0, name_item)
-            self._results_table.setItem(i, 1, QTableWidgetItem(str(n)))
-            self._results_table.setItem(i, 2, QTableWidgetItem(f"{pct:.1f}"))
+            self._results_table.setItem(i, 1, n_item)
+            self._results_table.setItem(i, 2, pct_item)
 
         self._redraw()
 
