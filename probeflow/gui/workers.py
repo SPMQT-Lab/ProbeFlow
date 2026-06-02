@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import io
 import logging
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -24,6 +26,32 @@ from probeflow.gui.rendering import (
 )
 
 DEFAULT_CUSHION = FILE_CUSHIONS_DIR
+
+
+def _file_identity(path) -> tuple[Optional[int], Optional[int]]:
+    try:
+        st = os.stat(path)
+        return st.st_mtime_ns, st.st_size
+    except OSError:
+        return None, None
+
+
+def _cached_thumbnail_pixmap(key: Optional[str]) -> Optional[QPixmap]:
+    from probeflow.core import browse_cache
+
+    data = browse_cache.get_thumbnail(key)
+    if data is None:
+        return None
+    pm = QPixmap()
+    if pm.loadFromData(data, b"PNG"):
+        return pm
+    return None
+
+
+def _png_bytes(img) -> bytes:
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
 
 
 def _log_preview_failure(loader_name: str, action: str, path, exc: Exception) -> None:
@@ -61,6 +89,19 @@ class ThumbnailLoader(QRunnable):
         self.thumbnail_channel = thumbnail_channel
 
     def run(self):
+        from probeflow.core import browse_cache
+
+        mtime_ns, size = _file_identity(self.entry.path)
+        key = browse_cache.thumbnail_key(
+            self.entry.path, mtime_ns, size,
+            kind="scan", cm=self.colormap, ch=self.thumbnail_channel,
+            cl=self.clip_low, chh=self.clip_high, w=self.w, h=self.h,
+            proc=self.processing or None,
+        )
+        cached = _cached_thumbnail_pixmap(key)
+        if cached is not None:
+            self.signals.loaded.emit(browse_entry_key(self.entry), cached, self.token)
+            return
         try:
             arr, _names = load_thumbnail_plane(self.entry.path, self.thumbnail_channel)
         except Exception as exc:
@@ -75,6 +116,7 @@ class ThumbnailLoader(QRunnable):
             processing=self.processing or None,
         )
         if img is not None:
+            browse_cache.put_thumbnail(key, _png_bytes(img))
             self.signals.loaded.emit(browse_entry_key(self.entry), pil_to_pixmap(img), self.token)
 
 
@@ -104,11 +146,23 @@ class FolderThumbnailLoader(QRunnable):
         self.thumbnail_channel = thumbnail_channel
 
     def run(self):
+        from probeflow.core import browse_cache
+
         pixmaps: list = []
         for path in self.sample_paths:
             if path.suffix.lower() not in _SCAN_SUFFIXES:
                 _log.debug("FolderThumbnailLoader: skipping unsupported file %s", path)
                 pixmaps.append(None)
+                continue
+            mtime_ns, size = _file_identity(path)
+            key = browse_cache.thumbnail_key(
+                path, mtime_ns, size,
+                kind="folder", cm=self.colormap, ch=self.thumbnail_channel,
+                cl=self.clip_low, chh=self.clip_high, w=self.w, h=self.h,
+            )
+            cached = _cached_thumbnail_pixmap(key)
+            if cached is not None:
+                pixmaps.append(cached)
                 continue
             try:
                 arr, _names = load_thumbnail_plane(path, self.thumbnail_channel)
@@ -122,6 +176,8 @@ class FolderThumbnailLoader(QRunnable):
                 clip_high=self.clip_high,
                 size=(self.w, self.h),
             )
+            if img is not None:
+                browse_cache.put_thumbnail(key, _png_bytes(img))
             pixmaps.append(pil_to_pixmap(img) if img is not None else None)
         self.signals.loaded.emit(self.folder_key, pixmaps, self.token)
 

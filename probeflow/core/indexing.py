@@ -138,6 +138,17 @@ def _iter_files(folder: Path, *, recursive: bool):
 
 # ── Item builders ─────────────────────────────────────────────────────────────
 
+def _filter_indexed(
+    item: "Optional[ProbeFlowItem]", include_errors: bool
+) -> "Optional[ProbeFlowItem]":
+    """Apply the include_errors policy to a built or cached item."""
+    if item is None:
+        return None
+    if item.load_error is not None and not include_errors:
+        return None
+    return item
+
+
 def _file_stat(path: Path) -> tuple[Optional[int], Optional[int]]:
     try:
         st = path.stat()
@@ -394,20 +405,29 @@ def index_folder_shallow(
             subdir_paths.append(Path(e.path))
 
     def _process_file(entry: "os.DirEntry") -> "Optional[ProbeFlowItem]":
+        from probeflow.core import browse_cache
+
         p = Path(entry.path)
-        ft = sniff_file_type(p)
-        if ft not in _FORMAT_MAP:
-            return None
-        source_format, item_type = _FORMAT_MAP[ft]
         try:
             st = entry.stat()
-            stat = (st.st_mtime_ns, st.st_size)
+            mtime_ns, size_bytes = st.st_mtime_ns, st.st_size
         except OSError:
-            stat = (None, None)
-        item = _build_item(p, ft, source_format, item_type, stat=stat)
-        if item.load_error is not None and not include_errors:
+            mtime_ns, size_bytes = None, None
+
+        # Cache hit: no file content read at all (the network-drive revisit win).
+        # A cached None means "not a recognised file" — also worth not re-sniffing.
+        hit, cached = browse_cache.get_metadata(p, mtime_ns, size_bytes)
+        if hit:
+            return _filter_indexed(cached, include_errors)
+
+        ft = sniff_file_type(p)
+        if ft not in _FORMAT_MAP:
+            browse_cache.put_metadata(p, mtime_ns, size_bytes, None)
             return None
-        return item
+        source_format, item_type = _FORMAT_MAP[ft]
+        item = _build_item(p, ft, source_format, item_type, stat=(mtime_ns, size_bytes))
+        browse_cache.put_metadata(p, mtime_ns, size_bytes, item)
+        return _filter_indexed(item, include_errors)
 
     n_workers = min(32, max(1, len(file_entries) + len(subdir_paths)))
     with ThreadPoolExecutor(max_workers=n_workers) as executor:
