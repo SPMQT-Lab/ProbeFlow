@@ -315,6 +315,31 @@ def test_sm4_metadata_only_matches_full_decode(tmp_path):
     assert fast == slow
 
 
+def test_sm4_sparse_metadata_read_matches_full(tmp_path, monkeypatch):
+    import probeflow.io.readers.rhk_sm4 as m
+    from probeflow.core.metadata import metadata_from_rhk_sm4, metadata_from_scan
+
+    path = _synthetic_sm4(tmp_path / "image.sm4")
+    # Force the sparse seek-read path even for this tiny file.
+    monkeypatch.setattr(m, "_SM4_FULL_READ_THRESHOLD", 0)
+    sparse = metadata_from_rhk_sm4(m.read_rhk_sm4(path, metadata_only=True))
+    full = metadata_from_scan(m.read_sm4(path))
+    assert sparse == full
+
+
+def test_sm4_metadata_range_collector_skips_payload(tmp_path):
+    import probeflow.io.readers.rhk_sm4 as m
+
+    path = _synthetic_sm4(tmp_path / "image.sm4")
+    size = path.stat().st_size
+    with open(path, "rb") as fh:
+        ranges = m._collect_sm4_metadata_ranges(fh, size)
+    fetched = sum(min(sz, size - off) for off, sz in ranges if 0 <= off < size)
+    # Metadata is a small fraction of the file: PAGE_DATA must not be fetched.
+    assert ranges
+    assert fetched < size
+
+
 def test_sm4_thumbnail_plane_matches_full_load(tmp_path):
     from probeflow.gui.rendering import load_thumbnail_plane, resolve_thumbnail_plane_index
 
@@ -357,6 +382,21 @@ class TestRealSM4:
         sm4 = read_rhk_sm4(REAL_SM4)
         assert sm4.page_count == 4
         assert len(sm4.pages) == 4
+
+    def test_sparse_metadata_read_matches_full_and_is_small(self):
+        import probeflow.io.readers.rhk_sm4 as m
+        from probeflow.core.metadata import metadata_from_rhk_sm4, metadata_from_scan
+
+        sparse = metadata_from_rhk_sm4(m.read_rhk_sm4(REAL_SM4, metadata_only=True))
+        full = metadata_from_scan(m.read_sm4(REAL_SM4))
+        assert sparse == full
+
+        size = REAL_SM4.stat().st_size
+        with open(REAL_SM4, "rb") as fh:
+            ranges = m._collect_sm4_metadata_ranges(fh, size)
+        fetched = sum(min(sz, size - off) for off, sz in ranges if 0 <= off < size)
+        # Header/table/string metadata is a tiny fraction of the file.
+        assert fetched < size * 0.05
 
     def test_page_labels_dimensions_units(self):
         sm4 = read_rhk_sm4(REAL_SM4)
