@@ -170,23 +170,42 @@ def read_spec_file(
     )
 
 
+# Sniffed FileType -> spectroscopy reader vocabulary, so an already-sniffed
+# caller (folder indexing) can skip identify_spectrum_file's repeat sniff/stat.
+_SPEC_FILE_TYPE_FORMATS = {
+    "nanonis_spec": "nanonis_dat_spectrum",
+    "createc_spec": "createc_vert",
+}
+
+
 def read_spec_metadata(
     path: Union[str, Path],
     *,
     time_trace_threshold_mv: float = _TIME_TRACE_THRESHOLD_MV,
     measurement_mode: str | None = None,
+    file_type=None,
 ) -> SpecMetadata:
-    """Read spectroscopy metadata without loading full numeric arrays."""
-    from probeflow.core.loaders import identify_spectrum_file
+    """Read spectroscopy metadata without loading full numeric arrays.
 
-    sig = identify_spectrum_file(path)
-    if sig.source_format == "nanonis_dat_spectrum":
+    ``file_type`` may be a previously sniffed
+    :class:`~probeflow.core.file_type.FileType`; when given for a supported
+    spectroscopy type, ``identify_spectrum_file``'s redundant re-sniff is
+    skipped.
+    """
+    source_format = _SPEC_FILE_TYPE_FORMATS.get(getattr(file_type, "value", None))
+    if source_format is None:
+        from probeflow.core.loaders import identify_spectrum_file
+
+        sig = identify_spectrum_file(path)
+        source_format, path = sig.source_format, sig.path
+
+    if source_format == "nanonis_dat_spectrum":
         from probeflow.io.readers.nanonis_spec import read_nanonis_spec_metadata
-        meta = read_nanonis_spec_metadata(sig.path)
+        meta = read_nanonis_spec_metadata(path)
         _apply_measurement_override(meta.metadata, measurement_mode)
         return meta
     return _read_createc_vert_metadata(
-        sig.path,
+        path,
         time_trace_threshold_mv=time_trace_threshold_mv,
         measurement_mode=measurement_mode,
     )

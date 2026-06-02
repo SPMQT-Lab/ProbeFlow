@@ -16,6 +16,30 @@ from probeflow.core.indexing import (
 TESTDATA = Path(__file__).resolve().parents[1] / "test_data"
 
 
+def test_each_file_is_sniffed_once(tmp_path, monkeypatch):
+    """Indexing should not re-sniff each file inside the metadata reader (R4)."""
+    import shutil
+
+    import probeflow.core.indexing as indexing
+
+    src = next(TESTDATA.glob("*.sxm"), None) or next(TESTDATA.glob("*.dat"))
+    dest = tmp_path / src.name
+    shutil.copy(src, dest)
+
+    calls: dict[str, int] = {}
+    real_sniff = indexing.sniff_file_type
+
+    def counting_sniff(path):
+        key = str(path)
+        calls[key] = calls.get(key, 0) + 1
+        return real_sniff(path)
+
+    monkeypatch.setattr(indexing, "sniff_file_type", counting_sniff)
+    index_folder_shallow(tmp_path)
+
+    assert calls.get(str(dest)) == 1
+
+
 def test_returns_shallow_index_object():
     idx = index_folder_shallow(TESTDATA)
     assert isinstance(idx, ShallowFolderIndex)

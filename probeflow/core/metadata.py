@@ -317,27 +317,45 @@ def _extract_rhk_fields(hdr: dict) -> tuple:
 
 # ── read_scan_metadata ───────────────────────────────────────────────────────
 
-def read_scan_metadata(path) -> ScanMetadata:
+# Map a sniffed FileType straight to the scan reader vocabulary, so callers that
+# already sniffed (e.g. folder indexing) can skip identify_scan_file's repeat
+# sniff + exists/is_file/resolve round-trips.
+_SCAN_FILE_TYPE_FORMATS = {
+    "createc_image": "dat",
+    "nanonis_image": "sxm",
+    "rhk_sm4_image": "sm4",
+}
+
+
+def read_scan_metadata(path, *, file_type=None) -> ScanMetadata:
     """Return :class:`ScanMetadata` for a Createc DAT or Nanonis SXM image file.
 
     Spectroscopy files and unknown file types raise ``ValueError`` with a
     descriptive message.  Createc DAT metadata uses the low-level decode report
     path so callers do not pay the cost of constructing a full ``Scan``.
-    """
-    from probeflow.core.loaders import identify_scan_file
 
-    sig = identify_scan_file(path)
-    if sig.source_format == "dat":
+    ``file_type`` may be a previously sniffed :class:`~probeflow.core.file_type.FileType`;
+    when given for a supported image type, the redundant re-sniff / stat done by
+    ``identify_scan_file`` is skipped (the network-drive indexing fast path).
+    """
+    source_format = _SCAN_FILE_TYPE_FORMATS.get(getattr(file_type, "value", None))
+    if source_format is None:
+        from probeflow.core.loaders import identify_scan_file
+
+        sig = identify_scan_file(path)
+        source_format, path = sig.source_format, sig.path
+
+    if source_format == "dat":
         from probeflow.io.readers.createc_scan import read_dat_metadata
 
-        return read_dat_metadata(sig.path)
-    if sig.source_format == "sxm":
+        return read_dat_metadata(path)
+    if source_format == "sxm":
         from probeflow.io.readers.nanonis_sxm import read_sxm_metadata
 
-        return read_sxm_metadata(sig.path)
-    if sig.source_format == "sm4":
+        return read_sxm_metadata(path)
+    if source_format == "sm4":
         from probeflow.io.readers.rhk_sm4 import read_sm4_metadata
 
-        return read_sm4_metadata(sig.path)
+        return read_sm4_metadata(path)
 
-    raise ValueError(f"Unsupported scan source format: {sig.source_format!r}")
+    raise ValueError(f"Unsupported scan source format: {source_format!r}")
