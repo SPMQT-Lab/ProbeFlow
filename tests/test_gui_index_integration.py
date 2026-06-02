@@ -398,6 +398,84 @@ def test_thumbnail_grid_keys_same_stem_scan_and_spectrum_by_type_and_path(qapp):
     assert grid.get_primary_entry() is spec
 
 
+def test_thumbnail_grid_prioritizes_visible_cards_before_background(qapp, monkeypatch):
+    from types import SimpleNamespace
+
+    from probeflow.gui import THEMES
+    from probeflow.gui.browse import ThumbnailGrid
+    from probeflow.gui.models import SxmFile, browse_entry_key
+
+    started = []
+
+    def start(loader):
+        started.append(loader.entry.path.name)
+
+    grid = ThumbnailGrid(THEMES["dark"])
+    grid._pool = SimpleNamespace(start=start)
+    grid._background_thumbnail_batch_size = 2
+    entries = [
+        SxmFile(path=Path(f"/tmp/scan_{i}.dat"), stem=f"scan_{i}")
+        for i in range(6)
+    ]
+    grid.load(entries)
+    grid._visible_thumb_timer.stop()
+    grid._thumbnail_bg_timer.stop()
+
+    visible_keys = [browse_entry_key(entry) for entry in entries[:3]]
+    monkeypatch.setattr(grid, "_visible_thumbnail_keys", lambda: list(visible_keys))
+
+    grid._queue_visible_thumbnails()
+
+    assert started == ["scan_0.dat", "scan_1.dat", "scan_2.dat"]
+    assert [entry.path.name for entry in grid._thumbnail_pending.values()] == [
+        "scan_3.dat", "scan_4.dat", "scan_5.dat"
+    ]
+
+    monkeypatch.setattr(grid, "_visible_thumbnail_keys", lambda: [])
+    grid._queue_background_thumbnail_batch()
+
+    assert started == [
+        "scan_0.dat", "scan_1.dat", "scan_2.dat",
+        "scan_3.dat", "scan_4.dat",
+    ]
+
+
+def test_thumbnail_grid_background_waits_when_pool_is_busy(qapp, monkeypatch):
+    from probeflow.gui import THEMES
+    from probeflow.gui.browse import ThumbnailGrid
+    from probeflow.gui.models import SxmFile
+
+    class BusyPool:
+        def __init__(self):
+            self.started = []
+
+        def start(self, loader):
+            self.started.append(loader)
+
+        def activeThreadCount(self):
+            return 4
+
+        def maxThreadCount(self):
+            return 8
+
+    pool = BusyPool()
+    grid = ThumbnailGrid(THEMES["dark"])
+    grid._pool = pool
+    entries = [
+        SxmFile(path=Path(f"/tmp/busy_{i}.dat"), stem=f"busy_{i}")
+        for i in range(3)
+    ]
+    grid.load(entries)
+    grid._visible_thumb_timer.stop()
+    grid._thumbnail_bg_timer.stop()
+    monkeypatch.setattr(grid, "_visible_thumbnail_keys", lambda: [])
+
+    grid._queue_background_thumbnail_batch()
+
+    assert pool.started == []
+    assert len(grid._thumbnail_pending) == 3
+
+
 TESTDATA = Path(__file__).resolve().parents[1] / "test_data"
 
 

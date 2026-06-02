@@ -110,6 +110,17 @@ class ThumbnailGrid(QWidget):
         self._current_cols: int                                = 1
         self._filter_mode: str                                 = "all"
         self._thumbnail_size_name: str                         = "large"
+        self._thumbnail_pending: dict[str, Union[SxmFile, VertFile, FolderEntry]] = {}
+        self._background_thumbnail_batch_size: int             = 2
+
+        self._visible_thumb_timer = QTimer(self)
+        self._visible_thumb_timer.setSingleShot(True)
+        self._visible_thumb_timer.timeout.connect(self._queue_visible_thumbnails)
+        self._thumbnail_bg_timer = QTimer(self)
+        self._thumbnail_bg_timer.setSingleShot(True)
+        self._thumbnail_bg_timer.timeout.connect(self._queue_background_thumbnail_batch)
+        self._scroll.verticalScrollBar().valueChanged.connect(
+            self._schedule_visible_thumbnail_refresh)
 
         # navigation state
         self._root:        Optional[Path] = None
@@ -261,33 +272,7 @@ class ThumbnailGrid(QWidget):
         # Populate the grid honouring the current filter.
         self._relayout_filtered()
 
-        # Queue async thumbnail rendering for every card.
-        token = self._load_token
-        for entry in entries:
-            if isinstance(entry, FolderEntry):
-                if entry.sample_scan_paths:
-                    Loader = _browse_attr("FolderThumbnailLoader", FolderThumbnailLoader)
-                    loader = Loader(
-                        str(entry.path),
-                        list(entry.sample_scan_paths),
-                        self._thumbnail_colormap,
-                        token,
-                        FolderCard.THUMB_W, FolderCard.THUMB_H,
-                        self._thumbnail_clip[0], self._thumbnail_clip[1],
-                        thumbnail_channel=self._thumbnail_channel,
-                    )
-                    loader.signals.loaded.connect(self._on_folder_thumbs)
-                    self._pool.start(loader)
-            elif isinstance(entry, VertFile):
-                Loader = _browse_attr("SpecThumbnailLoader", SpecThumbnailLoader)
-                loader = Loader(entry, token,
-                                             SpecCard.IMG_W, SpecCard.IMG_H)
-                loader.signals.loaded.connect(self._on_thumb)
-                self._pool.start(loader)
-            else:
-                loader = self._make_thumbnail_loader(entry, token)
-                loader.signals.loaded.connect(self._on_thumb)
-                self._pool.start(loader)
+        self._prepare_thumbnail_queue(entries)
 
     @staticmethod
     def _key_for(entry) -> str:
@@ -338,34 +323,139 @@ class ThumbnailGrid(QWidget):
                                processing=proc,
                                thumbnail_channel=self._thumbnail_channel)
 
-    def _rerender_scan_thumbnails(self) -> int:
+    def _entry_needs_thumbnail(self, entry) -> bool:
+        if isinstance(entry, FolderEntry):
+            return bool(entry.sample_scan_paths)
+        return isinstance(entry, (SxmFile, VertFile))
+
+    def _prepare_thumbnail_queue(self, entries: list) -> None:
+        self._thumbnail_bg_timer.stop()
+        self._visible_thumb_timer.stop()
+        self._thumbnail_pending = {
+            self._key_for(entry): entry
+            for entry in entries
+            if self._entry_needs_thumbnail(entry)
+        }
+        if not self._thumbnail_pending:
+            return
+        self._schedule_visible_thumbnail_refresh(delay_ms=0)
+        self._schedule_background_thumbnail_batch(delay_ms=300)
+
+    def _schedule_visible_thumbnail_refresh(self, *_args, delay_ms: int = 50) -> None:
+        if not self._thumbnail_pending:
+            return
+        self._visible_thumb_timer.start(max(0, int(delay_ms)))
+
+    def _schedule_background_thumbnail_batch(self, delay_ms: int = 120) -> None:
+        if not self._thumbnail_pending:
+            self._thumbnail_bg_timer.stop()
+            return
+        self._thumbnail_bg_timer.start(max(0, int(delay_ms)))
+
+    def _visible_thumbnail_keys(self) -> list[str]:
+        if not self._thumbnail_pending:
+            return []
+        self._grid.activate()
+        bar = self._scroll.verticalScrollBar()
+        top = bar.value()
+        bottom = top + self._scroll.viewport().height()
+        preload = max(_BrowseCard.CARD_H * 2, 320)
+        keys: list[str] = []
+        for entry in self._entries:
+            key = self._key_for(entry)
+            if key not in self._thumbnail_pending:
+                continue
+            card = self._cards.get(key)
+            if card is None or card.isHidden():
+                continue
+            geom = card.geometry()
+            if geom.bottom() >= top - preload and geom.top() <= bottom + preload:
+                keys.append(key)
+        return keys
+
+    def _start_thumbnail_for_key(self, key: str) -> bool:
+        entry = self._thumbnail_pending.pop(key, None)
+        if entry is None:
+            return False
         token = self._load_token
-        count = 0
+        if isinstance(entry, FolderEntry):
+            Loader = _browse_attr("FolderThumbnailLoader", FolderThumbnailLoader)
+            loader = Loader(
+                str(entry.path),
+                list(entry.sample_scan_paths),
+                self._thumbnail_colormap,
+                token,
+                FolderCard.THUMB_W, FolderCard.THUMB_H,
+                self._thumbnail_clip[0], self._thumbnail_clip[1],
+                thumbnail_channel=self._thumbnail_channel,
+            )
+            loader.signals.loaded.connect(self._on_folder_thumbs)
+            self._pool.start(loader)
+            return True
+        if isinstance(entry, VertFile):
+            Loader = _browse_attr("SpecThumbnailLoader", SpecThumbnailLoader)
+            loader = Loader(entry, token, SpecCard.IMG_W, SpecCard.IMG_H)
+            loader.signals.loaded.connect(self._on_thumb)
+            self._pool.start(loader)
+            return True
+        if isinstance(entry, SxmFile):
+            loader = self._make_thumbnail_loader(entry, token)
+            loader.signals.loaded.connect(self._on_thumb)
+            self._pool.start(loader)
+            return True
+        return False
+
+    def _queue_visible_thumbnails(self) -> None:
+        for key in self._visible_thumbnail_keys():
+            self._start_thumbnail_for_key(key)
+        if self._thumbnail_pending:
+            self._schedule_background_thumbnail_batch()
+
+    def _background_thumbnail_slots(self) -> int:
+        active_fn = getattr(self._pool, "activeThreadCount", None)
+        max_fn = getattr(self._pool, "maxThreadCount", None)
+        if not callable(active_fn) or not callable(max_fn):
+            return self._background_thumbnail_batch_size
+        try:
+            active = int(active_fn())
+            max_threads = max(1, int(max_fn()))
+        except Exception:
+            return self._background_thumbnail_batch_size
+        target_active = max(1, min(4, max_threads // 2))
+        return max(0, min(self._background_thumbnail_batch_size, target_active - active))
+
+    def _queue_background_thumbnail_batch(self) -> None:
+        if not self._thumbnail_pending:
+            return
+        for key in self._visible_thumbnail_keys():
+            self._start_thumbnail_for_key(key)
+        slots = self._background_thumbnail_slots()
+        if slots <= 0:
+            self._schedule_background_thumbnail_batch(delay_ms=180)
+            return
+        started = 0
+        for key in list(self._thumbnail_pending):
+            if started >= slots:
+                break
+            if self._start_thumbnail_for_key(key):
+                started += 1
+        self._schedule_background_thumbnail_batch()
+
+    def _rerender_scan_thumbnails(self) -> int:
+        self._load_token = object()
+        entries: list[Union[SxmFile, FolderEntry]] = []
         for entry in self._entries:
             if isinstance(entry, SxmFile):
                 if self._key_for(entry) not in self._cards:
                     continue
-                loader = self._make_thumbnail_loader(entry, token)
-                loader.signals.loaded.connect(self._on_thumb)
-                self._pool.start(loader)
-                count += 1
+                entries.append(entry)
             elif isinstance(entry, FolderEntry) and entry.sample_scan_paths:
                 key = self._key_for(entry)
                 if key not in self._cards:
                     continue
-                Loader = _browse_attr("FolderThumbnailLoader", FolderThumbnailLoader)
-                loader = Loader(
-                    str(entry.path),
-                    list(entry.sample_scan_paths),
-                    self._thumbnail_colormap,
-                    token,
-                    FolderCard.THUMB_W, FolderCard.THUMB_H,
-                    self._thumbnail_clip[0], self._thumbnail_clip[1],
-                    thumbnail_channel=self._thumbnail_channel,
-                )
-                loader.signals.loaded.connect(self._on_folder_thumbs)
-                self._pool.start(loader)
-        return count
+                entries.append(entry)
+        self._prepare_thumbnail_queue(entries)
+        return sum(1 for entry in entries if isinstance(entry, SxmFile))
 
     def set_thumbnail_colormap(self, colormap_key: str) -> int:
         """Set the global browse thumbnail colormap and re-render scan cards."""
@@ -413,6 +503,7 @@ class ThumbnailGrid(QWidget):
         for entry in self._entries:
             if isinstance(entry, SxmFile) and str(entry.path) == path_str:
                 if self._key_for(entry) in self._cards:
+                    self._thumbnail_pending.pop(self._key_for(entry), None)
                     loader = self._make_thumbnail_loader(entry, token)
                     loader.signals.loaded.connect(self._on_thumb)
                     self._pool.start(loader)
@@ -543,6 +634,7 @@ class ThumbnailGrid(QWidget):
         super().resizeEvent(event)
         if self._entries:
             QTimer.singleShot(60, self._relayout)
+            self._schedule_visible_thumbnail_refresh(delay_ms=80)
 
     def _relayout(self):
         if not self._entries:
@@ -563,6 +655,7 @@ class ThumbnailGrid(QWidget):
             mode = "all"
         self._filter_mode = mode
         self._relayout_filtered()
+        self._schedule_visible_thumbnail_refresh(delay_ms=0)
 
     def _is_entry_visible(self, entry) -> bool:
         # Folders are navigation aids; never hide them based on a file filter.
@@ -618,3 +711,4 @@ class ThumbnailGrid(QWidget):
                            sizes["IMG_W"], sizes["IMG_H"])
             card.set_compact_mode(compact)
         self._relayout_filtered()
+        self._schedule_visible_thumbnail_refresh(delay_ms=0)
