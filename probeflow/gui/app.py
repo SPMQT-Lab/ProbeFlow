@@ -433,6 +433,13 @@ class ProbeFlowWindow(QMainWindow):
         open_action.setShortcut(QKeySequence.Open)
         open_action.triggered.connect(self._menu_open_folder)
         file_menu.addAction(open_action)
+        refresh_action = QAction("Refresh folder", self)
+        refresh_action.setShortcut(QKeySequence("F5"))
+        refresh_action.setToolTip(
+            "Rescan the current Browse folder for new files.\n"
+            "Use this when the STM has written new scans while ProbeFlow is open.")
+        refresh_action.triggered.connect(lambda: self._grid.refresh())
+        file_menu.addAction(refresh_action)
         recent_action = QAction("Open recent", self)
         recent_action.setEnabled(False)
         file_menu.addAction(recent_action)
