@@ -22,7 +22,7 @@ import matplotlib
 matplotlib.use("QtAgg")
 
 from PySide6.QtCore import (
-    Qt, QThreadPool,
+    Qt, QObject, QRunnable, QThreadPool,
     Signal, Slot,
 )
 from PySide6.QtGui import (
@@ -93,6 +93,36 @@ from probeflow.gui.dialogs.definitions import _DefinitionsDialog
 from probeflow.gui.terminal import _DevSidebar
 from probeflow.gui.dialogs.image_viewer import ImageViewerDialog
 from probeflow.gui.dialogs import SpecViewerDialog
+
+
+# ── Scan-load background worker ───────────────────────────────────────────────
+
+class _ScanLoadSignals(QObject):
+    """Signals for the off-thread scan-load worker."""
+    finished = Signal(object, str)   # (result_tuple_or_None, error_str)
+
+
+class _ScanLoadWorker(QRunnable):
+    """Load a scan plane off the main thread so the FC window stays responsive.
+
+    ``load_fn`` must be callable as ``load_fn(entry, plane_idx) → tuple`` where
+    the returned tuple is ``(arr, px_m, px_x_m, px_y_m, plane_idx, scan)``
+    (i.e. the same signature as ``_load_scan_plane_for_analysis``).
+    """
+
+    def __init__(self, load_fn, entry, plane_idx: int) -> None:
+        super().__init__()
+        self.signals   = _ScanLoadSignals()
+        self._load_fn  = load_fn
+        self._entry    = entry
+        self._plane_idx = plane_idx
+
+    def run(self) -> None:
+        try:
+            result = self._load_fn(self._entry, self._plane_idx)
+            self.signals.finished.emit(result, "")
+        except Exception as exc:  # noqa: BLE001
+            self.signals.finished.emit(None, str(exc))
 
 
 # ── Main window ───────────────────────────────────────────────────────────────
@@ -1199,7 +1229,7 @@ class ProbeFlowWindow(QMainWindow):
         return arr, px_m, px_x_m, px_y_m, plane_idx, analysis_scan
 
     def _on_fc_load_from_browse(self) -> None:
-        """Bridge: read Browse selection → load into the floating FC window."""
+        """Bridge: read Browse selection → load into the floating FC window (off-thread)."""
         from probeflow.gui.models import VertFile
         if self._fc_window is None:
             return
@@ -1208,17 +1238,26 @@ class ProbeFlowWindow(QMainWindow):
             self._fc_window._sidebar.set_status(
                 "Select a scan in the Browse tab first.")
             return
-        if not entry or isinstance(entry, VertFile):
+        if isinstance(entry, VertFile):
             self._fc_window._sidebar.set_status(
                 "Selected entry is not a topography scan.")
             return
         plane_idx = self._fc_window._sidebar.plane_index()
-        try:
-            arr, px_m, px_x_m, px_y_m, plane_idx, scan = \
-                self._load_scan_plane_for_analysis(entry, plane_idx)
-        except Exception as exc:
-            self._fc_window._sidebar.set_status(f"Could not read scan: {exc}")
+        self._fc_window._sidebar.set_status("Loading scan…")
+        worker = _ScanLoadWorker(self._load_scan_plane_for_analysis, entry, plane_idx)
+        worker.signals.finished.connect(
+            lambda result, error, e=entry: self._on_fc_load_finished(e, result, error)
+        )
+        QThreadPool.globalInstance().start(worker)
+
+    def _on_fc_load_finished(self, entry, result, error: str) -> None:
+        """Receive the background-loaded scan and hand it to the FC window."""
+        if self._fc_window is None:
             return
+        if error:
+            self._fc_window._sidebar.set_status(f"Could not read scan: {error}")
+            return
+        arr, px_m, px_x_m, px_y_m, plane_idx, scan = result
         self._fc_window.load_entry(entry, plane_idx, arr, px_m, px_x_m, px_y_m, scan=scan)
 
     # ── Features tab handlers ──────────────────────────────────────────────────
@@ -1365,10 +1404,16 @@ class ProbeFlowWindow(QMainWindow):
                     self._grid.set_entry_processing(str(last_entry.path), state)
                 except Exception:
                     pass
-            # Handle "Send to …" actions requested from inside the image viewer.
+            # Handle "Send to …" actions that were NOT already handled immediately
+            # (e.g. user closed the viewer without clicking Send after setting action).
             if not spec and d._deferred.is_pending():
                 self._load_from_viewer(d, d._deferred.action)
         dlg.finished.connect(_on_closed)
+        # immediate_action_requested fires when user clicks "→ Feature Counting" /
+        # "→ TV Denoising" so the viewer stays open and the action runs right away.
+        dlg.immediate_action_requested.connect(
+            lambda action, _d=dlg: self._load_from_viewer_live(_d, action)
+        )
         dlg.show()
 
     def _track_open_viewer(self, dlg) -> None:
@@ -1416,11 +1461,42 @@ class ProbeFlowWindow(QMainWindow):
         else:
             px_x_m = px_y_m = px_m = 1e-10
         if action == "features":
-            self._switch_mode("features")
-            self._features_panel.load_entry(entry, plane_idx, arr, px_m, px_x_m, px_y_m)
-            self._features_sidebar.set_status(
-                f"Loaded {entry.stem} (processed, plane {plane_idx}, px = {px_m * 1e12:.1f} pm)")
+            self._open_fc_window()
+            self._fc_window.load_entry(entry, plane_idx, arr, px_m, px_x_m, px_y_m)
             self._status_bar.showMessage(f"{entry.stem} → Feature Counting")
+        elif action == "tv":
+            self._switch_mode("tv")
+            self._tv_panel.load_entry(entry, plane_idx, arr, px_m)
+            self._tv_sidebar.set_status(
+                f"Loaded {entry.stem} (processed, plane {plane_idx}). Adjust parameters and Run.")
+            self._status_bar.showMessage(f"{entry.stem} → TV Denoising")
+
+    def _load_from_viewer_live(self, dlg, action: str) -> None:
+        """Load processed data from an *open* ImageViewerDialog into FC/TV without closing it.
+
+        Called via ``immediate_action_requested`` so the image viewer stays open.
+        Clears ``_deferred`` so the ``_on_closed`` handler doesn't repeat the action.
+        """
+        entry = dlg._entries[dlg._idx]
+        plane_idx = dlg._deferred.plane_idx
+        arr = dlg._display_arr if dlg._display_arr is not None else dlg._raw_arr
+        dlg._deferred.clear()   # consumed — prevent _on_closed from re-firing
+        if arr is None:
+            self._status_bar.showMessage("Viewer had no image data to send.")
+            return
+        scan_range = dlg._scan_range_m
+        shape = arr.shape
+        if scan_range and shape and shape[0] > 0 and shape[1] > 0:
+            w_m, h_m = float(scan_range[0]), float(scan_range[1])
+            px_x_m = float(w_m / shape[1])
+            px_y_m = float(h_m / shape[0])
+            px_m = float(np.sqrt(px_x_m * px_y_m))
+        else:
+            px_x_m = px_y_m = px_m = 1e-10
+        if action == "features":
+            self._open_fc_window()
+            self._fc_window.load_entry(entry, plane_idx, arr, px_m, px_x_m, px_y_m)
+            self._status_bar.showMessage(f"{entry.stem} → Feature Counting (viewer open)")
         elif action == "tv":
             self._switch_mode("tv")
             self._tv_panel.load_entry(entry, plane_idx, arr, px_m)

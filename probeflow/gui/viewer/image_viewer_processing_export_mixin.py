@@ -525,12 +525,14 @@ class ImageViewerProcessingExportMixin:
     def _on_send_to_features(self):
         self._deferred.action = "features"
         self._deferred.plane_idx = self._ch_cb.currentIndex()
-        self.accept()
+        # Emit immediately so the parent can load data without closing the viewer.
+        # The viewer stays open; the parent clears _deferred so _on_closed won't fire it again.
+        self.immediate_action_requested.emit("features")
 
     def _on_send_to_tv(self):
         self._deferred.action = "tv"
         self._deferred.plane_idx = self._ch_cb.currentIndex()
-        self.accept()
+        self.immediate_action_requested.emit("tv")
 
     def _on_image_context_menu(self, pos):
         from probeflow.gui.viewer.context_menus import build_blank_image_context_menu

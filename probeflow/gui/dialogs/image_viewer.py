@@ -162,6 +162,10 @@ class ImageViewerDialog(
 ):
     """Double-click viewer with scroll/zoom, histogram display, processing, export."""
 
+    # Emitted by "→ Feature Counting" / "→ TV Denoising" buttons so the
+    # parent can act immediately without the viewer closing.
+    immediate_action_requested = Signal(str)   # "features" | "tv"
+
     def __init__(self, entry: SxmFile, entries: list[SxmFile],
                  colormap: str, t: dict, parent=None,
                  clip_low: float = 1.0, clip_high: float = 99.0,
@@ -691,7 +695,7 @@ class ImageViewerDialog(
         send_feat_btn.setFont(QFont("Helvetica", 8))
         send_feat_btn.setFixedHeight(24)
         send_feat_btn.setToolTip(
-            "Send the current processed image to the Feature Counting tab and close viewer")
+            "Send the current processed image to Feature Counting (viewer stays open)")
         send_feat_btn.clicked.connect(self._on_send_to_features)
         send_lay.addWidget(send_feat_btn)
 
@@ -699,7 +703,7 @@ class ImageViewerDialog(
         send_tv_btn.setFont(QFont("Helvetica", 8))
         send_tv_btn.setFixedHeight(24)
         send_tv_btn.setToolTip(
-            "Send the current processed image to the TV Denoising tab and close viewer")
+            "Send the current processed image to TV Denoising (viewer stays open)")
         send_tv_btn.clicked.connect(self._on_send_to_tv)
         send_lay.addWidget(send_tv_btn)
 

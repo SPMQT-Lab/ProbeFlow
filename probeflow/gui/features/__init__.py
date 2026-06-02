@@ -122,6 +122,81 @@ from probeflow.gui._tooltips import tip as _tip
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Compact height-distribution histogram for the FC sidebar
+# ─────────────────────────────────────────────────────────────────────────────
+
+class _FCHistogram(QWidget):
+    """Lightweight height-distribution histogram embedded in the FC sidebar.
+
+    Relies on matplotlib (already imported for the image-viewer histogram) but
+    has no sliders or drag lines — it is purely informational: shows the pixel
+    height distribution of the currently loaded (and possibly zero-plane-corrected)
+    scan array so the user can judge whether the background is flat.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+        from matplotlib.figure import Figure
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 2, 0, 0)
+        lay.setSpacing(0)
+        self._fig = Figure(figsize=(2.4, 1.1), dpi=80)
+        self._fig.patch.set_alpha(0)
+        self._ax  = self._fig.add_subplot(111)
+        self._canvas = FigureCanvasQTAgg(self._fig)
+        self._canvas.setFixedHeight(105)
+        lay.addWidget(self._canvas)
+        self._draw_placeholder()
+
+    def _draw_placeholder(self) -> None:
+        self._ax.cla()
+        bg = "#1e1e2e"
+        self._fig.patch.set_facecolor(bg)
+        self._ax.set_facecolor(bg)
+        self._ax.text(0.5, 0.5, "load a scan", transform=self._ax.transAxes,
+                      ha="center", va="center", fontsize=7, color="#585b70")
+        for sp in self._ax.spines.values():
+            sp.set_edgecolor("#45475a")
+        self._fig.subplots_adjust(left=0.02, right=0.98, top=0.93, bottom=0.20)
+        self._canvas.draw_idle()
+
+    def update_data(self, arr: np.ndarray) -> None:
+        """Replot height distribution from a 2-D float scan array."""
+        flat = arr[np.isfinite(arr)].ravel()
+        if flat.size == 0:
+            self._draw_placeholder()
+            return
+        # Pick a human-readable unit based on the median magnitude.
+        med = abs(float(np.nanmedian(flat)))
+        if med > 1e-9:
+            scale, unit = 1e9,  "nm"
+        elif med > 1e-12:
+            scale, unit = 1e10, "Å"
+        else:
+            scale, unit = 1e12, "pm"
+        flat_d = flat * scale
+        bg, fg, acc = "#1e1e2e", "#cdd6f4", "#89b4fa"
+        self._ax.cla()
+        self._fig.patch.set_facecolor(bg)
+        self._ax.set_facecolor(bg)
+        counts, edges = np.histogram(flat_d, bins=128)
+        centers = (edges[:-1] + edges[1:]) / 2.0
+        widths  = np.diff(edges)
+        self._ax.bar(centers, np.maximum(counts, 1), width=widths,
+                     color=acc, alpha=0.85, linewidth=0)
+        self._ax.set_yscale("log")
+        self._ax.tick_params(axis="x", colors=fg, labelsize=6)
+        self._ax.tick_params(axis="y", left=False, labelleft=False)
+        self._ax.yaxis.set_visible(False)
+        self._ax.set_xlabel(f"Height [{unit}]", fontsize=6, color=fg)
+        for sp in self._ax.spines.values():
+            sp.set_edgecolor("#45475a")
+        self._fig.subplots_adjust(left=0.02, right=0.98, top=0.93, bottom=0.26)
+        self._canvas.draw_idle()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # QGraphicsView-based image canvas for the Features panel
 # Replaces the previous matplotlib canvas — gives the same native Qt
 # scroll-wheel zoom / click-drag pan as the thumbnail double-click viewer.
@@ -144,9 +219,10 @@ class _FeatureView(QGraphicsView):
         ``mask_painted(scene_x, scene_y)`` for each sampled point.
     """
 
-    particle_clicked = Signal(float, float)        # scene (image-pixel) coords
-    crop_completed   = Signal(int, int, int, int)  # x0, y0, x1, y1 in image px
-    mask_painted     = Signal(float, float)        # scene x, scene y (brush centre)
+    particle_clicked  = Signal(float, float)        # scene (image-pixel) coords
+    crop_completed    = Signal(int, int, int, int)  # x0, y0, x1, y1 in image px
+    mask_painted      = Signal(float, float)        # scene x, scene y (brush centre)
+    zero_plane_pick   = Signal(float, float)        # scene x, scene y for zero-plane pts
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -157,12 +233,13 @@ class _FeatureView(QGraphicsView):
         self._scene.addItem(self._pixmap_item)
         self._overlay_items: list = []
 
-        self._classify_armed  = False
-        self._cropping        = False
-        self._crop_start      = None
-        self._crop_rect_item  = None
-        self._mask_painting   = False
-        self._brush_radius_px = 10
+        self._classify_armed    = False
+        self._cropping          = False
+        self._crop_start        = None
+        self._crop_rect_item    = None
+        self._mask_painting     = False
+        self._brush_radius_px   = 10
+        self._zero_plane_armed  = False
 
         self.setDragMode(QGraphicsView.ScrollHandDrag)
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
@@ -264,6 +341,17 @@ class _FeatureView(QGraphicsView):
                 self.setDragMode(QGraphicsView.ScrollHandDrag)
             self.viewport().setCursor(Qt.ArrowCursor)
 
+    def set_zero_plane_armed(self, armed: bool) -> None:
+        """Enter/exit interactive zero-plane point-picking mode."""
+        self._zero_plane_armed = armed
+        if armed:
+            self.setDragMode(QGraphicsView.NoDrag)
+            self.viewport().setCursor(Qt.CrossCursor)
+        else:
+            if not self._cropping and not self._mask_painting:
+                self.setDragMode(QGraphicsView.ScrollHandDrag)
+            self.viewport().setCursor(Qt.ArrowCursor)
+
     def set_cropping(self, cropping: bool) -> None:
         self._cropping   = cropping
         self._crop_start = None
@@ -289,6 +377,10 @@ class _FeatureView(QGraphicsView):
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.LeftButton:
             pos = self.mapToScene(event.pos())
+            if self._zero_plane_armed:
+                self.zero_plane_pick.emit(pos.x(), pos.y())
+                event.accept()
+                return
             if self._mask_painting:
                 self.mask_painted.emit(pos.x(), pos.y())
                 event.accept()   # explicit accept so Qt delivers mouseMoveEvent
@@ -437,9 +529,11 @@ class FeaturesPanel(QWidget):
     not mutate Browse thumbnails or Viewer processing state.
     """
 
-    analysis_requested    = Signal(str)   # mode name
+    analysis_requested      = Signal(str)    # mode name
     template_crop_requested = Signal()
-    go_to_browse_requested  = Signal()    # ← Browse button
+    go_to_browse_requested  = Signal()       # ← Browse button
+    scan_loaded             = Signal(object) # emitted after load_entry with the arr
+    zero_plane_applied      = Signal()       # emitted after zero-plane correction
 
     def __init__(self, t: dict, parent=None):
         super().__init__(parent)
@@ -481,6 +575,9 @@ class FeaturesPanel(QWidget):
         self._step_mask: np.ndarray | None = None        # computed step band, bool
         self._step_mask_sig = None                       # params signature for caching
         self._step_overlay_item = None                   # amber band overlay item
+        # Zero-plane interactive correction ───────────────────────────────────
+        self._arr_original: np.ndarray | None = None    # raw array before any zero-plane
+        self._zero_plane_pts: list = []                 # picked (x_px, y_px) points (≤3)
         self._build()
 
     def _build(self):
@@ -510,6 +607,7 @@ class FeaturesPanel(QWidget):
         self._view.particle_clicked.connect(self._on_particle_clicked)
         self._view.crop_completed.connect(self._on_crop_completed)
         self._view.mask_painted.connect(self._on_mask_painted)
+        self._view.zero_plane_pick.connect(self._on_zero_plane_pick)
         lay.addWidget(self._view, 1)
 
         # ── View toolbar ────────────────────────────────────────────────────
@@ -560,6 +658,8 @@ class FeaturesPanel(QWidget):
         self._entry        = entry
         self._plane_idx    = plane_idx
         self._arr          = arr
+        self._arr_original = np.asarray(arr, dtype=np.float64).copy()  # snapshot before any zero-plane
+        self._zero_plane_pts = []                                        # reset on every new load
         self._scan         = scan
         self._pixel_size_m = pixel_size_m
         self._pixel_size_x_m = (
@@ -589,6 +689,7 @@ class FeaturesPanel(QWidget):
             f"{arr.shape[1]}x{arr.shape[0]} px  "
             f"(px = {self._pixel_size_x_m * 1e12:.1f} x "
             f"{self._pixel_size_y_m * 1e12:.1f} pm)")
+        self.scan_loaded.emit(self._arr)   # update sidebar histogram
 
     def current_entry(self):
         return self._entry
@@ -612,6 +713,78 @@ class FeaturesPanel(QWidget):
     def set_sample_selection_armed(self, armed: bool) -> None:
         self._sample_armed = armed
         self._view.set_classify_armed(armed)
+
+    # ── Zero-plane interactive correction ─────────────────────────────────────
+
+    def set_zero_plane_armed(self, armed: bool) -> None:
+        """Toggle interactive 3-point zero-plane picking on/off."""
+        self._view.set_zero_plane_armed(armed)
+        if not armed:
+            # If the user cancels before picking 3 points, clear the partial list
+            # only if no plane has been applied yet (i.e. pts < 3).
+            if len(self._zero_plane_pts) < 3:
+                self._zero_plane_pts = []
+                self._redraw()    # remove partial markers
+
+    def _on_zero_plane_pick(self, scene_x: float, scene_y: float) -> None:
+        """Handle a canvas click while zero-plane mode is armed.
+
+        Scene coords map 1:1 to image pixels in the ``_FeatureView``.
+        """
+        if self._arr is None:
+            return
+        Ny, Nx = self._arr.shape
+        x_px = max(0, min(int(round(scene_x)), Nx - 1))
+        y_px = max(0, min(int(round(scene_y)), Ny - 1))
+        self._zero_plane_pts.append((x_px, y_px))
+        self._redraw()   # show numbered markers as they accumulate
+
+        n = len(self._zero_plane_pts)
+        if n < 3:
+            return  # still collecting — controller will update the status
+
+        # All 3 points collected: apply the plane correction.
+        from probeflow.processing.geometry import set_zero_plane as _set_zero_plane
+        try:
+            corrected = _set_zero_plane(
+                self._arr_original if self._arr_original is not None else self._arr,
+                self._zero_plane_pts,
+            )
+        except ValueError:
+            # Degenerate triangle or collinear points — clear and let user retry.
+            self._zero_plane_pts = []
+            self._redraw()
+            self.zero_plane_applied.emit()   # signal controller to show error
+            return
+        self._arr = corrected
+        # Discard segmentation results — they were computed on the old array.
+        self._particles   = []
+        self._detections  = []
+        self._lattice     = None
+        self._classifications = []
+        self._overlay_mode = "none"
+        self._show_overlay = True
+        self._overlay_toggle_btn.setVisible(False)
+        self._redraw(reset_view=False)
+        self._results_table.setRowCount(0)
+        self.zero_plane_applied.emit()
+
+    def reset_to_original(self) -> None:
+        """Revert to the array as loaded (undo zero-plane correction)."""
+        if self._arr_original is None:
+            return
+        self._arr = np.asarray(self._arr_original, dtype=np.float64).copy()
+        self._zero_plane_pts = []
+        self._particles   = []
+        self._detections  = []
+        self._lattice     = None
+        self._classifications = []
+        self._overlay_mode = "none"
+        self._show_overlay = True
+        self._overlay_toggle_btn.setVisible(False)
+        self._redraw(reset_view=False)
+        self._results_table.setRowCount(0)
+        self.scan_loaded.emit(self._arr)   # update histogram to original
 
     def has_sample_labels(self) -> bool:
         return bool(self._sample_labels)
@@ -1073,6 +1246,13 @@ class FeaturesPanel(QWidget):
         pixmap = _arr_to_pixmap(self._arr)
         self._view.set_pixmap(pixmap, reset_view=reset_view)
 
+        # ── Zero-plane reference point markers ────────────────────────────────
+        _ZP_COLOR = "#f9e2af"   # warm yellow — visible on both bright and dark scans
+        for i, (x_px, y_px) in enumerate(self._zero_plane_pts[:3]):
+            r = 7.0
+            self._view.add_circle(x_px, y_px, r, _ZP_COLOR, lw=1.8)
+            self._view.add_text(x_px + r + 2, y_px - r, str(i + 1), _ZP_COLOR, font_size=8)
+
         # ── Particle overlays ────────────────────────────────────────────────
         if self._overlay_mode == "particles" and self._show_overlay:
             if self._current_mode == "classify":
@@ -1196,6 +1376,8 @@ class FeaturesSidebar(QWidget):
     mask_clear_requested       = Signal()
     mask_color_changed         = Signal(int, int, int)  # R, G, B
     step_exclude_changed       = Signal()      # algorithmic step-edge controls changed
+    zero_plane_armed           = Signal(bool)  # True = enter 3-point picking mode
+    reset_to_original_requested = Signal()     # undo zero-plane correction
 
     MASK_COLORS: dict[str, tuple[int, int, int]] = {
         "Red":     (220,  50,  50),
@@ -1283,6 +1465,49 @@ class FeaturesSidebar(QWidget):
             "scan directions. Most particle work uses Z fwd."))
         plane_row.addWidget(self._plane_cb, 1)
         lay.addLayout(plane_row)
+
+        # ── Scan Processing ────────────────────────────────────────────────────
+        lay.addWidget(_sep())
+        proc_title = QLabel("Scan Processing")
+        proc_title.setFont(QFont("Helvetica", 10, QFont.Bold))
+        lay.addWidget(proc_title)
+
+        proc_hint = QLabel(
+            "Apply before segmenting. Zero-plane subtracts sample tilt "
+            "by clicking 3 substrate reference points.")
+        proc_hint.setFont(QFont("Helvetica", 8))
+        proc_hint.setWordWrap(True)
+        proc_hint.setStyleSheet("color: #888;")
+        lay.addWidget(proc_hint)
+
+        # Height histogram — updates whenever a scan is loaded or zero-plane applied
+        self._histogram = _FCHistogram(self)
+        lay.addWidget(self._histogram)
+
+        self._zero_plane_btn = QPushButton("📐 Set Zero Plane")
+        self._zero_plane_btn.setCheckable(True)
+        self._zero_plane_btn.setFont(QFont("Helvetica", 9))
+        self._zero_plane_btn.setFixedHeight(28)
+        self._zero_plane_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self._zero_plane_btn.setToolTip(_tip(
+            "Click 3 reference points on the bare substrate — a tilted plane "
+            "through those 3 heights is subtracted from the whole image. "
+            "Removes sample tilt and slow scanner drift. The corrected array "
+            "is used for all subsequent segmentation and analysis."))
+        self._zero_plane_btn.toggled.connect(self.zero_plane_armed.emit)
+        lay.addWidget(self._zero_plane_btn)
+
+        self._reset_proc_btn = QPushButton("↩ Reset to Original")
+        self._reset_proc_btn.setFont(QFont("Helvetica", 9))
+        self._reset_proc_btn.setFixedHeight(26)
+        self._reset_proc_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self._reset_proc_btn.setToolTip(_tip(
+            "Undo the zero-plane correction and restore the scan as loaded "
+            "from Browse (Viewer processing still applied). Also clears any "
+            "segmentation results."))
+        self._reset_proc_btn.clicked.connect(self.reset_to_original_requested.emit)
+        lay.addWidget(self._reset_proc_btn)
+
         lay.addWidget(_sep())
 
         # ── Segmentation Settings ──────────────────────────────────────────────
@@ -2024,6 +2249,17 @@ class FeaturesSidebar(QWidget):
 
     def set_status(self, text: str) -> None:
         self._status_lbl.setText(text)
+
+    def update_histogram(self, arr) -> None:
+        """Replot the height histogram from a 2-D scan array."""
+        if arr is not None:
+            self._histogram.update_data(arr)
+
+    def disarm_zero_plane(self) -> None:
+        """Un-toggle the Set Zero Plane button without re-emitting the signal."""
+        self._zero_plane_btn.blockSignals(True)
+        self._zero_plane_btn.setChecked(False)
+        self._zero_plane_btn.blockSignals(False)
 
     def _on_mask_btn_toggled(self, checked: bool) -> None:
         self._mask_btn.setText(

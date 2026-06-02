@@ -126,6 +126,12 @@ class FeatureCountingController(QObject):
         sidebar.mask_clear_requested.connect(self._on_mask_clear)
         sidebar.step_exclude_changed.connect(self._on_step_exclude_changed)
 
+        # Zero-plane / histogram
+        sidebar.zero_plane_armed.connect(self._on_zero_plane_armed)
+        sidebar.reset_to_original_requested.connect(self._on_reset_to_original)
+        panel.scan_loaded.connect(self._on_scan_loaded)
+        panel.zero_plane_applied.connect(self._on_zero_plane_applied)
+
     # ── Algorithmic step-edge exclusion ───────────────────────────────────────
 
     def _build_exclude_mask(self):
@@ -488,3 +494,39 @@ class FeatureCountingController(QObject):
             self._status_cb(f"Exported {kind} → {out_path}")
         except Exception as exc:
             self._sidebar.set_status(f"Export failed: {exc}")
+
+    # ── Zero-plane / histogram ────────────────────────────────────────────────
+
+    def _on_scan_loaded(self, arr) -> None:
+        """Update the sidebar histogram whenever a new scan is loaded."""
+        self._sidebar.update_histogram(arr)
+
+    def _on_zero_plane_armed(self, armed: bool) -> None:
+        self._panel.set_zero_plane_armed(armed)
+        if armed:
+            self._sidebar.set_status(
+                "Click 3 reference points on the bare substrate — "
+                "a zero plane through those heights will be subtracted.")
+
+    def _on_reset_to_original(self) -> None:
+        self._panel.reset_to_original()
+        self._sidebar.set_status(
+            "Reverted to original scan. Run 'Apply Segmentation' again if needed.")
+        self._status_cb("Zero-plane correction removed.")
+
+    def _on_zero_plane_applied(self) -> None:
+        arr = self._panel.get_analysis_array()
+        if arr is not None:
+            self._sidebar.update_histogram(arr)
+        self._sidebar.disarm_zero_plane()
+        n = len(self._panel._zero_plane_pts)
+        if n < 3:
+            # Degenerate triangle — tell user to retry
+            self._sidebar.set_status(
+                "Zero-plane failed: the 3 points were too close together or collinear. "
+                "Try again with points spread further apart.")
+        else:
+            self._sidebar.set_status(
+                "Zero plane subtracted ✓  Run 'Apply Segmentation' to segment "
+                "the corrected image.")
+            self._status_cb("Zero-plane correction applied.")
