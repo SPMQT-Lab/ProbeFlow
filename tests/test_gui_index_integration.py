@@ -87,17 +87,21 @@ class TestGuiWorkers:
         token = object()
         calls = {}
         emitted = []
+        channels_seen = []
 
-        class FakeScan:
-            plane_names = ["Z forward", "Current forward"]
-            n_planes = 2
-            planes = [np.zeros((3, 3)), np.ones((3, 3))]
+        planes = [np.zeros((3, 3)), np.ones((3, 3))]
+
+        def fake_load_plane(_path, channel):
+            # Plane selection now lives in load_thumbnail_plane; emulate it
+            # resolving the requested channel to the second plane.
+            channels_seen.append(channel)
+            return planes[1], ["Z forward", "Current forward"]
 
         def fake_render(**kwargs):
             calls.update(kwargs)
             return Image.new("RGB", (2, 2))
 
-        monkeypatch.setattr(worker_mod, "load_scan", lambda _path: FakeScan())
+        monkeypatch.setattr(worker_mod, "load_thumbnail_plane", fake_load_plane)
         monkeypatch.setattr(worker_mod, "render_scan_image", fake_render)
 
         loader = worker_mod.ThumbnailLoader(
@@ -112,7 +116,8 @@ class TestGuiWorkers:
         loader.signals.loaded.connect(lambda *args: emitted.append(args))
         loader.run()
 
-        assert calls["arr"] is FakeScan.planes[1]
+        assert channels_seen == ["Current"]
+        assert calls["arr"] is planes[1]
         assert "scan_path" not in calls
         assert calls["size"] == (148, 116)
         assert calls["processing"] == {"align_rows": "median"}
@@ -128,10 +133,10 @@ class TestGuiWorkers:
         caplog.set_level(logging.WARNING, logger=worker_mod.__name__)
         emitted = []
 
-        def fail_load_scan(_path):
+        def fail_load_plane(_path, _channel):
             raise ValueError("bad scan")
 
-        monkeypatch.setattr(worker_mod, "load_scan", fail_load_scan)
+        monkeypatch.setattr(worker_mod, "load_thumbnail_plane", fail_load_plane)
         monkeypatch.setattr(worker_mod, "render_scan_image", lambda **_kwargs: None)
 
         loader = worker_mod.ThumbnailLoader(
@@ -155,10 +160,10 @@ class TestGuiWorkers:
 
         caplog.set_level(logging.WARNING, logger=worker_mod.__name__)
 
-        def fail_load_scan(_path):
+        def fail_load_plane(_path, _channel):
             raise ValueError("bad folder scan")
 
-        monkeypatch.setattr(worker_mod, "load_scan", fail_load_scan)
+        monkeypatch.setattr(worker_mod, "load_thumbnail_plane", fail_load_plane)
         monkeypatch.setattr(worker_mod, "render_scan_image", lambda **_kwargs: None)
 
         emitted = []
