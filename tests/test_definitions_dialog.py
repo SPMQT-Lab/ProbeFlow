@@ -50,10 +50,15 @@ def test_definitions_reference_has_equations_and_light_theme_contrast():
     assert "color: #111827" in html
     assert "#cdd6f4" not in lowered
     assert "#a6adc8" not in lowered
+    # Equation/reference blocks are preserved verbatim.
     assert "S = [j0, j1)" in html
     assert "slope &lt; tan(step_threshold_deg)" in html
-    assert "mean is subtracted before the FFT in both modes" in html
-    assert "derivative cusp" in html
+    # Tutorial prose (reworded) still conveys the key physics.
+    assert "subtracted before the FFT in both modes" in html
+    assert "sharp kink" in html  # creep-model singularity explanation
+    # Tutorial framing is present.
+    assert "no valid measurement" in lowered  # NaN explained in the intro
+    assert "fourier transform" in lowered      # FFT introduced in plain terms
 
 
 def test_roi_reference_has_action_scope_and_tool_behaviour():
@@ -78,6 +83,9 @@ def test_roi_reference_has_action_scope_and_tool_behaviour():
         "line = two endpoints plus optional averaging width",
         "Point ROI actions",
         "pair-correlation",
+        # Tutorial behaviour the reference must teach.
+        "select-then-edit",
+        "Contrast scope",
     ):
         assert expected in html
 

@@ -40,9 +40,13 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "max_adjacent_bad_lines",
         ),
         summary=(
-            "Detects short damaged segments on fast-scan rows by comparing each "
-            "row to nearby rows, then replaces only the accepted segment from "
-            "valid neighbouring scan lines."
+            "An STM image is built one row at a time as the tip sweeps back and "
+            "forth. Sometimes the tip glitches part-way along a row and leaves a "
+            "short bright or dark streak that is not real surface. This tool finds "
+            "those short damaged stretches by comparing each row with the rows just "
+            "above and below it, then repairs only the bad stretch by copying from "
+            "its healthy neighbours. Everything else in the image is left exactly "
+            "as measured."
         ),
         equations=(
             "MADN(v) = 1.4826 * median(|v - median(v)|)\n"
@@ -67,23 +71,40 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "  z'_i,S = nearest valid neighbour segment when only one side is valid",
         ),
         details=(
-            "The minimum segment length rejects single-pixel speckles. The maximum "
-            "adjacent bad-line setting is a safety limit: broader blocks of damaged "
-            "rows are skipped because local interpolation becomes unreliable.",
-            "Preview detection computes candidate segments without modifying the image. "
-            "Applying correction preserves pixels outside accepted segments.",
+            "Two modes find the bad stretches. 'step' looks for a sudden jump up "
+            "and a matching jump back down, which is what a glitch streak looks "
+            "like. 'mad' simply flags pixels that sit far from the typical value "
+            "for that row. 'Polarity' tells it whether you are chasing bright "
+            "(too-high) or dark (too-low) streaks. The threshold is measured in "
+            "robust noise units (MAD), so a value of 3 means 'about three times "
+            "the usual row noise'.",
+            "Minimum segment length ignores single-pixel speckle, so only genuine "
+            "stretches are touched. Maximum adjacent bad lines is a safety brake: "
+            "if a whole block of neighbouring rows is damaged there are no healthy "
+            "neighbours to copy from, so the tool leaves that block alone rather "
+            "than guessing.",
+            "Use 'Preview detection' first — it highlights what would be repaired "
+            "without changing the data. Only 'Apply' edits the image, and even "
+            "then only the accepted stretches change.",
         ),
         cautions=(
-            "This is intended for local line artifacts. It is not a whole-row "
-            "levelling tool and should not be used to flatten real terrace steps.",
+            "This fixes local streaks, not whole-row level differences. Do not use "
+            "it to flatten real terrace steps or step edges — those are genuine "
+            "surface features, and row levelling (below) is the right tool if you "
+            "want to remove row-to-row offsets.",
         ),
     ),
     _DefinitionEntry(
         title="Row alignment",
         params=("method = median | mean | linear",),
         summary=(
-            "Removes independent row offsets, and optionally row slopes, from "
-            "raw scan lines before later background or filter operations."
+            "Because each scan line is recorded separately, neighbouring rows "
+            "often sit at slightly different heights, giving the image a streaky, "
+            "venetian-blind look. Row alignment removes that by shifting every row "
+            "to a common level — subtracting each row's own typical height. The "
+            "'linear' option also removes a gentle tilt within each row. This is "
+            "usually the first cleanup step, done before background subtraction or "
+            "filtering."
         ),
         equations=(
             "median: z'_i,j = z_i,j - median_j(z_i,j)\n"
@@ -92,13 +113,18 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "        z'_i,j = z_i,j - (a_i*x_j + b_i)",
         ),
         details=(
-            "Median is the robust default for STM data because isolated crashes or "
-            "adsorbates do not dominate the row reference. Mean can be useful for "
-            "clean rows. Linear also removes within-row tilt.",
+            "'Median' is the safe default: it asks 'what is the middle height in "
+            "this row?', and a few unusual pixels (an adsorbed molecule, a tip "
+            "crash, a bright defect) cannot drag that answer around. 'Mean' "
+            "averages every pixel, so it is only suitable when rows are clean. "
+            "'Linear' fits and removes a straight slope across each row, which "
+            "helps when the rows are also tilted, not just offset.",
         ),
         cautions=(
-            "If a row contains mostly a real sloped feature, alignment can remove part "
-            "of that physical signal.",
+            "If a row is dominated by a real sloped feature — say a wide terrace "
+            "that rises across the whole row — alignment can subtract part of that "
+            "genuine signal along with the offset. When in doubt, compare before "
+            "and after.",
         ),
     ),
     _DefinitionEntry(
@@ -112,9 +138,13 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "step_threshold_deg",
         ),
         summary=(
-            "Fits a two-dimensional polynomial background on selected finite "
-            "pixels, then subtracts the fitted surface from the whole image or "
-            "from an apply ROI."
+            "Real scans usually sit on a smooth, unwanted backdrop — an overall "
+            "tilt from the sample not being perfectly flat, or a gentle bow from "
+            "the scanner. This tool models that backdrop as a smooth surface (a "
+            "polynomial), fits it to the image, and subtracts it, so the features "
+            "you care about are left sitting on a flat, level background. Order 1 "
+            "removes a flat tilt (a plane); higher orders remove gentle curvature "
+            "or bowing."
         ),
         equations=(
             "normalised coordinates: x, y in [-1, 1]\n"
@@ -126,17 +156,26 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "z'(x, y) = z(x, y) - B(x, y)",
         ),
         details=(
-            "The viewer's Plane/background button uses a first-order plane by default: "
-            "B(x,y) = c00 + c10*x + c01*y.",
-            "Fit ROI and exclude ROI affect only the pixels used to estimate the "
-            "background. Apply ROI controls which pixels are modified.",
-            "Step tolerance excludes high-slope pixels from the fit only when enough "
-            "pixels remain to solve the requested polynomial.",
+            "The quick Plane/background button just removes a first-order tilt "
+            "(B(x,y) = c00 + c10*x + c01*y) from the whole image, which is the "
+            "most common case.",
+            "The three ROI options give you fine control. 'Fit ROI' fits the "
+            "background using only pixels inside a region — handy when one clean "
+            "patch represents the true background. 'Exclude ROI' does the "
+            "opposite: it leaves tall features (islands, molecules) out of the fit "
+            "so they do not pull the surface upward. 'Apply ROI' limits which "
+            "pixels actually get the subtraction. Fit and exclude change what the "
+            "model learns from; apply changes what it edits.",
+            "'Step tolerance' is for stepped surfaces: it drops steep pixels (step "
+            "edges) from the fit so the background follows the flat terraces "
+            "instead of bending across the steps — but only while enough flat "
+            "pixels remain to solve the fit.",
         ),
         cautions=(
-            "A polynomial fit extrapolates outside the fit region. If the fit ROI is "
-            "small or not representative, the subtraction can create artificial "
-            "curvature.",
+            "A polynomial keeps curving outside the region it was fitted to. If the "
+            "fit ROI is small or not typical of the whole image, the subtraction "
+            "can invent curvature where there was none. Prefer a fit region that "
+            "samples genuinely flat background across the scan.",
         ),
     ),
     _DefinitionEntry(
@@ -151,9 +190,14 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "preserve_level",
         ),
         summary=(
-            "Builds a one-dimensional background profile along the slow-scan "
-            "direction, fits or smooths that profile, then subtracts the "
-            "resulting line background from the full image."
+            "STM images often drift slowly from the top of the scan to the bottom "
+            "— the surface appears to ramp or bow in the slow-scan direction (the "
+            "direction the tip steps from one row to the next) because of thermal "
+            "drift or piezo creep. This tool measures one representative height per "
+            "row, builds a smooth profile down the image, and subtracts it from "
+            "every row, flattening that top-to-bottom trend while leaving the "
+            "side-to-side detail intact. It is the STM-specific complement to the "
+            "polynomial background above, which works in both directions at once."
         ),
         equations=(
             "optional x prefit per row:\n"
@@ -176,28 +220,43 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "z'_i,j = z_i,j - background_i,j + reference(background)",
         ),
         details=(
-            "Active ROI limits where the line profile is estimated, but subtraction is "
-            "still applied to the full image.",
-            "The optional jump threshold removes large discontinuities in the profile "
-            "before fitting. Preserve level adds back the median or mean of the fitted "
-            "background so the corrected image keeps a familiar height reference.",
-            "For logarithmic creep models, d is constrained before the scan start so "
-            "the log singularity stays off the measured image; eps is only numerical "
-            "protection. The sqrt model uses the same off-scan anchor convention to "
-            "keep its derivative cusp outside the measured rows.",
+            "Choose the 'model' to match the drift you see. 'linear' and "
+            "'poly2/poly3' remove a straight or gently curved trend. 'low_pass' "
+            "smooths the per-row profile and removes whatever is left — flexible "
+            "but gentle. The 'piezo_creep' and 'sqrt_creep' models have the "
+            "characteristic curved shape of scanner creep right after a large tip "
+            "move, where the drift is fast at first and then settles.",
+            "If you draw an area ROI and fit from it, only pixels inside that ROI "
+            "are used to measure each row's height — useful for fitting on clean "
+            "background while ignoring tall features. The correction is still "
+            "applied to the whole image so nothing is left out.",
+            "Two helpers refine the fit. 'Jump threshold' ignores large sudden "
+            "steps in the profile (for example a terrace edge) so they do not bend "
+            "the fitted trend. 'Preserve level' adds the background's average "
+            "height back afterwards, so the corrected image keeps a sensible "
+            "absolute height instead of hovering around zero.",
+            "Technical note on the creep models: the logarithm and square-root "
+            "shapes have a sharp kink at one point, so the fit pins that kink just "
+            "before the first scan row, keeping it off the measured image; the eps "
+            "term is only there to stop the logarithm blowing up numerically.",
         ),
         cautions=(
-            "Line-by-line mode is aggressive because each row gets its own background "
-            "value. It can suppress real slow-scan variation if the selected fit pixels "
-            "include the signal of interest.",
+            "'line_by_line' gives every row its own independent background value, "
+            "which is powerful but blunt: if the features you care about vary down "
+            "the slow-scan direction, this mode can flatten them away along with "
+            "the drift. Reach for it only when the row-to-row background really is "
+            "independent.",
         ),
     ),
     _DefinitionEntry(
         title="Gaussian smoothing",
         params=("sigma_px",),
         summary=(
-            "Applies an isotropic two-dimensional Gaussian blur while handling "
-            "NaN pixels by weighted normalisation."
+            "Smooths the image by blending each pixel with its neighbours, "
+            "weighting nearby pixels more than distant ones (a Gaussian, or "
+            "bell-curve, weighting). This softens random pixel noise so faint, "
+            "broad features stand out. 'sigma_px' is the blur radius in pixels — "
+            "larger values blur more."
         ),
         equations=(
             "G_sigma(x,y) = exp(-(x^2 + y^2) / (2*sigma_px^2))\n"
@@ -205,40 +264,55 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "z'_i,j = (G_sigma * (M*z))_i,j / (G_sigma * M)_i,j",
         ),
         details=(
-            "The normalisation prevents missing pixels from bleeding NaNs into "
-            "neighbouring valid pixels. Original NaN positions are restored after "
-            "smoothing.",
+            "Gaps (NaN pixels) are handled carefully: the blur is renormalised so "
+            "a missing measurement cannot smear its emptiness into good "
+            "neighbouring pixels, and the original gaps are put back afterwards.",
         ),
         cautions=(
-            "Large sigma values remove atomic corrugation and other fine spatial detail.",
+            "Smoothing trades detail for a cleaner look. Too large a sigma will "
+            "wash out atomic corrugation and other fine structure you may want to "
+            "keep — start small and increase only as needed.",
         ),
     ),
     _DefinitionEntry(
         title="Gaussian high-pass",
         params=("sigma_px",),
         summary=(
-            "Estimates broad structure with a Gaussian blur and subtracts it, "
-            "leaving high-spatial-frequency contrast."
+            "The mirror image of smoothing: it makes a blurred copy of the image "
+            "(the broad, slowly-varying part) and subtracts it, leaving only the "
+            "fine, fast-changing detail. This is a quick way to flatten an uneven "
+            "background and pop out small features like atoms or edges. 'sigma_px' "
+            "sets the scale — anything broader than this blur radius is removed."
         ),
         equations=(
             "background = GaussianSmooth(z, sigma_px)\n"
             "z' = z - background",
         ),
         details=(
-            "NaNs are handled with the same weighted Gaussian normalisation as Gaussian "
-            "smoothing, then restored in the output.",
+            "Think of it as 'keep the small stuff, throw away the big stuff'. "
+            "Choosing sigma is choosing the boundary between the two. Gaps (NaNs) "
+            "are handled the same careful way as Gaussian smoothing.",
         ),
         cautions=(
-            "High-pass filtering removes real long-wavelength topography as well as "
-            "unwanted background.",
+            "It cannot tell wanted broad topography from unwanted background — both "
+            "are 'big stuff' and both get removed. After a high-pass you can no "
+            "longer read true heights of large features; use it for visualising "
+            "fine detail, not for quantitative step heights.",
         ),
     ),
     _DefinitionEntry(
         title="FFT soft-border filtering",
         params=("mode = low_pass | high_pass", "cutoff", "border_frac"),
         summary=(
-            "Applies a radial FFT filter after tapering image edges toward the "
-            "finite-pixel mean to reduce wrap-around ringing."
+            "A Fourier transform (FFT) re-describes the image as a sum of waves: "
+            "smooth, broad variations are 'low spatial frequencies' near the "
+            "centre, and fine, closely-spaced detail is 'high frequencies' further "
+            "out. Filtering in this domain lets you keep or remove features by "
+            "their size. Low-pass keeps the broad waves (smooths); high-pass keeps "
+            "the fine waves (sharpens). The 'soft border' first fades the image "
+            "edges to a common level, because the FFT secretly assumes the image "
+            "tiles edge-to-edge, and a hard jump between opposite edges would "
+            "create ripples across the result."
         ),
         equations=(
             "m = mean_finite(z)\n"
@@ -250,16 +324,20 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "z' = real(ifft2(ifftshift(H*F))) / safe(w) + m",
         ),
         details=(
-            "This is a full forward-filter-inverse operation. The soft border is "
-            "compensated after the inverse transform so the image interior stays on the "
-            "original level.",
-            "This compensation is the key difference from the simpler Fourier radial "
-            "filter, where the Hann or Hamming window is not divided out after inverse "
-            "transform.",
+            "'cutoff' is the size boundary between 'broad' and 'fine', and "
+            "'border_frac' is how much of the edge gets faded. The sequence is: "
+            "fade the edges, transform to the wave (Fourier) domain, keep or "
+            "remove waves on the chosen side of the cutoff, transform back, then "
+            "undo the edge fade so the middle of the image stays at its true "
+            "height.",
+            "Undoing that edge fade is the main difference from the simpler "
+            "Fourier radial filter below, which leaves its taper in place. That "
+            "makes this version better when edge heights matter.",
         ),
         cautions=(
-            "Very small cutoffs or large border fractions can over-smooth the image and "
-            "amplify edge compensation artifacts.",
+            "A very small cutoff or a very large border fraction can over-smooth "
+            "the image and exaggerate edge artifacts. Change one setting at a time "
+            "and watch the preview.",
         ),
     ),
     _DefinitionEntry(
@@ -270,8 +348,13 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "window = hanning | hamming | none",
         ),
         summary=(
-            "Applies a global circular cutoff in the centred 2-D Fourier "
-            "domain, optionally after a Hann or Hamming window."
+            "The straightforward version of FFT filtering: keep the broad waves "
+            "(low-pass, smooths) or the fine waves (high-pass, sharpens) using a "
+            "circular cutoff in the Fourier domain. The optional Hann or Hamming "
+            "'window' gently fades the image toward its edges before transforming, "
+            "which softens ripple artifacts but is not undone afterwards. Choose "
+            "this for a quick filter; choose the soft-border version when keeping "
+            "edge heights exactly right matters."
         ),
         equations=(
             "m = mean_finite(z)\n"
@@ -282,25 +365,29 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "z' = real(ifft2(ifftshift(H*F))) + m",
         ),
         details=(
-            "The finite-pixel mean is subtracted before the FFT in both modes, then "
-            "added back after the inverse FFT so the output stays on the original "
-            "height reference. Low-pass keeps broad structure; high-pass keeps fine "
-            "spatial detail.",
+            "The average height (the mean) is subtracted before the FFT in both "
+            "modes and added back after the inverse FFT, so the result keeps its "
+            "original height reference rather than drifting to zero. As a memory "
+            "aid: low-pass keeps the big, broad structure; high-pass keeps the "
+            "small, fine detail.",
         ),
         cautions=(
-            "Hard circular cutoffs can create ringing, especially when no window is used.",
-            "Unlike FFT soft-border filtering, the Hann or Hamming taper is not "
-            "compensated after the inverse transform, so border amplitudes can be "
-            "attenuated.",
+            "A hard circular cutoff can leave faint ripples (ringing) around sharp "
+            "features, especially with no window. And because the Hann/Hamming "
+            "taper is left in place here, heights near the image border are "
+            "slightly suppressed — use the soft-border filter if that matters.",
         ),
     ),
     _DefinitionEntry(
         title="Periodic notch filtering",
         params=("peaks = (dx, dy)", "radius_px"),
         summary=(
-            "Suppresses selected periodic FFT peaks and their Hermitian "
-            "conjugates with Gaussian notches, then transforms back to real "
-            "space."
+            "A repeating pattern in the image — an atomic lattice, or unwanted "
+            "electrical interference — shows up as bright spots in the FFT, one "
+            "pair of spots per repeating wave. This tool lets you pick those spots "
+            "and dim them, which removes that one periodic pattern from the image "
+            "while leaving everything else. It is the precise way to kill a "
+            "specific stripe or ripple without blurring the whole picture."
         ),
         equations=(
             "m = mean_finite(z)\n"
@@ -311,21 +398,30 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "z' = real(ifft2(ifftshift(N*F))) + m",
         ),
         details=(
-            "Peaks are pixel offsets from the centred FFT origin. Suppressing both a "
-            "peak and its conjugate keeps the inverse transform real-valued.",
+            "Each pattern produces two spots, symmetric about the FFT centre, and "
+            "the tool always dims both together — that symmetry is what keeps the "
+            "filtered image real (an ordinary height map rather than complex "
+            "numbers). 'radius_px' sets how wide a notch to cut around each spot: "
+            "wider removes the pattern more completely but also touches nearby "
+            "detail.",
         ),
         cautions=(
-            "Notching lattice peaks can make defects easier to see, but it can also "
-            "remove real periodic structure that matters for lattice analysis.",
+            "Removing the lattice spots can make defects and adsorbates much easier "
+            "to see — but you are deleting real periodic signal. Do not notch out "
+            "the lattice and then try to measure that same lattice; keep an "
+            "unfiltered copy for quantitative work.",
         ),
     ),
     _DefinitionEntry(
         title="Edge detection",
         params=("method = laplacian | log | dog", "sigma", "sigma2"),
         summary=(
-            "Returns a Laplacian-family filter response for edge and feature "
-            "enhancement. Positive and negative values mark opposite contrast "
-            "directions."
+            "Highlights where the height changes sharply — the rims of islands, "
+            "step edges, and feature outlines — by responding to curvature in the "
+            "image rather than to height itself. The result is not a height map: "
+            "it is an 'edge map' where flat areas are near zero and edges light "
+            "up, with opposite signs on the two sides of an edge. Useful for "
+            "seeing shapes and boundaries clearly."
         ),
         equations=(
             "laplacian: z' = Laplacian(z)\n"
@@ -333,23 +429,31 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "DoG:       z' = (G_sigma * z) - (G_sigma2 * z), sigma2 >= sigma + 0.1",
         ),
         details=(
-            "NaN and inf pixels are filled with the finite mean for the derivative "
-            "calculation, then restored to NaN in the output.",
-            "With the implemented DoG sign, bright compact features are positive when "
-            "sigma2 is broader than sigma.",
+            "The three methods differ in how much they smooth first. Plain "
+            "'laplacian' reacts to the rawest detail (and the most noise). 'LoG' "
+            "(Laplacian of Gaussian) blurs by 'sigma' before taking the edge "
+            "response, so it ignores pixel noise and finds edges at a chosen "
+            "scale. 'DoG' (Difference of Gaussians) subtracts two blurs and "
+            "behaves like a band-pass — with 'sigma2' broader than 'sigma', "
+            "compact bright bumps come out positive. Gaps are filled for the "
+            "calculation and restored afterwards.",
         ),
         cautions=(
-            "Second-derivative filters are noise-sensitive. Use LoG or DoG when raw "
-            "Laplacian contrast is too harsh.",
+            "These respond to the rate of change of the rate of change, so they "
+            "amplify noise. If a plain Laplacian looks like static, switch to LoG "
+            "or DoG and increase the smoothing scale.",
         ),
     ),
     _DefinitionEntry(
         title="Manual zero reference",
         params=("set_zero_point", "set_zero_plane_points", "patch"),
         summary=(
-            "Subtracts a user-picked height reference from the whole image. A "
-            "single point sets Z=0 at one local patch; three points define a "
-            "manual zero plane."
+            "Lets you choose, by clicking, what counts as 'zero height' in the "
+            "image. STM height values have no absolute meaning on their own, so "
+            "this is how you set a reference you trust. Click one point to make "
+            "that spot the new zero (everything is measured relative to it), or "
+            "click three points on what should be a flat surface to define a "
+            "level reference plane and remove an overall tilt by hand."
         ),
         equations=(
             "point reference:\n"
@@ -361,15 +465,21 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "  z'(x, y) = z(x, y) - z_ref(x, y)",
         ),
         details=(
-            "The set-zero plane tool stores three clicked pixel positions and samples "
-            "small finite-valued patches around them. It is a manual reference "
-            "operation, separate from automatic background fitting.",
-            "The correction is applied to the whole image; zero markers can be hidden "
-            "without changing the processing state.",
+            "To be robust against noise, the tool averages a small patch of pixels "
+            "around each click rather than trusting one pixel. The three-point "
+            "version fits a flat plane through the three sampled heights and "
+            "subtracts it. This is a deliberate, manual choice of reference — quite "
+            "different from the automatic background fits, which guess the "
+            "background from the data.",
+            "The correction applies to the whole image. The little markers showing "
+            "your clicked points can be hidden for a clean view without undoing the "
+            "correction.",
         ),
         cautions=(
-            "A zero plane is only as good as the picked reference points. Picking "
-            "points on adsorbates, crashes, or steps can tilt the whole image.",
+            "The result is only as good as the points you pick. If you click on a "
+            "molecule, a tip crash, or a step edge instead of true flat surface, "
+            "you will tilt or offset the whole image. Pick clean, flat spots that "
+            "really should be at the same height.",
         ),
     ),
     _DefinitionEntry(
@@ -380,8 +490,12 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "ROI scope",
         ),
         summary=(
-            "Applies numeric arithmetic to the image, using either a scalar, another "
-            "same-shaped image plane, or a deterministic generated pattern."
+            "Does basic maths on the image — add, subtract, multiply, or divide. "
+            "The second operand can be a single number (shift or rescale every "
+            "height), another image of the same size (for example, subtract one "
+            "scan from another to see what changed), or a built-in test pattern. "
+            "It is a general-purpose building block rather than a specific "
+            "correction."
         ),
         equations=(
             "constant operand:\n"
@@ -394,24 +508,31 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "speckle, and impulse_grid patterns.",
         ),
         details=(
-            "Image operands must match the current image shape. Generated operands are "
-            "created in the current image shape and recorded through their pattern "
-            "parameters.",
-            "When image arithmetic is launched with active-area ROI scope, the full "
-            "operation is computed and only pixels inside the ROI mask are copied "
-            "back into the result.",
+            "An image operand has to be the same size as the current scan. The "
+            "generated patterns (checkerboard, ramps, speckle, impulse grid) are "
+            "made to fit and are recorded by their settings, so the step can be "
+            "replayed exactly later.",
+            "If you run it with an area ROI as the scope, the maths is computed for "
+            "the whole image but only the pixels inside the ROI are kept — a handy "
+            "way to apply an operation to just one region.",
         ),
         cautions=(
-            "Arithmetic changes physical data values directly. Use display range or "
-            "colormap controls when only visual contrast should change.",
+            "This rewrites the actual measured values. If you only want the image "
+            "to look brighter or higher-contrast, leave the data alone and use the "
+            "display-range sliders or colour map instead.",
         ),
     ),
     _DefinitionEntry(
         title="Thresholding and bit-depth conversion",
         params=("lower", "upper", "mode = clip | binarize", "bits = 8 | 16"),
         summary=(
-            "Applies value thresholds or quantizes finite image values to a smaller "
-            "number of intensity levels while preserving NaN pixels."
+            "Two related tools. Thresholding selects pixels by height: 'clip' "
+            "keeps only pixels inside a height band (the rest become gaps), and "
+            "'binarize' turns the image into a simple yes/no map of 1 inside the "
+            "band and 0 outside — useful for isolating islands or molecules above "
+            "a height. Bit-depth conversion rounds the heights onto a fixed number "
+            "of levels (256 for 8-bit, 65536 for 16-bit), as if re-digitising the "
+            "image more coarsely."
         ),
         equations=(
             "threshold clip:\n"
@@ -426,15 +547,19 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "  z' = q * (vmax - vmin)/(2^bits - 1) + vmin",
         ),
         details=(
-            "Threshold values are in the image's physical data units. Binarize mode "
-            "returns numeric 0/1 values rather than a display-only mask.",
-            "Bit-depth conversion still returns float64 data, but finite values are "
-            "restricted to the selected number of levels. If vmin/vmax are not "
-            "provided, a robust percentile band is used.",
+            "The lower/upper limits are real height values in the image's units, "
+            "not slider positions, so you are choosing physical heights. Binarize "
+            "produces genuine 0/1 numbers in the data (not just a coloured "
+            "overlay), so the result can feed later steps.",
+            "Bit-depth conversion still stores the data as normal numbers; it just "
+            "limits how many distinct height levels remain. If you do not set the "
+            "range, a robust automatic range is used.",
         ),
         cautions=(
-            "Thresholding can discard pixels by turning them into NaN. Quantization is "
-            "not reversible and can hide subtle height variation.",
+            "Both throw information away. Clipping permanently turns out-of-band "
+            "pixels into gaps, and coarse bit depth cannot be undone — it can hide "
+            "subtle height differences. Keep an unprocessed copy if you might need "
+            "the full data later.",
         ),
     ),
     _DefinitionEntry(
@@ -447,8 +572,13 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "scale image",
         ),
         summary=(
-            "Changes image geometry by exact array transforms or interpolation-based "
-            "resampling, updating scan extent rules where the canvas size changes."
+            "Reorients or reshapes the image: flip it, rotate it, shear it, or "
+            "resample it to a different pixel count. Some of these just rearrange "
+            "existing pixels and are perfectly lossless (flips and right-angle "
+            "rotations); others have to invent in-between pixels by interpolation "
+            "(arbitrary rotation, shear, rescaling), which slightly alters values. "
+            "The program keeps the physical scale bar correct as the image size "
+            "changes."
         ),
         equations=(
             "lossless transforms:\n"
@@ -464,15 +594,18 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "  z' = zoom(z, (new_height/Ny, new_width/Nx), order=order)",
         ),
         details=(
-            "Right-angle rotations and flips transform existing ROI geometry exactly. "
-            "Scale preserves physical scan extent while changing pixel density.",
-            "Arbitrary rotation, shear, and expanded affine corrections preserve pixel "
-            "size and grow the physical displayed extent with the output shape.",
+            "Flips and 90-degree rotations also move any ROIs you have drawn to "
+            "match, exactly. Rescaling changes how many pixels describe the same "
+            "physical area (more or fewer dots per nanometre) without changing the "
+            "real size of the scan.",
+            "Arbitrary rotation and shear keep each pixel's physical size but grow "
+            "the canvas to fit the tilted image, filling the new corners with gaps.",
         ),
         cautions=(
-            "Arbitrary rotation invalidates existing ROI geometry; invalidated ROIs "
-            "are removed from the displayed ROI set. Interpolated transforms can "
-            "change local pixel values.",
+            "An arbitrary rotation no longer lines up with your existing ROIs, so "
+            "those are dropped — re-draw them afterwards. And any interpolated "
+            "transform nudges pixel values slightly, so avoid stacking several if "
+            "you need quantitative heights.",
         ),
     ),
     _DefinitionEntry(
@@ -483,8 +616,13 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "affine lattice correction",
         ),
         summary=(
-            "Applies data-changing corrections from FFT-domain selections or fitted "
-            "lattice geometry."
+            "A set of advanced corrections that act through the Fourier (FFT) "
+            "domain or a fitted lattice. 'Mains pickup' removes the regular "
+            "ripples from 50/60 Hz electrical interference. 'Inverse FFT "
+            "selection' lets you draw around features in the FFT and either delete "
+            "or keep only those, rebuilding the image from what remains. 'Affine "
+            "lattice correction' gently warps the image so a measured atomic "
+            "lattice matches its ideal geometry, undoing drift-induced distortion."
         ),
         equations=(
             "mains pickup suppression:\n"
@@ -501,24 +639,32 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "  output pixels inverse-map through A^-1 and sample z by interpolation",
         ),
         details=(
-            "Mains pickup can remove spot-like harmonics or fast-axis streaks. Inverse "
-            "FFT selections can create either a corrected image or a new result image, "
-            "depending on the dialog action.",
-            "Affine lattice correction is usually produced by FFT or real-space "
-            "lattice fitting. It may expand the canvas and fill outside-input regions "
-            "with NaN or a configured background value.",
+            "Mains pickup predicts where the interference should appear from the "
+            "scan speed and mains frequency, and can snap to the actual bright "
+            "spots before removing them. Inverse-FFT selections can either replace "
+            "the current image or produce a separate result image, depending on "
+            "the button you press.",
+            "Affine lattice correction normally comes from fitting the lattice in "
+            "the FFT or in real space. Like an arbitrary rotation, it can enlarge "
+            "the canvas and fill the new edges with gaps or a chosen background "
+            "value.",
         ),
         cautions=(
-            "FFT-domain corrections can remove real periodic signal as well as "
-            "artifacts. Inspect previews before applying them to quantitative data.",
+            "Because these work in the FFT, they can delete genuine periodic signal "
+            "along with the artifacts. Always check the preview, and keep an "
+            "uncorrected copy before using the output for measurements.",
         ),
     ),
     _DefinitionEntry(
         title="Linear undistortion",
         params=("shear_x", "scale_y"),
         summary=(
-            "Applies an affine drift or creep correction by inverse-mapping each "
-            "output pixel to a bilinearly interpolated input location."
+            "Corrects simple, steady distortion from thermal drift or a "
+            "pixel-size mismatch between the x and y axes. 'shear_x' slants the "
+            "image to undo a sideways drift that built up from the top of the scan "
+            "to the bottom; 'scale_y' stretches or squashes vertically to make the "
+            "two axes consistent. It rebuilds the image by sampling the original "
+            "at the shifted positions."
         ),
         equations=(
             "for output pixel (y, x):\n"
@@ -529,20 +675,26 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "y=0 to y=Ny-1; scale_y is a dimensionless vertical scale ratio.",
         ),
         details=(
-            "Positive shear_x means the accumulated horizontal correction grows across "
-            "the slow-scan direction. scale_y corrects a y/x pixel-size mismatch.",
+            "A positive 'shear_x' means the sideways correction grows steadily "
+            "from the first row to the last — matching drift that accumulates as "
+            "the slow scan proceeds. 'scale_y' is a simple vertical stretch factor "
+            "to fix a y-versus-x pixel-size mismatch.",
         ),
         cautions=(
-            "Interpolation changes local pixel values. The operation is appropriate for "
-            "geometric distortion, not for background levelling.",
+            "This reshapes geometry, not height. It interpolates, so it slightly "
+            "changes pixel values — use it to straighten distorted shapes, not to "
+            "level or flatten the background.",
         ),
     ),
     _DefinitionEntry(
         title="Forward/backward scan blending",
         params=("weight",),
         summary=(
-            "Blends a forward scan plane with a left-right mirrored backward "
-            "scan plane so both directions align to the same physical pixels."
+            "The tip scans each line twice — once left-to-right (forward) and once "
+            "right-to-left (backward). Combining the two cuts random noise and can "
+            "reveal where the surface or tip changed between passes. Because the "
+            "backward pass runs in reverse, it is flipped left-to-right first so "
+            "the same physical point lines up, then the two are averaged."
         ),
         equations=(
             "b_mirror[i,j] = bwd[i, Nx - 1 - j]\n"
@@ -550,10 +702,13 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "if one side is non-finite and the other is finite, use the finite side",
         ),
         details=(
-            "A weight of 0.5 is a symmetric average. Higher weights favour the forward scan.",
+            "'weight' sets the balance: 0.5 is an even average of both passes, "
+            "while higher values lean toward the forward scan. Where one pass has a "
+            "gap but the other has a valid pixel, the valid one is kept.",
         ),
         cautions=(
-            "The two planes must already represent the same image shape and scan area.",
+            "The forward and backward planes must be the same size and cover the "
+            "same scan area, otherwise they cannot be aligned point-for-point.",
         ),
     ),
 )
@@ -564,9 +719,13 @@ _ROI_REFERENCE_ENTRIES: tuple[_DefinitionEntry, ...] = (
         title="ROI model and selection state",
         params=("pixel coordinates", "ROISet", "active ROI", "dock selection"),
         summary=(
-            "ROIs are per-image objects stored in pixel coordinates and persisted in "
-            "a sidecar next to the scan. Many viewer actions use the dock selection "
-            "first, then fall back to the active ROI."
+            "Each ROI belongs to one image and is remembered between sessions in a "
+            "small companion file saved next to the scan, so your regions are still "
+            "there when you reopen it. Two ideas matter throughout: the 'active' "
+            "ROI (the one currently highlighted, which canvas editing acts on) and "
+            "the ROI Manager 'selection' (one or more ROIs ticked in the list). "
+            "When you run a tool, it uses the dock selection if you have one, "
+            "otherwise it falls back to the active ROI."
         ),
         equations=(
             "coordinate convention:\n"
@@ -582,23 +741,29 @@ _ROI_REFERENCE_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "  sidecar path = <scan stem>.rois.json",
         ),
         details=(
-            "The ROI Manager can select multiple ROIs for operations such as combine "
-            "or step height. Canvas click selection sets the active ROI.",
-            "Measurements record ROI identity and name at creation time, so results "
-            "can remain meaningful even if the ROI is later renamed or deleted.",
+            "Use the ROI Manager when an action needs several ROIs at once — for "
+            "example combining shapes, or measuring a step height between two "
+            "regions. Clicking a shape on the image simply makes it the active ROI.",
+            "When you take a measurement, the ROI's name and identity are stored "
+            "with the result, so the number still makes sense later even if you "
+            "rename or delete that ROI.",
         ),
         cautions=(
-            "If processing history references a ROI that no longer exists, interactive "
-            "display warns or pauses and export can abort rather than silently using "
-            "the wrong mask.",
+            "If a saved processing step points at an ROI you have since deleted, "
+            "the program will warn you or pause rather than quietly use the wrong "
+            "region — and an export may stop instead of producing a misleading "
+            "result.",
         ),
     ),
     _DefinitionEntry(
         title="Drawing and pan tools",
         params=("pan", "rectangle", "ellipse", "polygon", "freehand", "line", "point"),
         summary=(
-            "ROI drawing tools create one ROI and then return to pan mode. Pan mode "
-            "handles navigation, hover hints, ROI selection, and active-ROI dragging."
+            "Pick a drawing tool, draw one ROI, and the viewer hands control back "
+            "to the everyday 'pan' tool automatically. Pan mode is where you spend "
+            "most of your time: it pans and zooms the image, shows a hint about "
+            "what is under the cursor, lets you click an ROI to select it, and lets "
+            "you drag the active ROI to move it."
         ),
         equations=(
             "pan mode:\n"
@@ -614,24 +779,31 @@ _ROI_REFERENCE_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "  Escape: cancel active drawing preview and return to pan",
         ),
         details=(
-            "Rectangle and ellipse require a minimum non-zero drawn size. Polygon and "
-            "freehand ROIs require at least three points; incomplete shapes are "
-            "discarded cleanly.",
-            "The status bar and ROI item tooltips describe the current action. Hover "
-            "highlight in pan mode shows which ROI a click will select.",
+            "A rectangle or ellipse has to be dragged to a real size (a single "
+            "click will not make one), and polygons and freehand shapes need at "
+            "least three points. If you stop short, the half-drawn shape is simply "
+            "discarded — nothing is left behind.",
+            "Watch the status bar and the tooltip that appears as you hover: they "
+            "tell you what the current click will do. In pan mode an ROI lights up "
+            "when the cursor is over it, and that highlight is a promise — clicking "
+            "selects exactly the ROI that is highlighted.",
         ),
         cautions=(
-            "Drawing mode captures clicks for drawing. Return to pan before trying to "
-            "move or right-click existing ROIs.",
+            "While a drawing tool is active, clicks make new shapes instead of "
+            "selecting existing ones. Switch back to pan (or press Escape) before "
+            "you try to move or right-click an ROI you already drew.",
         ),
     ),
     _DefinitionEntry(
         title="Editing existing ROIs",
         params=("rename", "delete", "copy/paste", "duplicate", "move", "resize"),
         summary=(
-            "Editing is explicit: only the active ROI can be dragged or resized on "
-            "the canvas, while the ROI Manager and context menus expose object "
-            "actions."
+            "Editing follows a simple select-then-edit rule: your first click "
+            "selects an ROI (it becomes the active one and shows its handles), and "
+            "only then can you drag it or its handles to reshape it. This means a "
+            "stray click never accidentally drags the wrong shape. Renaming, "
+            "deleting, copying, and duplicating live in the ROI Manager and the "
+            "right-click menu."
         ),
         equations=(
             "selection and movement:\n"
@@ -648,22 +820,31 @@ _ROI_REFERENCE_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "  paste or duplicate creates a new ROI shifted by 10 px",
         ),
         details=(
-            "Line ROI width is stored in the line geometry and controls the "
-            "perpendicular averaging swath used by line-profile calculations.",
-            "Delete/Backspace removes the active ROI from the canvas; the ROI Manager "
-            "can delete one or more selected ROIs.",
+            "Handles are the small squares on the active ROI: corners and edges "
+            "for rectangles, four points for ellipses, the two endpoints for "
+            "lines. Hold Shift while dragging a rectangle or ellipse corner to keep "
+            "its proportions. A line's 'width' is part of its shape and sets how "
+            "wide a strip the line profile averages over.",
+            "Delete or Backspace removes the active ROI; the ROI Manager can delete "
+            "several selected ROIs at once. Copy then paste (or duplicate) makes a "
+            "fresh copy offset by a few pixels so it is easy to grab.",
         ),
         cautions=(
-            "Polygon, freehand, point, and multipolygon ROIs currently do not have "
-            "resize handles. They can still be moved, renamed, copied, or deleted.",
+            "Polygon, freehand, point, and multipolygon ROIs do not have resize "
+            "handles yet — you can still move, rename, copy, or delete them, but "
+            "not reshape them by dragging.",
         ),
     ),
     _DefinitionEntry(
         title="Area ROI actions",
         params=("mask/filter scope", "invert", "combine", "FFT", "histogram", "measure"),
         summary=(
-            "Area ROIs provide masks for local filters, region analysis, geometric "
-            "ROI algebra, and measurement workflows."
+            "Area ROIs (rectangles, ellipses, polygons, freehand, multipolygon) "
+            "enclose a patch of the image, which the program turns into a mask — a "
+            "yes/no map of which pixels are inside. That mask is what lets you "
+            "apply a filter to just one region, measure statistics inside it, take "
+            "an FFT of only that area, or combine regions with set operations. They "
+            "are the workhorse ROI for analysing part of a scan."
         ),
         equations=(
             "area mask kinds:\n"
@@ -680,24 +861,34 @@ _ROI_REFERENCE_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "  combine modes = union | intersection | difference | xor",
         ),
         details=(
-            "Area ROI context-menu actions include setting filter scope, invert, STM "
-            "background fit from ROI, histogram, FFT this region, ROI statistics, and "
-            "feature maxima detection.",
-            "Step height requires exactly two selected area ROIs and records the "
-            "mean-height difference between them.",
+            "Right-click an area ROI for its actions: limit a filter to this region "
+            "('ROI filters only'), invert it, fit an STM background from it, show a "
+            "histogram or FFT of just this region, compute statistics, or find "
+            "feature peaks inside it.",
+            "Step height is a two-ROI measurement: select exactly two area ROIs and "
+            "it reports the average height difference between them — handy for "
+            "measuring a terrace or island step.",
+            "Area ROIs also drive per-region display. In the View tab, set "
+            "'Contrast scope' to 'Active ROI' and the brightness/contrast sliders "
+            "then adjust only the active region, so a scan with a bright area and a "
+            "dim area can show both well at once; 'Hide ROI overlays' there lets "
+            "you study the result without the outlines in the way.",
         ),
         cautions=(
-            "ROI filter scope affects only eligible local filters. Background and "
-            "scan-line corrections remain whole-image unless their own dialog has a "
-            "specific ROI fit option.",
+            "'ROI filters only' affects just the local filters listed above. "
+            "Whole-image steps like background and scan-line correction still cover "
+            "the entire image unless their own dialog offers an ROI fit option.",
         ),
     ),
     _DefinitionEntry(
         title="Line ROI actions",
         params=("profile", "distance", "periodicity", "width", "endpoints"),
         summary=(
-            "Line ROIs drive profile, distance, and periodicity workflows. The active "
-            "line ROI also keeps the live line-profile panel in sync."
+            "A line ROI is two endpoints with an optional width. Its main job is "
+            "the height profile: a graph of surface height along the line, which "
+            "you use to measure step heights, feature widths, and spacings. While a "
+            "line is active, the profile panel under the image updates live as you "
+            "move it, so you can drag the line and watch the cross-section change."
         ),
         equations=(
             "line geometry:\n"
@@ -714,24 +905,28 @@ _ROI_REFERENCE_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "  estimate periodicity = analyse current line-profile signal",
         ),
         details=(
-            "Line context menus expose show profile, add profile measurement, estimate "
-            "periodicity, and set line width. The Measurements panel can add profile "
-            "summaries and profile deltas.",
-            "Distance/ruler measurement uses the active line ROI and reports physical "
-            "length using the scan calibration.",
+            "Giving the line a width greater than one pixel averages a strip "
+            "perpendicular to the line, which smooths a noisy profile. Right-click "
+            "for actions: show the profile, save it as a measurement, estimate a "
+            "repeat spacing (periodicity) from the profile, or set the line width. "
+            "The ruler/distance tool reports the line's true physical length using "
+            "the scan calibration.",
         ),
         cautions=(
-            "A selected line ROI is not valid for area-only actions such as ROI "
-            "statistics, histogram, FFT region, or filter masking.",
+            "A line is not an area, so area-only actions — region statistics, "
+            "histogram, FFT of a region, filter masking — are unavailable while a "
+            "line is selected. Draw an area ROI for those.",
         ),
     ),
     _DefinitionEntry(
         title="Point ROI actions",
         params=("point marker", "copy coordinates", "point sources"),
         summary=(
-            "Point ROIs mark individual pixel locations. They can be copied as "
-            "coordinates and used as point sources by downstream feature-analysis "
-            "tools."
+            "A point ROI marks a single spot — the position of an atom, a defect, "
+            "or any feature you want to record. You can copy its coordinates, and a "
+            "collection of points can feed the feature-analysis tools that need a "
+            "list of locations. Think of points as labelled pins rather than "
+            "regions."
         ),
         equations=(
             "point geometry:\n"
@@ -743,22 +938,28 @@ _ROI_REFERENCE_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "  physical coordinates = (x * pixel_size_x_m, y * pixel_size_y_m)",
         ),
         details=(
-            "pair-correlation, feature-to-lattice, and point-mask/FFT workflows can "
-            "consume point sources from feature maxima or point ROIs.",
-            "Point ROIs are fixed-screen-size markers on the canvas so they stay "
-            "visible while zooming.",
+            "Several analyses can take a set of points as input — pair-correlation "
+            "(how features are spaced relative to each other), matching features to "
+            "a lattice, and point-based masking or FFT. Those points can come from "
+            "your point ROIs or from automatically detected feature peaks.",
+            "On screen the markers stay the same size as you zoom, so they remain "
+            "easy to see whether you are zoomed in or out.",
         ),
         cautions=(
-            "Point ROIs do not define an area mask. They are intentionally disabled "
-            "for ROI filters, STM background fit masks, histogram, and ROI statistics.",
+            "A point has no area, so it cannot act as a region mask. Area-only "
+            "tools — ROI filters, STM background fit masks, histograms, region "
+            "statistics — are deliberately turned off for points.",
         ),
     ),
     _DefinitionEntry(
         title="Tool interactions and persistence",
         params=("sidecar save", "processing references", "geometric transforms"),
         summary=(
-            "ROI edits save immediately to the per-image sidecar, and downstream "
-            "tools resolve ROI references at the moment they run."
+            "Every ROI change — create, move, resize, rename, delete — is saved "
+            "straight away to the per-image companion file, so you never have to "
+            "remember to save. Tools that refer to an ROI look it up at the moment "
+            "they run, which means the result reflects the ROI as it is then, not "
+            "as it was when you set the tool up."
         ),
         equations=(
             "persistence:\n"
@@ -775,17 +976,19 @@ _ROI_REFERENCE_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "  correction is applied to the full image",
         ),
         details=(
-            "The quick toolbar Mask action sets the Processing panel to 'ROI filters "
-            "only' for the selected-or-active area ROI. Invert creates a new inverted "
-            "area ROI and sets ROI filter scope to the inverted area when invoked from "
-            "the active ROI path.",
-            "The quick Simple background button remains a whole-image first-order "
-            "plane subtraction. Use dedicated background controls when fit/apply/exclude "
-            "ROI behaviour is required.",
+            "The toolbar 'Mask' shortcut switches the Processing panel to 'ROI "
+            "filters only' for your chosen area ROI, and 'Invert' makes a new ROI "
+            "covering everything outside the current one and scopes filtering to "
+            "that inverted area.",
+            "The quick 'Simple background' button is always a whole-image flat-tilt "
+            "subtraction. When you need the fit/apply/exclude-ROI options, open the "
+            "dedicated background dialog instead.",
         ),
         cautions=(
-            "Changing ROI geometry after a processing step was configured can change "
-            "future replays of that processing if the step references the ROI by ID.",
+            "Because steps look up their ROI when they run, moving or reshaping an "
+            "ROI after you configured a step will change what that step does the "
+            "next time it is replayed. If you want a step frozen, avoid editing the "
+            "ROI it depends on.",
         ),
     ),
 )
@@ -979,9 +1182,14 @@ def render_definitions_html(theme: Mapping[str, object] | None = None) -> str:
     return _render_reference_html(
         title="Processing Algorithm Reference",
         intro=(
-            "Each step transforms the raw height data in physical units. The "
-            "equations below describe the operation applied to finite float64 "
-            "image data before display scaling or colour-map clipping."
+            "This guide explains what each processing step does, when you would "
+            "reach for it, and what to watch out for. Every step works on the "
+            "real measured height values (in physical units such as metres or "
+            "amps), not on the colours you see on screen — changing the "
+            "colour map or contrast never alters the data, but these operations "
+            "do. Each entry has a plain-language summary, the exact formula the "
+            "program uses, practical notes, and cautions. NaN means a pixel with "
+            "no valid measurement; most steps carry those gaps through untouched."
         ),
         entries=_DEFINITION_ENTRIES,
         theme=theme,
@@ -993,10 +1201,13 @@ def render_roi_reference_html(theme: Mapping[str, object] | None = None) -> str:
     return _render_reference_html(
         title="ROI Actions Reference",
         intro=(
-            "ROI actions depend on selection state, ROI kind, and the active "
-            "viewer tool. The behaviour blocks below describe when each action is "
-            "available, which ROI context it uses, and how it affects downstream "
-            "processing or measurement tools."
+            "A region of interest (ROI) is a shape you draw on the image to mark "
+            "an area, a line, or a point you want to work with — for measuring, "
+            "filtering, or analysing just part of a scan. This guide explains the "
+            "kinds of ROI, how to draw and edit them, and what each kind can do. "
+            "What happens when you click depends on three things: which ROI (if "
+            "any) is currently selected, what kind of ROI it is, and which tool is "
+            "active in the viewer. The notes below spell out each of those cases."
         ),
         entries=_ROI_REFERENCE_ENTRIES,
         theme=theme,
