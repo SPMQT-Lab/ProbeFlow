@@ -90,6 +90,23 @@ class MeasurementResultsTable(QWidget):
         self._results.append(result)
         self._append_row(result)
 
+    def update_result(self, result: MeasurementResult) -> bool:
+        """Replace an existing result (matched by measurement_id) in place.
+
+        Returns ``True`` if a matching row was found and updated; ``False`` if no
+        result with that id exists (the caller may then choose to add it).
+        """
+        for row, existing in enumerate(self._results):
+            if existing.measurement_id == result.measurement_id:
+                self._results[row] = result
+                self._set_row_cells(row, result)
+                if self._table.selectionModel().isRowSelected(
+                    row, self._table.rootIndex()
+                ):
+                    self._details.setPlainText(_format_details(result))
+                return True
+        return False
+
     def results(self) -> list[MeasurementResult]:
         """Return all table results."""
         return list(self._results)
@@ -154,6 +171,9 @@ class MeasurementResultsTable(QWidget):
     def _append_row(self, result: MeasurementResult) -> None:
         row = self._table.rowCount()
         self._table.insertRow(row)
+        self._set_row_cells(row, result)
+
+    def _set_row_cells(self, row: int, result: MeasurementResult) -> None:
         key, value, unit = measurement_main_value(result)
         main_value = "" if value is None else _fmt_value(value)
         values = [

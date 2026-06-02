@@ -20,6 +20,8 @@ GUI_TEST_MODULES = {
     "test_viewer_region_levels.py",
     "test_viewer_region_contrast_integration.py",
     "test_thumbnail_cache_pixmap.py",
+    "test_line_periodicity_plot.py",
+    "test_angle_update_and_dock_restore.py",
 }
 
 MIXED_QT_FIXTURE_MODULES = {

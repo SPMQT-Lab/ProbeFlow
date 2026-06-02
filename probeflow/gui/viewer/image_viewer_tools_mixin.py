@@ -254,17 +254,10 @@ class ImageViewerToolsMixin:
         self._zoom_lbl.set_tool("angle")
         self._status_lbl.setText("Click P1, P2 (vertex), P3 to measure angle")
 
-    def _on_angle_points_ready(self, p1, p2, p3) -> None:
-        """Create angle overlay and record result from the 3-point angle tool."""
-        from probeflow.gui.angle_overlay import AngleOverlayItem
-        scene = self._zoom_lbl.scene()
-        if self._angle_overlay is not None:
-            self._angle_overlay.remove_from_scene(scene)
-        self._angle_overlay = AngleOverlayItem(p1, p2, p3, scene)
-        deg = self._angle_overlay.angle_deg
+    def _angle_measurement_result(self, mid: str, deg: float):
+        """Build an angle MeasurementResult for *deg* under measurement id *mid*."""
         from probeflow.measurements.models import MeasurementResult as R
-        mid = self._measurement_table.next_measurement_id()
-        result = R(
+        return R(
             measurement_id=mid,
             kind="angle",
             source_label=self._source_label(),
@@ -277,10 +270,49 @@ class ImageViewerToolsMixin:
             context={},
             notes="",
         )
-        self._measurement_table.add_result(result)
+
+    def _on_angle_points_ready(self, p1, p2, p3) -> None:
+        """Create angle overlay and record result from the 3-point angle tool."""
+        from probeflow.gui.angle_overlay import AngleOverlayItem
+        scene = self._zoom_lbl.scene()
+        if self._angle_overlay is not None:
+            self._angle_overlay.remove_from_scene(scene)
+        self._angle_overlay = AngleOverlayItem(p1, p2, p3, scene)
+        deg = self._angle_overlay.angle_deg
+        mid = self._measurement_table.next_measurement_id()
+        self._angle_measurement_id = mid
+        self._measurement_table.add_result(self._angle_measurement_result(mid, deg))
         self._measurement_dock.show()
         self._measurement_dock.raise_()
-        self._status_lbl.setText(f"Angle: {deg:.2f}°  (drag handles to adjust)")
+        self._sync_viewer_menu_actions()
+        self._status_lbl.setText(
+            f"Angle: {deg:.2f}°  — drag handles to adjust, then 'Update angle "
+            "measurement'."
+        )
+
+    def _on_update_angle_measurement(self) -> None:
+        """Rewrite the current angle measurement with the adjusted overlay value."""
+        if self._angle_overlay is None:
+            self._status_lbl.setText(
+                "No angle on the image. Use Measure → Angle to place one first."
+            )
+            return
+        deg = self._angle_overlay.angle_deg
+        mid = self._angle_measurement_id
+        # If the tracked measurement was cleared (or never created), add a fresh one.
+        if mid is None:
+            mid = self._measurement_table.next_measurement_id()
+            self._angle_measurement_id = mid
+            self._measurement_table.add_result(self._angle_measurement_result(mid, deg))
+            self._status_lbl.setText(f"Angle measurement {mid}: {deg:.2f}°.")
+            return
+        result = self._angle_measurement_result(mid, deg)
+        if not self._measurement_table.update_result(result):
+            # Row was removed from the table — re-add it.
+            self._measurement_table.add_result(result)
+        self._measurement_dock.show()
+        self._measurement_dock.raise_()
+        self._status_lbl.setText(f"Updated angle measurement {mid}: {deg:.2f}°.")
 
     def _on_measure_roi_stats(self) -> None:
         """Compute statistics for the active area ROI → new panel."""

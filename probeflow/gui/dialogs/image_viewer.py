@@ -238,6 +238,7 @@ class ImageViewerDialog(
         self._spec_overlay: "SpecOverlayController | None" = None
         self._zero_ctrl: "SetZeroPlaneController | None" = None
         self._angle_overlay: "object | None" = None  # AngleOverlayItem, imported lazily
+        self._angle_measurement_id: "str | None" = None  # measurement tied to overlay
         self._proc_undo_ctrl: "ProcessingUndoController | None" = None
         self._display_slider_ctrl: "DisplaySliderController | None" = None
         self._bad_line_preview_ctrl: "BadLinePreviewController | None" = None
@@ -889,6 +890,16 @@ class ImageViewerDialog(
         angle_btn.clicked.connect(self._on_measure_angle)
         measurements_lay.addWidget(angle_btn)
 
+        update_angle_btn = QPushButton("Update angle measurement")
+        update_angle_btn.setFont(QFont("Helvetica", 8))
+        update_angle_btn.setFixedHeight(26)
+        update_angle_btn.setToolTip(
+            "After dragging the angle handles, rewrite the current angle "
+            "measurement with the adjusted value."
+        )
+        update_angle_btn.clicked.connect(self._on_update_angle_measurement)
+        measurements_lay.addWidget(update_angle_btn)
+
         measurements_lay.addWidget(_sep())
         measurements_lay.addWidget(_sec_lbl("ROI measurements"))
         roi_stats_btn = QPushButton("ROI statistics (active area ROI)")
@@ -1186,6 +1197,11 @@ class ImageViewerDialog(
             action = dock.toggleViewAction()
             self._configure_viewer_action(action, label)
             view_menu.addAction(action)
+        dock_panels_action = self._viewer_action(
+            "view.dock_panels",
+            self._dock_panels_into_window,
+        )
+        view_menu.addAction(dock_panels_action)
 
         # ── Image menu ────────────────────────────────────────────────────────
         image_menu = menu_bar.addMenu("Image")
@@ -1415,6 +1431,10 @@ class ImageViewerDialog(
         measurements_menu.addAction(ruler_action)
         angle_action = self._viewer_action("measure.angle", self._on_measure_angle)
         measurements_menu.addAction(angle_action)
+        update_angle_action = self._viewer_action(
+            "measure.update_angle", self._on_update_angle_measurement,
+        )
+        measurements_menu.addAction(update_angle_action)
         roi_stats_new_action = self._viewer_action(
             "measure.roi_stats",
             self._on_measure_roi_stats,
@@ -1619,12 +1639,41 @@ class ImageViewerDialog(
                     layout["sidebar_tab"] = key
                     break
 
+    def _dock_panels_into_window(self) -> None:
+        """Re-dock any floating ROI / Measurements panels back into the window.
+
+        A QDockWidget that has been dragged out to float has no obvious way back
+        for most users; this pulls every floating panel back into the right dock
+        area and makes sure it is visible.
+        """
+        docks = [
+            d for d in (
+                getattr(self, "_roi_dock", None),
+                getattr(self, "_measurement_dock", None),
+            )
+            if d is not None
+        ]
+        restored = 0
+        for dock in docks:
+            if dock.isFloating():
+                self._viewer_main.addDockWidget(Qt.RightDockWidgetArea, dock)
+                dock.setFloating(False)
+                restored += 1
+            if not dock.isVisible():
+                dock.show()
+        if hasattr(self, "_status_lbl"):
+            if restored:
+                self._status_lbl.setText("Panels docked back into the window.")
+            else:
+                self._status_lbl.setText("Panels are already docked.")
+
     def _reset_viewer_window_layout(self) -> None:
         cfg = load_config()
         if isinstance(cfg.get("layout"), dict):
             cfg["layout"].pop("image_viewer", None)
         save_config(cfg)
         apply_screen_fraction_geometry(self, 0.90)
+        self._dock_panels_into_window()
         self._viewer_splitter.setSizes([900, 400])
         self._sidebar_tabs.setCurrentIndex(self._sidebar_tab_indices.get("display", 0))
         self._zoom_lbl._view_scale_mode = "fit"
