@@ -131,6 +131,7 @@ VIEWER_COMMANDS: tuple[ViewerCommand, ...] = (
     ViewerCommand("export.save_processed", "Save processed image", "Export", ("Ctrl+Shift+S",), "Save the processed image data.", aliases=("data", "processed")),
     ViewerCommand("export.save_provenance", "Save provenance", "Export", status_tip="Save processing provenance metadata.", aliases=("metadata", "history")),
     ViewerCommand("help.shortcuts", "Image viewer shortcuts", "Help", status_tip="Show image-viewer shortcut help.", aliases=("keyboard", "keys")),
+    ViewerCommand("help.howto", "How-to guides", "Help", status_tip="Show step-by-step how-to walkthroughs for common tasks.", aliases=("tutorial", "guide", "walkthrough", "getting started")),
     ViewerCommand("help.definitions", "Definitions", "Help", status_tip="Show processing definitions and equations.", aliases=("reference", "math", "algorithms")),
     ViewerCommand(
         "help.roi_reference", "ROI Reference", "Help",

@@ -29,6 +29,17 @@ class _DefinitionEntry:
     cautions: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class _HowToEntry:
+    """A step-by-step walkthrough for one common task."""
+
+    title: str
+    goal: str
+    steps: tuple[str, ...]
+    notes: tuple[str, ...] = ()
+    tips: tuple[str, ...] = ()
+
+
 _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
     _DefinitionEntry(
         title="Bad-line correction",
@@ -994,6 +1005,305 @@ _ROI_REFERENCE_ENTRIES: tuple[_DefinitionEntry, ...] = (
 )
 
 
+_HOWTO_ENTRIES: tuple[_HowToEntry, ...] = (
+    _HowToEntry(
+        title="Open an image and flatten it",
+        goal="Load a scan and remove the basic tilt and drift so features stand out.",
+        steps=(
+            "Browse to your data folder and double-click a scan thumbnail to open "
+            "it in the image viewer.",
+            "Go to the Process tab and set 'Align rows' to Median to remove the "
+            "row-to-row streaks, then click 'Apply processing'.",
+            "Click 'STM Background...' to open the background dialog, and pick a "
+            "model that matches the top-to-bottom drift you see (start with Linear "
+            "or Poly2).",
+            "Watch the live preview — the corrected image and the fitted background "
+            "update as you change settings. Use 'Jump threshold' to ignore step "
+            "edges and 'Preserve level' to keep a sensible absolute height.",
+            "When the preview looks flat, click Apply. The correction is added to "
+            "the image's processing pipeline and the main view updates.",
+        ),
+        notes=(
+            "For a quick one-click flatten, use the Simple background button "
+            "instead — it removes a first-order plane. STM Background is the better "
+            "choice for STM's slow-scan drift and creep.",
+            "Order matters: align rows first, then subtract a background.",
+        ),
+        tips=(
+            "Every step is reversible — Undo/Redo step through changes, and Reset "
+            "reloads the original on-disk data.",
+        ),
+    ),
+    _HowToEntry(
+        title="Move around the image: zoom, pan, colour, channels",
+        goal="Navigate the scan and change how it looks, without changing the data.",
+        steps=(
+            "Ctrl+scroll (Cmd+scroll on a Mac) to zoom in and out.",
+            "Drag a blank part of the image, or hold the middle mouse button, to "
+            "pan around.",
+            "Change the 'Colormap' dropdown at the top to recolour the image for "
+            "clarity or contrast.",
+            "Use the 'Channel' selector to switch between recorded channels, such "
+            "as the forward and backward scans.",
+        ),
+        notes=(
+            "Zoom, pan, colour map, and channel are all display choices — they "
+            "never alter the measured height values.",
+        ),
+    ),
+    _HowToEntry(
+        title="Create, select, and delete ROIs",
+        goal="Mark regions, lines, or points on the image and manage them.",
+        steps=(
+            "Pick a drawing tool (rectangle, ellipse, polygon, freehand, line, or "
+            "point) and draw one shape; the viewer returns to pan mode "
+            "automatically.",
+            "Click a shape to select it — it lights up as you hover so you can see "
+            "what a click will pick — and the selected ROI shows handles you can "
+            "drag to reshape it.",
+            "Open the ROI Manager (ROI tab, then 'Show ROI Manager') to see every "
+            "ROI, rename them, set which one is active, or select several at once.",
+            "To delete, select an ROI and press Delete or Backspace, or use Delete "
+            "in the ROI Manager (which can remove several selected ROIs at once).",
+        ),
+        notes=(
+            "ROIs are saved automatically in a small file next to the scan, so they "
+            "are still there when you reopen the image.",
+        ),
+        tips=(
+            "First click selects, the next interaction edits — a stray click never "
+            "drags the wrong shape.",
+        ),
+    ),
+    _HowToEntry(
+        title="Measure a height profile along a line",
+        goal="Read heights and distances across a feature, and save the profile.",
+        steps=(
+            "Choose the Line tool and drag a line across the feature; the tool "
+            "returns to pan mode and the new line becomes the active one.",
+            "Read the profile panel below the image — it plots height versus "
+            "distance along the line and updates live as you drag the line or its "
+            "endpoints.",
+            "To smooth a noisy profile, right-click the line and set a larger "
+            "width (or change it in the ROI Manager); the profile then averages a "
+            "strip that wide, perpendicular to the line.",
+            "To save it, right-click the line and choose 'Export line profile as "
+            "CSV...'.",
+        ),
+        notes=(
+            "The CSV begins with comment lines for the file name, bias (mV) and "
+            "setpoint current, then a header row naming the two columns (Distance "
+            "and Height, with their units), then the distance/value pairs — ready "
+            "to open in a plotting program.",
+        ),
+        tips=(
+            "Click a different line to switch which profile is shown; the panel "
+            "always follows the active line.",
+        ),
+    ),
+    _HowToEntry(
+        title="Measure a distance or angle",
+        goal="Read a physical length or an angle directly off the image.",
+        steps=(
+            "For a distance, draw a Line across the two points; its length is "
+            "reported in real units (such as nanometres) from the scan "
+            "calibration.",
+            "For an angle, use the angle tool and click three points; the angle at "
+            "the middle point is reported.",
+        ),
+        notes=(
+            "These use the scan's calibration, so results are physical lengths and "
+            "angles, not pixel counts.",
+        ),
+    ),
+    _HowToEntry(
+        title="Measure a step height between two regions",
+        goal="Find the height difference between two terraces, or an island and "
+             "its substrate.",
+        steps=(
+            "Draw an area ROI on each level — one on the upper terrace, one on the "
+            "lower.",
+            "In the ROI Manager, select both ROIs (Ctrl/Cmd-click the second to "
+            "add it).",
+            "Open the Measurements menu and choose 'Add step height from selected "
+            "ROIs'.",
+            "The result, added to the Measurements panel, is the difference between "
+            "the two regions' average heights.",
+        ),
+        tips=(
+            "Use flat, representative patches on each level — avoid step edges and "
+            "adsorbates, which would bias the average.",
+        ),
+    ),
+    _HowToEntry(
+        title="Show two regions at once (per-region contrast)",
+        goal="View a scan where one area is bright and another is dim without "
+             "either contrast washing the other out.",
+        steps=(
+            "Draw an area ROI around each region (for example, the top half and "
+            "the bottom half of a split scan).",
+            "In the View tab, set 'Contrast scope' to 'Active ROI'.",
+            "Click a region to make it active, then move the brightness/contrast "
+            "sliders — they now affect only that region.",
+            "Repeat for the other region. The image composites both, each scaled "
+            "on its own.",
+            "Tick 'Hide ROI overlays' to study the combined image without the "
+            "outlines in the way.",
+        ),
+        notes=(
+            "'Whole image' is the normal mode; switch back to it to adjust the "
+            "global contrast again.",
+        ),
+        tips=(
+            "This is ideal for a scan that was split mid-acquisition, where the two "
+            "halves need different background and contrast.",
+        ),
+    ),
+    _HowToEntry(
+        title="Filter just one region",
+        goal="Smooth or sharpen only part of the image, leaving the rest as "
+             "measured.",
+        steps=(
+            "Draw an area ROI around the region you want to filter.",
+            "In the Process tab, set the scope to 'ROI filters only'.",
+            "Choose an eligible filter — smoothing, high-pass, edge detection, or "
+            "an FFT filter — and apply it.",
+            "Only the pixels inside the ROI change; everything outside is "
+            "untouched.",
+        ),
+        notes=(
+            "Whole-image steps like background and scan-line correction still cover "
+            "the whole image; only the local filters listed above respect the ROI "
+            "scope.",
+        ),
+    ),
+    _HowToEntry(
+        title="Fix scan-line glitches (bad-line correction)",
+        goal="Remove short bright or dark streaks left when the tip glitches "
+             "part-way along a row.",
+        steps=(
+            "In the Process tab, open the bad-line controls and choose a method "
+            "(step or mad) and a polarity (bright or dark) to match the streaks "
+            "you see.",
+            "Click 'Preview detection' to highlight what would be repaired — "
+            "nothing is changed yet.",
+            "Adjust the threshold (measured in robust noise units) until only the "
+            "genuine streaks are caught.",
+            "Click Apply to repair just those stretches from their healthy "
+            "neighbouring rows.",
+        ),
+        notes=(
+            "This patches short local streaks only; it will not flatten real step "
+            "edges or terraces. Use row alignment or a background fit for those.",
+        ),
+    ),
+    _HowToEntry(
+        title="Set a height zero reference",
+        goal="Choose, by clicking, what counts as zero height in the image.",
+        steps=(
+            "In the Process tab, click 'Set zero plane'.",
+            "Click one point to make that spot zero, or click three points on a "
+            "surface that should be flat to define a level reference plane.",
+            "The image is re-levelled against your chosen reference.",
+        ),
+        notes=(
+            "A small patch around each click is averaged, so noise on a single "
+            "pixel cannot throw off the reference. The markers can be hidden ('Hide "
+            "Points') without undoing the correction.",
+        ),
+        tips=(
+            "Pick clean, flat spots that really should be at the same height; "
+            "clicking on a molecule, a tip crash, or a step will tilt the whole "
+            "image.",
+        ),
+    ),
+    _HowToEntry(
+        title="Correct lattice distortion with the FFT viewer",
+        goal="Straighten drift-distorted atomic rows using the reciprocal-space "
+             "(FFT) lattice.",
+        steps=(
+            "With the image open, click 'FFT viewer...' (Process tab under "
+            "Advanced, or the Measurements menu). The FFT opens on the Inspect "
+            "tab.",
+            "On Inspect, use the Min/Max/Brightness/Contrast sliders to bring the "
+            "sharp Bragg spots out against the background — raise the minimum until "
+            "mostly the bright lattice spots remain.",
+            "Switch to the Grid tab and drag the g1 and g2 handles onto a pair of "
+            "Bragg spots so the reciprocal grid matches the lattice.",
+            "To check against a known material, tick 'Show shell rings' and enter "
+            "the real-space lattice spacing under 'Known structure'; the overlay "
+            "rings show where that lattice's Bragg spots should fall, confirming "
+            "your grid.",
+            "Switch to the Correction tab and click 'Preview' to see the "
+            "de-distorted image — the main view updates live. Use 'Clear preview' "
+            "to revert while you experiment.",
+            "When satisfied, click 'Apply correction'. This adds an affine lattice "
+            "correction to the image's processing pipeline and updates the main "
+            "image.",
+            "Close the FFT viewer. The corrected image stays in the main viewer "
+            "with the correction applied.",
+        ),
+        notes=(
+            "Bragg spots are the bright dots in the FFT — each pair marks one "
+            "repeating lattice direction, and their positions encode the lattice "
+            "spacing and angle. 'Show shell rings' draws the radii those spots "
+            "should sit at for a known lattice, so a correct grid lines up with "
+            "the rings.",
+            "The Expert tab exposes the ideal-lattice settings, interpolation "
+            "choice, and scanner-calibration helpers if you need finer control.",
+        ),
+        tips=(
+            "If the spots are hard to see, push the minimum slider up and the "
+            "contrast high: the lattice spots are sharp and bright, while the noise "
+            "is broad and dim.",
+        ),
+    ),
+    _HowToEntry(
+        title="Undo, redo, and reset processing",
+        goal="Step back through changes, or return all the way to the original "
+             "data.",
+        steps=(
+            "After any processing step, use the Undo button (Process tab) to go "
+            "back one step, and Redo to reapply it.",
+            "Click 'Reset' to discard all processing and reload the raw, on-disk "
+            "data for the current image.",
+        ),
+        notes=(
+            "Display settings such as contrast and colour map are separate from "
+            "processing — resetting the processing does not change your colour "
+            "choices.",
+        ),
+    ),
+    _HowToEntry(
+        title="Export your processed image (data and provenance)",
+        goal="Save the corrected image, and understand what is stored with it.",
+        steps=(
+            "Open the Export tab.",
+            "To save a picture for a figure, choose PNG: this bakes in the current "
+            "colour map, brightness/contrast, and (optionally) the scale bar. It is "
+            "for presentation, not re-analysis.",
+            "To save the data, export to a data format such as .sxm: this keeps the "
+            "real height values so the scan can be reopened and analysed.",
+            "Leave 'provenance' enabled to also write a JSON sidecar next to the "
+            "file.",
+        ),
+        notes=(
+            "The JSON provenance records the original source file, the full list of "
+            "processing steps you applied (with their settings and the program "
+            "version), the display settings (colour map and contrast), a "
+            "timestamp, any warnings, and your ROIs — everything needed to "
+            "reproduce the result.",
+            "A processed export also carries a warning noting it is not raw "
+            "instrument data, so it can never be mistaken for the original.",
+        ),
+        tips=(
+            "Keep the JSON next to the exported file; it is your record of exactly "
+            "how the image was made.",
+        ),
+    ),
+)
+
+
 def _hex_to_rgb(value: object, default: str) -> tuple[int, int, int]:
     text = str(value or default).strip()
     if not text.startswith("#"):
@@ -1099,10 +1409,23 @@ def _render_reference_html(
     theme: Mapping[str, object] | None = None,
     block_label: str = "Operation",
 ) -> str:
-    p = _definitions_palette(theme)
     rendered_entries = "\n<hr/>\n".join(
         _render_entry(entry, block_label=block_label) for entry in entries
     )
+    return _reference_document(
+        title=title, intro=intro, rendered_entries=rendered_entries, theme=theme,
+    )
+
+
+def _reference_document(
+    *,
+    title: str,
+    intro: str,
+    rendered_entries: str,
+    theme: Mapping[str, object] | None = None,
+) -> str:
+    """Wrap pre-rendered entry HTML in the shared, themed document shell."""
+    p = _definitions_palette(theme)
     return f"""
 <style>
   body {{
@@ -1158,6 +1481,14 @@ def _render_reference_html(
       font-size: 12px;
       line-height: 1.35;
       white-space: pre-wrap;
+  }}
+  ol {{
+      margin: 4px 0 9px 0;
+      padding-left: 22px;
+      line-height: 1.5;
+  }}
+  li {{
+      margin: 3px 0;
   }}
   .note {{
       color: {p["note"]};
@@ -1215,8 +1546,45 @@ def render_roi_reference_html(theme: Mapping[str, object] | None = None) -> str:
     )
 
 
+def _render_howto_entry(entry: _HowToEntry) -> str:
+    blocks = [f'<div class="entry" id="{_entry_id(entry.title)}">']
+    blocks.append(f"<h2>{escape(entry.title)}</h2>")
+    blocks.append(f'<p class="sub">{escape(entry.goal)}</p>')
+    if entry.steps:
+        blocks.append('<p class="label">Steps</p>')
+        items = "".join(f"<li>{escape(step)}</li>" for step in entry.steps)
+        blocks.append(f"<ol>{items}</ol>")
+    for note in entry.notes:
+        blocks.append(f"<p>{escape(note)}</p>")
+    for tip in entry.tips:
+        blocks.append(f'<p class="note">Tip: {escape(tip)}</p>')
+    blocks.append("</div>")
+    return "\n".join(blocks)
+
+
+def render_howto_html(theme: Mapping[str, object] | None = None) -> str:
+    """Return theme-aware HTML for the step-by-step how-to guides."""
+    rendered_entries = "\n<hr/>\n".join(
+        _render_howto_entry(entry) for entry in _HOWTO_ENTRIES
+    )
+    return _reference_document(
+        title="How-to Guides",
+        intro=(
+            "Short, numbered walkthroughs for the most common tasks — opening and "
+            "flattening a scan, drawing ROIs and line profiles, measuring, "
+            "filtering, correcting lattice distortion in the FFT viewer, and "
+            "exporting. Each guide lists the steps in order, with notes on what you "
+            "get and tips to avoid common mistakes. For the underlying maths, see "
+            "the Processing and ROI Actions tabs."
+        ),
+        rendered_entries=rendered_entries,
+        theme=theme,
+    )
+
+
 _DEFINITIONS_HTML = render_definitions_html()
 _ROI_REFERENCE_HTML = render_roi_reference_html()
+_HOWTO_HTML = render_howto_html()
 
 
 class _HtmlReferencePanel(QWidget):
@@ -1264,6 +1632,13 @@ class _ROIReferencePanel(_HtmlReferencePanel):
         super().__init__(t, render_roi_reference_html(t), parent)
 
 
+class _HowToPanel(_HtmlReferencePanel):
+    """Scrollable panel with step-by-step how-to walkthroughs."""
+
+    def __init__(self, t: dict, parent=None):
+        super().__init__(t, render_howto_html(t), parent)
+
+
 class _DefinitionsDialog(QDialog):
     """Closeable utility window for processing and ROI definitions/help."""
 
@@ -1275,19 +1650,33 @@ class _DefinitionsDialog(QDialog):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         self._tabs = QTabWidget(self)
+        self._howto_panel = _HowToPanel(t, self)
         self._panel = _DefinitionsPanel(t, self)
         self._roi_panel = _ROIReferencePanel(t, self)
+        self._tabs.addTab(self._howto_panel, "How-to")
         self._tabs.addTab(self._panel, "Processing")
         self._tabs.addTab(self._roi_panel, "ROI Actions")
         lay.addWidget(self._tabs)
         self.set_reference_tab(initial_tab)
 
+    # Stable tab keys -> tab index (How-to first as the friendliest landing).
+    _TAB_INDEX = {"howto": 0, "processing": 1, "roi": 2}
+
     def set_reference_tab(self, tab: str) -> None:
         """Switch to the named reference tab."""
         key = str(tab or "processing").lower().replace("-", "_")
-        index = 1 if key in {"roi", "roi_actions", "roi_reference"} else 0
-        self._tabs.setCurrentIndex(index)
+        if key in {"roi", "roi_actions", "roi_reference"}:
+            key = "roi"
+        elif key in {"howto", "how_to", "guides", "guide"}:
+            key = "howto"
+        else:
+            key = "processing"
+        self._tabs.setCurrentIndex(self._TAB_INDEX[key])
 
     def current_reference_tab(self) -> str:
         """Return the stable key for the currently selected reference tab."""
-        return "roi" if self._tabs.currentIndex() == 1 else "processing"
+        index = self._tabs.currentIndex()
+        for key, idx in self._TAB_INDEX.items():
+            if idx == index:
+                return key
+        return "processing"

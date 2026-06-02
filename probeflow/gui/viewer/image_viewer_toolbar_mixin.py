@@ -17,6 +17,17 @@ class ImageViewerToolbarMixin:
         dlg = AboutDialog(self._t, self)
         dlg.exec()
 
+    def _show_viewer_howto(self) -> None:
+        dlg = getattr(self, "_definitions_dialog", None)
+        if dlg is None:
+            dlg = _DefinitionsDialog(self._t, self, initial_tab="howto")
+            self._definitions_dialog = dlg
+        else:
+            dlg.set_reference_tab("howto")
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+
     def _show_viewer_definitions(self) -> None:
         dlg = getattr(self, "_definitions_dialog", None)
         if dlg is None:

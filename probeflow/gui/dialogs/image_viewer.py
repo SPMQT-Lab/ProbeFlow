@@ -1548,6 +1548,11 @@ class ImageViewerDialog(
         help_menu.addAction(github_action)
         about_action = self._viewer_action("help.about", self._show_viewer_about)
         help_menu.addAction(about_action)
+        howto_action = self._viewer_action(
+            "help.howto",
+            self._show_viewer_howto,
+        )
+        help_menu.insertAction(github_action, howto_action)
         definitions_action = self._viewer_action(
             "help.definitions",
             self._show_viewer_definitions,

@@ -90,22 +90,62 @@ def test_roi_reference_has_action_scope_and_tool_behaviour():
         assert expected in html
 
 
-def test_definitions_dialog_tabs_can_focus_processing_and_roi(qapp):
+def test_howto_reference_has_numbered_steps_and_key_workflows():
+    from probeflow.gui.dialogs.definitions import (
+        _HOWTO_ENTRIES,
+        render_howto_html,
+    )
+    from probeflow.gui.styling import THEMES
+
+    html = render_howto_html(THEMES["light"])
+
+    # Every guide renders an ordered (numbered) step list.
+    assert html.count("<ol>") >= len(_HOWTO_ENTRIES)
+    assert "<li>" in html
+
+    for expected in (
+        "How-to Guides",
+        "Open an image and flatten it",
+        "Measure a height profile along a line",
+        "Export line profile as CSV",
+        "Create, select, and delete ROIs",
+        "Show two regions at once (per-region contrast)",
+        "Contrast scope",
+        "Measure a step height between two regions",
+        "Correct lattice distortion with the FFT viewer",
+        "Bragg",
+        "Apply correction",
+        "JSON",
+    ):
+        assert expected in html, expected
+
+
+def test_definitions_dialog_tabs_can_focus_howto_processing_and_roi(qapp):
     from probeflow.gui.dialogs.definitions import _DefinitionsDialog
     from probeflow.gui.styling import THEMES
 
     default = _DefinitionsDialog(THEMES["light"])
     roi_first = _DefinitionsDialog(THEMES["light"], initial_tab="roi")
+    howto_first = _DefinitionsDialog(THEMES["light"], initial_tab="howto")
     try:
         assert default.current_reference_tab() == "processing"
         default.set_reference_tab("roi")
         assert default.current_reference_tab() == "roi"
+        default.set_reference_tab("howto")
+        assert default.current_reference_tab() == "howto"
         default.set_reference_tab("processing")
         assert default.current_reference_tab() == "processing"
         assert roi_first.current_reference_tab() == "roi"
+        assert howto_first.current_reference_tab() == "howto"
     finally:
-        default.close()
-        roi_first.close()
-        default.deleteLater()
-        roi_first.deleteLater()
+        for dlg in (default, roi_first, howto_first):
+            dlg.close()
+            dlg.deleteLater()
         qapp.processEvents()
+
+
+def test_howto_help_command_is_registered():
+    from probeflow.gui.viewer.shortcuts import VIEWER_COMMANDS
+
+    ids = {c.command_id for c in VIEWER_COMMANDS}
+    assert "help.howto" in ids
