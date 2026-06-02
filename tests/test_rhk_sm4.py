@@ -295,6 +295,63 @@ def test_sm4_scan_conversion_normalises_length_z_units(tmp_path):
     np.testing.assert_allclose(scan.planes[0].ravel()[:3], [1.0e-9, 1.5e-9, 2.0e-9])
 
 
+def test_sm4_metadata_only_parse_skips_payload_decode(tmp_path):
+    path = _synthetic_sm4(tmp_path / "image.sm4")
+    sm4 = read_rhk_sm4(path, metadata_only=True)
+    assert len(sm4.pages) == 1
+    page = sm4.pages[0]
+    # Headers/strings are parsed, but image arrays are left empty.
+    assert page.x_size == 4 and page.y_size == 3
+    assert page.raw_data.size == 0
+    assert page.physical_data.size == 0
+
+
+def test_sm4_metadata_only_matches_full_decode(tmp_path):
+    from probeflow.core.metadata import metadata_from_rhk_sm4, metadata_from_scan
+
+    path = _synthetic_sm4(tmp_path / "image.sm4")
+    fast = metadata_from_rhk_sm4(read_rhk_sm4(path, metadata_only=True))
+    slow = metadata_from_scan(read_sm4(path))
+    assert fast == slow
+
+
+def test_sm4_sparse_metadata_read_matches_full(tmp_path, monkeypatch):
+    import probeflow.io.readers.rhk_sm4 as m
+    from probeflow.core.metadata import metadata_from_rhk_sm4, metadata_from_scan
+
+    path = _synthetic_sm4(tmp_path / "image.sm4")
+    # Force the sparse seek-read path even for this tiny file.
+    monkeypatch.setattr(m, "_SM4_FULL_READ_THRESHOLD", 0)
+    sparse = metadata_from_rhk_sm4(m.read_rhk_sm4(path, metadata_only=True))
+    full = metadata_from_scan(m.read_sm4(path))
+    assert sparse == full
+
+
+def test_sm4_metadata_range_collector_skips_payload(tmp_path):
+    import probeflow.io.readers.rhk_sm4 as m
+
+    path = _synthetic_sm4(tmp_path / "image.sm4")
+    size = path.stat().st_size
+    with open(path, "rb") as fh:
+        ranges = m._collect_sm4_metadata_ranges(fh, size)
+    fetched = sum(min(sz, size - off) for off, sz in ranges if 0 <= off < size)
+    # Metadata is a small fraction of the file: PAGE_DATA must not be fetched.
+    assert ranges
+    assert fetched < size
+
+
+def test_sm4_thumbnail_plane_matches_full_load(tmp_path):
+    from probeflow.gui.rendering import load_thumbnail_plane, resolve_thumbnail_plane_index
+
+    path = _synthetic_sm4(tmp_path / "image.sm4")
+    scan = load_scan(path)
+    names = list(scan.plane_names)
+    idx = resolve_thumbnail_plane_index(names, "Z")
+    arr, returned_names = load_thumbnail_plane(path, "Z")
+    assert returned_names == names
+    np.testing.assert_array_equal(arr, scan.planes[idx])
+
+
 def test_index_and_gui_entry_include_sm4(tmp_path):
     path = _synthetic_sm4(tmp_path / "image.sm4")
     items = index_folder(tmp_path)
@@ -325,6 +382,21 @@ class TestRealSM4:
         sm4 = read_rhk_sm4(REAL_SM4)
         assert sm4.page_count == 4
         assert len(sm4.pages) == 4
+
+    def test_sparse_metadata_read_matches_full_and_is_small(self):
+        import probeflow.io.readers.rhk_sm4 as m
+        from probeflow.core.metadata import metadata_from_rhk_sm4, metadata_from_scan
+
+        sparse = metadata_from_rhk_sm4(m.read_rhk_sm4(REAL_SM4, metadata_only=True))
+        full = metadata_from_scan(m.read_sm4(REAL_SM4))
+        assert sparse == full
+
+        size = REAL_SM4.stat().st_size
+        with open(REAL_SM4, "rb") as fh:
+            ranges = m._collect_sm4_metadata_ranges(fh, size)
+        fetched = sum(min(sz, size - off) for off, sz in ranges if 0 <= off < size)
+        # Header/table/string metadata is a tiny fraction of the file.
+        assert fetched < size * 0.05
 
     def test_page_labels_dimensions_units(self):
         sm4 = read_rhk_sm4(REAL_SM4)

@@ -32,8 +32,15 @@ def load_scan(path) -> Scan:
     """
     from probeflow.core.loaders import identify_scan_file
 
-    sig = identify_scan_file(path)
+    return load_scan_from_signature(identify_scan_file(path))
 
+
+def load_scan_from_signature(sig) -> Scan:
+    """Load a scan from an already-resolved :class:`LoadSignature`.
+
+    Lets callers that have already sniffed (e.g. the thumbnail path) skip a
+    second identify_scan_file round-trip.
+    """
     if sig.source_format == "sxm":
         from probeflow.io.readers.nanonis_sxm import read_sxm
         scan = read_sxm(sig.path)
@@ -62,4 +69,5 @@ __all__ = [
     "SUPPORTED_SUFFIXES",
     "Scan",
     "load_scan",
+    "load_scan_from_signature",
 ]

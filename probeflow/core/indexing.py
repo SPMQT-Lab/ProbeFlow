@@ -98,7 +98,7 @@ def index_folder(
         if ft not in _FORMAT_MAP:
             return None
         source_format, item_type = _FORMAT_MAP[ft]
-        item = _build_item(path, source_format, item_type)
+        item = _build_item(path, ft, source_format, item_type)
         if item.load_error is not None and not include_errors:
             return None
         return item
@@ -138,6 +138,17 @@ def _iter_files(folder: Path, *, recursive: bool):
 
 # ── Item builders ─────────────────────────────────────────────────────────────
 
+def _filter_indexed(
+    item: "Optional[ProbeFlowItem]", include_errors: bool
+) -> "Optional[ProbeFlowItem]":
+    """Apply the include_errors policy to a built or cached item."""
+    if item is None:
+        return None
+    if item.load_error is not None and not include_errors:
+        return None
+    return item
+
+
 def _file_stat(path: Path) -> tuple[Optional[int], Optional[int]]:
     try:
         st = path.stat()
@@ -146,13 +157,22 @@ def _file_stat(path: Path) -> tuple[Optional[int], Optional[int]]:
         return None, None
 
 
-def _build_item(path: Path, source_format: str, item_type: str) -> ProbeFlowItem:
-    mtime_ns, size_bytes = _file_stat(path)
+def _build_item(
+    path: Path,
+    ft: FileType,
+    source_format: str,
+    item_type: str,
+    *,
+    stat: Optional[tuple[Optional[int], Optional[int]]] = None,
+) -> ProbeFlowItem:
+    # ``stat`` lets callers reuse a DirEntry.stat() from os.scandir instead of
+    # paying a second stat round-trip (matters on a network drive).
+    mtime_ns, size_bytes = stat if stat is not None else _file_stat(path)
     try:
         if item_type == "scan":
-            return _item_from_scan(path, source_format, mtime_ns, size_bytes)
+            return _item_from_scan(path, ft, source_format, mtime_ns, size_bytes)
         else:
-            return _item_from_spec(path, source_format, mtime_ns, size_bytes)
+            return _item_from_spec(path, ft, source_format, mtime_ns, size_bytes)
     except Exception as exc:
         return ProbeFlowItem(
             path=path,
@@ -167,13 +187,14 @@ def _build_item(path: Path, source_format: str, item_type: str) -> ProbeFlowItem
 
 def _item_from_scan(
     path: Path,
+    ft: FileType,
     source_format: str,
     mtime_ns: Optional[int],
     size_bytes: Optional[int],
 ) -> ProbeFlowItem:
     from probeflow.core.metadata import read_scan_metadata
     from probeflow.io.scanflow_acquisition import load_scanflow_scan_sidecar
-    meta = read_scan_metadata(path)
+    meta = read_scan_metadata(path, file_type=ft)
     extra = dict(meta.raw_header)
     extra["experiment_metadata"] = dict(meta.experiment_metadata)
     sidecar = load_scanflow_scan_sidecar(path, missing_ok=True)
@@ -200,12 +221,13 @@ def _item_from_scan(
 
 def _item_from_spec(
     path: Path,
+    ft: FileType,
     source_format: str,
     mtime_ns: Optional[int],
     size_bytes: Optional[int],
 ) -> ProbeFlowItem:
     from probeflow.io.spectroscopy import read_spec_metadata, spec_channel_to_dict
-    meta = read_spec_metadata(path)
+    meta = read_spec_metadata(path, file_type=ft)
     n_pts = meta.metadata.get("n_points")
     extra: dict[str, Any] = {
         "sweep_type": meta.metadata.get("sweep_type"),
@@ -306,18 +328,22 @@ def _peek_subfolder(
     while queue:
         current, depth = queue.pop(0)
         try:
-            entries = sorted(current.iterdir())
+            # os.scandir serves is_file()/is_dir() from the single directory
+            # read, avoiding a per-entry stat round-trip on a network drive.
+            with os.scandir(current) as it:
+                entries = sorted(it, key=lambda e: e.name)
         except (OSError, PermissionError):
             continue
-        for p in entries:
-            if p.name.startswith(".") or p.name in _SKIP_DIRS:
+        for e in entries:
+            if e.name.startswith(".") or e.name in _SKIP_DIRS:
                 continue
             try:
-                is_file = p.is_file()
-                is_dir = p.is_dir()
+                is_file = e.is_file()
+                is_dir = e.is_dir()
             except OSError:
                 continue
             if is_file:
+                p = Path(e.path)
                 ft = sniff_file_type(p)
                 if ft in (FileType.CREATEC_IMAGE, FileType.NANONIS_IMAGE):
                     n_scans += 1
@@ -326,7 +352,7 @@ def _peek_subfolder(
                 elif ft in (FileType.CREATEC_SPEC, FileType.NANONIS_SPEC):
                     n_specs += 1
             elif is_dir and depth < peek_depth:
-                queue.append((p, depth + 1))
+                queue.append((Path(e.path), depth + 1))
 
     return SubfolderEntry(
         path=folder,
@@ -355,40 +381,59 @@ def index_folder_shallow(
         raise ValueError(f"Path is not a directory: {folder}")
 
     try:
-        entries = sorted(folder.iterdir())
+        # A single os.scandir read yields name + type (+ a cached stat), so we
+        # avoid a separate is_file()/is_dir()/stat round-trip per entry — the
+        # dominant cost when browsing a high-latency network drive.
+        with os.scandir(folder) as it:
+            entries = list(it)
     except (OSError, PermissionError):
         entries = []
 
-    file_paths: list[Path] = []
+    file_entries: list[os.DirEntry] = []
     subdir_paths: list[Path] = []
-    for p in entries:
-        if p.name.startswith(".") or p.name in _SKIP_DIRS:
+    for e in entries:
+        if e.name.startswith(".") or e.name in _SKIP_DIRS:
             continue
         try:
-            is_file = p.is_file()
-            is_dir = p.is_dir()
+            is_file = e.is_file()
+            is_dir = e.is_dir()
         except OSError:
             continue
         if is_file:
-            file_paths.append(p)
+            file_entries.append(e)
         elif is_dir:
-            subdir_paths.append(p)
+            subdir_paths.append(Path(e.path))
 
-    def _process_file(p: Path) -> "Optional[ProbeFlowItem]":
+    def _process_file(entry: "os.DirEntry") -> "Optional[ProbeFlowItem]":
+        from probeflow.core import browse_cache
+
+        p = Path(entry.path)
+        try:
+            st = entry.stat()
+            mtime_ns, size_bytes = st.st_mtime_ns, st.st_size
+        except OSError:
+            mtime_ns, size_bytes = None, None
+
+        # Cache hit: no file content read at all (the network-drive revisit win).
+        # A cached None means "not a recognised file" — also worth not re-sniffing.
+        hit, cached = browse_cache.get_metadata(p, mtime_ns, size_bytes)
+        if hit:
+            return _filter_indexed(cached, include_errors)
+
         ft = sniff_file_type(p)
         if ft not in _FORMAT_MAP:
+            browse_cache.put_metadata(p, mtime_ns, size_bytes, None)
             return None
         source_format, item_type = _FORMAT_MAP[ft]
-        item = _build_item(p, source_format, item_type)
-        if item.load_error is not None and not include_errors:
-            return None
-        return item
+        item = _build_item(p, ft, source_format, item_type, stat=(mtime_ns, size_bytes))
+        browse_cache.put_metadata(p, mtime_ns, size_bytes, item)
+        return _filter_indexed(item, include_errors)
 
-    n_workers = min(32, max(1, len(file_paths) + len(subdir_paths)))
+    n_workers = min(32, max(1, len(file_entries) + len(subdir_paths)))
     with ThreadPoolExecutor(max_workers=n_workers) as executor:
         # Submit file processing and subfolder peeking concurrently so both
         # classes of I/O-bound work run in parallel (helpful on network drives).
-        file_futs    = [executor.submit(_process_file, p)   for p in file_paths]
+        file_futs    = [executor.submit(_process_file, e)   for e in file_entries]
         subfolder_futs = [executor.submit(_peek_subfolder, p) for p in subdir_paths]
 
     files     = [it for f in file_futs    for it in (f.result(),) if it is not None]

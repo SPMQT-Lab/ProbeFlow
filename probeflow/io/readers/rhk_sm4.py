@@ -50,6 +50,15 @@ RHK_OBJECT_PRM_HEADER = 15
 
 RHK_DATA_IMAGE = 0
 
+# Placeholder for pages parsed in metadata-only mode (no payload decoded).
+_EMPTY_IMAGE = np.empty((0, 0), dtype=np.float64)
+
+# Below this size, a metadata-only read just slurps the whole file: the handful
+# of seek/read round-trips a sparse read would cost is not worth it for small
+# files, and locally it makes no difference.  Above it (the network-drive win),
+# only the small header/table/string byte ranges are fetched — never PAGE_DATA.
+_SM4_FULL_READ_THRESHOLD = 1 << 20  # 1 MiB
+
 PAGE_TYPE_LABELS = {
     1: "Topography",
     2: "Current",
@@ -126,6 +135,9 @@ class RHKSM4Page:
     raw_data: np.ndarray
     physical_data: np.ndarray
     metadata: dict[str, Any] = field(default_factory=dict)
+    # Location of this page's PAGE_DATA object, so a single plane can be decoded
+    # later (e.g. for a thumbnail) without re-parsing or decoding other pages.
+    data_object: "RHKObject | None" = None
 
 
 @dataclass(frozen=True)
@@ -139,10 +151,150 @@ class RHKSM4File:
     parser_notes: list[str]
 
 
-def read_rhk_sm4(path) -> RHKSM4File:
-    """Parse an RHK SM4 container and decode supported image pages."""
+def _read_sm4_metadata_buffer(path: Path):
+    """Return a buffer suitable for a metadata-only SM4 parse.
+
+    Small files are read whole.  For larger files, only the byte ranges that
+    hold structural metadata (file header, object tables, page index, page
+    headers, string data) are fetched by seeking; the large ``PAGE_DATA``
+    payloads are left as zeros in a full-length buffer so the existing
+    absolute-offset parser works unchanged on it.  This avoids transferring the
+    image bulk over a network drive just to read headers.
+
+    On any structural surprise the function falls back to a whole-file read, so
+    correctness never depends on the sparse traversal being exhaustive.
+    """
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return path.read_bytes()
+    if size <= _SM4_FULL_READ_THRESHOLD:
+        return path.read_bytes()
+
+    with open(path, "rb") as fh:
+        try:
+            ranges = _collect_sm4_metadata_ranges(fh, size)
+        except Exception:
+            fh.seek(0)
+            return fh.read()
+        if not ranges:
+            fh.seek(0)
+            return fh.read()
+        buf = bytearray(size)
+        for off, sz in ranges:
+            if sz <= 0 or off < 0 or off >= size:
+                continue
+            fh.seek(off)
+            chunk = fh.read(min(sz, size - off))
+            buf[off:off + len(chunk)] = chunk
+        return buf
+
+
+def _collect_sm4_metadata_ranges(fh, file_size: int) -> list[tuple[int, int]]:
+    """Walk the SM4 object graph via seek reads, collecting metadata byte ranges.
+
+    Mirrors the navigation of :func:`_parse_pages` but interprets only what is
+    needed to locate objects; the canonical parser then interprets the fetched
+    bytes.  PAGE_DATA object ranges are deliberately never collected.
+    """
+    ranges: list[tuple[int, int]] = []
+
+    def read_at(offset: int, size: int) -> bytes:
+        if offset < 0 or size <= 0 or offset >= file_size:
+            return b""
+        fh.seek(offset)
+        return fh.read(min(size, file_size - offset))
+
+    def objects_at(offset: int, count: int) -> list[RHKObject]:
+        if count <= 0 or count > 100000:
+            return []
+        tbl = read_at(offset, count * OBJECT_SIZE)
+        out: list[RHKObject] = []
+        for i in range(count):
+            if (i + 1) * OBJECT_SIZE > len(tbl):
+                break
+            typ, off, sz = struct.unpack_from("<III", tbl, i * OBJECT_SIZE)
+            out.append(RHKObject(int(typ), int(off), int(sz)))
+        return out
+
+    header_offset = MAGIC_OFFSET + MAGIC_TOTAL_SIZE
+    head = read_at(0, header_offset + 20)
+    if len(head) < header_offset + 20:
+        raise ValueError("truncated SM4 header")
+    page_count = _u32(head, header_offset)
+    object_count = _u32(head, header_offset + 4)
+    file_object_table_offset = header_offset + 20
+    # File header + file-level object table.
+    ranges.append((0, file_object_table_offset + object_count * OBJECT_SIZE))
+
+    file_objects = objects_at(file_object_table_offset, object_count)
+    page_index_array = _first_object(file_objects, RHK_OBJECT_PAGE_INDEX_ARRAY)
+    if page_index_array is None:
+        pih = _first_object(file_objects, RHK_OBJECT_PAGE_INDEX_HEADER)
+        if pih is not None:
+            ranges.append((pih.offset, max(pih.size, 8)))
+            sub_head = read_at(pih.offset, 8)
+            if len(sub_head) >= 8:
+                sub_count = _u32(sub_head, 4)
+                sub_table_start = pih.offset + pih.size
+                ranges.append((sub_table_start, sub_count * OBJECT_SIZE))
+                sub_objects = objects_at(sub_table_start, sub_count)
+                page_index_array = _first_object(sub_objects, RHK_OBJECT_PAGE_INDEX_ARRAY)
+    if page_index_array is None:
+        return ranges
+
+    offset = page_index_array.offset
+    for _ in range(max(page_count, 0)):
+        if offset + PAGE_INDEX_ARRAY_SIZE > file_size:
+            break
+        entry = read_at(offset, PAGE_INDEX_ARRAY_SIZE)
+        if len(entry) < PAGE_INDEX_ARRAY_SIZE:
+            break
+        data_type = _u32(entry, GUID_SIZE)
+        entry_object_count = _u32(entry, GUID_SIZE + 8)
+        obj_table_start = offset + PAGE_INDEX_ARRAY_SIZE
+        # Page-index entry + its object table.
+        ranges.append((offset, PAGE_INDEX_ARRAY_SIZE + max(entry_object_count, 0) * OBJECT_SIZE))
+
+        if data_type == RHK_DATA_IMAGE:
+            page_objects = objects_at(obj_table_start, entry_object_count)
+            header_obj = _first_object(page_objects, RHK_OBJECT_PAGE_HEADER)
+            if header_obj is not None:
+                ph_size = max(header_obj.size, PAGE_HEADER_SIZE)
+                ranges.append((header_obj.offset, ph_size))
+                ph = read_at(header_obj.offset, ph_size)
+                if len(ph) >= PAGE_HEADER_SIZE:
+                    field_size = max(_u16(ph, 0), PAGE_HEADER_SIZE)
+                    internal_obj_count = _u32(ph, 112)
+                    internal_objects: list[RHKObject] = []
+                    if internal_obj_count > 0:
+                        internal_table_off = header_obj.offset + field_size
+                        ranges.append((internal_table_off, internal_obj_count * OBJECT_SIZE))
+                        internal_objects = objects_at(internal_table_off, internal_obj_count)
+                    string_obj = (
+                        _first_object(internal_objects, RHK_OBJECT_STRING_DATA)
+                        or _first_object(page_objects, RHK_OBJECT_STRING_DATA)
+                    )
+                    if string_obj is not None:
+                        ranges.append((string_obj.offset, string_obj.size))
+
+        offset += PAGE_INDEX_ARRAY_SIZE + max(entry_object_count, 0) * OBJECT_SIZE
+
+    return ranges
+
+
+def read_rhk_sm4(path, *, metadata_only: bool = False) -> RHKSM4File:
+    """Parse an RHK SM4 container and decode supported image pages.
+
+    When ``metadata_only`` is True, page headers and string data are parsed but
+    the (potentially large) ``PAGE_DATA`` image payloads are not decoded: each
+    returned :class:`RHKSM4Page` carries an empty ``raw_data``/``physical_data``
+    and full header/string metadata.  This is the indexing fast path — it avoids
+    per-page ``frombuffer``/``astype`` work and is a prerequisite for reading
+    only header byte ranges over a network drive.
+    """
     path = Path(path)
-    data = path.read_bytes()
+    data = _read_sm4_metadata_buffer(path) if metadata_only else path.read_bytes()
     _magic_end = MAGIC_OFFSET + len(SM4_MAGIC)
     if not (len(data) >= _magic_end and data[MAGIC_OFFSET:_magic_end] == SM4_MAGIC):
         raise ValueError(f"{path}: not an RHK SM4 file")
@@ -169,7 +321,7 @@ def read_rhk_sm4(path) -> RHKSM4File:
         notes=notes,
     )
 
-    pages = _parse_pages(data, objects, page_count, notes)
+    pages = _parse_pages(data, objects, page_count, notes, metadata_only=metadata_only)
     metadata = {
         "file_object_count": object_count,
         "object_field_size": object_field_size,
@@ -236,10 +388,73 @@ def read_sm4(path) -> Scan:
 
 
 def read_sm4_metadata(path):
-    """Return :class:`~probeflow.core.metadata.ScanMetadata` for an RHK SM4 file."""
-    from probeflow.core.metadata import metadata_from_scan
+    """Return :class:`~probeflow.core.metadata.ScanMetadata` for an RHK SM4 file.
 
-    return metadata_from_scan(read_sm4(path))
+    Uses the ``metadata_only`` parse path so image payloads are never decoded —
+    only page headers and string blocks are needed for the summary.
+    """
+    from probeflow.core.metadata import metadata_from_rhk_sm4
+
+    return metadata_from_rhk_sm4(read_rhk_sm4(path, metadata_only=True))
+
+
+def read_sm4_thumbnail_plane(path, resolve_index):
+    """Decode only the single image plane selected by ``resolve_index``.
+
+    ``resolve_index(plane_names) -> int`` picks the wanted plane.  Headers are
+    parsed once via the ``metadata_only`` path, then only the chosen page's
+    ``PAGE_DATA`` byte range is read and decoded — an N-page SM4 does ~1× rather
+    than ~N× the pixel work (and, paired with seek reads, transfers ~1/N of the
+    image bytes).  Returns ``(arr | None, plane_names)``.
+    """
+    path = Path(path)
+    sm4 = read_rhk_sm4(path, metadata_only=True)
+    pages = _select_image_pages(sm4.pages)
+    names = [_page_name(p) for p in pages]
+    if not pages:
+        return None, names
+    idx = int(resolve_index(names))
+    if idx < 0 or idx >= len(pages):
+        return None, names
+    return _decode_page_plane(path, pages[idx]), names
+
+
+def _select_image_pages(pages: list[RHKSM4Page]) -> list[RHKSM4Page]:
+    """Keep only pages whose dimensions match the first page (matches read_sm4)."""
+    if not pages:
+        return []
+    first = pages[0]
+    shape = (first.y_size, first.x_size)
+    return [p for p in pages if (p.y_size, p.x_size) == shape]
+
+
+def _decode_page_plane(path: Path, page: RHKSM4Page) -> np.ndarray | None:
+    """Read and decode a single page's payload into a scaled (SI) plane.
+
+    Mirrors the per-plane math of :func:`read_sm4`:
+    ``(raw * z_scale + z_offset) * unit_scale``.
+    """
+    obj = page.data_object
+    if obj is None:
+        return None
+    with open(path, "rb") as fh:
+        fh.seek(obj.offset)
+        payload = fh.read(obj.size)
+    raw = _decode_image_payload(
+        payload,
+        x_size=page.x_size,
+        y_size=page.y_size,
+        data_size=int(page.metadata.get("data_size", 0)),
+        notes=[],
+        page_index=page.page_index,
+    )
+    if raw is None:
+        return None
+    z_scale = _finite_or(page.z_scale, 1.0)
+    z_offset = _finite_or(page.z_offset, 0.0)
+    physical = raw.astype(np.float64) * z_scale + z_offset
+    unit_scale, _unit = _normalise_z_unit_for_scan(page.z_unit)
+    return physical * unit_scale
 
 
 def parse_object_table(
@@ -314,6 +529,8 @@ def _parse_pages(
     file_objects: list[RHKObject],
     declared_page_count: int,
     notes: list[str],
+    *,
+    metadata_only: bool = False,
 ) -> list[RHKSM4Page]:
     # Some SM4 files expose PAGE_INDEX_ARRAY directly in the file-level object
     # table. Others wrap it inside a PAGE_INDEX_HEADER sub-container.
@@ -337,7 +554,10 @@ def _parse_pages(
         notes.append("No PAGE_INDEX_ARRAY found in file-level or page-index-header objects.")
         return []
 
-    return _parse_page_index_array(data, page_index_array, declared_page_count, notes)
+    return _parse_page_index_array(
+        data, page_index_array, declared_page_count, notes,
+        metadata_only=metadata_only,
+    )
 
 
 def _parse_page_index_array(
@@ -345,6 +565,8 @@ def _parse_page_index_array(
     obj: RHKObject,
     declared_page_count: int,
     notes: list[str],
+    *,
+    metadata_only: bool = False,
 ) -> list[RHKSM4Page]:
     count = declared_page_count
     if count <= 0:
@@ -374,7 +596,10 @@ def _parse_page_index_array(
             objects = []
 
         if data_type == RHK_DATA_IMAGE:
-            page = _parse_page_from_objects(data, objects, i, data_type, source, notes)
+            page = _parse_page_from_objects(
+                data, objects, i, data_type, source, notes,
+                metadata_only=metadata_only,
+            )
             if page is not None:
                 page.metadata["minor_version"] = minor_version
                 pages.append(page)
@@ -397,6 +622,8 @@ def _parse_page_from_objects(
     data_type: int,
     source: int,
     notes: list[str],
+    *,
+    metadata_only: bool = False,
 ) -> RHKSM4Page | None:
     header_obj = _first_object(objects, RHK_OBJECT_PAGE_HEADER)
     data_obj = _first_object(objects, RHK_OBJECT_PAGE_DATA)
@@ -437,19 +664,26 @@ def _parse_page_from_objects(
         notes=notes,
         page_index=page_index,
     )
-    raw = _decode_image_payload(
-        _object_bytes(data, data_obj),
-        x_size=x_size,
-        y_size=y_size,
-        data_size=int(header.get("data_size", 0)),
-        notes=notes,
-        page_index=page_index,
-    )
-    if raw is None:
-        return None
-    z_scale = _finite_or(header["z_scale"], 1.0)
-    z_offset = _finite_or(header["z_offset"], 0.0)
-    physical = raw.astype(np.float64) * z_scale + z_offset
+    if metadata_only:
+        # Image payloads are not needed for the metadata summary: skip the
+        # frombuffer/astype work entirely and leave the arrays empty.  Page
+        # selection downstream relies on header dimensions, not decoded shape.
+        raw = _EMPTY_IMAGE
+        physical = _EMPTY_IMAGE
+    else:
+        raw = _decode_image_payload(
+            _object_bytes(data, data_obj),
+            x_size=x_size,
+            y_size=y_size,
+            data_size=int(header.get("data_size", 0)),
+            notes=notes,
+            page_index=page_index,
+        )
+        if raw is None:
+            return None
+        z_scale = _finite_or(header["z_scale"], 1.0)
+        z_offset = _finite_or(header["z_offset"], 0.0)
+        physical = raw.astype(np.float64) * z_scale + z_offset
     page_type = int(header["page_type"])
     scan_dir = int(header["scan_dir"])
     label = strings.get("label") or PAGE_TYPE_LABELS.get(page_type)
@@ -488,6 +722,7 @@ def _parse_page_from_objects(
         raw_data=raw,
         physical_data=physical,
         metadata=meta,
+        data_object=data_obj,
     )
 
 
