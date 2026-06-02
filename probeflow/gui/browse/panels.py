@@ -198,15 +198,16 @@ class BrowseToolPanel(QWidget):
 
         lay.addWidget(_sep())
 
-        fc_btn = QPushButton("🔬  Feature Counting  ↗")
+        fc_btn = QPushButton("🔬  Feature Counting")
         fc_btn.setFont(QFont("Helvetica", 10, QFont.Bold))
         fc_btn.setFixedHeight(34)
         fc_btn.setCursor(QCursor(Qt.PointingHandCursor))
         fc_btn.setObjectName("accentBtn")
         fc_btn.setToolTip(
-            "Open the Feature Counting window as a separate floating panel.\n"
-            "You can keep browsing thumbnails while counting molecules.\n"
-            "Shortcut: Ctrl+Shift+F")
+            "Open the Feature Counting window.\n"
+            "Stays open alongside Browse so you can keep browsing\n"
+            "thumbnails while counting molecules.\n"
+            "Shortcut: Ctrl+3")
         fc_btn.clicked.connect(self.open_fc_window_requested.emit)
         lay.addWidget(fc_btn)
 

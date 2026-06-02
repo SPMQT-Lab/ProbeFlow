@@ -538,11 +538,7 @@ class ProbeFlowWindow(QMainWindow):
         map_action.triggered.connect(self._on_map_spectra)
         tools_menu.addAction(map_action)
         tools_menu.addSeparator()
-        fc_window_action = QAction("Open Feature Counting window…", self)
-        fc_window_action.setShortcut(QKeySequence("Ctrl+Shift+F"))
-        fc_window_action.triggered.connect(self._open_fc_window)
-        tools_menu.addAction(fc_window_action)
-        _mode_action(tools_menu, "Feature counting (tab)", "features", "Ctrl+3")
+        _mode_action(tools_menu, "Feature Counting…", "features", "Ctrl+3")
         _mode_action(tools_menu, "TV denoise", "tv", "Ctrl+4")
         tools_menu.addSeparator()
         survey_action = _mode_action(
@@ -777,13 +773,12 @@ class ProbeFlowWindow(QMainWindow):
             self._status_bar.showMessage(
                 f"{n} scan(s) loaded" if n else "Open a folder to browse scans")
         elif mode == "features":
-            self._content_stack.setCurrentIndex(2)
-            self._sidebar_stack.setCurrentIndex(2)
-            if self._features_panel.current_array() is None:
-                self._status_bar.showMessage(
-                    "Pick a scan in Browse, then 'Load primary scan from Browse'")
-            else:
-                self._status_bar.showMessage("FeatureCounting — pick a mode and Run")
+            # Always open Feature Counting in the dedicated floating window
+            # rather than switching the main window's content stack.
+            self._open_fc_window()
+            self._mode = self._mode if self._mode != "features" else "browse"
+            self._sync_menu_actions()
+            return
         elif mode == "tv":
             self._content_stack.setCurrentIndex(3)
             self._sidebar_stack.setCurrentIndex(3)
