@@ -192,6 +192,13 @@ class ImageViewerDialog(
         self._clip_low   = clip_low
         self._clip_high  = clip_high
         self._drs        = DisplayRangeController(clip_low=clip_low, clip_high=clip_high, parent=self)
+        # Per-region (per-area-ROI) display ranges for composite rendering.
+        # ``_display_scope`` selects whether the contrast sliders edit the
+        # global range or the active area ROI's own range.  ``_rois_hidden``
+        # hides every ROI overlay so the composited image can be inspected.
+        self._region_drs: dict[str, DisplayRangeController] = {}
+        self._display_scope: str = "global"  # "global" | "roi"
+        self._rois_hidden: bool = False
         self._processing = dict(processing) if processing else {}
         self._processing_roi_error: str = ""
         self._processing_error: str = ""
@@ -483,6 +490,35 @@ class ImageViewerDialog(
         self._hist_panel.brightnessReleased.connect(self._on_brightness_slider_changed)
         self._hist_panel.contrastReleased.connect(self._on_contrast_slider_changed)
         display_lay.addWidget(self._hist_panel)
+
+        # ── Per-region contrast scope + overlay visibility ────────────────────
+        disp_scope_row = QHBoxLayout()
+        disp_scope_row.setSpacing(6)
+        disp_scope_row.setContentsMargins(0, 0, 0, 0)
+        _disp_scope_lbl = QLabel("Contrast scope")
+        _disp_scope_lbl.setFont(QFont("Helvetica", 8))
+        self._display_scope_cb = QComboBox()
+        self._display_scope_cb.addItems(["Whole image", "Active ROI"])
+        self._display_scope_cb.setFont(QFont("Helvetica", 8))
+        self._display_scope_cb.setToolTip(
+            "Active ROI: the brightness/contrast sliders edit the active area\n"
+            "ROI's own range. Each region is composited with its own scaling,\n"
+            "so a split scan can show both areas well in one image."
+        )
+        self._display_scope_cb.currentIndexChanged.connect(self._on_display_scope_changed)
+        disp_scope_row.addWidget(_disp_scope_lbl)
+        disp_scope_row.addWidget(self._display_scope_cb, 1)
+        display_lay.addLayout(disp_scope_row)
+
+        self._hide_rois_cb = QCheckBox("Hide ROI overlays")
+        self._hide_rois_cb.setFont(QFont("Helvetica", 8))
+        self._hide_rois_cb.setToolTip(
+            "Hide every ROI overlay so the composited image can be inspected.\n"
+            "ROIs are unchanged; untick to show them again."
+        )
+        self._hide_rois_cb.toggled.connect(self._on_toggle_rois_hidden)
+        display_lay.addWidget(self._hide_rois_cb)
+
         self._processing_panel = ProcessingControlPanel("viewer_full")
         self._processing_panel.bad_line_preview_requested.connect(
             self._on_preview_bad_lines)
@@ -812,7 +848,11 @@ class ImageViewerDialog(
 
         roi_empty_lbl = QLabel(
             "ROI tools live in the ROI Manager dock. Choose a drawing tool above "
-            "to create an ROI, or reopen the manager here."
+            "to create an ROI, or reopen the manager here. Click an ROI to select "
+            "it, then drag the active ROI (or its handles) to edit. For a split "
+            "scan, set the View tab's “Contrast scope” to “Active ROI” to give "
+            "each region its own brightness/contrast, and use “Hide ROI "
+            "overlays” there to inspect the result."
         )
         roi_empty_lbl.setFont(QFont("Helvetica", 8))
         roi_empty_lbl.setWordWrap(True)
@@ -1039,7 +1079,7 @@ class ImageViewerDialog(
         self._spec_overlay = SpecOverlayController(self._zoom_lbl, self._spec_image_map)
         self._zero_ctrl = SetZeroPlaneController(self._zoom_lbl)
         self._display_slider_ctrl = DisplaySliderController(
-            self._drs, self._hist_panel,
+            self._target_drs, self._hist_panel,
             lambda: self._display_arr,
             self._channel_unit,
         )
@@ -1958,7 +1998,8 @@ class ImageViewerDialog(
                               self._clip_low, self._clip_high,
                               None,
                               vmin=vmin, vmax=vmax,
-                              arr=self._display_arr)
+                              arr=self._display_arr,
+                              region_levels=self._region_levels_for_render())
         self._reset_zoom_on_next_pixmap = bool(reset_zoom or self._reset_zoom_on_next_pixmap)
         loader.signals.loaded.connect(self._on_loaded)
         loader.signals.failed.connect(self._on_viewer_pixmap_failed)

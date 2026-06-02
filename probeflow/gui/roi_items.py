@@ -138,14 +138,77 @@ def _make_label(roi: "ROI", shape_item: QGraphicsItem) -> QGraphicsTextItem:
     return label
 
 
+# ── ROI interaction hints (single source of truth) ────────────────────────────
+# One click selects the highlighted ROI; a second interaction on the now-active
+# ROI edits it (select-then-edit). Each kind's hint is a title plus short
+# clauses, shared by the floating item tooltips (wrapped onto multiple rows near
+# the cursor) and the status-bar hint (a single concise line).
+
+_AREA_ROI_KINDS = {"rectangle", "ellipse", "polygon", "freehand", "multipolygon"}
+
+_ROI_HINTS: dict[str, tuple[str, tuple[str, ...]]] = {
+    "line": (
+        "Line ROI",
+        (
+            "Click to select this line.",
+            "Drag the active line or its endpoints to edit.",
+            "Right-click for profile and actions.",
+        ),
+    ),
+    "area": (
+        "Area ROI",
+        (
+            "Click to select this ROI.",
+            "Drag the active ROI to move it; drag handles to resize.",
+            "Right-click for mask, measure and actions.",
+        ),
+    ),
+    "point": (
+        "Point ROI",
+        (
+            "Click to select this point.",
+            "Right-click for point actions.",
+        ),
+    ),
+    "roi": (
+        "ROI",
+        (
+            "Click to select.",
+            "Right-click for actions.",
+        ),
+    ),
+}
+
+
+def _roi_hint_key(kind: str) -> str:
+    if kind == "line":
+        return "line"
+    if kind in _AREA_ROI_KINDS:
+        return "area"
+    if kind == "point":
+        return "point"
+    return "roi"
+
+
+def roi_hint_text(kind: str) -> str:
+    """Concise single-line interaction hint for the status bar."""
+    title, clauses = _ROI_HINTS[_roi_hint_key(kind)]
+    return f"{title}: " + " ".join(clauses)
+
+
+def roi_tooltip_html(kind: str) -> str:
+    """Rich-text tooltip that wraps onto several short rows near the cursor.
+
+    Qt only word-wraps tooltips when the text is rich text; the explicit
+    ``<br>`` breaks keep the tooltip from stretching into one wide row.
+    """
+    title, clauses = _ROI_HINTS[_roi_hint_key(kind)]
+    body = "<br>".join(clauses)
+    return f"<qt><b>{title}</b><br>{body}</qt>"
+
+
 def _tooltip_for_roi(roi: "ROI") -> str:
-    if roi.kind == "line":
-        return "Line ROI: click to select, drag active line or endpoints, right-click for profile/actions."
-    if roi.kind in {"rectangle", "ellipse", "polygon", "freehand", "multipolygon"}:
-        return "Area ROI: click to select, drag active ROI, right-click for mask/measure/actions."
-    if roi.kind == "point":
-        return "Point ROI: click to select, right-click for point actions."
-    return "ROI: click to select, right-click for actions."
+    return roi_tooltip_html(roi.kind)
 
 
 # ── Style helpers ─────────────────────────────────────────────────────────────

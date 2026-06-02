@@ -284,11 +284,19 @@ def render_scan_image(
     vmax: Optional[float] = None,
     allow_upscale: bool = False,
     processing: Optional[dict] = None,
+    region_levels: Optional[list] = None,
 ) -> Optional[Image.Image]:
     """Render a scan plane for all GUI image surfaces.
 
     Browse thumbnails, right-panel channel previews, and the full image viewer
     intentionally share this path so only sizing policy differs between them.
+
+    *region_levels* enables per-region (per-ROI) brightness/contrast: a list of
+    ``(mask, vmin, vmax)`` tuples where *mask* is a boolean array matching the
+    plane shape.  Pixels inside each mask are re-mapped with that region's
+    ``(vmin, vmax)`` and composited over the globally-mapped image, so two areas
+    of one scan can be scaled independently.  ``None`` (the default) leaves the
+    shared thumbnail/preview path untouched.
     """
     try:
         if arr is None:
@@ -308,8 +316,18 @@ def render_scan_image(
         if vmin is None:
             return None
 
+        lut = _get_lut(colormap)
         u8 = _array_to_uint8(arr, vmin=vmin, vmax=vmax)
-        colored = _get_lut(colormap)[u8]
+        colored = lut[u8]
+        if region_levels:
+            colored = colored.copy()
+            for mask, rvmin, rvmax in region_levels:
+                if mask is None or rvmin is None or rvmax is None:
+                    continue
+                if getattr(mask, "shape", None) != arr.shape or not mask.any():
+                    continue
+                region_u8 = _array_to_uint8(arr, vmin=float(rvmin), vmax=float(rvmax))
+                colored[mask] = lut[region_u8[mask]]
         grain_thresh = (processing or {}).get("grain_threshold")
         if grain_thresh is not None:
             label_map, _, _ = _proc.detect_grains(

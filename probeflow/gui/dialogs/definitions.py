@@ -708,6 +708,7 @@ _ROI_REFERENCE_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "  z(s) samples along the line\n"
             "  width_px > 1 averages finite pixels in a perpendicular swath\n\n"
             "line actions:\n"
+            "  click a line = make it the active line\n"
             "  drag active line = translate both endpoints\n"
             "  drag p1/p2 handle = move one endpoint\n"
             "  estimate periodicity = analyse current line-profile signal",

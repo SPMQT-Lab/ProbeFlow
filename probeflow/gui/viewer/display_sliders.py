@@ -24,10 +24,18 @@ class DisplaySliderController:
         get_display_arr: Callable[[], "np.ndarray | None"],
         channel_unit_fn: Callable[[], tuple[float, str, str]],
     ) -> None:
-        self._drs = drs
+        # *drs* may be a DisplayRangeController or a zero-arg callable returning
+        # one.  The callable form lets the viewer retarget the sliders at the
+        # active per-ROI display range without the controller being rebuilt.
+        self._drs_source = drs
         self._hist_panel = hist_panel
         self._get_display_arr = get_display_arr
         self._channel_unit_fn = channel_unit_fn
+
+    @property
+    def _drs(self):
+        src = self._drs_source
+        return src() if callable(src) else src
 
     # ── Sync ──────────────────────────────────────────────────────────────────
 

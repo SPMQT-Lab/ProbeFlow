@@ -70,6 +70,11 @@ class ImageViewerRoiMixin:
             self._roi_dock.refresh(self._image_roi_set)
         self._sync_line_profile_visibility()
         self._sync_viewer_menu_actions()
+        # In per-ROI contrast scope the sliders follow the active area ROI, so
+        # refresh them (and re-composite) whenever the active ROI changes.
+        if getattr(self, "_display_scope", "global") == "roi":
+            self._update_display_sliders()
+            self._refresh_viewer_pixmap(reset_zoom=False)
 
     def _on_pixel_hovered(self, col: int, row: int, val) -> None:
         if not hasattr(self, "_coord_lbl"):

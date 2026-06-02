@@ -44,24 +44,107 @@ class ImageViewerDisplayMixin:
         msg = self._zero_ctrl.clear()
         self._status_lbl.setText(msg)
 
+    # ── Per-region display range (composite brightness/contrast) ──────────────
+    def _target_drs(self):
+        """Return the DisplayRangeController the contrast sliders should edit.
+
+        In ``roi`` scope, edits go to the active area ROI's own range so each
+        region can be scaled independently; otherwise the global range.
+        """
+        if getattr(self, "_display_scope", "global") == "roi":
+            from probeflow.gui.roi_context import active_area_roi_context
+            ctx = active_area_roi_context(getattr(self, "_image_roi_set", None))
+            if ctx.roi_id is not None:
+                return self._region_drs_for(ctx.roi_id)
+        return self._drs
+
+    def _region_drs_for(self, roi_id: str):
+        """Get (or lazily create) the per-ROI DisplayRangeController."""
+        from probeflow.gui.viewer.display_range import DisplayRangeController
+        drs = self._region_drs.get(roi_id)
+        if drs is None:
+            drs = DisplayRangeController(
+                clip_low=self._clip_low, clip_high=self._clip_high, parent=self
+            )
+            drs.rangeChanged.connect(self._refresh_display_range)
+            self._region_drs[roi_id] = drs
+        return drs
+
+    def _region_levels_for_render(self):
+        """Build the ``region_levels`` list for render_scan_image.
+
+        Only area ROIs whose range has been *manually* tuned contribute, so an
+        untouched region renders identically to the global mapping.
+        """
+        if (
+            self._display_arr is None
+            or not getattr(self, "_region_drs", None)
+            or getattr(self, "_image_roi_set", None) is None
+        ):
+            return None
+        from probeflow.gui.roi_context import area_roi_mask
+        shape = self._display_arr.shape[:2]
+        out = []
+        for roi_id, drs in self._region_drs.items():
+            if drs.mode != "manual":
+                continue
+            roi = self._image_roi_set.get(roi_id)
+            if roi is None:
+                continue
+            mask = area_roi_mask(roi, shape)
+            if mask is None:
+                continue
+            vmin, vmax = drs.resolve(self._display_arr)
+            if vmin is None:
+                continue
+            out.append((mask, vmin, vmax))
+        return out or None
+
+    def _on_display_scope_changed(self, index: int) -> None:
+        """Switch the contrast sliders between global and active-ROI scope."""
+        self._display_scope = "roi" if index == 1 else "global"
+        self._update_display_sliders()
+        if self._display_scope == "roi":
+            from probeflow.gui.roi_context import active_area_roi_context
+            ctx = active_area_roi_context(getattr(self, "_image_roi_set", None))
+            if ctx.roi_id is None:
+                self._status_lbl.setText(
+                    "Per-ROI contrast: select an area ROI to tune its own "
+                    "brightness/contrast."
+                )
+            else:
+                self._status_lbl.setText(
+                    f"Per-ROI contrast: editing '{ctx.roi.name}'."
+                )
+        else:
+            self._status_lbl.setText("Contrast: editing whole image.")
+
+    def _on_toggle_rois_hidden(self, checked: bool) -> None:
+        """Hide/show all ROI overlays so the composited image can be inspected."""
+        self._rois_hidden = bool(checked)
+        self._zoom_lbl.set_rois_visible(not self._rois_hidden)
+        self._status_lbl.setText(
+            "ROI overlays hidden." if self._rois_hidden else "ROI overlays shown."
+        )
+
     # ── Histogram range and clip handlers ─────────────────────────────────────
     def _on_hist_range_released(self, lo_phys: float, hi_phys: float) -> None:
         """Receive drag-release from HistogramPanel and update display range."""
         scale, _, _ = self._channel_unit()
         if not scale:
             return
-        self._drs.set_manual(lo_phys / scale, hi_phys / scale)
+        self._target_drs().set_manual(lo_phys / scale, hi_phys / scale)
 
     def _on_auto_clip(self):
         """Reset to 1%–99% percentile autoscale."""
         self._clip_low  = 1.0
         self._clip_high = 99.0
-        self._drs.reset()
+        self._target_drs().reset()
         self._status_lbl.setText("Auto contrast applied.")
 
     def _on_reset_display(self):
         """Reset display range to default percentile state."""
-        self._drs.reset()
+        self._target_drs().reset()
         self._status_lbl.setText("Display range reset.")
 
     # ── Per-image colormap ────────────────────────────────────────────────────
@@ -149,6 +232,8 @@ class ImageViewerDisplayMixin:
         # Different channels have different physical units — reset manual limits.
         # Use reset_silent to avoid a premature refresh with stale channel data.
         self._drs.reset_silent(self._clip_low, self._clip_high)
+        # Per-region manual limits are channel-specific; drop them too.
+        self._region_drs.clear()
         self._hist_panel.clear(self._t)
         self._load_current(reset_zoom=True)
 

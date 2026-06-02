@@ -230,6 +230,10 @@ class ImageCanvas(QGraphicsView):
         self._hover_roi_id: Optional[str] = None
         self._last_hover_message: tuple[str, str] | None = None
 
+        # When False, every ROI overlay item is hidden so the underlying
+        # (possibly per-region composited) image can be inspected cleanly.
+        self._rois_visible: bool = True
+
     # ── public image API ─────────────────────────────────────────────────────
 
     def set_source(self, pixmap: QPixmap, reset_zoom: bool = True) -> None:
@@ -465,6 +469,21 @@ class ImageCanvas(QGraphicsView):
             self._image_roi_set.active_roi_id = roi_id
         self._update_roi_styles()
 
+    def set_rois_visible(self, visible: bool) -> None:
+        """Show or hide every ROI overlay (shapes, points, labels, handles).
+
+        Hiding leaves the ROI data model untouched — it only affects display so
+        a per-region composited image can be inspected without overlay clutter.
+        """
+        self._rois_visible = bool(visible)
+        for item in self._roi_items.values():
+            item.setVisible(self._rois_visible)
+        for point in self._point_items.values():
+            point.setVisible(self._rois_visible)
+        if not self._rois_visible:
+            # Clear any lingering hover highlight when overlays vanish.
+            self._hover_roi_id = None
+
     def _rebuild_roi_items(self) -> None:
         for item in list(self._roi_items.values()):
             point = item.data(1)
@@ -483,9 +502,11 @@ class ImageCanvas(QGraphicsView):
 
     def _add_roi_item_internal(self, roi, active: bool) -> None:
         item = make_roi_item(roi, active=active)
+        item.setVisible(self._rois_visible)
         self.scene().addItem(item)
         point = item.data(1)
         if point is not None:
+            point.setVisible(self._rois_visible)
             self.scene().addItem(point)
             self._point_items[roi.id] = point  # keep strong Python ref
         self._roi_items[roi.id] = item
@@ -800,6 +821,8 @@ class ImageCanvas(QGraphicsView):
     # ── hover highlight ───────────────────────────────────────────────────────
 
     def _update_hover(self, view_pos: QPoint) -> None:
+        if not self._rois_visible:
+            return
         roi_id = self._roi_at_pos(view_pos)
         if roi_id == self._hover_roi_id:
             return
@@ -821,22 +844,8 @@ class ImageCanvas(QGraphicsView):
         if roi_id and self._image_roi_set:
             roi = self._image_roi_set.get(roi_id)
             if roi is not None:
-                if roi.kind == "line":
-                    return (
-                        "roi",
-                        "Line ROI: click to select, drag active line or endpoints, right-click for profile/actions.",
-                    )
-                if roi.kind in {"rectangle", "ellipse", "polygon", "freehand", "multipolygon"}:
-                    return (
-                        "roi",
-                        "Area ROI: click to select, drag active ROI, right-click for mask/measure/actions.",
-                    )
-                if roi.kind == "point":
-                    return (
-                        "roi",
-                        "Point ROI: click to select, right-click for point actions.",
-                    )
-                return ("roi", "ROI: click to select, right-click for actions.")
+                from probeflow.gui.roi_items import roi_hint_text
+                return ("roi", roi_hint_text(roi.kind))
 
         if self._show_markers and self._marker_items:
             for item in self._marker_items:
@@ -926,14 +935,22 @@ class ImageCanvas(QGraphicsView):
 
         # ── pan tool ──────────────────────────────────────────────────────────
         if tool == "pan":
-            roi_id = self._roi_at_pos(event.pos())
+            # Selection target follows the *visible* hover highlight so a click
+            # always acts on the ROI the user sees lit up. Fall back to a fresh
+            # hit test when nothing is currently hovered (e.g. click without a
+            # preceding move).
+            roi_id = self._hover_roi_id
+            if roi_id is None or roi_id not in self._roi_items:
+                roi_id = self._roi_at_pos(event.pos())
             active_id = self._image_roi_set.active_roi_id if self._image_roi_set else None
 
-            # Check for a resize-handle hit on the clicked ROI (or the active one
-            # when no other ROI is under the cursor). Generic across kinds via
+            # Resize-handle hit test runs only against the active ROI, and only
+            # when the cursor is not over a *different* (non-active) ROI — a click
+            # on a highlighted non-active ROI must select it, never grab the
+            # active ROI's nearby endpoint. Generic across kinds via
             # resize_handles(); 12px view-space (Chebyshev) test.
             from probeflow.core.roi import resize_handles
-            handle_candidate_id = roi_id if roi_id else active_id
+            handle_candidate_id = active_id if (roi_id is None or roi_id == active_id) else None
             if self._image_roi_set and handle_candidate_id:
                 cand_roi = self._image_roi_set.get(handle_candidate_id)
                 if cand_roi is not None:
@@ -952,8 +969,7 @@ class ImageCanvas(QGraphicsView):
                                 best_d2 = d2
                                 best_name = h.name
                     if best_name is not None:
-                        if handle_candidate_id != active_id:
-                            self.roi_activate_requested.emit(handle_candidate_id)
+                        # handle_candidate_id is always the active ROI here.
                         self._handle_roi_id = handle_candidate_id
                         self._handle_name = best_name
                         self._handle_base_roi = cand_roi

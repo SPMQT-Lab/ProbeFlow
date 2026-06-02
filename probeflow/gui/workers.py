@@ -257,7 +257,8 @@ class ViewerLoader(QRunnable):
                  plane_idx: int = 0, clip_low: float = 1.0,
                  clip_high: float = 99.0, processing: dict = None,
                  vmin: Optional[float] = None, vmax: Optional[float] = None,
-                 arr: Optional[np.ndarray] = None):
+                 arr: Optional[np.ndarray] = None,
+                 region_levels: Optional[list] = None):
         super().__init__()
         self.setAutoDelete(True)
         self.signals    = ViewerSignals()
@@ -272,6 +273,7 @@ class ViewerLoader(QRunnable):
         self.vmin       = vmin
         self.vmax       = vmax
         self.arr        = arr
+        self.region_levels = region_levels
 
     def run(self):
         try:
@@ -287,6 +289,7 @@ class ViewerLoader(QRunnable):
                 vmax=self.vmax,
                 allow_upscale=False,
                 processing=None if self.arr is not None else (self.processing or None),
+                region_levels=self.region_levels,
             )
             if img is not None:
                 self.signals.loaded.emit(pil_to_pixmap(img), self.token)
