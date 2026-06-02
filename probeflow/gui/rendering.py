@@ -201,9 +201,10 @@ def load_thumbnail_plane(
             lambda names: resolve_thumbnail_plane_index(names, semantic),
         )
 
-    from probeflow.core.scan_loader import load_scan
+    # Reuse the signature we already resolved instead of re-sniffing via load_scan.
+    from probeflow.core.scan_loader import load_scan_from_signature
 
-    scan = load_scan(sig.path)
+    scan = load_scan_from_signature(sig)
     names = list(getattr(scan, "plane_names", []) or [])
     idx = resolve_thumbnail_plane_index(names, semantic)
     arr = scan.planes[idx] if idx < scan.n_planes else None

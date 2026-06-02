@@ -398,12 +398,6 @@ def read_sm4_metadata(path):
     return metadata_from_rhk_sm4(read_rhk_sm4(path, metadata_only=True))
 
 
-def sm4_image_plane_names(path) -> list[str]:
-    """Return the SM4 image-plane names (same order/filtering as :func:`read_sm4`)."""
-    sm4 = read_rhk_sm4(path, metadata_only=True)
-    return [_page_name(p) for p in _select_image_pages(sm4.pages)]
-
-
 def read_sm4_thumbnail_plane(path, resolve_index):
     """Decode only the single image plane selected by ``resolve_index``.
 
