@@ -158,6 +158,59 @@ def metadata_from_sxm_header(path, hdr: dict, n_planes: int) -> ScanMetadata:
     )
 
 
+def metadata_from_rhk_sm4(sm4) -> ScanMetadata:
+    """Build ``ScanMetadata`` from a parsed RHK SM4 container without decoding pixels.
+
+    Mirrors the page selection, naming, and scan-range logic of
+    :func:`probeflow.io.readers.rhk_sm4.read_sm4` so the summary matches what a
+    full load would report, but works on a ``metadata_only`` parse where the
+    image payloads were never decoded.
+    """
+    from probeflow.io.readers.rhk_sm4 import (
+        _normalise_z_unit_for_scan,
+        _page_metadata,
+        _page_name,
+        _scan_range_m,
+    )
+
+    if not sm4.pages:
+        note = "; ".join(sm4.parser_notes) if sm4.parser_notes else "no image pages found"
+        raise ValueError(f"{sm4.path}: no supported RHK SM4 image pages ({note})")
+
+    first = sm4.pages[0]
+    first_shape = (first.y_size, first.x_size)
+    # Match read_sm4: keep only pages whose image dimensions match the first.
+    pages = [p for p in sm4.pages if (p.y_size, p.x_size) == first_shape]
+
+    plane_names = tuple(_page_name(p) for p in pages)
+    plane_units = tuple(unit for _scale, unit in (_normalise_z_unit_for_scan(p.z_unit) for p in pages))
+    scan_range = _scan_range_m(first)
+    header = {
+        "RHK_SM4": True,
+        "page_count": sm4.page_count,
+        "parser_notes": list(sm4.parser_notes),
+        "pages": [_page_metadata(p) for p in pages],
+    }
+    bias, setpoint, comment, acq_dt = _extract_rhk_fields(header)
+
+    return ScanMetadata(
+        path=Path(sm4.path),
+        source_format="rhk_sm4",
+        item_type="scan",
+        display_name=Path(sm4.path).stem,
+        shape=first_shape,
+        plane_names=plane_names,
+        units=plane_units,
+        scan_range=scan_range,
+        bias=bias,
+        setpoint=setpoint,
+        comment=comment,
+        acquisition_datetime=acq_dt,
+        raw_header=header,
+        experiment_metadata={},
+    )
+
+
 def _createc_report_plane_metadata(report) -> tuple[tuple[str, ...], tuple[str, ...]]:
     """Return public plane names/units matching ``read_dat`` compatibility."""
 

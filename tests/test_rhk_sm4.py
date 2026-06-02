@@ -295,6 +295,26 @@ def test_sm4_scan_conversion_normalises_length_z_units(tmp_path):
     np.testing.assert_allclose(scan.planes[0].ravel()[:3], [1.0e-9, 1.5e-9, 2.0e-9])
 
 
+def test_sm4_metadata_only_parse_skips_payload_decode(tmp_path):
+    path = _synthetic_sm4(tmp_path / "image.sm4")
+    sm4 = read_rhk_sm4(path, metadata_only=True)
+    assert len(sm4.pages) == 1
+    page = sm4.pages[0]
+    # Headers/strings are parsed, but image arrays are left empty.
+    assert page.x_size == 4 and page.y_size == 3
+    assert page.raw_data.size == 0
+    assert page.physical_data.size == 0
+
+
+def test_sm4_metadata_only_matches_full_decode(tmp_path):
+    from probeflow.core.metadata import metadata_from_rhk_sm4, metadata_from_scan
+
+    path = _synthetic_sm4(tmp_path / "image.sm4")
+    fast = metadata_from_rhk_sm4(read_rhk_sm4(path, metadata_only=True))
+    slow = metadata_from_scan(read_sm4(path))
+    assert fast == slow
+
+
 def test_index_and_gui_entry_include_sm4(tmp_path):
     path = _synthetic_sm4(tmp_path / "image.sm4")
     items = index_folder(tmp_path)
