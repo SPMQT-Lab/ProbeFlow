@@ -128,7 +128,22 @@ def test_image_viewer_window_menu_contains_core_actions(qapp):
         assert "Cascade Visible Viewer Windows" in action_texts
         assert "Open Windows and Tools" in action_texts
         assert "Image viewer: example" in action_texts
+
+        roi_action = menu_bar.actions()[menu_titles.index("ROI")]
+        roi_menu = roi_action.menu()
+        assert roi_menu is not None
+        roi_texts = [_clean_menu_text(action.text()) for action in roi_menu.actions()]
+        assert "ROI Reference" in roi_texts
+
+        reference_action = roi_menu.actions()[roi_texts.index("ROI Reference")]
+        reference_action.trigger()
+        qapp.processEvents()
+        assert dlg._definitions_dialog.current_reference_tab() == "roi"
     finally:
+        definitions = getattr(dlg, "_definitions_dialog", None)
+        if definitions is not None:
+            definitions.close()
+            definitions.deleteLater()
         dlg.close()
         dlg.deleteLater()
         qapp.processEvents()

@@ -132,6 +132,11 @@ VIEWER_COMMANDS: tuple[ViewerCommand, ...] = (
     ViewerCommand("export.save_provenance", "Save provenance", "Export", status_tip="Save processing provenance metadata.", aliases=("metadata", "history")),
     ViewerCommand("help.shortcuts", "Image viewer shortcuts", "Help", status_tip="Show image-viewer shortcut help.", aliases=("keyboard", "keys")),
     ViewerCommand("help.definitions", "Definitions", "Help", status_tip="Show processing definitions and equations.", aliases=("reference", "math", "algorithms")),
+    ViewerCommand(
+        "help.roi_reference", "ROI Reference", "Help",
+        status_tip="Show ROI actions, selection rules, and tool interactions.",
+        aliases=("roi", "mask", "active roi", "selection"),
+    ),
     ViewerCommand("help.about", "About ProbeFlow", "Help", status_tip="Show ProbeFlow version and project information.", aliases=("version",)),
     ViewerCommand(
         "window.cycle_windows",

@@ -20,8 +20,21 @@ class ImageViewerToolbarMixin:
     def _show_viewer_definitions(self) -> None:
         dlg = getattr(self, "_definitions_dialog", None)
         if dlg is None:
-            dlg = _DefinitionsDialog(self._t, self)
+            dlg = _DefinitionsDialog(self._t, self, initial_tab="processing")
             self._definitions_dialog = dlg
+        else:
+            dlg.set_reference_tab("processing")
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+
+    def _show_viewer_roi_reference(self) -> None:
+        dlg = getattr(self, "_definitions_dialog", None)
+        if dlg is None:
+            dlg = _DefinitionsDialog(self._t, self, initial_tab="roi")
+            self._definitions_dialog = dlg
+        else:
+            dlg.set_reference_tab("roi")
         dlg.show()
         dlg.raise_()
         dlg.activateWindow()

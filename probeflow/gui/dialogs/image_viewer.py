@@ -1320,6 +1320,11 @@ class ImageViewerDialog(
         show_roi_manager_action = QAction("Show ROI Manager", self)
         show_roi_manager_action.triggered.connect(self._show_roi_manager)
         roi_menu.addAction(show_roi_manager_action)
+        roi_reference_action = self._viewer_action(
+            "help.roi_reference",
+            self._show_viewer_roi_reference,
+        )
+        roi_menu.addAction(roi_reference_action)
         roi_menu.addSeparator()
         tool_group = QActionGroup(self)
         tool_group.setExclusive(True)
@@ -1508,6 +1513,11 @@ class ImageViewerDialog(
             self._show_viewer_definitions,
         )
         help_menu.insertAction(github_action, definitions_action)
+        roi_reference_help_action = self._viewer_action(
+            "help.roi_reference",
+            self._show_viewer_roi_reference,
+        )
+        help_menu.insertAction(github_action, roi_reference_help_action)
         help_menu.insertSeparator(github_action)
 
         self._sync_viewer_menu_actions()

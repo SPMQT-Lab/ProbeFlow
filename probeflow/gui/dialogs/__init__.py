@@ -5,8 +5,10 @@ from __future__ import annotations
 from probeflow.gui.dialogs.about import AboutDialog
 from probeflow.gui.dialogs.definitions import (
     _DEFINITIONS_HTML,
+    _ROI_REFERENCE_HTML,
     _DefinitionsDialog,
     _DefinitionsPanel,
+    render_roi_reference_html,
 )
 from probeflow.gui.dialogs.feature_finder import FeatureFinderDialog
 from probeflow.gui.dialogs.feature_lattice_dialog import FeatureLatticeDialog
@@ -22,8 +24,10 @@ from probeflow.gui.dialogs.image_viewer import ImageViewerDialog
 __all__ = [
     "AboutDialog",
     "_DEFINITIONS_HTML",
+    "_ROI_REFERENCE_HTML",
     "_DefinitionsDialog",
     "_DefinitionsPanel",
+    "render_roi_reference_html",
     "FeatureFinderDialog",
     "FeatureLatticeDialog",
     "FFTViewerDialog",

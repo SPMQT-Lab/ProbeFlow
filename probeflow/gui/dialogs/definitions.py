@@ -6,7 +6,15 @@ from dataclasses import dataclass
 from html import escape
 from typing import Mapping
 
-from PySide6.QtWidgets import QDialog, QFrame, QScrollArea, QTextEdit, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QDialog,
+    QFrame,
+    QScrollArea,
+    QTabWidget,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
 
 
 @dataclass(frozen=True)
@@ -336,6 +344,176 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
         ),
     ),
     _DefinitionEntry(
+        title="Manual zero reference",
+        params=("set_zero_point", "set_zero_plane_points", "patch"),
+        summary=(
+            "Subtracts a user-picked height reference from the whole image. A "
+            "single point sets Z=0 at one local patch; three points define a "
+            "manual zero plane."
+        ),
+        equations=(
+            "point reference:\n"
+            "  ref = mean_finite(z[y-p:y+p+1, x-p:x+p+1])\n"
+            "  z' = z - ref\n\n"
+            "three-point plane reference:\n"
+            "  sample heights h_k from finite patches around clicked points (x_k, y_k)\n"
+            "  fit z_ref(x, y) = a*x + b*y + c through the three samples\n"
+            "  z'(x, y) = z(x, y) - z_ref(x, y)",
+        ),
+        details=(
+            "The set-zero plane tool stores three clicked pixel positions and samples "
+            "small finite-valued patches around them. It is a manual reference "
+            "operation, separate from automatic background fitting.",
+            "The correction is applied to the whole image; zero markers can be hidden "
+            "without changing the processing state.",
+        ),
+        cautions=(
+            "A zero plane is only as good as the picked reference points. Picking "
+            "points on adsorbates, crashes, or steps can tilt the whole image.",
+        ),
+    ),
+    _DefinitionEntry(
+        title="Image arithmetic",
+        params=(
+            "operation = add | subtract | multiply | divide",
+            "operand = constant | image | generated",
+            "ROI scope",
+        ),
+        summary=(
+            "Applies numeric arithmetic to the image, using either a scalar, another "
+            "same-shaped image plane, or a deterministic generated pattern."
+        ),
+        equations=(
+            "constant operand:\n"
+            "  add/subtract: z' = z +/- value_si\n"
+            "  multiply:     z' = z * factor\n"
+            "  divide:       z' = z / factor, factor != 0\n\n"
+            "image or generated operand o:\n"
+            "  z' = z + o  or  z' = z - o\n\n"
+            "generated operands include checkerboard, ramp_x, ramp_y,\n"
+            "speckle, and impulse_grid patterns.",
+        ),
+        details=(
+            "Image operands must match the current image shape. Generated operands are "
+            "created in the current image shape and recorded through their pattern "
+            "parameters.",
+            "When image arithmetic is launched with active-area ROI scope, the full "
+            "operation is computed and only pixels inside the ROI mask are copied "
+            "back into the result.",
+        ),
+        cautions=(
+            "Arithmetic changes physical data values directly. Use display range or "
+            "colormap controls when only visual contrast should change.",
+        ),
+    ),
+    _DefinitionEntry(
+        title="Thresholding and bit-depth conversion",
+        params=("lower", "upper", "mode = clip | binarize", "bits = 8 | 16"),
+        summary=(
+            "Applies value thresholds or quantizes finite image values to a smaller "
+            "number of intensity levels while preserving NaN pixels."
+        ),
+        equations=(
+            "threshold clip:\n"
+            "  z'_i,j = NaN when z_i,j < lower or z_i,j > upper\n"
+            "  z'_i,j = z_i,j otherwise\n\n"
+            "threshold binarize:\n"
+            "  z'_i,j = 1 when finite(z_i,j) and lower <= z_i,j <= upper\n"
+            "  z'_i,j = 0 when finite(z_i,j) and outside the band\n"
+            "  z'_i,j = NaN when z_i,j is non-finite\n\n"
+            "quantize:\n"
+            "  q = round((clip(z, vmin, vmax) - vmin) * (2^bits - 1)/(vmax - vmin))\n"
+            "  z' = q * (vmax - vmin)/(2^bits - 1) + vmin",
+        ),
+        details=(
+            "Threshold values are in the image's physical data units. Binarize mode "
+            "returns numeric 0/1 values rather than a display-only mask.",
+            "Bit-depth conversion still returns float64 data, but finite values are "
+            "restricted to the selected number of levels. If vmin/vmax are not "
+            "provided, a robust percentile band is used.",
+        ),
+        cautions=(
+            "Thresholding can discard pixels by turning them into NaN. Quantization is "
+            "not reversible and can hide subtle height variation.",
+        ),
+    ),
+    _DefinitionEntry(
+        title="Geometric transforms and resampling",
+        params=(
+            "flip",
+            "rotate 90/180/270",
+            "rotate arbitrary",
+            "shear",
+            "scale image",
+        ),
+        summary=(
+            "Changes image geometry by exact array transforms or interpolation-based "
+            "resampling, updating scan extent rules where the canvas size changes."
+        ),
+        equations=(
+            "lossless transforms:\n"
+            "  flip_horizontal, flip_vertical, rotate_90_cw,\n"
+            "  rotate_180, rotate_270_cw map pixels exactly\n\n"
+            "arbitrary rotation:\n"
+            "  z' = scipy.ndimage.rotate(z, angle, reshape=True, order=order)\n"
+            "  out-of-input pixels and invalid interpolated regions become NaN\n\n"
+            "shear:\n"
+            "  [x'; y'] = [[1, shear_x], [shear_y, 1]] * [x; y]\n"
+            "  sampled by inverse affine interpolation with expanded canvas\n\n"
+            "scale:\n"
+            "  z' = zoom(z, (new_height/Ny, new_width/Nx), order=order)",
+        ),
+        details=(
+            "Right-angle rotations and flips transform existing ROI geometry exactly. "
+            "Scale preserves physical scan extent while changing pixel density.",
+            "Arbitrary rotation, shear, and expanded affine corrections preserve pixel "
+            "size and grow the physical displayed extent with the output shape.",
+        ),
+        cautions=(
+            "Arbitrary rotation invalidates existing ROI geometry; invalidated ROIs "
+            "are removed from the displayed ROI set. Interpolated transforms can "
+            "change local pixel values.",
+        ),
+    ),
+    _DefinitionEntry(
+        title="FFT-derived correction tools",
+        params=(
+            "mains pickup",
+            "inverse FFT selections",
+            "affine lattice correction",
+        ),
+        summary=(
+            "Applies data-changing corrections from FFT-domain selections or fitted "
+            "lattice geometry."
+        ),
+        equations=(
+            "mains pickup suppression:\n"
+            "  predict harmonics from scan_speed, scan_range, mains_frequency\n"
+            "  optionally snap each predicted peak or streak to bright FFT power\n"
+            "  apply symmetric Gaussian notches and inverse transform\n\n"
+            "inverse FFT selection filter:\n"
+            "  build an ellipse mask M(k) from selected FFT regions\n"
+            "  mode remove_selected: keep (1 - M) * F(k)\n"
+            "  mode keep_selected:   keep M(k) * F(k)\n"
+            "  z' = real(ifft2(filtered F))\n\n"
+            "affine lattice correction:\n"
+            "  measured centred pixel coordinate u maps to ideal coordinate v = A*u\n"
+            "  output pixels inverse-map through A^-1 and sample z by interpolation",
+        ),
+        details=(
+            "Mains pickup can remove spot-like harmonics or fast-axis streaks. Inverse "
+            "FFT selections can create either a corrected image or a new result image, "
+            "depending on the dialog action.",
+            "Affine lattice correction is usually produced by FFT or real-space "
+            "lattice fitting. It may expand the canvas and fill outside-input regions "
+            "with NaN or a configured background value.",
+        ),
+        cautions=(
+            "FFT-domain corrections can remove real periodic signal as well as "
+            "artifacts. Inspect previews before applying them to quantitative data.",
+        ),
+    ),
+    _DefinitionEntry(
         title="Linear undistortion",
         params=("shear_x", "scale_y"),
         summary=(
@@ -376,6 +554,237 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
         ),
         cautions=(
             "The two planes must already represent the same image shape and scan area.",
+        ),
+    ),
+)
+
+
+_ROI_REFERENCE_ENTRIES: tuple[_DefinitionEntry, ...] = (
+    _DefinitionEntry(
+        title="ROI model and selection state",
+        params=("pixel coordinates", "ROISet", "active ROI", "dock selection"),
+        summary=(
+            "ROIs are per-image objects stored in pixel coordinates and persisted in "
+            "a sidecar next to the scan. Many viewer actions use the dock selection "
+            "first, then fall back to the active ROI."
+        ),
+        equations=(
+            "coordinate convention:\n"
+            "  x = image column, y = image row\n"
+            "  origin = top-left pixel, +x right, +y down\n\n"
+            "ROI kinds:\n"
+            "  area = rectangle | ellipse | polygon | freehand | multipolygon\n"
+            "  line = two endpoints plus optional averaging width\n"
+            "  point = one fixed pixel coordinate\n\n"
+            "action context:\n"
+            "  selected ROI(s) in ROI Manager dock win when present\n"
+            "  otherwise use ROISet.active_roi_id\n"
+            "  sidecar path = <scan stem>.rois.json",
+        ),
+        details=(
+            "The ROI Manager can select multiple ROIs for operations such as combine "
+            "or step height. Canvas click selection sets the active ROI.",
+            "Measurements record ROI identity and name at creation time, so results "
+            "can remain meaningful even if the ROI is later renamed or deleted.",
+        ),
+        cautions=(
+            "If processing history references a ROI that no longer exists, interactive "
+            "display warns or pauses and export can abort rather than silently using "
+            "the wrong mask.",
+        ),
+    ),
+    _DefinitionEntry(
+        title="Drawing and pan tools",
+        params=("pan", "rectangle", "ellipse", "polygon", "freehand", "line", "point"),
+        summary=(
+            "ROI drawing tools create one ROI and then return to pan mode. Pan mode "
+            "handles navigation, hover hints, ROI selection, and active-ROI dragging."
+        ),
+        equations=(
+            "pan mode:\n"
+            "  drag blank image = pan scroll area\n"
+            "  middle mouse = pan from any tool context\n"
+            "  Ctrl+scroll = zoom\n"
+            "  click ROI = select it; click active ROI = prepare to move or resize\n\n"
+            "drawing completion:\n"
+            "  rectangle/ellipse/line: drag, release to finish\n"
+            "  point: click once to place\n"
+            "  polygon: click vertices, Enter or double-click to close\n"
+            "  freehand: drag path, release to finish\n"
+            "  Escape: cancel active drawing preview and return to pan",
+        ),
+        details=(
+            "Rectangle and ellipse require a minimum non-zero drawn size. Polygon and "
+            "freehand ROIs require at least three points; incomplete shapes are "
+            "discarded cleanly.",
+            "The status bar and ROI item tooltips describe the current action. Hover "
+            "highlight in pan mode shows which ROI a click will select.",
+        ),
+        cautions=(
+            "Drawing mode captures clicks for drawing. Return to pan before trying to "
+            "move or right-click existing ROIs.",
+        ),
+    ),
+    _DefinitionEntry(
+        title="Editing existing ROIs",
+        params=("rename", "delete", "copy/paste", "duplicate", "move", "resize"),
+        summary=(
+            "Editing is explicit: only the active ROI can be dragged or resized on "
+            "the canvas, while the ROI Manager and context menus expose object "
+            "actions."
+        ),
+        equations=(
+            "selection and movement:\n"
+            "  click non-active ROI -> active_roi_id = roi.id\n"
+            "  drag active ROI -> translate geometry by rounded (dx, dy)\n"
+            "  release drag -> persist one geometry update to sidecar\n\n"
+            "resize handles:\n"
+            "  rectangle: nw ne se sw n e s w\n"
+            "  ellipse: n e s w\n"
+            "  line: p1 p2\n"
+            "  Shift while dragging rectangle/ellipse handles preserves aspect ratio\n\n"
+            "copy/duplicate:\n"
+            "  copy keeps the ROI in memory\n"
+            "  paste or duplicate creates a new ROI shifted by 10 px",
+        ),
+        details=(
+            "Line ROI width is stored in the line geometry and controls the "
+            "perpendicular averaging swath used by line-profile calculations.",
+            "Delete/Backspace removes the active ROI from the canvas; the ROI Manager "
+            "can delete one or more selected ROIs.",
+        ),
+        cautions=(
+            "Polygon, freehand, point, and multipolygon ROIs currently do not have "
+            "resize handles. They can still be moved, renamed, copied, or deleted.",
+        ),
+    ),
+    _DefinitionEntry(
+        title="Area ROI actions",
+        params=("mask/filter scope", "invert", "combine", "FFT", "histogram", "measure"),
+        summary=(
+            "Area ROIs provide masks for local filters, region analysis, geometric "
+            "ROI algebra, and measurement workflows."
+        ),
+        equations=(
+            "area mask kinds:\n"
+            "  rectangle, ellipse, polygon, freehand, multipolygon -> boolean mask\n"
+            "  line and point are rejected for area-only actions\n\n"
+            "ROI filters only:\n"
+            "  eligible local filters = smooth, high-pass, edge, Fourier filter,\n"
+            "                           FFT soft-border, arithmetic\n"
+            "  processed_full = operation(z)\n"
+            "  z'_inside_roi = processed_full_inside_roi\n"
+            "  z'_outside_roi = z_outside_roi\n\n"
+            "geometry algebra:\n"
+            "  invert = image bounds minus ROI\n"
+            "  combine modes = union | intersection | difference | xor",
+        ),
+        details=(
+            "Area ROI context-menu actions include setting filter scope, invert, STM "
+            "background fit from ROI, histogram, FFT this region, ROI statistics, and "
+            "feature maxima detection.",
+            "Step height requires exactly two selected area ROIs and records the "
+            "mean-height difference between them.",
+        ),
+        cautions=(
+            "ROI filter scope affects only eligible local filters. Background and "
+            "scan-line corrections remain whole-image unless their own dialog has a "
+            "specific ROI fit option.",
+        ),
+    ),
+    _DefinitionEntry(
+        title="Line ROI actions",
+        params=("profile", "distance", "periodicity", "width", "endpoints"),
+        summary=(
+            "Line ROIs drive profile, distance, and periodicity workflows. The active "
+            "line ROI also keeps the live line-profile panel in sync."
+        ),
+        equations=(
+            "line geometry:\n"
+            "  p1 = (x1, y1), p2 = (x2, y2)\n"
+            "  width_px = max(1, stored width)\n\n"
+            "profile sampling:\n"
+            "  s runs from 0 to physical distance between p1 and p2\n"
+            "  z(s) samples along the line\n"
+            "  width_px > 1 averages finite pixels in a perpendicular swath\n\n"
+            "line actions:\n"
+            "  drag active line = translate both endpoints\n"
+            "  drag p1/p2 handle = move one endpoint\n"
+            "  estimate periodicity = analyse current line-profile signal",
+        ),
+        details=(
+            "Line context menus expose show profile, add profile measurement, estimate "
+            "periodicity, and set line width. The Measurements panel can add profile "
+            "summaries and profile deltas.",
+            "Distance/ruler measurement uses the active line ROI and reports physical "
+            "length using the scan calibration.",
+        ),
+        cautions=(
+            "A selected line ROI is not valid for area-only actions such as ROI "
+            "statistics, histogram, FFT region, or filter masking.",
+        ),
+    ),
+    _DefinitionEntry(
+        title="Point ROI actions",
+        params=("point marker", "copy coordinates", "point sources"),
+        summary=(
+            "Point ROIs mark individual pixel locations. They can be copied as "
+            "coordinates and used as point sources by downstream feature-analysis "
+            "tools."
+        ),
+        equations=(
+            "point geometry:\n"
+            "  point = (x, y) in pixel coordinates\n"
+            "  copy action writes 'x, y' to the clipboard\n\n"
+            "point-source collection:\n"
+            "  selected point ROIs become one labelled point source\n"
+            "  all point ROIs can also be offered as a point source\n"
+            "  physical coordinates = (x * pixel_size_x_m, y * pixel_size_y_m)",
+        ),
+        details=(
+            "pair-correlation, feature-to-lattice, and point-mask/FFT workflows can "
+            "consume point sources from feature maxima or point ROIs.",
+            "Point ROIs are fixed-screen-size markers on the canvas so they stay "
+            "visible while zooming.",
+        ),
+        cautions=(
+            "Point ROIs do not define an area mask. They are intentionally disabled "
+            "for ROI filters, STM background fit masks, histogram, and ROI statistics.",
+        ),
+    ),
+    _DefinitionEntry(
+        title="Tool interactions and persistence",
+        params=("sidecar save", "processing references", "geometric transforms"),
+        summary=(
+            "ROI edits save immediately to the per-image sidecar, and downstream "
+            "tools resolve ROI references at the moment they run."
+        ),
+        equations=(
+            "persistence:\n"
+            "  ROI created / moved / resized / renamed / deleted\n"
+            "    -> ROISet updated\n"
+            "    -> canvas and dock refreshed\n"
+            "    -> <scan stem>.rois.json saved\n\n"
+            "transform rules:\n"
+            "  flips and right-angle rotations transform ROI geometry exactly\n"
+            "  crop shifts/clips ROIs and drops ROIs outside the crop\n"
+            "  rotate_arbitrary invalidates existing ROIs\n\n"
+            "STM background from ROI:\n"
+            "  area ROI mask limits profile fitting pixels\n"
+            "  correction is applied to the full image",
+        ),
+        details=(
+            "The quick toolbar Mask action sets the Processing panel to 'ROI filters "
+            "only' for the selected-or-active area ROI. Invert creates a new inverted "
+            "area ROI and sets ROI filter scope to the inverted area when invoked from "
+            "the active ROI path.",
+            "The quick Simple background button remains a whole-image first-order "
+            "plane subtraction. Use dedicated background controls when fit/apply/exclude "
+            "ROI behaviour is required.",
+        ),
+        cautions=(
+            "Changing ROI geometry after a processing step was configured can change "
+            "future replays of that processing if the step references the ROI by ID.",
         ),
     ),
 )
@@ -462,13 +871,13 @@ def _render_params(params: tuple[str, ...]) -> str:
     return f'<p class="sub">Params: {rendered}</p>'
 
 
-def _render_entry(entry: _DefinitionEntry) -> str:
+def _render_entry(entry: _DefinitionEntry, *, block_label: str = "Operation") -> str:
     blocks = [f'<div class="entry" id="{_entry_id(entry.title)}">']
     blocks.append(f"<h2>{escape(entry.title)}</h2>")
     blocks.append(_render_params(entry.params))
     blocks.append(f"<p>{escape(entry.summary)}</p>")
     for equation in entry.equations:
-        blocks.append('<p class="label">Operation</p>')
+        blocks.append(f'<p class="label">{escape(block_label)}</p>')
         blocks.append(f'<pre class="equation">{escape(equation)}</pre>')
     for detail in entry.details:
         blocks.append(f"<p>{escape(detail)}</p>")
@@ -478,10 +887,18 @@ def _render_entry(entry: _DefinitionEntry) -> str:
     return "\n".join(blocks)
 
 
-def render_definitions_html(theme: Mapping[str, object] | None = None) -> str:
-    """Return theme-aware HTML for the processing definitions dialog."""
+def _render_reference_html(
+    *,
+    title: str,
+    intro: str,
+    entries: tuple[_DefinitionEntry, ...],
+    theme: Mapping[str, object] | None = None,
+    block_label: str = "Operation",
+) -> str:
     p = _definitions_palette(theme)
-    entries = "\n<hr/>\n".join(_render_entry(entry) for entry in _DEFINITION_ENTRIES)
+    rendered_entries = "\n<hr/>\n".join(
+        _render_entry(entry, block_label=block_label) for entry in entries
+    )
     return f"""
 <style>
   body {{
@@ -548,23 +965,52 @@ def render_definitions_html(theme: Mapping[str, object] | None = None) -> str:
   }}
 </style>
 <body>
-<h1>Processing Algorithm Reference</h1>
-<p class="intro">Each step transforms the raw height data in physical units. The equations
-below describe the operation applied to finite float64 image data before display scaling
-or colour-map clipping.</p>
+<h1>{escape(title)}</h1>
+<p class="intro">{escape(intro)}</p>
 <hr/>
-{entries}
+{rendered_entries}
 </body>
 """
 
 
+def render_definitions_html(theme: Mapping[str, object] | None = None) -> str:
+    """Return theme-aware HTML for the processing definitions dialog."""
+    return _render_reference_html(
+        title="Processing Algorithm Reference",
+        intro=(
+            "Each step transforms the raw height data in physical units. The "
+            "equations below describe the operation applied to finite float64 "
+            "image data before display scaling or colour-map clipping."
+        ),
+        entries=_DEFINITION_ENTRIES,
+        theme=theme,
+    )
+
+
+def render_roi_reference_html(theme: Mapping[str, object] | None = None) -> str:
+    """Return theme-aware HTML for ROI actions and tool interactions."""
+    return _render_reference_html(
+        title="ROI Actions Reference",
+        intro=(
+            "ROI actions depend on selection state, ROI kind, and the active "
+            "viewer tool. The behaviour blocks below describe when each action is "
+            "available, which ROI context it uses, and how it affects downstream "
+            "processing or measurement tools."
+        ),
+        entries=_ROI_REFERENCE_ENTRIES,
+        theme=theme,
+        block_label="Behaviour",
+    )
+
+
 _DEFINITIONS_HTML = render_definitions_html()
+_ROI_REFERENCE_HTML = render_roi_reference_html()
 
 
-class _DefinitionsPanel(QWidget):
-    """Scrollable reference panel listing processing algorithms."""
+class _HtmlReferencePanel(QWidget):
+    """Scrollable HTML reference panel."""
 
-    def __init__(self, t: dict, parent=None):
+    def __init__(self, t: dict, html: str, parent=None):
         super().__init__(parent)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -576,7 +1022,7 @@ class _DefinitionsPanel(QWidget):
         palette = _definitions_palette(t)
         inner = QTextEdit()
         inner.setReadOnly(True)
-        inner.setHtml(render_definitions_html(t))
+        inner.setHtml(html)
         inner.setStyleSheet(f"""
             QTextEdit {{
                 background-color: {palette["bg"]};
@@ -589,17 +1035,47 @@ class _DefinitionsPanel(QWidget):
 
         scroll.setWidget(inner)
         lay.addWidget(scroll)
+        self._text_edit = inner
+
+
+class _DefinitionsPanel(_HtmlReferencePanel):
+    """Scrollable reference panel listing processing algorithms."""
+
+    def __init__(self, t: dict, parent=None):
+        super().__init__(t, render_definitions_html(t), parent)
+
+
+class _ROIReferencePanel(_HtmlReferencePanel):
+    """Scrollable reference panel listing ROI actions and interactions."""
+
+    def __init__(self, t: dict, parent=None):
+        super().__init__(t, render_roi_reference_html(t), parent)
 
 
 class _DefinitionsDialog(QDialog):
-    """Closeable utility window for processing definitions/help."""
+    """Closeable utility window for processing and ROI definitions/help."""
 
-    def __init__(self, t: dict, parent=None):
+    def __init__(self, t: dict, parent=None, *, initial_tab: str = "processing"):
         super().__init__(parent)
         self.setWindowTitle("ProbeFlow Definitions")
         self.resize(820, 680)
         self.setModal(False)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
+        self._tabs = QTabWidget(self)
         self._panel = _DefinitionsPanel(t, self)
-        lay.addWidget(self._panel)
+        self._roi_panel = _ROIReferencePanel(t, self)
+        self._tabs.addTab(self._panel, "Processing")
+        self._tabs.addTab(self._roi_panel, "ROI Actions")
+        lay.addWidget(self._tabs)
+        self.set_reference_tab(initial_tab)
+
+    def set_reference_tab(self, tab: str) -> None:
+        """Switch to the named reference tab."""
+        key = str(tab or "processing").lower().replace("-", "_")
+        index = 1 if key in {"roi", "roi_actions", "roi_reference"} else 0
+        self._tabs.setCurrentIndex(index)
+
+    def current_reference_tab(self) -> str:
+        """Return the stable key for the currently selected reference tab."""
+        return "roi" if self._tabs.currentIndex() == 1 else "processing"
