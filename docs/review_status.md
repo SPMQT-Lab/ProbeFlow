@@ -112,16 +112,23 @@ Backend / GUI architecture:
 
 - `feature_points_to_csv` now rejects non-finite / non-positive `pixel_size_*_nm`
   instead of silently emitting meaningless nm columns.
+- **Large-file splits — done.** The three monoliths were broken up along their
+  natural seams (behaviour preserved; methods/functions moved verbatim and resolve
+  via the class MRO / module re-exports, verified by ruff `F821`, class assembly,
+  and the runnable backend tests):
+  - `fft_viewer.py` 3044 → 1769 LOC, with `fft_viewer_lattice_mixin.py`,
+    `fft_viewer_mains_mixin.py`, `fft_viewer_reconstruct_mixin.py`.
+  - `image_viewer.py` 2293 → 627 LOC, with `image_viewer_build_mixin.py`
+    (the `_build` UI assembly) and `image_viewer_chrome_mixin.py` (menu bar,
+    sidebar/tool hosting, modal overlays, window layout).
+  - `filters.py` 1214 → 577 LOC, with the Bragg/reciprocal-lattice analysis moved
+    to `bragg.py` and re-exported for backward compatibility.
 
 ### Genuinely remaining (deliberately deferred)
 
 These are real but are either large structural refactors (carry regression risk,
 better done as their own slices) or need instrument data to verify safely. None
 is a user-facing defect.
-
-- **Large-file splits** (maintainability only): `processing/filters.py` (~1.2k LOC,
-  four concerns); `gui/dialogs/image_viewer.py` (~2.3k LOC) and `fft_viewer.py`
-  (~3.0k LOC) monoliths; the five-mixin `ImageViewerDialog` MRO.
 - **Layering tidiness**: `apply_processing_state` opens files on disk; `Scan`
   lazy-imports `processing.*`; `processing/analysis.py` holds analysis-style
   measurements; spectroscopy spread across three packages; many-arg measurement
