@@ -50,6 +50,7 @@ class ImageMeasurementsPanel(QWidget):
     pairCorrelationRequested = Signal()
     featureToLatticeRequested = Signal()
     latticeGridRequested = Signal()
+    fftViewerRequested = Signal()
 
     # Setup-style modes that map to a page of ``_setup_stack``.
     _MODES = [
@@ -61,7 +62,11 @@ class ImageMeasurementsPanel(QWidget):
         ("Line periodicity", "line_periodicity"),
     ]
 
-    # Menu layout: (group title, [(label, key, kind), …]); kind ∈ setup|oneshot|dialog.
+    # Curated Measure-tab menu: the commonly-used tools only. The niche / ImageJ-style
+    # measurements (step height, feature maxima, point/FFT, pair correlation,
+    # feature-to-lattice) live in the Measurements top menu + command finder; line
+    # periodicity is reached from the Line-profile detail (drawing a line is when you
+    # want it). (group title, [(label, key, kind), …]); kind ∈ setup|oneshot|dialog.
     _TOOL_GROUPS = [
         ("Quick measurements", [
             ("Distance", "distance", "oneshot"),
@@ -69,33 +74,22 @@ class ImageMeasurementsPanel(QWidget):
         ]),
         ("ROI measurements", [
             ("ROI statistics", "roi_stats", "setup"),
-            ("Step height", "step_height", "setup"),
         ]),
         ("Profiles", [
             ("Line profile", "line_profile", "setup"),
-            ("Line periodicity", "line_periodicity", "setup"),
-        ]),
-        ("Feature detection", [
-            ("Feature maxima", "feature_maxima", "setup"),
-            ("Point mask / FFT", "point_fft", "setup"),
         ]),
         ("Tools", [
-            ("Feature finder…", "feature_finder", "dialog"),
-            ("Pair correlation…", "pair_correlation", "dialog"),
-            ("Feature-to-lattice…", "feature_to_lattice", "dialog"),
+            ("FFT viewer…", "fft_viewer", "dialog"),
             ("Lattice grid…", "lattice_grid", "dialog"),
+            ("Feature finder…", "feature_finder", "dialog"),
         ]),
     ]
 
     # Compact labels for the menu grid (full text lives in each button's tooltip).
-    _SHORT_LABELS = {
-        "line_periodicity": "Periodicity",
-        "point_fft": "Point / FFT",
-        "pair_correlation": "Pair corr…",
-        "feature_to_lattice": "Feature→lat…",
-    }
+    _SHORT_LABELS: dict[str, str] = {}
 
     _DIALOG_SIGNALS = {
+        "fft_viewer": "fftViewerRequested",
         "feature_finder": "featureFinderRequested",
         "pair_correlation": "pairCorrelationRequested",
         "feature_to_lattice": "featureToLatticeRequested",
@@ -106,10 +100,13 @@ class ImageMeasurementsPanel(QWidget):
         "angle": "angleRequested",
     }
     _ONESHOT_INFO = {
-        "distance": "Select a line ROI on the image; its length and angle are added "
-                    "to the results below.",
-        "angle": "Click P1, P2 (vertex), then P3 on the image to measure an angle. "
-                 "Drag the handles to adjust, then use “Update angle”.",
+        "distance": "Measure a real-world length and orientation. Draw or select a "
+                    "line ROI across two points; its length and angle (from the scan "
+                    "calibration) are added to the results below.",
+        "angle": "Measure the angle between two directions — e.g. step edges or "
+                 "lattice rows. Click P1, P2 (the vertex), then P3 on the image; the "
+                 "angle at P2 is reported. Drag the handles to adjust, then "
+                 "“Update angle”.",
     }
 
     def __init__(self, parent=None):
@@ -243,8 +240,10 @@ class ImageMeasurementsPanel(QWidget):
         self._mode_pages["point_fft"] = 1
         self._setup_stack.addWidget(self._action_page(
             "roi_stats", "ROI statistics",
-            "Calculate mean, median, roughness, area, extrema, and finite-pixel "
-            "counts for the active area ROI.",
+            "Area-averaged stats for the active area ROI: size (nm² and side "
+            "lengths), pixel and point counts, mean/median height, RMS roughness, "
+            "and range. More robust than a single line when you want a "
+            "representative height or roughness over a patch.",
             "Add active ROI statistics", self.roiStatsRequested,
         ))
         self._mode_pages["roi_stats"] = 2
@@ -257,8 +256,9 @@ class ImageMeasurementsPanel(QWidget):
         self._mode_pages["step_height"] = 3
         self._setup_stack.addWidget(self._action_page(
             "line_profile", "Line profile",
-            "Use the active line ROI to add a profile summary to the measurement "
-            "table.",
+            "Height vs distance along the active line ROI — read step heights and "
+            "feature spacings directly off the curve below. Drag the line (or its "
+            "endpoints) to update it live; widen the line to average a strip.",
             "Add current line profile", self.lineProfileRequested,
         ))
         self._mode_pages["line_profile"] = 4
@@ -280,8 +280,27 @@ class ImageMeasurementsPanel(QWidget):
         self._update_angle_btn.setAutoDefault(False)
         self._update_angle_btn.clicked.connect(self.updateAngleRequested.emit)
         extra_lay.addWidget(self._update_angle_btn)
+        # Periodicity belongs to the line context: reach its tool from the line profile.
+        self._periodicity_btn = QPushButton("Find spacing (periodicity)…")
+        self._periodicity_btn.setToolTip(
+            "Estimate a repeat spacing along the active line ROI and optionally save "
+            "it as a known structure."
+        )
+        self._periodicity_btn.setDefault(False)
+        self._periodicity_btn.setAutoDefault(False)
+        self._periodicity_btn.clicked.connect(lambda: self._open_tool("line_periodicity"))
+        extra_lay.addWidget(self._periodicity_btn)
         self._detail_extra.setVisible(False)
         lay.addWidget(self._detail_extra)
+
+        # Latest-result summary, kept front-and-centre so the numbers are visible
+        # without scrolling the table's detail box.
+        self._result_summary = QLabel("")
+        self._result_summary.setObjectName("resultSummary")
+        self._result_summary.setWordWrap(True)
+        self._result_summary.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self._result_summary.hide()
+        lay.addWidget(self._result_summary)
 
         results_lbl = QLabel("Results")
         results_lbl.setStyleSheet("font-weight: 600;")
@@ -301,19 +320,26 @@ class ImageMeasurementsPanel(QWidget):
             return
 
         self._detail_title.setText(self._titles.get(key, key))
+        self._set_extra(key)
         if key in self._ONESHOT_SIGNALS:
             self._setup_stack.hide()
             self._detail_info.setText(self._ONESHOT_INFO.get(key, ""))
             self._detail_info.setVisible(bool(self._ONESHOT_INFO.get(key)))
-            self._detail_extra.setVisible(key == "angle")
             self._nav.setCurrentIndex(1)
             getattr(self, self._ONESHOT_SIGNALS[key]).emit()
         else:  # setup tool
             self._select_mode(key)
             self._setup_stack.show()
             self._detail_info.hide()
-            self._detail_extra.setVisible(False)
             self._nav.setCurrentIndex(1)
+
+    def _set_extra(self, key: str) -> None:
+        """Show the per-tool extra action (Angle → Update; Line profile → spacing)."""
+        show_update = key == "angle"
+        show_period = key == "line_profile"
+        self._update_angle_btn.setVisible(show_update)
+        self._periodicity_btn.setVisible(show_period)
+        self._detail_extra.setVisible(show_update or show_period)
 
     def _open_results(self) -> None:
         self._detail_title.setText("Results")
@@ -324,9 +350,48 @@ class ImageMeasurementsPanel(QWidget):
 
     def _on_results_changed(self, count: int, added: bool) -> None:
         self._results_btn.setText(f"Results ({count})")
+        if not added:
+            if count == 0:
+                self._result_summary.hide()
+            return
+        results = self.table.results()
+        text = self._summarize(results[-1]) if results else ""
+        if text:
+            self._result_summary.setText("Latest:  " + text)
+            self._result_summary.show()
+        else:
+            self._result_summary.hide()
         # Surface a freshly produced result even if it came from outside the menu.
-        if added and self._nav.currentIndex() == 0:
+        if self._nav.currentIndex() == 0:
             self._open_results()
+
+    def _summarize(self, r) -> str:
+        """One-line headline for the latest result, shown front-and-centre."""
+        summary = r.context.get("summary")
+        if summary:
+            return str(summary)
+        v = r.values
+        if r.kind == "roi_stats":
+            parts: list[str] = []
+            if v.get("area") is not None:
+                parts.append(f"Area {v['area']:.4g} nm²")
+            w, h = v.get("width_nm"), v.get("height_nm")
+            if w and h:
+                parts.append(f"{w:.3g} × {h:.3g} nm")
+            if v.get("n_finite_pixels") is not None:
+                parts.append(f"{int(v['n_finite_pixels'])} px")
+            if v.get("n_points_inside") is not None:
+                parts.append(f"{int(v['n_points_inside'])} pts inside")
+            return "  ·  ".join(parts)
+        if r.kind == "line_profile":
+            parts = []
+            if v.get("length") is not None:
+                parts.append(f"Length {v['length']:.4g} {r.x_unit or ''}".rstrip())
+            hd = v.get("height_difference")
+            if hd is not None:
+                parts.append(f"Δheight {hd:.4g} {r.z_unit or r.y_unit or ''}".rstrip())
+            return "  ·  ".join(parts)
+        return ""
 
     def _select_mode(self, key: str) -> None:
         if key in self._mode_pages:
@@ -336,7 +401,18 @@ class ImageMeasurementsPanel(QWidget):
     # ── helpers ────────────────────────────────────────────────────────────────
 
     def _collect_titles(self) -> dict[str, str]:
-        titles: dict[str, str] = {}
+        # Cover every key — including the demoted tools reached from the top menu —
+        # so the detail header shows a real title (not the raw key).
+        titles: dict[str, str] = {key: label for label, key in self._MODES}
+        titles.update({
+            "distance": "Distance",
+            "angle": "Angle",
+            "fft_viewer": "FFT viewer",
+            "lattice_grid": "Lattice grid",
+            "feature_finder": "Feature finder",
+            "pair_correlation": "Pair correlation",
+            "feature_to_lattice": "Feature-to-lattice",
+        })
         for _group, tools in self._TOOL_GROUPS:
             for label, key, _kind in tools:
                 titles[key] = label.rstrip("…")

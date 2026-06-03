@@ -1048,6 +1048,7 @@ class ImageViewerDialog(
             self._on_open_feature_lattice
         )
         self._measurement_panel.latticeGridRequested.connect(self._on_open_lattice_grid)
+        self._measurement_panel.fftViewerRequested.connect(self._on_open_fft_viewer)
         self._line_profile_panel.add_delta_measurement_clicked.connect(
             self._image_measurements.add_current_line_profile_delta_measurement
         )
@@ -1487,27 +1488,33 @@ class ImageViewerDialog(
             register=self._viewer_measurement_actions,
         )
         measurements_menu.addAction(find_periodicity_action)
-        detect_maxima_action = self._viewer_action(
-            "measure.feature_maxima",
-            self._image_measurements.detect_feature_maxima_for_active_roi,
-            register=self._viewer_measurement_actions,
-        )
-        measurements_menu.addAction(detect_maxima_action)
+        # Niche / feature-analysis tools live under a Features submenu.
+        features_menu = measurements_menu.addMenu("Features")
         feature_finder_action = self._viewer_action(
             "measure.feature_finder",
             self._on_open_feature_finder,
         )
-        measurements_menu.addAction(feature_finder_action)
+        features_menu.addAction(feature_finder_action)
+        detect_maxima_action = self._viewer_action(
+            "measure.feature_maxima",
+            lambda: self._open_measure_tool("feature_maxima"),
+        )
+        features_menu.addAction(detect_maxima_action)
+        point_fft_action = self._viewer_action(
+            "measure.point_fft",
+            lambda: self._open_measure_tool("point_fft"),
+        )
+        features_menu.addAction(point_fft_action)
         pair_corr_action = self._viewer_action(
             "measure.pair_correlation",
             self._on_open_pair_correlation,
         )
-        measurements_menu.addAction(pair_corr_action)
+        features_menu.addAction(pair_corr_action)
         feat_lat_action = self._viewer_action(
             "measure.feature_lattice",
             self._on_open_feature_lattice,
         )
-        measurements_menu.addAction(feat_lat_action)
+        features_menu.addAction(feat_lat_action)
         measurements_menu.addSeparator()
         self._image_measurements.add_detected_point_menu_actions(
             measurements_menu,
@@ -1791,6 +1798,16 @@ class ImageViewerDialog(
 
     def _show_measurements(self) -> None:
         self._show_sidebar_tab("measurements")
+
+    def _open_measure_tool(self, key: str) -> None:
+        """Show the Measure tab and focus a tool's detail (controls) by key.
+
+        Used by the Measurements → Features menu so the demoted setup tools
+        (feature maxima, point/FFT) remain fully usable without a tab button.
+        """
+        self._show_sidebar_tab("measurements")
+        if hasattr(self, "_measurement_panel"):
+            self._measurement_panel.set_measurement_type(key)
 
     # ── Navigation ─────────────────────────────────────────────────────────────
     def keyPressEvent(self, event):

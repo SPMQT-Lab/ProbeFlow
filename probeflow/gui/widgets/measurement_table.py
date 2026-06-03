@@ -307,6 +307,34 @@ def _format_details(result: MeasurementResult) -> str:
         roi_name = result.context.get("roi_name")
         if roi_name:
             lines.append(f"Line ROI: {roi_name}")
+    elif result.kind == "roi_stats":
+        v = result.values
+        height_unit = result.z_unit or ""
+        if v.get("area") is not None:
+            lines.append(f"Area: {_fmt_value(v['area'])} nm²")
+        w, h = v.get("width_nm"), v.get("height_nm")
+        if w is not None and h is not None:
+            lines.append(f"Sides: {_fmt_value(w)} × {_fmt_value(h)} nm")
+        if v.get("n_finite_pixels") is not None:
+            lines.append(f"Pixels: {int(v['n_finite_pixels'])}")
+        if v.get("n_points_inside") is not None:
+            lines.append(f"Points inside: {int(v['n_points_inside'])}")
+        lines.append("")
+        for key, lbl in (
+            ("mean_height", "Mean height"),
+            ("median_height", "Median height"),
+            ("rms_roughness", "RMS roughness"),
+            ("peak_to_peak", "Range (peak-to-peak)"),
+            ("min_height", "Min height"),
+            ("max_height", "Max height"),
+        ):
+            if v.get(key) is not None:
+                lines.append(f"{lbl}: {_fmt_value(v[key])} {height_unit}".rstrip())
+        if result.channel:
+            lines.append(f"Channel: {result.channel}")
+        roi_name = result.context.get("roi_name")
+        if roi_name:
+            lines.append(f"ROI: {roi_name}")
     elif result.kind == "spectrum_delta":
         dy = result.values.get("dy")
         dx = result.values.get("dx")

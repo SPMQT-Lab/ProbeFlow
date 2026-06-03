@@ -555,6 +555,15 @@ QToolButton#floatingPanelClose {{
 }}
 QToolButton#floatingPanelClose:hover {{ background-color: {t['err_fg']}; color: #ffffff; }}
 
+/* Latest-result headline in the Measure detail view. */
+QLabel#resultSummary {{
+    background-color: {t['sel_tint']};
+    color: {t['fg']};
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-weight: 600;
+}}
+
 /* ── Modal tool overlay (dimmed scrim + centred card) ─────────────────── */
 #modalOverlay {{ background-color: rgba(0, 0, 0, 0.45); }}
 #overlayCard {{

@@ -221,6 +221,23 @@ class ImageMeasurementController:
                 height_unit=unit or None,
                 notes=f"ROI statistics for {roi.name}",
             )
+            # GUI extras the kernel doesn't compute: bounding-box side lengths (nm)
+            # and the number of point ROIs that fall inside this region.
+            shape = arr.shape[:2]
+            area_mask = roi.to_mask(shape)
+            ys, xs = np.nonzero(area_mask)
+            if xs.size:
+                result.values["width_nm"] = float((xs.max() - xs.min() + 1) * px_x_nm)
+                result.values["height_nm"] = float((ys.max() - ys.min() + 1) * px_y_nm)
+            roi_set = self._roi_set()
+            n_inside = 0
+            if roi_set is not None:
+                for other in roi_set.rois:
+                    if other.kind == "point" and bool(
+                        (other.to_mask(shape) & area_mask).any()
+                    ):
+                        n_inside += 1
+            result.values["n_points_inside"] = int(n_inside)
             self._record(result)
         except Exception as exc:
             self._set_status(f"Could not add ROI statistics: {exc}")

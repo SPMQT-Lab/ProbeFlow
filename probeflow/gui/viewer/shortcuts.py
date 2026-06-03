@@ -44,7 +44,7 @@ VIEWER_COMMANDS: tuple[ViewerCommand, ...] = (
     ViewerCommand("processing.clear_zero", "Clear zero plane", "Processing", status_tip="Clear the current zero reference plane.", aliases=("zero", "reference")),
     ViewerCommand("processing.undo", "Undo", "Processing", ("Ctrl+Z",), "Restore the previous processing state.", "undo", aliases=("history",)),
     ViewerCommand("processing.redo", "Redo", "Processing", ("Ctrl+Y", "Ctrl+Shift+Z"), "Reapply a processing state that was undone.", "redo", aliases=("history",)),
-    ViewerCommand("fft.open", "FFT lattice correction...", "Measurements", ("Ctrl+Shift+F",), "Fit reciprocal Bragg peaks to a known structure and preview undistortion.", aliases=("spectrum", "fourier")),
+    ViewerCommand("fft.open", "FFT viewer...", "Measurements", ("Ctrl+Shift+F",), "Open the FFT viewer: inspect the power spectrum, fit reciprocal Bragg peaks, and preview lattice undistortion.", aliases=("fft viewer", "viewer", "spectrum", "fourier", "reciprocal", "bragg", "lattice correction")),
     ViewerCommand("fft.periodic_filter", "Periodic notch filter...", "Measurements", ("Ctrl+Alt+F",), "Suppress selected FFT peaks; this is separate from lattice correction.", aliases=("notch", "lattice", "periodic")),
     ViewerCommand(
         "image.info", "Show image info...", "Image", ("Ctrl+I",),
@@ -119,7 +119,8 @@ VIEWER_COMMANDS: tuple[ViewerCommand, ...] = (
     ViewerCommand("measure.step_height", "Add step height from selected ROIs", "Measurements", status_tip="Measure step height from selected ROIs.", enabled_state_key="step_height", aliases=("terrace", "height")),
     ViewerCommand("measure.line_profile", "Add current line profile", "Measurements", ("Ctrl+Shift+P",), "Add a line-profile measurement.", "line_profile", aliases=("profile", "line")),
     ViewerCommand("measure.line_periodicity", "Find spacing from line profile...", "Measurements", ("Ctrl+Alt+P",), "Estimate spacing from a line ROI and optionally save it as a known structure.", "line_periodicity", aliases=("period", "spacing", "profile")),
-    ViewerCommand("measure.feature_maxima", "Detect maxima in active ROI", "Measurements", status_tip="Detect feature maxima in the active area ROI.", enabled_state_key="feature_maxima", aliases=("maxima", "peaks", "features")),
+    ViewerCommand("measure.feature_maxima", "Feature maxima...", "Measurements", status_tip="Detect local maxima in the active area ROI (opens the controls).", aliases=("maxima", "peaks", "features")),
+    ViewerCommand("measure.point_fft", "Point mask / FFT...", "Measurements", status_tip="Build a point mask from detected features and inspect its FFT.", aliases=("point mask", "fft", "mask fft", "selective fft")),
     ViewerCommand("measure.feature_finder", "Feature finder...", "Measurements", status_tip="Open the feature finder tool.", aliases=("maxima", "minima", "peaks")),
     ViewerCommand("measure.pair_correlation", "Pair correlation...", "Measurements", status_tip="Open pair correlation analysis.", aliases=("g(r)", "rdf", "radial distribution")),
     ViewerCommand("measure.feature_lattice", "Feature-to-lattice comparison...", "Measurements", status_tip="Compare detected features to a lattice.", aliases=("lattice", "features")),
