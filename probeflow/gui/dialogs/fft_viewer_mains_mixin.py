@@ -21,6 +21,11 @@ from PySide6.QtWidgets import (
 )
 
 
+# Compact width caps so value fields don't stretch across the wide sidebar.
+_FIELD_W = 96
+_WIDE_FIELD_W = 124
+
+
 class FFTViewerMainsMixin:
     """Predict / overlay / inspect / preview / apply mains-pickup suppression."""
 
@@ -69,7 +74,9 @@ class FFTViewerMainsMixin:
             "Your local mains frequency — 50 Hz (most of the world) or 60 Hz "
             "(North America). Choose the one for where the data was taken."))
         self._mains_freq_combo.currentIndexChanged.connect(self._on_mains_changed)
-        freq_row.addWidget(self._mains_freq_combo, 1)
+        self._mains_freq_combo.setMaximumWidth(_FIELD_W)
+        freq_row.addWidget(self._mains_freq_combo)
+        freq_row.addStretch(1)
         gl.addLayout(freq_row)
 
         harm_row = QHBoxLayout()
@@ -87,7 +94,9 @@ class FFTViewerMainsMixin:
         self._mains_harm_spin.setToolTip(_tip(
             "Manual number of mains harmonics to mark when Auto is off."))
         self._mains_harm_spin.valueChanged.connect(self._on_mains_changed)
-        harm_row.addWidget(self._mains_harm_spin, 1)
+        self._mains_harm_spin.setMaximumWidth(64)
+        harm_row.addWidget(self._mains_harm_spin)
+        harm_row.addStretch(1)
         gl.addLayout(harm_row)
 
         speed_row = QHBoxLayout()
@@ -103,7 +112,9 @@ class FFTViewerMainsMixin:
             "where mains lands in the FFT. If blank or wrong, type the value "
             "from your scan parameters; the overlay needs it."))
         self._mains_speed_spin.valueChanged.connect(self._on_mains_changed)
-        speed_row.addWidget(self._mains_speed_spin, 1)
+        self._mains_speed_spin.setMaximumWidth(_WIDE_FIELD_W)
+        speed_row.addWidget(self._mains_speed_spin)
+        speed_row.addStretch(1)
         gl.addLayout(speed_row)
 
         axis_row = QHBoxLayout()
@@ -115,7 +126,9 @@ class FFTViewerMainsMixin:
             "this direction. Leave on Horizontal unless the scan was rotated "
             "or transposed."))
         self._mains_fast_combo.currentIndexChanged.connect(self._on_mains_changed)
-        axis_row.addWidget(self._mains_fast_combo, 1)
+        self._mains_fast_combo.setMaximumWidth(_WIDE_FIELD_W)
+        axis_row.addWidget(self._mains_fast_combo)
+        axis_row.addStretch(1)
         gl.addLayout(axis_row)
 
         self._mains_status_lbl = QLabel("")
@@ -137,7 +150,9 @@ class FFTViewerMainsMixin:
         self._mains_radius_spin.setSuffix(" px")
         self._mains_radius_spin.setToolTip(_tip(
             "Width of each mains streak notch in FFT pixels."))
-        rad_row.addWidget(self._mains_radius_spin, 1)
+        self._mains_radius_spin.setMaximumWidth(_FIELD_W)
+        rad_row.addWidget(self._mains_radius_spin)
+        rad_row.addStretch(1)
         sl.addLayout(rad_row)
 
         min_q_row = QHBoxLayout()
@@ -151,7 +166,9 @@ class FFTViewerMainsMixin:
         self._mains_min_q_spin.setToolTip(_tip(
             "Protect low-q signal by leaving a central circle unchanged."))
         self._mains_min_q_spin.valueChanged.connect(self._on_mains_changed)
-        min_q_row.addWidget(self._mains_min_q_spin, 1)
+        self._mains_min_q_spin.setMaximumWidth(_WIDE_FIELD_W)
+        min_q_row.addWidget(self._mains_min_q_spin)
+        min_q_row.addStretch(1)
         sl.addLayout(min_q_row)
 
         self._mains_residual_cb = QCheckBox("Show residual (removed signal)")

@@ -92,7 +92,9 @@ class FFTViewerReconstructMixin:
             "the corrected image. Keep selected: rebuild only the selected "
             "periodic component (everything else removed)."))
         self._recon_mode_combo.currentIndexChanged.connect(self._update_reconstruct_status)
-        mode_row.addWidget(self._recon_mode_combo, 1)
+        self._recon_mode_combo.setMaximumWidth(140)
+        mode_row.addWidget(self._recon_mode_combo)
+        mode_row.addStretch(1)
         og.addLayout(mode_row)
         self._recon_conj_cb = QCheckBox("Conjugate symmetry (keep result real)")
         self._recon_conj_cb.setChecked(True)
@@ -110,7 +112,9 @@ class FFTViewerReconstructMixin:
         self._recon_soft_spin.setToolTip(_tip(
             "Feather the selection boundary by this many pixels. A few pixels "
             "reduces ringing in the reconstructed image; 0 is a hard edge."))
-        soft_row.addWidget(self._recon_soft_spin, 1)
+        self._recon_soft_spin.setMaximumWidth(96)
+        soft_row.addWidget(self._recon_soft_spin)
+        soft_row.addStretch(1)
         og.addLayout(soft_row)
         lay.addWidget(ogrp)
 
@@ -124,7 +128,9 @@ class FFTViewerReconstructMixin:
             "Residual (what was removed), or the Original for comparison."))
         self._recon_view_combo.currentIndexChanged.connect(
             lambda _=0: self._on_reconstruct_preview() if self._reconstruct_preview_active else None)
-        view_row.addWidget(self._recon_view_combo, 1)
+        self._recon_view_combo.setMaximumWidth(140)
+        view_row.addWidget(self._recon_view_combo)
+        view_row.addStretch(1)
         lay.addLayout(view_row)
 
         pv_row = QHBoxLayout()

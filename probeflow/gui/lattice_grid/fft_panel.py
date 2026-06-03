@@ -32,6 +32,10 @@ from probeflow.gui.no_wheel import install_no_wheel_spinboxes
 
 from .fft_overlay import FFTLatticeOverlay
 
+# Compact width for numeric value fields so they don't stretch across the wide
+# sidebar column (keeps the two label/field pairs reading as a tidy two-up grid).
+_FIELD_W = 96
+
 # ── FFT panel ─────────────────────────────────────────────────────────────────
 
 class FFTLatticePanel(QWidget):
@@ -98,6 +102,7 @@ class FFTLatticePanel(QWidget):
                 sp.setSuffix(f" {sfx}")
             sp.setFont(ui_font(9))
             sp.setFixedHeight(22)
+            sp.setMaximumWidth(_FIELD_W)
             params_lay.addWidget(_make_label(label), row, col * 2)
             params_lay.addWidget(sp, row, col * 2 + 1)
             return sp
@@ -108,6 +113,7 @@ class FFTLatticePanel(QWidget):
             sp.setValue(value)
             sp.setFont(ui_font(9))
             sp.setFixedHeight(22)
+            sp.setMaximumWidth(_FIELD_W)
             params_lay.addWidget(_make_label(label), row, col * 2)
             params_lay.addWidget(sp, row, col * 2 + 1)
             return sp
@@ -125,8 +131,11 @@ class FFTLatticePanel(QWidget):
 
         self._line_width_spin = _double_cell(3, 1, "Line width:", 0.25, 10.0, 0.25, 2, "px")
         self._line_width_spin.setValue(1.5)
-        params_lay.setColumnStretch(1, 1)
-        params_lay.setColumnStretch(3, 1)
+        # Keep the two label/field pairs packed to the left at a compact width;
+        # absorb the slack in a trailing column instead of stretching the fields.
+        params_lay.setColumnStretch(1, 0)
+        params_lay.setColumnStretch(3, 0)
+        params_lay.setColumnStretch(4, 1)
 
         lay.addWidget(params_grp)
 
