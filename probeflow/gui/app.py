@@ -27,7 +27,7 @@ from PySide6.QtCore import (
     Signal, Slot,
 )
 from PySide6.QtGui import (
-    QAction, QActionGroup, QFont, QKeySequence,
+    QAction, QActionGroup, QFont, QKeySequence, QShortcut,
 )
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QDialog, QFileDialog,
@@ -70,6 +70,8 @@ from probeflow.gui.desktop_layout import (
 )
 from probeflow.gui.styling import (
     THEMES,
+    THEME_PRESETS,
+    theme_is_dark,
     _build_qss,
     _build_palette,
 )
@@ -145,7 +147,13 @@ class ProbeFlowWindow(QMainWindow):
         self._show_maximized_on_start = False
 
         self._cfg      = load_config()
-        self._dark     = self._cfg.get("dark_mode", True)
+        # Theme is now a named preset; migrate from the legacy dark_mode boolean.
+        self._theme_name = self._cfg.get("theme_name") or (
+            "dark" if self._cfg.get("dark_mode", True) else "light"
+        )
+        if self._theme_name not in THEMES:
+            self._theme_name = "dark"
+        self._dark     = theme_is_dark(self._theme_name)
         self._gui_font_size = normalise_gui_font_size(self._cfg.get("gui_font_size"))
         self._mode     = "browse"
         self._running  = False
@@ -284,7 +292,7 @@ class ProbeFlowWindow(QMainWindow):
         self._splitter.setHandleWidth(5)
         v_lay.addWidget(self._splitter, 1)
 
-        t = THEMES["dark" if self._dark else "light"]
+        t = THEMES[self._theme_name]
 
         # ── Content stack (center+left area) ──────────────────────────────────
         self._content_stack = QStackedWidget()
@@ -505,16 +513,18 @@ class ProbeFlowWindow(QMainWindow):
         view_menu.addAction(reset_layout_action)
         view_menu.addSeparator()
         theme_menu = view_menu.addMenu("Theme")
-        for label, dark in (("Dark mode", True), ("Light mode", False)):
+        for key, label, _is_dark in THEME_PRESETS:
             action = QAction(label, self)
             action.setCheckable(True)
             action.triggered.connect(
-                lambda _checked=False, value=dark: self._set_dark_mode(value)
+                lambda _checked=False, name=key: self._set_theme(name)
             )
             self._theme_action_group.addAction(action)
-            self._theme_actions["dark" if dark else "light"] = action
+            self._theme_actions[key] = action
             theme_menu.addAction(action)
-        self._theme_actions["dark"].setShortcut(QKeySequence("Ctrl+Shift+T"))
+        # Ctrl+Shift+T flips between the base dark and light themes.
+        self._theme_toggle_shortcut = QShortcut(QKeySequence("Ctrl+Shift+T"), self)
+        self._theme_toggle_shortcut.activated.connect(self._toggle_theme)
         text_menu = view_menu.addMenu("Text size")
         for label in GUI_FONT_SIZES:
             action = QAction(label, self)
@@ -728,14 +738,21 @@ class ProbeFlowWindow(QMainWindow):
         self._switch_mode("browse")
         self._open_browse_folder()
 
-    def _set_dark_mode(self, dark: bool) -> None:
-        dark = bool(dark)
-        if self._dark == dark:
+    def _set_theme(self, name: str) -> None:
+        if name not in THEMES:
+            return
+        if name == self._theme_name:
             self._sync_menu_actions()
             return
-        self._dark = dark
+        self._theme_name = name
+        self._dark = theme_is_dark(name)
         self._navbar.set_dark(self._dark)
         self._apply_theme()
+        self._sync_menu_actions()
+
+    def _set_dark_mode(self, dark: bool) -> None:
+        """Back-compat shim: pick the base dark or light preset."""
+        self._set_theme("dark" if dark else "light")
 
     def _apply_thumbnail_setting(
         self, combo_attr: str, handler, value, transform=None
@@ -781,7 +798,7 @@ class ProbeFlowWindow(QMainWindow):
         )
 
     def _show_definitions(self) -> None:
-        theme = THEMES["dark" if self._dark else "light"]
+        theme = THEMES[self._theme_name]
         dlg = getattr(self, "_definitions_dialog", None)
         if dlg is None:
             dlg = _DefinitionsDialog(theme, self)
@@ -846,10 +863,9 @@ class ProbeFlowWindow(QMainWindow):
                 action.setChecked(self._mode == mode)
                 action.blockSignals(False)
         if hasattr(self, "_theme_actions"):
-            dark_key = "dark" if self._dark else "light"
             for key, action in self._theme_actions.items():
                 action.blockSignals(True)
-                action.setChecked(key == dark_key)
+                action.setChecked(key == self._theme_name)
                 action.blockSignals(False)
         if hasattr(self, "_font_size_actions"):
             for label, action in self._font_size_actions.items():
@@ -1037,7 +1053,7 @@ class ProbeFlowWindow(QMainWindow):
             self._status_bar.showMessage(
                 "Select two or more spectra with Ctrl-click before overlaying.")
             return
-        t = THEMES["dark" if self._dark else "light"]
+        t = THEMES[self._theme_name]
         dlg = SpecOverlayDialog(entries, t, self)
         dlg.exec()
 
@@ -1129,7 +1145,7 @@ class ProbeFlowWindow(QMainWindow):
         """Open (or raise) the floating Feature Counting window."""
         if self._fc_window is None:
             from probeflow.gui.features.window import FeatureCountingWindow
-            theme = THEMES["dark" if self._dark else "light"]
+            theme = THEMES[self._theme_name]
             self._fc_window = FeatureCountingWindow(parent=None, theme=theme)
             self._fc_window.load_from_browse_needed.connect(
                 self._on_fc_load_from_browse)
@@ -1371,7 +1387,7 @@ class ProbeFlowWindow(QMainWindow):
             self._tv_sidebar.set_status(f"Save failed: {exc}")
 
     def _open_viewer(self, entry):
-        t = THEMES["dark" if self._dark else "light"]
+        t = THEMES[self._theme_name]
         is_spec = isinstance(entry, VertFile)
         if is_spec:
             dlg = SpecViewerDialog(entry, t, self)
@@ -1563,7 +1579,8 @@ class ProbeFlowWindow(QMainWindow):
 
     # ── Theme ──────────────────────────────────────────────────────────────────
     def _toggle_theme(self):
-        self._set_dark_mode(not self._dark)
+        # Quick navbar/keyboard flip between the base dark and light themes.
+        self._set_theme("light" if self._dark else "dark")
 
     def _on_gui_font_size_changed(self, label: str):
         self._gui_font_size = normalise_gui_font_size(label)
@@ -1574,7 +1591,7 @@ class ProbeFlowWindow(QMainWindow):
         self._status_bar.showMessage(f"Text size: {self._gui_font_size}")
 
     def _apply_theme(self):
-        t = THEMES["dark" if self._dark else "light"]
+        t = THEMES[self._theme_name]
         app = QApplication.instance()
         app.setFont(QFont(ui_family(), GUI_FONT_SIZES[self._gui_font_size]))
         app.setPalette(_build_palette(t))
@@ -1589,7 +1606,7 @@ class ProbeFlowWindow(QMainWindow):
 
     # ── About ──────────────────────────────────────────────────────────────────
     def _show_about(self):
-        t   = THEMES["dark" if self._dark else "light"]
+        t   = THEMES[self._theme_name]
         dlg = AboutDialog(t, self)
         dlg.exec()
 
@@ -1623,6 +1640,7 @@ class ProbeFlowWindow(QMainWindow):
     def closeEvent(self, event):
         cfg = load_config()
         cfg.update({
+            "theme_name":    self._theme_name,
             "dark_mode":     self._dark,
             "input_dir":     self._conv_panel.input_entry.text(),
             "output_dir":    self._conv_panel.output_entry.text(),

@@ -1424,7 +1424,7 @@ def _reference_document(
     return f"""
 <style>
   body {{
-      font-family: Helvetica, Arial, sans-serif;
+      font-family: Helvetica, Arial;
       font-size: 13px;
       color: {p["text"]};
       background: {p["bg"]};

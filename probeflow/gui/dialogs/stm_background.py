@@ -478,7 +478,12 @@ class STMBackgroundDialog(QDialog):
         ax_bot.grid(True, alpha=0.25)
         ax_bot.tick_params(labelsize=7)
 
-        self._fig.tight_layout()
+        # GridSpec already sets the spacing; tight_layout only tidies margins and
+        # warns about the height-ratio axes — silence that cosmetic warning.
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            self._fig.tight_layout()
         self._canvas.draw_idle()
 
     def _update_stats(self, result) -> None:

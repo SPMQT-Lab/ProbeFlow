@@ -86,7 +86,173 @@ THEMES = {
         "border":     "#d8dbe1",
         "hover":      "#e4e7ec",
     },
+    # ── Midnight: near-pure-black dark (OLED / dark-room imaging) ──────────────
+    "midnight": {
+        "bg":         "#050608",
+        "fg":         "#eef0f3",
+        "entry_bg":   "#0f1115",
+        "btn_bg":     "#1a1d22",
+        "btn_fg":     "#eef0f3",
+        "log_bg":     "#000000",
+        "log_fg":     "#eef0f3",
+        "ok_fg":      "#57d977",
+        "err_fg":     "#ff6b81",
+        "warn_fg":    "#f0b072",
+        "info_fg":    "#eef0f3",
+        "accent_bg":  "#5b9cff",
+        "accent_fg":  "#04060a",
+        "sep":        "#1c2026",
+        "sub_fg":     "#8b929c",
+        "sidebar_bg": "#000000",
+        "main_bg":    "#050608",
+        "status_bg":  "#0f1115",
+        "status_fg":  "#8b929c",
+        "card_bg":    "#0f1115",
+        "card_sel":   "#1c2740",
+        "card_fg":    "#eef0f3",
+        "tab_act":    "#14171c",
+        "tab_inact":  "#050608",
+        "tree_bg":    "#050608",
+        "tree_fg":    "#eef0f3",
+        "tree_sel":   "#1c2740",
+        "tree_head":  "#0f1115",
+        "splitter":   "#1c2026",
+        "surface":    "#0f1115",
+        "raised":     "#161a20",
+        "sel_tint":   "#1c2740",
+        "border":     "#2a2f38",
+        "hover":      "#1e222a",
+    },
+    # ── Slate: cool blue-grey dark ────────────────────────────────────────────
+    "slate": {
+        "bg":         "#1b212b",
+        "fg":         "#e3e8ef",
+        "entry_bg":   "#181e27",
+        "btn_bg":     "#2a3440",
+        "btn_fg":     "#e3e8ef",
+        "log_bg":     "#141922",
+        "log_fg":     "#e3e8ef",
+        "ok_fg":      "#6bd58e",
+        "err_fg":     "#ff7a90",
+        "warn_fg":    "#f0b878",
+        "info_fg":    "#e3e8ef",
+        "accent_bg":  "#6aa3ff",
+        "accent_fg":  "#0b1018",
+        "sep":        "#2d3947",
+        "sub_fg":     "#93a0b3",
+        "sidebar_bg": "#161b23",
+        "main_bg":    "#1b212b",
+        "status_bg":  "#181e27",
+        "status_fg":  "#93a0b3",
+        "card_bg":    "#222b38",
+        "card_sel":   "#2b3a55",
+        "card_fg":    "#e3e8ef",
+        "tab_act":    "#222b38",
+        "tab_inact":  "#161b23",
+        "tree_bg":    "#161b23",
+        "tree_fg":    "#e3e8ef",
+        "tree_sel":   "#2b3a55",
+        "tree_head":  "#222b38",
+        "splitter":   "#2d3947",
+        "surface":    "#222b38",
+        "raised":     "#283340",
+        "sel_tint":   "#2b3a55",
+        "border":     "#3a4658",
+        "hover":      "#2f3b4a",
+    },
+    # ── Paper: warm, low-glare light ──────────────────────────────────────────
+    "paper": {
+        "bg":         "#fbf9f4",
+        "fg":         "#2b2620",
+        "entry_bg":   "#fffdf8",
+        "btn_bg":     "#ece6da",
+        "btn_fg":     "#2b2620",
+        "log_bg":     "#fbf9f4",
+        "log_fg":     "#2b2620",
+        "ok_fg":      "#2f7d32",
+        "err_fg":     "#b3261e",
+        "warn_fg":    "#9a6a00",
+        "info_fg":    "#2b2620",
+        "accent_bg":  "#2f66d6",
+        "accent_fg":  "#ffffff",
+        "sep":        "#e6dfd2",
+        "sub_fg":     "#6f665a",
+        "sidebar_bg": "#f1ece1",
+        "main_bg":    "#f5f1e8",
+        "status_bg":  "#ece6da",
+        "status_fg":  "#6f665a",
+        "card_bg":    "#fffdf8",
+        "card_sel":   "#e7edfb",
+        "card_fg":    "#2b2620",
+        "tab_act":    "#fffdf8",
+        "tab_inact":  "#ece6da",
+        "tree_bg":    "#fffdf8",
+        "tree_fg":    "#2b2620",
+        "tree_sel":   "#e7edfb",
+        "tree_head":  "#f1ece1",
+        "splitter":   "#e6dfd2",
+        "surface":    "#fffdf8",
+        "raised":     "#fffdf8",
+        "sel_tint":   "#e7edfb",
+        "border":     "#d9d2c4",
+        "hover":      "#ece6da",
+    },
+    # ── High contrast: maximum legibility (black/white + vivid accent) ────────
+    "high_contrast": {
+        "bg":         "#000000",
+        "fg":         "#ffffff",
+        "entry_bg":   "#000000",
+        "btn_bg":     "#1a1a1a",
+        "btn_fg":     "#ffffff",
+        "log_bg":     "#000000",
+        "log_fg":     "#ffffff",
+        "ok_fg":      "#00e676",
+        "err_fg":     "#ff5252",
+        "warn_fg":    "#ffd740",
+        "info_fg":    "#ffffff",
+        "accent_bg":  "#4da3ff",
+        "accent_fg":  "#000000",
+        "sep":        "#ffffff",
+        "sub_fg":     "#d4d4d4",
+        "sidebar_bg": "#000000",
+        "main_bg":    "#000000",
+        "status_bg":  "#000000",
+        "status_fg":  "#d4d4d4",
+        "card_bg":    "#0a0a0a",
+        "card_sel":   "#00305f",
+        "card_fg":    "#ffffff",
+        "tab_act":    "#0a0a0a",
+        "tab_inact":  "#000000",
+        "tree_bg":    "#000000",
+        "tree_fg":    "#ffffff",
+        "tree_sel":   "#00305f",
+        "tree_head":  "#0a0a0a",
+        "splitter":   "#ffffff",
+        "surface":    "#0a0a0a",
+        "raised":     "#141414",
+        "sel_tint":   "#00305f",
+        "border":     "#ffffff",
+        "hover":      "#1f1f1f",
+    },
 }
+
+# Ordered theme presets shown in the picker: (key, label, is_dark).
+# is_dark drives the navbar styling and logo variant.
+THEME_PRESETS: tuple[tuple[str, str, bool], ...] = (
+    ("dark",          "Dark",          True),
+    ("light",         "Light",         False),
+    ("midnight",      "Midnight",      True),
+    ("slate",         "Slate",         True),
+    ("paper",         "Paper",         False),
+    ("high_contrast", "High contrast", True),
+)
+
+_THEME_IS_DARK = {key: is_dark for key, _label, is_dark in THEME_PRESETS}
+
+
+def theme_is_dark(name: str) -> bool:
+    """Return whether the named theme is a dark theme (defaults to dark)."""
+    return _THEME_IS_DARK.get(name, True)
 
 
 def _sep():
@@ -103,7 +269,7 @@ def _build_qss(t: dict, font_pt: int = GUI_FONT_SIZES[GUI_FONT_DEFAULT]) -> str:
 QMainWindow, QWidget {{
     background-color: {t['main_bg']};
     color: {t['fg']};
-    font-family: "{ui_family()}", Helvetica, Arial, sans-serif;
+    font-family: "{ui_family()}", Helvetica, Arial;
     font-size: {font_pt}pt;
 }}
 /* Labels are transparent so they sit cleanly on any surface (cards, sidebars). */
@@ -466,6 +632,6 @@ def _build_palette(t: dict):
 
 __all__ = [
     "NAVBAR_DARK_BG", "NAVBAR_LIGHT_BG", "NAVBAR_H",
-    "THEMES",
+    "THEMES", "THEME_PRESETS", "theme_is_dark",
     "_sep", "_build_qss", "_build_palette",
 ]
