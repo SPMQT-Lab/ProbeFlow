@@ -1,82 +1,153 @@
 # ProbeFlow Review Status
 
-Date: 2026-05-20
+**Updated**: 2026-06-04
 
-This document preserves the useful status from completed review artifacts after pruning superseded detailed stage files.
+This is the single, consolidated record of ProbeFlow's code-review history. The
+detailed per-angle review files (`docs/reviews/2026-05-27-*.md`) and the earlier
+staged-review stage files were pruned once their conclusions were captured here,
+following the project convention: keep a living summary, prune the detail once
+findings are enacted. The conclusions and the remaining open items survive below.
 
-## Status Summary
+## Summary
 
-| Review stage | Status | Current artifact | Outcome |
-|---|---|---|---|
-| Stage 1 scientific workflow and physics review | Completed | Pruned after summary preservation | Identified unit, provenance, feature workflow, lattice correction, pair-correlation, point-mask FFT, periodicity export, and spectroscopy wording issues. |
-| Stage 1 workflow physics fixes | Completed | Pruned after summary preservation | Concrete PF-STAGE1-001 through PF-STAGE1-010 fixes were implemented. Latest relevant commit: `2724b77 Improve scientific workflow provenance`. |
-| Stage 2 architecture, repetition, and maintainability review plus bounded implementation slices | Completed slices | Pruned after summary preservation | Produced the architecture/refactor queue and implemented bounded cleanup: measurement adapter, canonical pair/feature-lattice results, ROI point-source helper, launch-context helper, feature-source metadata propagation, and lattice correction operation helper. |
-| Stage 3 compatibility, stability, and release-safety review | Completed locally with release caveats | Pruned after summary preservation | Verified import/CLI/processing/provenance surfaces locally, fixed a Qt headless test-harness abort, verified a temp wheel includes toolbar assets, and documented remaining Python 3.11/3.12 matrix and GUI-smoke checks. |
+Two review efforts have run on ProbeFlow:
 
-## Stage 1 Preserved Outcome
+1. **Staged review (2026-05, "Stage 1/2/3")** — scientific-workflow/physics pass,
+   an architecture/maintainability pass with bounded refactor slices, and a
+   compatibility/stability/release-safety pass. All concrete findings were enacted.
+2. **Deep review (2026-05-27)** — six parallel angles (physics, numerical
+   stability, image-processing pipeline, IO/instrument format, backend
+   architecture, GUI architecture) producing **114 findings (S0=1, S1=36, S2=61,
+   S3=16)**.
 
-The Stage 1 review was a review-only pass over ProbeFlow's user-facing STM workflows. It found several risks that could make output scientifically misleading or difficult to reproduce, especially around calibrated non-square pixels, feature-point workflow continuity, lattice correction provenance, pair/feature-lattice measurement context, point-mask FFT exports, line-periodicity exports, and spectroscopy derivative wording.
+**Status: essentially complete.** Every S0 and S1 finding, and every physics /
+numerical-correctness finding, has been enacted. What remains (listed below) is
+lower-severity S2/S3 polish — mostly GUI-architecture tidiness, large-file
+splits, and a handful of numerical/IO edge cases. None block users.
 
-Follow-up fixes addressed the concrete Stage 1 findings:
+## What was enacted (highlights)
 
-- Lattice/grid angle and reciprocal-space reporting now use calibrated physical vectors.
-- Feature-to-lattice residuals now use per-axis physical pixel calibration.
-- Measure-tab feature maxima are available as downstream point sources.
-- Active area ROI scope is passed into the legacy Feature Finder.
-- Affine lattice correction provenance retains measured/ideal lattice metadata, matrix data, preserve-orientation, and rotation metadata.
-- Pair-correlation, feature-lattice, point-mask, point-mask FFT, periodicity, and spectroscopy exports record stronger context.
+Scientific correctness:
 
-Remaining Stage 1-derived long-term work is architectural rather than a direct defect fix: unify the feature maxima/minima workflows and add richer per-assignment or per-bin exports where detailed downstream analysis needs them.
+- **Lattice correction** — `_polar_decompose` no longer flips singular values on
+  reflective input (the S0); reflective transforms are now flagged, not silently
+  applied. Calibrated physical lattice vectors and per-axis residuals throughout.
+- **FFT / window cluster** — unified window vocabulary, unbiased masked-ROI DC
+  subtraction, coherent-gain normalisation, periodic Hann semantics, isotropic
+  cutoffs, plateau-safe Bragg-peak finding.
+- **Calibration threading** — `apply_processing_state` now takes scan calibration;
+  pixel sizes reach `subtract_background(step_tolerance)`/`facet_level`, and
+  `scan_range_m` is updated by shape-changing geometric ops so scale bars, FFT
+  k-axes, and pixel→nm conversions stay correct.
+- **`quantize_bit_depth`** — explicit reproducible `vmin`/`vmax`/`quantum`, run
+  after arithmetic ops, preserving the "discrete level" export guarantee.
+- Periodicity/autocorrelation bias, pair-correlation edge correction, row-align
+  ordering, and assorted estimator fixes.
 
-## Stage 2 Preserved Outcome
+IO robustness:
 
-The bounded implementation slices from Stage 2 addressed the highest-priority seams without a broad refactor:
+- SXM writer overwrite/source-equality guard; ROI sidecar path no longer collapses
+  dotted Createc filenames; Createc channel-count trusts the header; Nanonis
+  missing tip position → NaN (not origin); DAT→SXM `SCAN_DIR` orientation; SI unit
+  normalisation; decode warnings surfaced on `Scan.warnings`; structured CSV and
+  provenance-sidecar coverage for all exporters.
 
-- `probeflow.measurements.adapters.legacy_measurement_to_result` is the single compatibility adapter for old analysis measurement rows.
-- Pair-correlation and feature-to-lattice dialogs now emit canonical `probeflow.measurements.models.MeasurementResult` rows.
-- Simple distance/angle and ROI-statistics producers now emit canonical measurement rows.
-- The legacy `MeasurementResultsPanel` public name now wraps the canonical measurement table.
-- `probeflow.gui.roi_context` now gathers downstream point sources, preserves source metadata, resolves line/area ROI context, and calculates active area ROI physical area outside the main viewer.
-- `probeflow.gui.viewer.tool_launch` now owns pair-correlation, feature-to-lattice, and lattice-grid launch precondition checks and source/context assembly.
-- Pair-correlation and feature-to-lattice table rows now record point-source type, selection scope, and available detection settings.
-- `probeflow.analysis.lattice_correction_workflow` now builds pixel-space lattice correction matrices and processing/provenance operation parameters outside the lattice GUI panel.
-- Focused regression tests cover the adapter, ROI context helper, launch-context helper, and lattice correction helper.
+Architecture / maintainability:
 
-The recommended next implementation stage is to address the remaining Stage 2 findings in this order:
+- Canonical `measurements.models.MeasurementResult` with a single legacy adapter;
+  unified `FeaturePoint`; shared kernels under `measurements/` (formatting,
+  `roi_resolve`, `raster`); `ProcessingStep`→`ProvenanceStep` (alias kept).
+- `ScanGraph` and `plugins/` shelved as explicitly experimental (dropped from the
+  public `provenance` namespace); boundary-rules docstrings rewritten to describe
+  the real architecture (Scan → ProcessingState → ProcessingHistory + ExportRecord).
+- GUI modeless-dialog lifecycle: `ImageViewerDialog` now owns a
+  `_modeless_children` registry closed on `closeEvent`; worker-signals race fixed;
+  central viewer command/shortcut registry (`gui/viewer/shortcuts.py`).
 
-1. Continue feature-source unification for point masks, point FFT, and detailed feature exports where source provenance is needed.
-2. Remove compatibility measurement shims only after no supported caller depends on legacy result rows.
-3. Add small unit-formatting and text-export helpers.
-4. Clean up spectroscopy and plotting duplication.
+Release safety: Qt headless test-harness skip; toolbar assets verified in the
+wheel; CLI surface verified; backend imports remain GUI-free.
 
-## Stage 3 Preserved Outcome
+## 2026-06-04 re-check of the open backlog
 
-The local compatibility/stability pass found no application-code S0/S1 blocker in the inspected import, CLI, optional dependency, processing-state, provenance, or package metadata surfaces. The current advertised CLI entry through `probeflow.cli.main` works for top-level, pipeline, info, convert, and GUI help paths. Backend imports remain GUI-free, and optional OpenCV, scikit-learn, and Gwyddion writer dependencies are lazy or guarded.
+Every item that was still listed as open was re-verified against the current
+code. The result: **the overwhelming majority were already resolved** by the
+refactoring that landed after the review docs were written, or were intentional
+design choices rather than defects. Details below.
 
-One release-validation blocker was fixed in the test harness: mixed backend/GUI tests that instantiate `QApplication` now use the same subprocess Qt preflight skip as the main GUI test modules, preventing local headless Qt aborts from killing the full pytest run while preserving backend coverage in those files.
+### Already resolved / not a defect (verified 2026-06-04)
 
-Local validation completed with:
+Physics / numerical:
+- `_polar_decompose` is the reworked PSD form (S always PSD, R inherits sign of
+  det, NaN + `UserWarning` on reflection). NumPy SVD returns non-negative
+  singular values, so the "tiny negative singular value" concern cannot arise.
+- `compute_correction`'s `tol = 1e-6·|a||b|` compared against `|det|` **is** a
+  `sin(angle)` test, since `det = |a||b|·sinθ`. Scale-invariant by design.
+- `line_profile` already uses `mode="constant", cval=NaN` (no `reflect` leakage)
+  and a symmetric perpendicular `linspace` (no `width_px=1` asymmetry).
+- `_robust_scale` already has a graded fallback (max-abs·1e-3, then `eps`), not a
+  bare `eps`. `subtract_background` step-tolerance already falls back to the full
+  fit mask when too few candidates pass (`candidate.sum() >= n_terms`).
+- `_subtract_scanline_background` `preserve_level` intentionally restores a single
+  global reference level; per-row "preservation" would undo the subtraction.
+- `extract_lattice` `cluster_choice=1` selects the *most populated* cluster (a
+  sensible, user-tunable default), not an arbitrary one.
+- `current_histogram` handles empty input via NumPy's defined empty-array behaviour
+  (no crash, no bad rounding).
 
-- `ruff check probeflow tests`
-- `pytest tests/test_layout_compatibility.py tests/test_processing_state.py tests/test_export_provenance.py`
-- `pytest tests/test_feature_lattice.py tests/test_pair_correlation.py tests/test_lattice_grid.py -rs`
-- full `pytest`
-- temp wheel build from a copied worktree, including installed-wheel import/resource/CLI smoke checks
+Image processing:
+- `_nan_normalized_gaussian` uses normalized convolution (`mode="constant"` + weight
+  division) — no `reflect` boundary leakage.
+- `threshold_image(mode="binarize")` returns float64 deliberately so non-finite
+  pixels stay NaN (bool/uint8 cannot) and stay pipeline-compatible.
 
-The release caveats are:
+Backend / GUI architecture:
+- `_legacy.py` no longer exists (removed).
+- `FeatureCountingWindow` was extracted into the `gui/features/` package with a
+  dedicated `controller.py` (the ~150 LOC dedup) and now takes/propagates a theme
+  via `apply_theme` (no more `t={}`).
+- `gui.processing` no longer uses a wildcard import (explicit imports now).
+- A central viewer command/shortcut registry exists (`gui/viewer/shortcuts.py`).
 
-1. Python 3.11 and Python 3.12 were not available locally, so the Stage 3 check set still needs a true 3.11/3.12 matrix before release-complete status.
-2. Local Qt cannot initialize `QApplication`, so GUI tests skip under the preflight guard here; manual GUI smoke or CI on a working Qt platform is still needed.
-3. Toolbar assets and package-data metadata passed local wheel verification, but they still need to be included in the final release commit so clean checkouts reproduce that package result.
+### Fixed in this pass (2026-06-04)
 
-## Housekeeping Notes
+- `feature_points_to_csv` now rejects non-finite / non-positive `pixel_size_*_nm`
+  instead of silently emitting meaningless nm columns.
 
-Detailed root-level Stage 2/3 review outputs and the dated dead-code audit were pruned after this summary captured their useful conclusions. Future review or audit passes should update this file only when the outcome needs to remain visible to users or contributors.
+### Genuinely remaining (deliberately deferred)
 
-## Current Non-Review Docs
+These are real but are either large structural refactors (carry regression risk,
+better done as their own slices) or need instrument data to verify safely. None
+is a user-facing defect.
 
-The following docs remain current user-facing or technical references and were intentionally kept:
+- **Large-file splits** (maintainability only): `processing/filters.py` (~1.2k LOC,
+  four concerns); `gui/dialogs/image_viewer.py` (~2.3k LOC) and `fft_viewer.py`
+  (~3.0k LOC) monoliths; the five-mixin `ImageViewerDialog` MRO.
+- **Layering tidiness**: `apply_processing_state` opens files on disk; `Scan`
+  lazy-imports `processing.*`; `processing/analysis.py` holds analysis-style
+  measurements; spectroscopy spread across three packages; many-arg measurement
+  constructors → context object.
+- **IO format hardening (needs instrument test files)**: RHK SM4 dtype
+  disambiguation ignores the `data_size` header field; `_parse_string_data`
+  truncates malformed blocks; `_parse_pages` assumes a fixed per-page record
+  stride. Plus the cosmetic `_data_offset_in_file` cushion-cache misnomer.
+- **GUI coupling/polish**: tool launch split between `viewer/tool_launch.py` and
+  ad-hoc imports; `_collect_point_sources_m` / `ThresholdDialog` reach into other
+  widgets' private attrs; saved processing keyed by absolute path with no mtime
+  invalidation; thumbnail combos use `currentText` as proxy state; `closeEvent`
+  writes config ad-hoc; `desktop_layout` requires exact splitter counts; survey
+  import inline in `_build_ui`; no `FeatureCountingWindow` lifecycle tests; minor
+  `threshold`-dialog highlight pixmap uses raw `vmin/vmax`; `affine_lattice_correction`
+  vs `rotate_arbitrary` NaN-mask edge difference.
+
+## Deferred (not in code-review scope)
+
+- A true Python 3.11/3.12 test matrix (only the local interpreter was available).
+- GUI smoke tests on a working Qt platform (local Qt cannot init `QApplication`;
+  GUI tests skip under the preflight guard).
+
+## Current user-facing / reference docs (kept)
 
 - `docs/cli.md`
 - `docs/createc_dat_reader.md`
 - `docs/roi_manual_test_checklist.md`
+- `docs/notes/roi-display-notes.md`

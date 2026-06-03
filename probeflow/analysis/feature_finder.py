@@ -8,6 +8,7 @@ No Qt imports. All functions operate on NumPy arrays and return plain dataclasse
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Sequence
 
@@ -209,9 +210,20 @@ def feature_points_to_csv(
     """Return a CSV string for the detected points.
 
     Columns: index, x_px, y_px, x_nm, y_nm, value
+
+    ``pixel_size_x_nm`` / ``pixel_size_y_nm`` must be finite and positive — a
+    zero/NaN calibration would silently emit meaningless nm columns, so it is
+    rejected rather than written out.
     """
     import csv
     import io
+
+    for name, value in (
+        ("pixel_size_x_nm", pixel_size_x_nm),
+        ("pixel_size_y_nm", pixel_size_y_nm),
+    ):
+        if not math.isfinite(value) or value <= 0.0:
+            raise ValueError(f"{name} must be finite and > 0, got {value!r}")
 
     out = io.StringIO()
     writer = csv.writer(out)
