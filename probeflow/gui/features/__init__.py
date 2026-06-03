@@ -48,6 +48,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QMenu,
     QPushButton,
     QRadioButton,
     QScrollArea,
@@ -153,10 +154,11 @@ class _FeatureView(QGraphicsView):
         ``mask_painted(scene_x, scene_y)`` for each sampled point.
     """
 
-    particle_clicked  = Signal(float, float)        # scene (image-pixel) coords
-    crop_completed    = Signal(int, int, int, int)  # x0, y0, x1, y1 in image px
-    mask_painted      = Signal(float, float)        # scene x, scene y (brush centre)
-    zero_plane_pick   = Signal(float, float)        # scene x, scene y for zero-plane pts
+    particle_clicked       = Signal(float, float)        # scene (image-pixel) coords
+    particle_right_clicked = Signal(float, float)        # right-click — context menu
+    crop_completed         = Signal(int, int, int, int)  # x0, y0, x1, y1 in image px
+    mask_painted           = Signal(float, float)        # scene x, scene y (brush centre)
+    zero_plane_pick        = Signal(float, float)        # scene x, scene y for zero-plane pts
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -309,6 +311,11 @@ class _FeatureView(QGraphicsView):
         event.accept()
 
     def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.RightButton:
+            pos = self.mapToScene(event.pos())
+            self.particle_right_clicked.emit(pos.x(), pos.y())
+            event.accept()
+            return
         if event.button() == Qt.LeftButton:
             pos = self.mapToScene(event.pos())
             if self._zero_plane_armed:
@@ -542,6 +549,7 @@ class FeaturesPanel(QWidget):
         # ── Image view (QGraphicsView — same zoom engine as thumbnail viewer) ─
         self._view = _FeatureView(self)
         self._view.particle_clicked.connect(self._on_particle_clicked)
+        self._view.particle_right_clicked.connect(self._on_particle_right_clicked)
         self._view.crop_completed.connect(self._on_crop_completed)
         self._view.mask_painted.connect(self._on_mask_painted)
         self._view.zero_plane_pick.connect(self._on_zero_plane_pick)
@@ -1172,6 +1180,51 @@ class FeaturesPanel(QWidget):
             self._label_history.append(copy.deepcopy(self._sample_labels))
             self._edit_sample_label(best_p)
             self._redraw()
+
+    def _on_particle_right_clicked(self, scene_x: float, scene_y: float) -> None:
+        """Right-click on the canvas — show an 'Unclassify' context menu when a
+        classified particle (non-'other') is clicked close enough to the cursor."""
+        if (self._overlay_mode != "classify"
+                or not self._classifications
+                or not self._particles
+                or self._arr is None):
+            return
+
+        # Find the nearest particle centroid within 15 % of the image diagonal.
+        best_p, best_dist_sq = None, float("inf")
+        for p in self._particles:
+            cx = p.centroid_x_m / self._pixel_size_x_m
+            cy = p.centroid_y_m / self._pixel_size_y_m
+            dist_sq = (cx - scene_x) ** 2 + (cy - scene_y) ** 2
+            if dist_sq < best_dist_sq:
+                best_dist_sq = dist_sq
+                best_p = p
+
+        max_dist_sq = (max(self._arr.shape) * 0.15) ** 2
+        if best_p is None or best_dist_sq > max_dist_sq:
+            return
+
+        # Look up its classification.
+        classify_map = {c.particle_index: c for c in self._classifications}
+        cls = classify_map.get(best_p.index)
+        if cls is None or cls.class_name == "other":
+            return   # already 'other' or not classified — nothing to undo
+
+        menu = QMenu(self)
+        action = menu.addAction(
+            f"Unclassify #{best_p.index}  (class '{cls.class_name}' → 'other')")
+        chosen = menu.exec(QCursor.pos())
+        if chosen is None:
+            return
+
+        # Rebuild the classification list with that particle set to 'other'.
+        from dataclasses import replace as _dc_replace
+        new_cls = [
+            _dc_replace(c, class_name="other") if c.particle_index == best_p.index else c
+            for c in self._classifications
+        ]
+        # Re-apply via set_classifications so the table and overlay both update.
+        self.set_classifications(new_cls, meta=self._classification_meta)
 
     def _on_crop_completed(self, x0: int, y0: int, x1: int, y1: int) -> None:
         """Handle template crop rectangle from _FeatureView."""
