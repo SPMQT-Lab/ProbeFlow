@@ -237,12 +237,24 @@ class ImageViewerProcessingExportMixin:
         self._export_precision_lbl.setText(self._export_precision_text())
         self._update_export_format_controls()
 
+    def _ask_save_path(self, title: str, default: str, file_filter: str) -> str:
+        """Save-file dialog that keeps the viewer active afterwards.
+
+        On macOS the native save sheet can hand focus to the parent browser
+        window when it closes (even on Cancel); re-activating the viewer keeps
+        the user where they were.
+        """
+        out_path, _ = QFileDialog.getSaveFileName(self, title, str(default), file_filter)
+        self.raise_()
+        self.activateWindow()
+        return out_path
+
     def _on_save_png(self):
         entry = self._entries[self._idx]
         if not self._assert_exportable_processing():
             return
-        out_path, _ = QFileDialog.getSaveFileName(
-            self, "Save PNG", str(self._default_viewer_export_path(".png")),
+        out_path = self._ask_save_path(
+            "Save PNG", str(self._default_viewer_export_path(".png")),
             "PNG images (*.png)")
         if not out_path:
             return
@@ -381,8 +393,7 @@ class ImageViewerProcessingExportMixin:
         if not self._assert_exportable_processing():
             return
         entry = self._entries[self._idx]
-        out_path, _ = QFileDialog.getSaveFileName(
-            self,
+        out_path = self._ask_save_path(
             "Save processed image",
             str(Path.home() / f"{entry.stem}_processed.sxm"),
             (
@@ -430,8 +441,7 @@ class ImageViewerProcessingExportMixin:
                 "SXM export from the viewer is available for Createc .dat scans."
             )
             return
-        out_path, _ = QFileDialog.getSaveFileName(
-            self,
+        out_path = self._ask_save_path(
             title,
             str(self._default_viewer_export_path(suffix)),
             file_filter,
@@ -481,8 +491,7 @@ class ImageViewerProcessingExportMixin:
             self._status_lbl.setText("No provenance available to save.")
             return
         entry = self._entries[self._idx]
-        out_path, _ = QFileDialog.getSaveFileName(
-            self,
+        out_path = self._ask_save_path(
             "Save provenance",
             str(Path.home() / f"{entry.stem}.probeflow.json"),
             "ProbeFlow provenance (*.probeflow.json *.json)",

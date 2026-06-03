@@ -435,7 +435,36 @@ class ImageViewerDialog(
         self._sidebar_tabs.setElideMode(Qt.ElideRight)
         self._sidebar_tabs.tabBar().setUsesScrollButtons(False)
         self._sidebar_tabs.tabBar().setExpanding(False)
-        right_lay.addWidget(self._sidebar_tabs, 1)
+
+        # The sidebar can show either the tab strip (page 0) or a single tool's
+        # controls (page 1) — e.g. the lattice grid — so an interactive tool gets
+        # the whole right column instead of opening a second dock.
+        self._sidebar_stack = QStackedWidget()
+        self._sidebar_stack.addWidget(self._sidebar_tabs)            # page 0
+        self._sidebar_tool_host = QWidget()
+        _tool_lay = QVBoxLayout(self._sidebar_tool_host)
+        _tool_lay.setContentsMargins(0, 0, 0, 0)
+        _tool_lay.setSpacing(6)
+        _tool_header = QHBoxLayout()
+        self._sidebar_tool_back = QPushButton("←  Back")
+        self._sidebar_tool_back.setObjectName("ghostBtn")
+        self._sidebar_tool_back.setCursor(QCursor(Qt.PointingHandCursor))
+        self._sidebar_tool_back.setDefault(False)
+        self._sidebar_tool_back.setAutoDefault(False)
+        self._sidebar_tool_back.clicked.connect(self._on_sidebar_tool_back)
+        _tool_header.addWidget(self._sidebar_tool_back)
+        self._sidebar_tool_title = QLabel("")
+        self._sidebar_tool_title.setStyleSheet("font-weight: 700;")
+        _tool_header.addWidget(self._sidebar_tool_title, 1)
+        _tool_lay.addLayout(_tool_header)
+        self._sidebar_tool_content = QWidget()
+        QVBoxLayout(self._sidebar_tool_content).setContentsMargins(0, 0, 0, 0)
+        _tool_lay.addWidget(self._sidebar_tool_content, 1)
+        self._sidebar_stack.addWidget(self._sidebar_tool_host)       # page 1
+        self._sidebar_tool_widget = None
+        self._sidebar_tool_on_close = None
+
+        right_lay.addWidget(self._sidebar_stack, 1)
         self._sidebar_tab_indices: dict[str, int] = {}
         # (key, label, tooltip) in tab order — also drives the collapsed rail.
         self._sidebar_tab_meta: list[tuple[str, str, str]] = []
@@ -1025,7 +1054,7 @@ class ImageViewerDialog(
             self._measurement_panel.line_periodicity_panel,
         )
         self._measurement_panel.roiStatsRequested.connect(
-            self._image_measurements.add_active_roi_stats_measurement
+            self._roi_stats_active_and_show
         )
         self._measurement_panel.stepHeightRequested.connect(
             self._image_measurements.add_selected_step_height_measurement
@@ -1040,6 +1069,7 @@ class ImageViewerDialog(
         self._measurement_panel.updateAngleRequested.connect(
             self._on_update_angle_measurement
         )
+        self._measurement_panel.clearAngleRequested.connect(self._clear_angle_overlay)
         self._measurement_panel.featureFinderRequested.connect(self._on_open_feature_finder)
         self._measurement_panel.pairCorrelationRequested.connect(
             self._on_open_pair_correlation
@@ -1062,7 +1092,7 @@ class ImageViewerDialog(
                 "on_roi_set_changed":    self._on_image_roi_set_changed,
                 "on_fft_roi":            self._on_roi_fft,
                 "on_histogram_roi":      self._on_roi_histogram,
-                "on_roi_stats_measurement": self._image_measurements.add_roi_stats_measurement,
+                "on_roi_stats_measurement": self._roi_stats_roi_and_show,
                 "on_step_height_measurement": self._image_measurements.add_step_height_measurement_for_rois,
                 "on_line_profile_roi":   self._on_roi_line_profile,
                 "on_line_profile_measurement": self._image_measurements.add_line_profile_measurement_for_roi,
@@ -1466,7 +1496,7 @@ class ImageViewerDialog(
         measurements_menu.addSeparator()
         add_roi_stats_action = self._viewer_action(
             "measure.add_roi_stats",
-            self._image_measurements.add_active_roi_stats_measurement,
+            self._roi_stats_active_and_show,
             register=self._viewer_measurement_actions,
         )
         measurements_menu.addAction(add_roi_stats_action)
@@ -1737,12 +1767,75 @@ class ImageViewerDialog(
     def _show_sidebar_tab(self, key: str) -> None:
         if not hasattr(self, "_sidebar_tabs"):
             return
-        # A request to show a tab implies the panel should be visible.
+        # A request to show a tab implies the panel should be visible and that
+        # any in-sidebar tool view yields back to the tabs.
         if getattr(self, "_sidebar_collapsed", False):
             self._set_sidebar_collapsed(False)
+        if hasattr(self, "_sidebar_stack"):
+            self._sidebar_stack.setCurrentIndex(0)
         idx = self._sidebar_tab_indices.get(key)
         if idx is not None:
             self._sidebar_tabs.setCurrentIndex(idx)
+
+    def _show_sidebar_tool(self, title: str, widget, on_close=None) -> None:
+        """Host an interactive tool's controls in the sidebar column (page 1).
+
+        Replaces the tab strip with *widget* + a Back button, so a tool like the
+        lattice grid gets the whole right column instead of opening a 2nd dock.
+        ``on_close`` runs when the user clicks Back (e.g. to clear an overlay).
+        """
+        self._close_sidebar_tool()
+        if getattr(self, "_sidebar_collapsed", False):
+            self._set_sidebar_collapsed(False)
+        self._sidebar_tool_title.setText(title)
+        self._sidebar_tool_content.layout().addWidget(widget)
+        self._sidebar_tool_widget = widget
+        self._sidebar_tool_on_close = on_close
+        self._sidebar_stack.setCurrentIndex(1)
+
+    def _on_sidebar_tool_back(self) -> None:
+        cb = self._sidebar_tool_on_close
+        if cb is not None:
+            cb()
+        self._close_sidebar_tool()
+
+    def _close_sidebar_tool(self) -> None:
+        widget = getattr(self, "_sidebar_tool_widget", None)
+        if widget is not None:
+            widget.setParent(None)
+            self._sidebar_tool_widget = None
+        self._sidebar_tool_on_close = None
+        if hasattr(self, "_sidebar_stack"):
+            self._sidebar_stack.setCurrentIndex(0)
+
+    # ── ROI statistics (recorded to the table + shown in a modal) ──────────────
+    def _roi_stats_active_and_show(self) -> None:
+        self._image_measurements.add_active_roi_stats_measurement()
+        self._present_roi_stats_modal()
+
+    def _roi_stats_roi_and_show(self, roi_id: str) -> None:
+        self._image_measurements.add_roi_stats_measurement(roi_id)
+        self._present_roi_stats_modal()
+
+    def _present_roi_stats_modal(self) -> None:
+        """Pop the latest ROI-statistics result in a dismissible modal card."""
+        results = self._measurement_table.results()
+        if not results or results[-1].kind != "roi_stats":
+            return
+        from probeflow.gui.widgets.measurement_table import _format_details
+        card = QWidget()
+        card.setMinimumWidth(300)
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(4, 4, 4, 4)
+        lay.setSpacing(6)
+        title = QLabel("ROI statistics")
+        title.setStyleSheet("font-weight: 700; font-size: 14pt;")
+        lay.addWidget(title)
+        body = QLabel(_format_details(results[-1]))
+        body.setWordWrap(True)
+        body.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        lay.addWidget(body)
+        self._present_modal_tool(card)
 
     def _set_sidebar_collapsed(self, collapsed: bool) -> None:
         """Collapse the task sidebar to a thin rail (image takes full width)."""

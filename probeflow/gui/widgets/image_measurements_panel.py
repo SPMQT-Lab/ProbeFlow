@@ -46,6 +46,7 @@ class ImageMeasurementsPanel(QWidget):
     distanceRequested = Signal()
     angleRequested = Signal()
     updateAngleRequested = Signal()
+    clearAngleRequested = Signal()
     featureFinderRequested = Signal()
     pairCorrelationRequested = Signal()
     featureToLatticeRequested = Signal()
@@ -69,7 +70,6 @@ class ImageMeasurementsPanel(QWidget):
     # want it). (group title, [(label, key, kind), …]); kind ∈ setup|oneshot|dialog.
     _TOOL_GROUPS = [
         ("Quick measurements", [
-            ("Distance", "distance", "oneshot"),
             ("Angle", "angle", "oneshot"),
         ]),
         ("ROI measurements", [
@@ -280,6 +280,12 @@ class ImageMeasurementsPanel(QWidget):
         self._update_angle_btn.setAutoDefault(False)
         self._update_angle_btn.clicked.connect(self.updateAngleRequested.emit)
         extra_lay.addWidget(self._update_angle_btn)
+        self._clear_angle_btn = QPushButton("Clear angle")
+        self._clear_angle_btn.setToolTip("Remove the angle overlay and its measurement.")
+        self._clear_angle_btn.setDefault(False)
+        self._clear_angle_btn.setAutoDefault(False)
+        self._clear_angle_btn.clicked.connect(self.clearAngleRequested.emit)
+        extra_lay.addWidget(self._clear_angle_btn)
         # Periodicity belongs to the line context: reach its tool from the line profile.
         self._periodicity_btn = QPushButton("Find spacing (periodicity)…")
         self._periodicity_btn.setToolTip(
@@ -338,6 +344,7 @@ class ImageMeasurementsPanel(QWidget):
         show_update = key == "angle"
         show_period = key == "line_profile"
         self._update_angle_btn.setVisible(show_update)
+        self._clear_angle_btn.setVisible(show_update)
         self._periodicity_btn.setVisible(show_period)
         self._detail_extra.setVisible(show_update or show_period)
 
@@ -386,7 +393,9 @@ class ImageMeasurementsPanel(QWidget):
         if r.kind == "line_profile":
             parts = []
             if v.get("length") is not None:
-                parts.append(f"Length {v['length']:.4g} {r.x_unit or ''}".rstrip())
+                lp = v.get("length_px")
+                px = f" ({int(lp)} px)" if lp is not None else ""
+                parts.append(f"Length {v['length']:.4g} {r.x_unit or ''}{px}".rstrip())
             hd = v.get("height_difference")
             if hd is not None:
                 parts.append(f"Δheight {hd:.4g} {r.z_unit or r.y_unit or ''}".rstrip())

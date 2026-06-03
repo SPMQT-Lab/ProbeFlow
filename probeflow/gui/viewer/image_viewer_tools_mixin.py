@@ -33,8 +33,9 @@ class ImageViewerToolsMixin:
             arr = getattr(self, "_raw_arr", None)
         return arr
 
-    def _clear_lattice_grid_overlay(self, *, close_dock: bool = True) -> bool:
-        """Remove the real-space lattice grid overlay and optionally close its dock."""
+    def _clear_lattice_grid_overlay(self, *, close_panel: bool = True) -> bool:
+        """Remove the real-space lattice grid overlay and optionally close its
+        sidebar tool panel."""
         removed = False
         panel = getattr(self, "_lattice_grid_panel", None)
         if panel is not None:
@@ -58,27 +59,15 @@ class ImageViewerToolsMixin:
                     pass
             self._lattice_grid_item = None
 
-        dock = getattr(self, "_lattice_grid_dock", None)
-        if dock is not None:
-            if close_dock:
-                try:
-                    dock.blockSignals(True)
-                    dock.close()
-                except RuntimeError:
-                    pass
-                finally:
-                    try:
-                        dock.blockSignals(False)
-                    except RuntimeError:
-                        pass
-            self._lattice_grid_dock = None
+        if close_panel and hasattr(self, "_close_sidebar_tool"):
+            self._close_sidebar_tool()
 
         if hasattr(self, "_sync_viewer_menu_actions"):
             self._sync_viewer_menu_actions()
         return removed
 
     def _on_clear_lattice_grid(self) -> None:
-        if self._clear_lattice_grid_overlay(close_dock=True):
+        if self._clear_lattice_grid_overlay(close_panel=True):
             self._status_lbl.setText("Cleared lattice grid overlay.")
         else:
             self._status_lbl.setText("No lattice grid overlay to clear.")
@@ -91,7 +80,7 @@ class ImageViewerToolsMixin:
             return
         from probeflow.gui.lattice_grid import open_real_space_tool
 
-        self._clear_lattice_grid_overlay(close_dock=True)
+        self._clear_lattice_grid_overlay(close_panel=True)
 
         def _get_image():
             return self._display_arr if self._display_arr is not None else self._raw_arr
@@ -120,25 +109,12 @@ class ImageViewerToolsMixin:
         )
         self._lattice_grid_item = item
         self._lattice_grid_panel = panel
-        dock = QDockWidget("Lattice Grid", self._viewer_main)
-        dock.setObjectName("imageViewerLatticeGridDock")
-        dock.setWidget(panel)
-        dock.setFeatures(
-            QDockWidget.DockWidgetClosable
-            | QDockWidget.DockWidgetMovable
-            | QDockWidget.DockWidgetFloatable
+        # Host the controls in the sidebar (single right column) rather than a
+        # separate dock that competes with the image for width.
+        self._show_sidebar_tool(
+            "Lattice grid", panel,
+            on_close=lambda: self._clear_lattice_grid_overlay(close_panel=False),
         )
-        dock.setMinimumWidth(220)
-        self._viewer_main.addDockWidget(Qt.RightDockWidgetArea, dock)
-        self._lattice_grid_dock = dock
-        dock.show()
-        dock.raise_()
-
-        def _on_dock_closed():
-            if getattr(self, "_lattice_grid_dock", None) is dock:
-                self._clear_lattice_grid_overlay(close_dock=False)
-
-        dock.visibilityChanged.connect(lambda v: _on_dock_closed() if not v else None)
         self._sync_viewer_menu_actions()
 
     def _on_open_feature_finder(self):

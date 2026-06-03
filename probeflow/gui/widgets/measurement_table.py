@@ -292,7 +292,8 @@ def _format_details(result: MeasurementResult) -> str:
         x2 = result.values.get("x2")
         y2 = result.values.get("y2")
         if length is not None:
-            lines.append(f"Length: {_fmt_value(length)} {x_unit}".rstrip())
+            px = f"  ({int(length_px)} px)" if length_px is not None else ""
+            lines.append(f"Length: {_fmt_value(length)} {x_unit}{px}".rstrip())
         if hdiff is not None:
             lines.append(f"Height difference: {_fmt_value(hdiff)} {y_unit}".rstrip())
         if n_pts is not None:

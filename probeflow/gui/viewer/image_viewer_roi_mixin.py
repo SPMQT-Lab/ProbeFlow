@@ -154,6 +154,16 @@ class ImageViewerRoiMixin:
         if roi is not None and hasattr(self, "_status_lbl"):
             self._status_lbl.setText(f"Deleted ROI '{roi.name}'.")
 
+    def _clear_angle_overlay(self) -> None:
+        """Remove just the angle overlay (and its measurement id) from the image."""
+        if self._angle_overlay is not None:
+            self._angle_overlay.remove_from_scene(self._zoom_lbl.scene())
+            self._angle_overlay = None
+            self._angle_measurement_id = None
+            if hasattr(self, "_status_lbl"):
+                self._status_lbl.setText("Angle overlay cleared.")
+            self._sync_viewer_menu_actions()
+
     def _clear_all_image_marks(self) -> None:
         delete_all_rois(self._image_roi_set, self._on_image_roi_set_changed)
         if self._angle_overlay is not None:
@@ -162,7 +172,7 @@ class ImageViewerRoiMixin:
             self._angle_overlay = None
             self._angle_measurement_id = None
         if hasattr(self, "_clear_lattice_grid_overlay"):
-            self._clear_lattice_grid_overlay(close_dock=True)
+            self._clear_lattice_grid_overlay(close_panel=True)
         if hasattr(self, "_status_lbl"):
             self._status_lbl.setText("Cleared ROIs and overlays.")
 

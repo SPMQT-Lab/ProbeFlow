@@ -135,15 +135,26 @@ class ImageViewerDisplayMixin:
             return
         self._target_drs().set_manual(lo_phys / scale, hi_phys / scale)
 
+    # Auto-contrast cycles through progressively tighter central windows of the
+    # data range (low %, high %, label). Clicking Auto steps to the next one.
+    _AUTO_CLIP_PRESETS = (
+        (1.0, 99.0, "99%"),
+        (16.0, 84.0, "68%"),
+        (33.5, 66.5, "33%"),
+    )
+
     def _on_auto_clip(self):
-        """Reset to 1%–99% percentile autoscale."""
-        self._clip_low  = 1.0
-        self._clip_high = 99.0
+        """Cycle the autoscale window: 99% → 68% → 33% → 99% of the data range."""
+        presets = self._AUTO_CLIP_PRESETS
+        idx = (getattr(self, "_auto_clip_idx", -1) + 1) % len(presets)
+        self._auto_clip_idx = idx
+        self._clip_low, self._clip_high, label = presets[idx]
         self._target_drs().reset()
-        self._status_lbl.setText("Auto contrast applied.")
+        self._status_lbl.setText(f"Auto contrast: central {label} of range.")
 
     def _on_reset_display(self):
         """Reset display range to default percentile state."""
+        self._auto_clip_idx = 0  # next Auto click starts the cycle at 99%
         self._target_drs().reset()
         self._status_lbl.setText("Display range reset.")
 
