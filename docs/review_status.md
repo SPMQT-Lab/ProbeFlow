@@ -124,27 +124,46 @@ Backend / GUI architecture:
   - `filters.py` 1214 → 577 LOC, with the Bragg/reciprocal-lattice analysis moved
     to `bragg.py` and re-exported for backward compatibility.
 
-### Genuinely remaining (deliberately deferred)
+### 2026-06-04 re-check #2 — the rest of the backlog was already enacted
 
-These are real but are either large structural refactors (carry regression risk,
-better done as their own slices) or need instrument data to verify safely. None
-is a user-facing defect.
-- **Layering tidiness**: `apply_processing_state` opens files on disk; `Scan`
-  lazy-imports `processing.*`; `processing/analysis.py` holds analysis-style
-  measurements; spectroscopy spread across three packages; many-arg measurement
-  constructors → context object.
-- **IO format hardening (needs instrument test files)**: RHK SM4 dtype
-  disambiguation ignores the `data_size` header field; `_parse_string_data`
-  truncates malformed blocks; `_parse_pages` assumes a fixed per-page record
-  stride. Plus the cosmetic `_data_offset_in_file` cushion-cache misnomer.
-- **GUI coupling/polish**: tool launch split between `viewer/tool_launch.py` and
-  ad-hoc imports; `_collect_point_sources_m` / `ThresholdDialog` reach into other
-  widgets' private attrs; saved processing keyed by absolute path with no mtime
-  invalidation; thumbnail combos use `currentText` as proxy state; `closeEvent`
-  writes config ad-hoc; `desktop_layout` requires exact splitter counts; survey
-  import inline in `_build_ui`; no `FeatureCountingWindow` lifecycle tests; minor
-  `threshold`-dialog highlight pixmap uses raw `vmin/vmax`; `affine_lattice_correction`
-  vs `rotate_arbitrary` NaN-mask edge difference.
+A second deliberate re-verification (prompted by how many earlier "open" items
+turned out already-done) confirmed that essentially the entire deferred list had
+been fixed during the deep-review campaign without being logged against its
+finding number. Verified resolved / intentional in the current code:
+
+- **Layering**: `apply_processing_state` no longer hides disk I/O — it takes an
+  `operand_resolver` injection point with the file-load isolated in a documented
+  default (cites arch-backend #13). `Scan`'s lazy `processing.*` imports are the
+  intended way to break the core←processing cycle.
+- **IO (RHK SM4 + SXM)**: `_dtype_from_data_size` now uses the `data_size` header
+  with a warned payload-length fallback (#7); `_parse_string_data` warns and stops
+  on a truncated block instead of silently dropping (#12); `_parse_page_index_array`
+  advances by `PAGE_INDEX_ARRAY_SIZE + object_count·OBJECT_SIZE`, not a fixed
+  stride (#13); the SXM cushion cache was cleanly refactored into `_cushion_tail_lens`
+  + `_data_offset_in_file` with accurately-named byte caches (#22).
+- **Image processing**: `affine_lattice_correction` now uses weight-normalized
+  NaN-aware OOB handling, matching the rotate path (#8); the threshold dialog's
+  display range is percentile-based, not raw extrema (#13).
+- **GUI**: `ThresholdDialog` owns its own `HistogramPanel` and uses its public API
+  (#6); the three thumbnail setters share `_apply_thumbnail_setting` (#14); saved
+  processing is keyed by path **and** mtime (#10); `closeEvent` writes config via
+  the centralized `_save_viewer_desktop_layout_into` helper (#16); survey
+  availability is probed before `_build_ui` (#17); `desktop_layout` restore
+  falls back gracefully when splitter counts differ (#18);
+  `FeatureCountingWindow` now has `test_feature_counting_controller.py` +
+  `test_gui_features.py` (#21).
+
+### Genuinely remaining (architectural opinions — not bugs)
+
+What is left is purely structural preference: no defect, no functional benefit,
+and a real import-churn/regression cost to change. Deliberately not pursued.
+
+- Spectroscopy logic spread across three packages; `processing/analysis.py` holds
+  analysis-style measurements despite living in `processing/`; many-argument
+  measurement constructors could take a context object.
+- `_collect_point_sources_m` reads the measurement controller's (non-underscore)
+  `feature_points` / `feature_metadata` via `getattr` defaults — minor coupling,
+  acceptable as-is.
 
 ## Deferred (not in code-review scope)
 
