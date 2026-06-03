@@ -5,9 +5,8 @@ TOOLS = ("pan", "rectangle", "ellipse", "polygon", "freehand", "line", "point", 
 
 _TOOL_HINTS: dict[str, str] = {
     "pan": (
-        "Pan mode: drag blank image to move view. "
-        "Click an ROI to select it. Right-click image or ROI for actions. "
-        "Ctrl+scroll zooms."
+        "Cursor: click an ROI to select it; drag to pan. "
+        "Right-click for actions; Ctrl+scroll to zoom."
     ),
     "rectangle": (
         "Rectangle ROI: drag to draw an area. "

@@ -854,7 +854,7 @@ class ImageCanvas(QGraphicsView):
                 if abs(sp.x() - view_pos.x()) <= 10 and abs(sp.y() - view_pos.y()) <= 10:
                     return ("marker", "Spectroscopy marker: click to open linked spectrum.")
 
-        return ("image", "Image: drag to pan, right-click for image actions, Ctrl+scroll to zoom.")
+        return ("image", "Drag to pan · right-click for actions · Ctrl+scroll to zoom.")
 
     def _emit_hover_message(self, view_pos: QPoint) -> None:
         message = self._hover_message_at(view_pos)

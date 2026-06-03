@@ -129,7 +129,7 @@ class ThumbnailGrid(QWidget):
         self._history:     list[Path]     = []  # back stack of previous dirs
 
         # empty-state placeholder
-        self._empty_lbl = QLabel("Open a folder to browse SXM scans")
+        self._empty_lbl = QLabel("Open a folder to browse scans and spectra")
         self._empty_lbl.setAlignment(Qt.AlignCenter)
         self._empty_lbl.setFont(ui_font(12))
         self._grid.addWidget(self._empty_lbl, 0, 0)

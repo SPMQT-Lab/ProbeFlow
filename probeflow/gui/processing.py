@@ -89,6 +89,10 @@ class ProcessingControlPanel(QWidget):
         lay.addWidget(line_lbl)
 
         self._align_combo = _combo_row("Align rows:", ["None", "Median", "Mean"])
+        self._align_combo.setToolTip(
+            "Level each scan line by subtracting its median or mean, removing "
+            "row-to-row offsets and slow tilt along the slow-scan direction."
+        )
 
         self._bad_lines_combo = _combo_row(
             "Bad lines:", ["None", "Step segments", "MAD/outlier segments"]
@@ -232,6 +236,10 @@ class ProcessingControlPanel(QWidget):
         _col_lbl("Filters", L)
 
         self._smooth_combo = _combo_row("Smooth:", ["None", "Gaussian"], L, 54)
+        self._smooth_combo.setToolTip(
+            "Gaussian blur to suppress noise. Larger sigma (px) smooths more, but "
+            "also blurs genuine fine features."
+        )
         self._smooth_sigma_w, self._smooth_sigma_sl, _ = _sub_slider(
             "sigma:", 1, 20, 1, "{v}px")
         L.addWidget(self._smooth_sigma_w)
@@ -251,6 +259,11 @@ class ProcessingControlPanel(QWidget):
             lambda i: self._highpass_sigma_w.setVisible(i != 0))
 
         self._edge_combo = _combo_row("Edge:", ["None", "Laplacian", "LoG", "DoG"], L, 54)
+        self._edge_combo.setToolTip(
+            "Edge / feature enhancement: Laplacian (2nd derivative), LoG "
+            "(Laplacian-of-Gaussian), or DoG (Difference-of-Gaussians). Sigma (px) "
+            "sets the feature scale."
+        )
         self._edge_sigma_w, self._edge_sigma_sl, _ = _sub_slider(
             "sigma:", 1, 20, 1, "{v}px")
         L.addWidget(self._edge_sigma_w)

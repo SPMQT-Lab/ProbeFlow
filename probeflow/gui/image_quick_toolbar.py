@@ -50,12 +50,12 @@ _MODE_BUTTONS: list[tuple[str, str, str, str]] = [
         "Draw a line ROI for profiles, step heights, and periodicity.  [L]",
         "line",
     ),
-    ("point",     "Point",   "Place a point ROI.  [T]", "point"),
+    ("point",     "Point",   "Place a point ROI.  [P]", "point"),
 ]
 
 # Less-common drawing tools tucked behind the "More" popup.
 _MORE_MODE_BUTTONS: list[tuple[str, str, str, str]] = [
-    ("polygon",   "Polygon",  "Draw a polygon ROI by clicking vertices.  [P]", "polygon"),
+    ("polygon",   "Polygon",  "Draw a polygon ROI by clicking vertices.  [G]", "polygon"),
     ("freehand",  "Freehand", "Draw a freehand ROI.  [F]", "freehand"),
 ]
 

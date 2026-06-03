@@ -372,6 +372,14 @@ class ImageViewerDialog(
         zoom_hint.setFont(ui_font(8))
         toolbar.addWidget(zoom_hint)
         toolbar.addStretch()
+        # Visible entry point for the command finder (also Ctrl+K / Help menu) so
+        # new users discover it.
+        search_btn = QPushButton("⌕ Search")
+        search_btn.setToolTip("Find and run any command  (Ctrl+K)")
+        search_btn.setDefault(False)
+        search_btn.setAutoDefault(False)
+        search_btn.clicked.connect(self._show_command_finder)
+        toolbar.addWidget(search_btn)
         help_btn = QPushButton("?")
         help_btn.setFixedSize(24, 24)
         help_btn.setToolTip("Show image viewer shortcuts")
@@ -1526,11 +1534,6 @@ class ImageViewerDialog(
         )
         measurements_menu.addAction(periodic_filter_action)
         measurements_menu.addSeparator()
-        show_measurements_action = self._viewer_action(
-            "measure.show_table",
-            self._show_measurements,
-        )
-        measurements_menu.addAction(show_measurements_action)
         show_measure_tab_action = self._viewer_action(
             "measure.show_panel",
             lambda: self._show_sidebar_tab("measurements"),
@@ -1794,13 +1797,14 @@ class ImageViewerDialog(
         k = event.key()
 
         # ── drawing tool shortcuts ────────────────────────────────────────────
+        # Mnemonic keys: the letter matches the tool name.
         _tool_keys = {
             Qt.Key_R: "rectangle",
             Qt.Key_E: "ellipse",
-            Qt.Key_P: "polygon",
-            Qt.Key_F: "freehand",
             Qt.Key_L: "line",
-            Qt.Key_T: "point",
+            Qt.Key_P: "point",
+            Qt.Key_G: "polygon",   # polyGon (P is taken by Point)
+            Qt.Key_F: "freehand",
         }
         if k in _tool_keys and not event.modifiers():
             self._set_drawing_tool(_tool_keys[k])

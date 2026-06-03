@@ -728,14 +728,14 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
 _ROI_REFERENCE_ENTRIES: tuple[_DefinitionEntry, ...] = (
     _DefinitionEntry(
         title="ROI model and selection state",
-        params=("pixel coordinates", "ROISet", "active ROI", "dock selection"),
+        params=("pixel coordinates", "ROISet", "active ROI", "list selection"),
         summary=(
             "Each ROI belongs to one image and is remembered between sessions in a "
             "small companion file saved next to the scan, so your regions are still "
             "there when you reopen it. Two ideas matter throughout: the 'active' "
             "ROI (the one currently highlighted, which canvas editing acts on) and "
-            "the ROI Manager 'selection' (one or more ROIs ticked in the list). "
-            "When you run a tool, it uses the dock selection if you have one, "
+            "the ROI Manager 'selection' (one or more ROIs ticked in the ROI tab's "
+            "list). When you run a tool, it uses that selection if you have one, "
             "otherwise it falls back to the active ROI."
         ),
         equations=(
@@ -747,7 +747,7 @@ _ROI_REFERENCE_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "  line = two endpoints plus optional averaging width\n"
             "  point = one fixed pixel coordinate\n\n"
             "action context:\n"
-            "  selected ROI(s) in ROI Manager dock win when present\n"
+            "  selected ROI(s) in the ROI Manager list win when present\n"
             "  otherwise use ROISet.active_roi_id\n"
             "  sidecar path = <scan stem>.rois.json",
         ),
@@ -767,42 +767,37 @@ _ROI_REFERENCE_ENTRIES: tuple[_DefinitionEntry, ...] = (
         ),
     ),
     _DefinitionEntry(
-        title="Drawing and pan tools",
-        params=("pan", "rectangle", "ellipse", "polygon", "freehand", "line", "point"),
+        title="Drawing tools and the cursor",
+        params=("cursor", "rectangle", "ellipse", "line", "point", "polygon", "freehand"),
         summary=(
-            "Pick a drawing tool, draw one ROI, and the viewer hands control back "
-            "to the everyday 'pan' tool automatically. Pan mode is where you spend "
-            "most of your time: it pans and zooms the image, shows a hint about "
-            "what is under the cursor, lets you click an ROI to select it, and lets "
-            "you drag the active ROI to move it."
+            "Pick a drawing tool, draw one ROI, and the viewer returns to the "
+            "cursor automatically. The cursor (↖) is the default tool: click an ROI "
+            "to select it, drag to pan, and Ctrl+scroll to zoom — no need to think "
+            "about it."
         ),
         equations=(
-            "pan mode:\n"
-            "  drag blank image = pan scroll area\n"
-            "  middle mouse = pan from any tool context\n"
-            "  Ctrl+scroll = zoom\n"
-            "  click ROI = select it; click active ROI = prepare to move or resize\n\n"
+            "shortcuts (press the key, then draw):\n"
+            "  R rectangle · E ellipse · L line · P point · G polygon · F freehand\n\n"
             "drawing completion:\n"
             "  rectangle/ellipse/line: drag, release to finish\n"
             "  point: click once to place\n"
             "  polygon: click vertices, Enter or double-click to close\n"
             "  freehand: drag path, release to finish\n"
-            "  Escape: cancel active drawing preview and return to pan",
+            "  Escape: cancel the drawing and return to the cursor",
         ),
         details=(
             "A rectangle or ellipse has to be dragged to a real size (a single "
             "click will not make one), and polygons and freehand shapes need at "
             "least three points. If you stop short, the half-drawn shape is simply "
             "discarded — nothing is left behind.",
-            "Watch the status bar and the tooltip that appears as you hover: they "
-            "tell you what the current click will do. In pan mode an ROI lights up "
-            "when the cursor is over it, and that highlight is a promise — clicking "
-            "selects exactly the ROI that is highlighted.",
+            "With the cursor, an ROI lights up when you hover over it, and that "
+            "highlight is a promise: clicking selects exactly the ROI that is "
+            "highlighted.",
         ),
         cautions=(
             "While a drawing tool is active, clicks make new shapes instead of "
-            "selecting existing ones. Switch back to pan (or press Escape) before "
-            "you try to move or right-click an ROI you already drew.",
+            "selecting existing ones. Press Escape (or pick the cursor) before you "
+            "move or right-click an ROI you already drew.",
         ),
     ),
     _DefinitionEntry(
@@ -1055,14 +1050,14 @@ _HOWTO_ENTRIES: tuple[_HowToEntry, ...] = (
         title="Create, select, and delete ROIs",
         goal="Mark regions, lines, or points on the image and manage them.",
         steps=(
-            "Pick a drawing tool (rectangle, ellipse, polygon, freehand, line, or "
-            "point) and draw one shape; the viewer returns to pan mode "
+            "Pick a drawing tool (rectangle, ellipse, line, point, polygon, or "
+            "freehand) and draw one shape; the viewer returns to the cursor "
             "automatically.",
             "Click a shape to select it — it lights up as you hover so you can see "
             "what a click will pick — and the selected ROI shows handles you can "
             "drag to reshape it.",
-            "Open the ROI Manager (ROI tab, then 'Show ROI Manager') to see every "
-            "ROI, rename them, set which one is active, or select several at once.",
+            "Open the ROI tab, which holds the ROI Manager, to see every ROI, "
+            "rename them, set which one is active, or select several at once.",
             "To delete, select an ROI and press Delete or Backspace, or use Delete "
             "in the ROI Manager (which can remove several selected ROIs at once).",
         ),
@@ -1080,7 +1075,7 @@ _HOWTO_ENTRIES: tuple[_HowToEntry, ...] = (
         goal="Read heights and distances across a feature, and save the profile.",
         steps=(
             "Choose the Line tool and drag a line across the feature; the tool "
-            "returns to pan mode and the new line becomes the active one.",
+            "returns to the cursor and the new line becomes the active one.",
             "Read the profile panel below the image — it plots height versus "
             "distance along the line and updates live as you drag the line or its "
             "endpoints.",
