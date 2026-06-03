@@ -91,7 +91,7 @@ class TestReconstructTab:
     def test_tab_present(self, qapp):
         dlg, _ = _dialog(qapp)
         labels = [dlg._tab_widget.tabText(i) for i in range(dlg._tab_widget.count())]
-        assert "Reconstruct" in labels
+        assert "Inverse FFT" in labels
         assert dlg._reconstruct_active()
 
     def test_preview_does_not_mutate_and_sets_active(self, qapp):

@@ -184,11 +184,15 @@ def test_tab_layout_and_content(qapp):
         dlg.show()
         qapp.processEvents()
 
-        # Tab order: Inspect(0), Grid(1), Correction(2), Expert(3)
+        # Tab order: Inspect(0), Grid(1), Correction(2), Mains(3), Inverse FFT(4).
+        # The "Expert" tab was removed (it duplicated the Grid tool + one display
+        # option, now in the View menu).
         assert dlg._tab_widget.tabText(0) == "Inspect"
         assert dlg._tab_widget.tabText(1) == "Grid"
         assert dlg._tab_widget.tabText(2) == "Correction"
-        assert dlg._tab_widget.tabText(3) == "⚙ Expert"
+        assert dlg._tab_widget.tabText(dlg._reconstruct_tab_index) == "Inverse FFT"
+        tab_labels = {dlg._tab_widget.tabText(i) for i in range(dlg._tab_widget.count())}
+        assert "⚙ Expert" not in tab_labels
 
         # Inspect tab is active on open
         assert dlg._tab_widget.currentIndex() == 0
@@ -202,22 +206,15 @@ def test_tab_layout_and_content(qapp):
         assert "Known structure" in grid_group_titles
         assert "Compare with known structure" in grid_group_titles
 
-        # Correction tab: correction label, preview/apply buttons, and piezo advisor
+        # Correction tab: correction label + preview/apply buttons. The piezo
+        # constants advisor was removed (the undistort text already conveys it).
         corr_tab = dlg._tab_widget.widget(2)
         corr_btn_texts = {btn.text() for btn in corr_tab.findChildren(QPushButton)}
         corr_group_titles = {grp.title() for grp in corr_tab.findChildren(QGroupBox)}
         assert "Preview corrected image" in corr_btn_texts
         assert "Apply correction" in corr_btn_texts
-        assert "Copy recommendation" in corr_btn_texts
-        assert "Piezo constants" in corr_group_titles
-
-        # Expert tab keeps advanced display/correction options, not scanner calibration.
-        expert_tab = dlg._tab_widget.widget(3)
-        expert_btn_texts = {btn.text() for btn in expert_tab.findChildren(QPushButton)}
-        expert_group_titles = {grp.title() for grp in expert_tab.findChildren(QGroupBox)}
-        assert "Detect peaks" not in expert_btn_texts
-        assert "Clear picks" not in expert_btn_texts
-        assert "Scanner calibration (expert)" not in expert_group_titles
+        assert "Copy recommendation" not in corr_btn_texts
+        assert "Piezo constants" not in corr_group_titles
     finally:
         dlg.close()
         dlg.deleteLater()
@@ -343,37 +340,6 @@ def test_fft_correction_records_roi_source_in_provenance(qapp):
         params = applied[0][1]
         assert params["fft_source"] == "active_roi"
         assert params["fft_roi_id"] == "roi-7"
-    finally:
-        dlg.close()
-        dlg.deleteLater()
-        qapp.processEvents()
-
-
-def test_piezo_recommendation_is_independent_of_canvas_zoom(qapp):
-    import numpy as np
-
-    dlg = FFTViewerDialog(np.ones((16, 16)), (1e-9, 1e-9))
-    try:
-        dlg.show()
-        qapp.processEvents()
-        dlg._on_open_fft_lattice()
-        qapp.processEvents()
-
-        dlg._piezo_x_edit.setText("100.00")
-        dlg._piezo_y_edit.setText("100.00")
-        qapp.processEvents()
-        original = dlg._piezo_result_lbl.text()
-        assert "X:" in original
-        assert "Y:" in original
-
-        dlg.resize(1400, 760)
-        qapp.processEvents()
-        dlg._zoom_by(0.5, 0.0, 0.0)
-        qapp.processEvents()
-        dlg._fft_equal_aspect_cb.setChecked(True)
-        qapp.processEvents()
-
-        assert dlg._piezo_result_lbl.text() == original
     finally:
         dlg.close()
         dlg.deleteLater()

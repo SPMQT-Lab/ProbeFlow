@@ -9,13 +9,13 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from probeflow.gui.typography import ui_font
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QAction, QActionGroup, QFont
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFileDialog, QFrame,
     QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
-    QInputDialog, QPushButton, QScrollArea, QSizePolicy, QSpinBox, QSplitter,
-    QTabWidget, QVBoxLayout, QWidget,
+    QInputDialog, QMenuBar, QPushButton, QScrollArea, QSizePolicy, QSpinBox,
+    QSplitter, QTabWidget, QVBoxLayout, QWidget,
 )
 
 from probeflow.analysis.lattice_correction_workflow import (
@@ -36,7 +36,6 @@ from probeflow.gui.lattice_correction_ui import (
     delete_structure,
     ideal_lattice_from_structure,
     load_known_structures,
-    piezo_constant_recommendation,
     save_known_structures,
     structure_display_value_nm,
     upsert_structure,
@@ -210,7 +209,13 @@ class FFTViewerDialog(QDialog):
     # ── layout helpers (shared with subclasses) ────────────────────────────────
 
     def _build_toolbar_row(self) -> QHBoxLayout:
-        """Create toolbar with Scale/LUT/Window/DC controls and zoom/export buttons."""
+        """Essentials-only toolbar.
+
+        Appearance/preprocessing controls (component, colour map, window, DC
+        handling) and Export live in the menu bar; the combos below are kept as
+        hidden state-holders that the menu actions drive, so all existing
+        handlers and state-restore paths keep working unchanged.
+        """
         tb = QHBoxLayout()
         tb.setSpacing(6)
 
@@ -219,59 +224,48 @@ class FFTViewerDialog(QDialog):
             lb.setFont(ui_font(9))
             return lb
 
-        def _combo(items, min_width=80):
-            c = QComboBox()
+        def _combo(items, min_width=80, *, hidden=False):
+            c = QComboBox(self)
             c.addItems(items)
             c.setFont(ui_font(9))
             c.setFixedHeight(24)
             c.setMinimumWidth(min_width)
+            if hidden:
+                c.hide()
             return c
 
-        tb.addWidget(_lbl("View:"))
-        self._fft_view_combo = _combo(["Magnitude", "Phase"], 96)
+        # ── hidden state-holders (driven by the menu bar) ────────────────────
+        self._fft_view_combo = _combo(["Magnitude", "Phase"], 96, hidden=True)
         self._fft_view_combo.setToolTip(_tip(
             "Show the FFT magnitude (default) or phase. Phase is in radians "
             "(−π…π) on a cyclic colour map; most analysis uses magnitude."))
         self._fft_view_combo.currentIndexChanged.connect(self._on_fft_view_changed)
-        tb.addWidget(self._fft_view_combo)
 
-        tb.addWidget(_lbl("Scale:"))
-        self._scale_combo = _combo(["Log", "Linear"], 80)
-        self._scale_combo.setToolTip(
-            "FFT display scale.  Log makes weak peaks visible; "
-            "Linear shows raw amplitude ratios."
-        )
+        # Scale is essentially set-and-forget (log by default) → View menu.
+        self._scale_combo = _combo(["Log", "Linear"], 80, hidden=True)
         self._scale_combo.currentIndexChanged.connect(self._on_scale_changed)
-        tb.addWidget(self._scale_combo)
 
-        tb.addWidget(_lbl("LUT:"))
+        self._window_combo = _combo(["Hann", "None", "Tukey"], 82, hidden=True)
+        self._window_combo.currentIndexChanged.connect(self._on_window_changed)
+
+        self._dc_combo = _combo(["Zero DC", "Keep DC", "Mask DC"], 95, hidden=True)
+        self._dc_combo.setCurrentIndex(1)
+        self._dc_combo.currentIndexChanged.connect(self._on_dc_changed)
+
+        # Equal-aspect display toggle (driven by the View menu; was the "Expert" tab).
+        self._fft_equal_aspect_cb = QCheckBox("Equal q_x/q_y aspect")
+        self._fft_equal_aspect_cb.setChecked(False)
+        self._fft_equal_aspect_cb.hide()
+        self._fft_equal_aspect_cb.toggled.connect(self._on_equal_aspect_toggled)
+
+        # ── essentials kept on the toolbar ───────────────────────────────────
+        tb.addWidget(_lbl("Colour:"))
         self._cmap_combo = _combo(
             ["Gray", "Gray (inv.)", "Inferno", "Hot", "Viridis", "Plasma", "Turbo"], 96
         )
         self._cmap_combo.setToolTip("Colour map for the FFT intensity display.")
         self._cmap_combo.currentIndexChanged.connect(self._on_cmap_changed)
         tb.addWidget(self._cmap_combo)
-
-        tb.addWidget(_lbl("Window:"))
-        self._window_combo = _combo(["Hann", "None", "Tukey"], 82)
-        self._window_combo.setToolTip(
-            "Apodisation window applied before the FFT to reduce ringing at image edges. "
-            "Hann is recommended for most images."
-        )
-        self._window_combo.currentIndexChanged.connect(self._on_window_changed)
-        tb.addWidget(self._window_combo)
-
-        tb.addWidget(_lbl("DC:"))
-        self._dc_combo = _combo(["Zero DC", "Keep DC", "Mask DC"], 95)
-        self._dc_combo.setCurrentIndex(1)
-        self._dc_combo.setToolTip(
-            "How the zero-frequency (DC) component is treated.  "
-            "'Keep DC' shows the bright central peak; "
-            "'Zero DC' removes it; "
-            "'Mask DC' hides it without removing it from the data."
-        )
-        self._dc_combo.currentIndexChanged.connect(self._on_dc_changed)
-        tb.addWidget(self._dc_combo)
 
         tb.addWidget(_lbl("Source:"))
         self._fft_source_combo = _combo(["Whole image", "Active ROI"], 104)
@@ -318,10 +312,9 @@ class FFTViewerDialog(QDialog):
         self._focus_fft_btn = focus_btn
 
         for label, tip, slot in [
-            ("Fit",   "Zoom to fit full FFT extent",    self._zoom_fit),
-            ("Ctr",   "Zoom to centre (quarter range)", self._zoom_centre),
-            ("  +  ", "Zoom in",                        lambda: self._zoom_by(0.5)),
-            ("  −  ", "Zoom out",                       lambda: self._zoom_by(2.0)),
+            ("Fit",   "Zoom to fit full FFT extent", self._zoom_fit),
+            ("  +  ", "Zoom in",                     lambda: self._zoom_by(0.5)),
+            ("  −  ", "Zoom out",                    lambda: self._zoom_by(2.0)),
         ]:
             btn = QPushButton(label)
             btn.setFont(ui_font(9))
@@ -331,26 +324,115 @@ class FFTViewerDialog(QDialog):
             btn.clicked.connect(slot)
             tb.addWidget(btn)
 
-        tb.addSpacing(8)
-        exp_btn = QPushButton("Export PNG…")
-        exp_btn.setFont(ui_font(9))
-        exp_btn.setFixedHeight(24)
-        exp_btn.setMinimumWidth(96)
-        exp_btn.setToolTip("Save the current FFT view as a PNG file.")
-        exp_btn.clicked.connect(self._on_export)
-        tb.addWidget(exp_btn)
-
-        tb.addSpacing(8)
-        grid_btn = QPushButton("Grid")
-        grid_btn.setFont(ui_font(9))
-        grid_btn.setFixedHeight(24)
-        grid_btn.setMinimumWidth(68)
-        grid_btn.setToolTip("Switch to the Grid tab (creates a lattice overlay if none exists)")
-        grid_btn.clicked.connect(lambda _checked=False: self._on_open_fft_lattice(select_advanced=True))
-        tb.addWidget(grid_btn)
-        self._grid_lattice_btn = grid_btn
-
         return tb
+
+    def _build_menu_bar(self) -> QMenuBar:
+        """Menu bar hosting the appearance/preprocessing controls demoted from
+        the toolbar (component, colour map, window, DC handling), zoom, panel
+        toggles, the Grid jump, and Export."""
+        mb = QMenuBar(self)
+        mb.setFont(ui_font(9))
+
+        def _radio_menu(parent_menu, title, items, combo, *, tip=None):
+            """Add a submenu of mutually-exclusive actions that drive `combo`."""
+            menu = parent_menu.addMenu(title)
+            if tip:
+                menu.setToolTip(tip)
+            group = QActionGroup(menu)
+            group.setExclusive(True)
+            actions = []
+            for i, label in enumerate(items):
+                act = QAction(label, menu, checkable=True)
+                act.setChecked(combo.currentIndex() == i)
+                act.triggered.connect(lambda _c=False, idx=i: combo.setCurrentIndex(idx))
+                group.addAction(act)
+                menu.addAction(act)
+                actions.append(act)
+            # Keep the menu's check-state in sync if the combo changes elsewhere.
+            combo.currentIndexChanged.connect(
+                lambda idx, acts=actions: (
+                    acts[idx].setChecked(True) if 0 <= idx < len(acts) else None
+                )
+            )
+            return menu
+
+        # ── View menu ────────────────────────────────────────────────────────
+        view_menu = mb.addMenu("&View")
+        _radio_menu(
+            view_menu, "Component", ["Magnitude", "Phase"], self._fft_view_combo,
+            tip="Magnitude (default) or phase. Phase is in radians on a cyclic map.",
+        )
+        self._scale_menu = _radio_menu(
+            view_menu, "Scale", ["Log", "Linear"], self._scale_combo,
+            tip="Log makes weak peaks visible; Linear shows raw amplitude ratios.",
+        )
+        view_menu.addSeparator()
+        zoom_menu = view_menu.addMenu("Zoom")
+        for label, slot in [
+            ("Fit to extent", self._zoom_fit),
+            ("Centre (quarter range)", self._zoom_centre),
+            ("Zoom in", lambda: self._zoom_by(0.5)),
+            ("Zoom out", lambda: self._zoom_by(2.0)),
+        ]:
+            act = QAction(label, zoom_menu)
+            act.triggered.connect(lambda _c=False, s=slot: s())
+            zoom_menu.addAction(act)
+        view_menu.addSeparator()
+        self._show_tools_act = QAction("Show cursor tools", view_menu, checkable=True)
+        self._show_tools_act.triggered.connect(
+            lambda checked: self._show_tools_btn.setChecked(checked)
+        )
+        view_menu.addAction(self._show_tools_act)
+        self._focus_fft_act = QAction("Focus FFT", view_menu, checkable=True)
+        self._focus_fft_act.triggered.connect(
+            lambda checked: self._focus_fft_btn.setChecked(checked)
+        )
+        view_menu.addAction(self._focus_fft_act)
+        self._equal_aspect_act = QAction("Equal q_x/q_y aspect", view_menu, checkable=True)
+        self._equal_aspect_act.setChecked(self._fft_equal_aspect_cb.isChecked())
+        self._equal_aspect_act.setToolTip(
+            "Zoom q_x and q_y symmetrically (equal q per pixel in both directions; "
+            "may leave blank space on a wide canvas). Off uses the full canvas width."
+        )
+        self._equal_aspect_act.triggered.connect(
+            lambda checked: self._fft_equal_aspect_cb.setChecked(checked)
+        )
+        self._fft_equal_aspect_cb.toggled.connect(
+            lambda checked: (
+                self._equal_aspect_act.setChecked(checked)
+                if self._equal_aspect_act.isChecked() != checked else None
+            )
+        )
+        view_menu.addAction(self._equal_aspect_act)
+
+        # ── FFT (compute) menu ────────────────────────────────────────────────
+        fft_menu = mb.addMenu("&FFT")
+        _radio_menu(
+            fft_menu, "Window", ["Hann", "None", "Tukey"], self._window_combo,
+            tip="Apodisation window applied before the FFT to reduce edge ringing.",
+        )
+        _radio_menu(
+            fft_menu, "DC component", ["Zero DC", "Keep DC", "Mask DC"], self._dc_combo,
+            tip="How the zero-frequency (central) component is treated.",
+        )
+        fft_menu.addSeparator()
+        grid_act = QAction("Go to Grid tab", fft_menu)
+        grid_act.setToolTip(
+            "Switch to the Grid tab (creates a lattice overlay if none exists)"
+        )
+        grid_act.triggered.connect(
+            lambda _c=False: self._on_open_fft_lattice(select_advanced=True)
+        )
+        fft_menu.addAction(grid_act)
+
+        # ── Export menu ───────────────────────────────────────────────────────
+        export_menu = mb.addMenu("&Export")
+        exp_act = QAction("Export PNG…", export_menu)
+        exp_act.setToolTip("Save the current FFT view as a PNG file.")
+        exp_act.triggered.connect(lambda _c=False: self._on_export())
+        export_menu.addAction(exp_act)
+
+        return mb
 
     def _build_fft_column(self) -> QVBoxLayout:
         """Create the FFT workspace and guided correction tools."""
@@ -693,132 +775,35 @@ class FFTViewerDialog(QDialog):
         action_row.addWidget(self._fft_apply_btn)
         corr_lay.addLayout(action_row)
 
-        piezo_grp = QGroupBox("Piezo constants")
-        piezo_grp.setFont(ui_font(9))
-        piezo_lay = QVBoxLayout(piezo_grp)
-        piezo_lay.setContentsMargins(8, 8, 8, 6)
-        piezo_lay.setSpacing(5)
-        piezo_row = QHBoxLayout()
-        piezo_row.addWidget(QLabel("Current X:"))
-        self._piezo_x_edit = QLineEdit("96.52")
-        self._piezo_x_edit.setFixedWidth(72)
-        self._piezo_x_edit.setToolTip("Current X piezo constant.")
-        self._piezo_x_edit.textChanged.connect(self._refresh_piezo_advisor)
-        piezo_row.addWidget(self._piezo_x_edit)
-        piezo_row.addWidget(QLabel("Current Y:"))
-        self._piezo_y_edit = QLineEdit("96.52")
-        self._piezo_y_edit.setFixedWidth(72)
-        self._piezo_y_edit.setToolTip("Current Y piezo constant.")
-        self._piezo_y_edit.textChanged.connect(self._refresh_piezo_advisor)
-        piezo_row.addWidget(self._piezo_y_edit)
-        piezo_row.addStretch(1)
-        self._piezo_copy_btn = QPushButton("Copy recommendation")
-        self._piezo_copy_btn.setFont(ui_font(9))
-        self._piezo_copy_btn.setFixedHeight(22)
-        self._piezo_copy_btn.setEnabled(False)
-        self._piezo_copy_btn.clicked.connect(self._copy_piezo_recommendation)
-        piezo_row.addWidget(self._piezo_copy_btn)
-        piezo_lay.addLayout(piezo_row)
-        self._piezo_result_lbl = QLabel(
-            "Align a reciprocal grid to get X/Y piezo recommendations."
-        )
-        self._piezo_result_lbl.setFont(QFont("Courier", 8))
-        self._piezo_result_lbl.setWordWrap(True)
-        self._piezo_result_lbl.setMinimumHeight(48)
-        self._piezo_result_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        piezo_lay.addWidget(self._piezo_result_lbl)
-        corr_lay.addWidget(piezo_grp)
-
         self._apply_known_structure_to_fft(self._active_known_structure, refresh=False)
         corr_lay.addStretch(1)
         self._tab_widget.addTab(corr_tab, "Correction")
 
-        # ── Tab 3: Expert ────────────────────────────────────────────────────
-        advanced_scroll = QScrollArea()
-        advanced_scroll.setWidgetResizable(True)
-        advanced_scroll.setFrameShape(QFrame.NoFrame)
-        advanced_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        advanced_inner = QWidget()
-        advanced_lay = QVBoxLayout(advanced_inner)
-        advanced_lay.setContentsMargins(8, 8, 8, 6)
-        advanced_lay.setSpacing(8)
-
-        def _collapsible_group(title: str, checked: bool = False):
-            grp = QGroupBox(title)
-            grp.setFont(ui_font(9))
-            grp.setCheckable(True)
-            grp.setChecked(checked)
-            outer = QVBoxLayout(grp)
-            outer.setContentsMargins(8, 8, 8, 6)
-            content = QWidget()
-            content_lay = QVBoxLayout(content)
-            content_lay.setContentsMargins(0, 0, 0, 0)
-            content_lay.setSpacing(6)
-            outer.addWidget(content)
-            content.setVisible(checked)
-            grp.toggled.connect(content.setVisible)
-            return grp, content_lay
-
-        correction_opts_grp, opts_lay_outer = _collapsible_group(
-            "Advanced correction options", checked=False,
-        )
-        target_grid = QGridLayout()
-        target_grid.setHorizontalSpacing(8)
-        target_grid.setVerticalSpacing(4)
-        target_grid.addWidget(QLabel("Ideal:"), 0, 0)
-        target_grid.addWidget(self._fft_ideal_combo, 0, 1)
-        target_grid.addWidget(QLabel("|a|:"), 0, 2)
-        target_grid.addWidget(self._fft_ideal_a_spin, 0, 3)
-        target_grid.addWidget(QLabel("|b|:"), 1, 0)
-        target_grid.addWidget(self._fft_ideal_b_spin, 1, 1)
-        target_grid.addWidget(QLabel("Angle:"), 1, 2)
-        target_grid.addWidget(self._fft_ideal_angle_spin, 1, 3)
-        target_grid.setColumnStretch(1, 1)
-        target_grid.setColumnStretch(3, 1)
-        opts_lay_outer.addLayout(target_grid)
-        opts_adv_row = QHBoxLayout()
-        opts_adv_row.addWidget(QLabel("Interpolation:"))
-        self._fft_interp_combo.setToolTip(
-            "Resampling method used when remapping pixels.  "
-            "Bilinear is a good default."
-        )
-        opts_adv_row.addWidget(self._fft_interp_combo)
-        opts_adv_row.addSpacing(8)
-        opts_adv_row.addWidget(QLabel("Fill:"))
-        self._fft_fill_combo.setToolTip(
-            "Value assigned to pixels outside the original image boundary "
-            "after transformation."
-        )
-        opts_adv_row.addWidget(self._fft_fill_combo)
-        opts_adv_row.addStretch(1)
-        opts_lay_outer.addLayout(opts_adv_row)
-        advanced_lay.addWidget(correction_opts_grp)
-
-        display_grp = QGroupBox("Display")
-        display_grp.setFont(ui_font(9))
-        display_grp_lay = QVBoxLayout(display_grp)
-        display_grp_lay.setContentsMargins(8, 8, 8, 6)
-        self._fft_equal_aspect_cb = QCheckBox("Preserve equal q_x/q_y aspect while zoomed")
-        self._fft_equal_aspect_cb.setFont(ui_font(9))
-        self._fft_equal_aspect_cb.setChecked(False)
-        self._fft_equal_aspect_cb.setToolTip(
-            "Off (default): zoom uses the full canvas width — the visible q-window "
-            "matches the canvas shape so no space is wasted. "
-            "On: q_x and q_y zoom symmetrically (equal q/pixel in both directions, "
-            "but may leave blank space on a wide canvas)."
-        )
-        self._fft_equal_aspect_cb.toggled.connect(self._on_equal_aspect_toggled)
-        display_grp_lay.addWidget(self._fft_equal_aspect_cb)
-        advanced_lay.addWidget(display_grp)
-        advanced_lay.addStretch(1)
-        advanced_scroll.setWidget(advanced_inner)
-        self._tab_widget.addTab(advanced_scroll, "⚙ Expert")
+        # The former "Expert" tab only duplicated the Grid tool (ideal target +
+        # interpolation/fill) plus one display option, so it was removed. The
+        # ideal-target / interpolation / fill controls stay alive as hidden
+        # state-holders — the ideal target follows the measured/known lattice and
+        # interp/fill keep sensible defaults (bilinear / NaN) — and the
+        # equal-aspect display option moved to the View menu.
+        self._fft_param_holder = QWidget(self)
+        _param_lay = QVBoxLayout(self._fft_param_holder)
+        _param_lay.setContentsMargins(0, 0, 0, 0)
+        for _w in (
+            self._fft_ideal_combo,
+            self._fft_ideal_a_spin,
+            self._fft_ideal_b_spin,
+            self._fft_ideal_angle_spin,
+            self._fft_interp_combo,
+            self._fft_fill_combo,
+        ):
+            _param_lay.addWidget(_w)
+        self._fft_param_holder.hide()
 
         # Append the Mains tab last so existing tab indices (e.g. _grid_tab_index)
         # are unaffected.
         self._tab_widget.addTab(self._build_mains_tab(), "⚡ Mains")
         self._reconstruct_tab_index = self._tab_widget.addTab(
-            self._build_reconstruct_tab(), "Reconstruct")
+            self._build_reconstruct_tab(), "Inverse FFT")
 
         self._fft_splitter = QSplitter(Qt.Vertical)
         self._fft_splitter.addWidget(fft_top)
@@ -864,7 +849,10 @@ class FFTViewerDialog(QDialog):
         lay.setSpacing(4)
         lay.setContentsMargins(6, 6, 6, 4)
 
-        lay.addLayout(self._build_toolbar_row())
+        # Toolbar must be built first: it creates the combos the menu drives.
+        toolbar_row = self._build_toolbar_row()
+        lay.setMenuBar(self._build_menu_bar())
+        lay.addLayout(toolbar_row)
 
         # ── body row: compact real-space reference | FFT workspace ───────────
         body_row = QHBoxLayout()
@@ -1222,6 +1210,9 @@ class FFTViewerDialog(QDialog):
         btn = getattr(self, "_focus_fft_btn", None)
         if btn is not None:
             btn.setText("Exit Focus" if checked else "Focus FFT")
+        act = getattr(self, "_focus_fft_act", None)
+        if act is not None and act.isChecked() != checked:
+            act.setChecked(checked)
         QTimer.singleShot(0, self._adapt_zoom_to_canvas)
 
     def _on_show_tools_toggled(self, checked: bool) -> None:
@@ -1232,6 +1223,9 @@ class FFTViewerDialog(QDialog):
         btn = getattr(self, "_show_tools_btn", None)
         if btn is not None:
             btn.setText("Hide tools" if checked else "Show tools")
+        act = getattr(self, "_show_tools_act", None)
+        if act is not None and act.isChecked() != checked:
+            act.setChecked(checked)
         QTimer.singleShot(0, self._adapt_zoom_to_canvas)
 
     def _set_status_text(self, text: str) -> None:
@@ -1512,6 +1506,10 @@ class FFTViewerDialog(QDialog):
         for combo in (getattr(self, "_scale_combo", None), getattr(self, "_cmap_combo", None)):
             if combo is not None:
                 combo.setEnabled(magnitude)
+        # Scale lives in the View menu now; grey it out in phase view too.
+        scale_menu = getattr(self, "_scale_menu", None)
+        if scale_menu is not None:
+            scale_menu.setEnabled(magnitude)
         if getattr(self, "_hist_panel", None) is not None:
             self._hist_panel.setEnabled(magnitude)
         self._redraw()   # phase is already stored; no FFT recompute needed
@@ -1998,7 +1996,6 @@ class FFTViewerDialog(QDialog):
             )
             if status_lbl is not None:
                 status_lbl.setText("No reciprocal grid yet")
-            self._refresh_piezo_advisor()
             return
 
         a_vec, b_vec = vectors
@@ -2025,7 +2022,6 @@ class FFTViewerDialog(QDialog):
             corr_lbl.setText(f"Cannot compute correction:\n{result}")
             if status_lbl is not None:
                 status_lbl.setText("Correction unavailable")
-            self._refresh_piezo_advisor()
             return
 
         self._fft_correction = result
@@ -2043,61 +2039,6 @@ class FFTViewerDialog(QDialog):
             self._fft_preview_btn.setEnabled(True)
         if self._apply_correction_fn is not None:
             self._fft_apply_btn.setEnabled(True)
-        self._refresh_piezo_advisor()
-
-    @staticmethod
-    def _input_decimal_count(text: str) -> int:
-        body = text.strip().split("e", 1)[0].split("E", 1)[0]
-        return len(body.split(".", 1)[1]) if "." in body else 0
-
-    def _refresh_piezo_advisor(self, *_args) -> None:
-        lbl = getattr(self, "_piezo_result_lbl", None)
-        copy_btn = getattr(self, "_piezo_copy_btn", None)
-        if lbl is None:
-            return
-        if copy_btn is not None:
-            copy_btn.setEnabled(False)
-        if self._fft_correction is None:
-            lbl.setText("Align a reciprocal grid to get X/Y piezo recommendations.")
-            return
-
-        x_text = self._piezo_x_edit.text().strip()
-        y_text = self._piezo_y_edit.text().strip()
-        try:
-            x_current = float(x_text)
-            y_current = float(y_text)
-            rec = piezo_constant_recommendation(
-                self._fft_correction,
-                x_current=x_current,
-                y_current=y_current,
-            )
-        except (TypeError, ValueError):
-            lbl.setText("Enter positive current X/Y piezo constants.")
-            return
-
-        x_dec = self._input_decimal_count(x_text)
-        y_dec = self._input_decimal_count(y_text)
-        lines = [
-            (
-                f"X: {x_current:.{x_dec}f} -> {rec.x_new:.{x_dec}f}  "
-                f"({rec.x_percent_change:+.2f}%, x{rec.x_multiplier:.5f})"
-            ),
-            (
-                f"Y: {y_current:.{y_dec}f} -> {rec.y_new:.{y_dec}f}  "
-                f"({rec.y_percent_change:+.2f}%, x{rec.y_multiplier:.5f})"
-            ),
-            rec.residual_text,
-        ]
-        if rec.warning:
-            lines.append(rec.warning)
-        lbl.setText("\n".join(lines))
-        if copy_btn is not None:
-            copy_btn.setEnabled(True)
-
-    def _copy_piezo_recommendation(self) -> None:
-        lbl = getattr(self, "_piezo_result_lbl", None)
-        if lbl is not None and lbl.text():
-            QApplication.clipboard().setText(lbl.text())
 
     def _fft_correction_options(self) -> dict:
         interp_map = {"Bilinear": "bilinear", "Nearest": "nearest", "Bicubic": "bicubic"}
