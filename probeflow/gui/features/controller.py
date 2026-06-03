@@ -132,6 +132,9 @@ class FeatureCountingController(QObject):
         panel.scan_loaded.connect(self._on_scan_loaded)
         panel.zero_plane_applied.connect(self._on_zero_plane_applied)
 
+        # Histogram contrast — drag lines / sliders → update panel display clip
+        sidebar.display_clip_changed.connect(panel.set_display_range)
+
     # ── Algorithmic step-edge exclusion ───────────────────────────────────────
 
     def _build_exclude_mask(self):

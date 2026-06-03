@@ -77,6 +77,14 @@ _CLASSIFY_PALETTE: list[str] = [
 ]
 _CLASSIFY_OTHER_COLOR = "#6c7086"   # muted gray for "other" particles
 
+# ── Histogram theme (Catppuccin Mocha — matches image viewer) ────────────────
+_FC_THEME: dict = {
+    "bg":        "#1e1e2e",
+    "fg":        "#cdd6f4",
+    "accent_bg": "#89b4fa",
+    "sep":       "#45475a",
+}
+
 
 def _auto_class_colors(class_names: list) -> dict:
     """Return {class_name: hex_color} with stable, distinct colors.
@@ -95,10 +103,10 @@ def _auto_class_colors(class_names: list) -> dict:
     return colors
 
 
-def _arr_to_pixmap(arr: np.ndarray) -> QPixmap:
+def _arr_to_pixmap(arr: np.ndarray, *, vmin=None, vmax=None) -> QPixmap:
     """Convert a 2-D float array to a grayscale QPixmap (no PIL dependency)."""
     from probeflow.processing.display import array_to_uint8
-    u8 = array_to_uint8(arr, clip_percentiles=(1.0, 99.0))
+    u8 = array_to_uint8(arr, vmin=vmin, vmax=vmax, clip_percentiles=(1.0, 99.0))
     u8 = np.ascontiguousarray(u8)
     h, w = u8.shape
     data = u8.tobytes()
@@ -120,81 +128,6 @@ def _sep() -> QFrame:
 # Shared tooltip wrapper (promoted to probeflow.gui._tooltips so the FFT viewer
 # and other modules can reuse the same multi-line-near-the-cursor behaviour).
 from probeflow.gui._tooltips import tip as _tip
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Compact height-distribution histogram for the FC sidebar
-# ─────────────────────────────────────────────────────────────────────────────
-
-class _FCHistogram(QWidget):
-    """Lightweight height-distribution histogram embedded in the FC sidebar.
-
-    Relies on matplotlib (already imported for the image-viewer histogram) but
-    has no sliders or drag lines — it is purely informational: shows the pixel
-    height distribution of the currently loaded (and possibly zero-plane-corrected)
-    scan array so the user can judge whether the background is flat.
-    """
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
-        from matplotlib.figure import Figure
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(0, 2, 0, 0)
-        lay.setSpacing(0)
-        self._fig = Figure(figsize=(2.4, 1.1), dpi=80)
-        self._fig.patch.set_alpha(0)
-        self._ax  = self._fig.add_subplot(111)
-        self._canvas = FigureCanvasQTAgg(self._fig)
-        self._canvas.setFixedHeight(105)
-        lay.addWidget(self._canvas)
-        self._draw_placeholder()
-
-    def _draw_placeholder(self) -> None:
-        self._ax.cla()
-        bg = "#1e1e2e"
-        self._fig.patch.set_facecolor(bg)
-        self._ax.set_facecolor(bg)
-        self._ax.text(0.5, 0.5, "load a scan", transform=self._ax.transAxes,
-                      ha="center", va="center", fontsize=7, color="#585b70")
-        for sp in self._ax.spines.values():
-            sp.set_edgecolor("#45475a")
-        self._fig.subplots_adjust(left=0.02, right=0.98, top=0.93, bottom=0.20)
-        self._canvas.draw_idle()
-
-    def update_data(self, arr: np.ndarray) -> None:
-        """Replot height distribution from a 2-D float scan array."""
-        flat = arr[np.isfinite(arr)].ravel()
-        if flat.size == 0:
-            self._draw_placeholder()
-            return
-        # Pick a human-readable unit based on the median magnitude.
-        med = abs(float(np.nanmedian(flat)))
-        if med > 1e-9:
-            scale, unit = 1e9,  "nm"
-        elif med > 1e-12:
-            scale, unit = 1e10, "Å"
-        else:
-            scale, unit = 1e12, "pm"
-        flat_d = flat * scale
-        bg, fg, acc = "#1e1e2e", "#cdd6f4", "#89b4fa"
-        self._ax.cla()
-        self._fig.patch.set_facecolor(bg)
-        self._ax.set_facecolor(bg)
-        counts, edges = np.histogram(flat_d, bins=128)
-        centers = (edges[:-1] + edges[1:]) / 2.0
-        widths  = np.diff(edges)
-        self._ax.bar(centers, np.maximum(counts, 1), width=widths,
-                     color=acc, alpha=0.85, linewidth=0)
-        self._ax.set_yscale("log")
-        self._ax.tick_params(axis="x", colors=fg, labelsize=6)
-        self._ax.tick_params(axis="y", left=False, labelleft=False)
-        self._ax.yaxis.set_visible(False)
-        self._ax.set_xlabel(f"Height [{unit}]", fontsize=6, color=fg)
-        for sp in self._ax.spines.values():
-            sp.set_edgecolor("#45475a")
-        self._fig.subplots_adjust(left=0.02, right=0.98, top=0.93, bottom=0.26)
-        self._canvas.draw_idle()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -579,6 +512,9 @@ class FeaturesPanel(QWidget):
         # Zero-plane interactive correction ───────────────────────────────────
         self._arr_original: np.ndarray | None = None    # raw array before any zero-plane
         self._zero_plane_pts: list = []                 # picked (x_px, y_px) points (≤3)
+        # Display contrast clip (SI — metres).  None → default 1–99 % auto-clip.
+        self._display_vmin: float | None = None
+        self._display_vmax: float | None = None
         self._build()
 
     def _build(self):
@@ -661,6 +597,8 @@ class FeaturesPanel(QWidget):
         self._arr          = arr
         self._arr_original = np.asarray(arr, dtype=np.float64).copy()  # snapshot before any zero-plane
         self._zero_plane_pts = []                                        # reset on every new load
+        self._display_vmin = None   # reset contrast clip; histogram will set auto-clip
+        self._display_vmax = None
         self._scan         = scan
         self._pixel_size_m = pixel_size_m
         self._pixel_size_x_m = (
@@ -776,6 +714,8 @@ class FeaturesPanel(QWidget):
             return
         self._arr = np.asarray(self._arr_original, dtype=np.float64).copy()
         self._zero_plane_pts = []
+        self._display_vmin = None   # revert contrast clip to auto
+        self._display_vmax = None
         self._particles   = []
         self._detections  = []
         self._lattice     = None
@@ -786,6 +726,18 @@ class FeaturesPanel(QWidget):
         self._redraw(reset_view=False)
         self._results_table.setRowCount(0)
         self.scan_loaded.emit(self._arr)   # update histogram to original
+
+    def set_display_range(self, lo_si: float, hi_si: float) -> None:
+        """Update the display contrast range and redraw.
+
+        Called by the controller when the histogram drag lines or sliders are
+        released.  Values are in SI (metres).  Pass ``None`` for either
+        argument to fall back to the default 1–99 % auto-clip.
+        """
+        self._display_vmin = float(lo_si) if lo_si is not None else None
+        self._display_vmax = float(hi_si) if hi_si is not None else None
+        if self._arr is not None:
+            self._redraw()
 
     def has_sample_labels(self) -> bool:
         return bool(self._sample_labels)
@@ -1244,7 +1196,9 @@ class FeaturesPanel(QWidget):
             return
 
         # ── Background pixmap ────────────────────────────────────────────────
-        pixmap = _arr_to_pixmap(self._arr)
+        pixmap = _arr_to_pixmap(self._arr,
+                                vmin=self._display_vmin,
+                                vmax=self._display_vmax)
         self._view.set_pixmap(pixmap, reset_view=reset_view)
 
         # ── Zero-plane reference point markers ────────────────────────────────
@@ -1379,6 +1333,7 @@ class FeaturesSidebar(QWidget):
     step_exclude_changed       = Signal()      # algorithmic step-edge controls changed
     zero_plane_armed           = Signal(bool)  # True = enter 3-point picking mode
     reset_to_original_requested = Signal()     # undo zero-plane correction
+    display_clip_changed       = Signal(float, float)  # lo_si, hi_si — contrast range
 
     MASK_COLORS: dict[str, tuple[int, int, int]] = {
         "Red":     (220,  50,  50),
@@ -1392,6 +1347,12 @@ class FeaturesSidebar(QWidget):
     def __init__(self, t: dict, parent=None):
         super().__init__(parent)
         self._t = t
+        # ── Histogram interaction state (populated by update_histogram) ────────
+        self._hist_scale: float = 1.0
+        self._hist_auto_lo_si: float | None = None  # 1-pct clip in SI
+        self._hist_auto_hi_si: float | None = None  # 99-pct clip in SI
+        self._hist_cur_lo_si:  float | None = None  # current drag-line lo in SI
+        self._hist_cur_hi_si:  float | None = None  # current drag-line hi in SI
         self._build()
 
     # ── Top-level layout ──────────────────────────────────────────────────────
@@ -1481,8 +1442,18 @@ class FeaturesSidebar(QWidget):
         proc_hint.setStyleSheet("color: #888;")
         lay.addWidget(proc_hint)
 
-        # Height histogram — updates whenever a scan is loaded or zero-plane applied
-        self._histogram = _FCHistogram(self)
+        # Interactive height histogram — same HistogramPanel as the image viewer.
+        # Brightness/Contrast sliders are hidden (not meaningful for a scan view);
+        # Min, Max, Auto, and Reset remain active.
+        from probeflow.gui.viewer.histogram import HistogramPanel as _HistogramPanel
+        self._histogram = _HistogramPanel(self)
+        self._histogram._brightness_w.setVisible(False)
+        self._histogram._contrast_w.setVisible(False)
+        self._histogram.rangeReleased.connect(self._on_hist_range_released)
+        self._histogram.minReleased.connect(self._on_hist_min_released)
+        self._histogram.maxReleased.connect(self._on_hist_max_released)
+        self._histogram.autoClipRequested.connect(self._on_hist_auto)
+        self._histogram.resetRequested.connect(self._on_hist_reset)
         lay.addWidget(self._histogram)
 
         self._zero_plane_btn = QPushButton("📐 Set Zero Plane")
@@ -2252,9 +2223,44 @@ class FeaturesSidebar(QWidget):
         self._status_lbl.setText(text)
 
     def update_histogram(self, arr) -> None:
-        """Replot the height histogram from a 2-D scan array."""
-        if arr is not None:
-            self._histogram.update_data(arr)
+        """Replot the height histogram and apply 1–99 % auto-clip to the display."""
+        if arr is None:
+            return
+        flat = arr[np.isfinite(arr)].ravel()
+        if flat.size == 0:
+            self._histogram.clear(_FC_THEME)
+            return
+        # Pick a human-readable unit based on the median magnitude.
+        med = abs(float(np.nanmedian(flat)))
+        if med > 1e-9:
+            scale, unit = 1e9,  "nm"
+        elif med > 1e-12:
+            scale, unit = 1e10, "Å"
+        else:
+            scale, unit = 1e12, "pm"
+        self._hist_scale          = scale
+        flat_phys                 = flat * scale
+        lo_phys                   = float(np.percentile(flat_phys,  1.0))
+        hi_phys                   = float(np.percentile(flat_phys, 99.0))
+        self._hist_auto_lo_si     = lo_phys / scale
+        self._hist_auto_hi_si     = hi_phys / scale
+        self._hist_cur_lo_si      = self._hist_auto_lo_si
+        self._hist_cur_hi_si      = self._hist_auto_hi_si
+        data_min_phys             = float(np.percentile(flat_phys,  0.1))
+        data_max_phys             = float(np.percentile(flat_phys, 99.9))
+        self._histogram.render(
+            flat_phys=flat_phys,
+            lo_phys=lo_phys,
+            hi_phys=hi_phys,
+            unit=unit,
+            axis_label="Height",
+            theme=_FC_THEME,
+            scale=scale,
+            data_min_phys=data_min_phys,
+            data_max_phys=data_max_phys,
+        )
+        # Notify the panel to apply auto-clip whenever data changes.
+        self.display_clip_changed.emit(self._hist_auto_lo_si, self._hist_auto_hi_si)
 
     def disarm_zero_plane(self) -> None:
         """Un-toggle the Set Zero Plane button without re-emitting the signal."""
@@ -2270,3 +2276,50 @@ class FeaturesSidebar(QWidget):
     def _on_mask_color_changed(self, name: str) -> None:
         r, g, b = self.MASK_COLORS.get(name, (220, 50, 50))
         self.mask_color_changed.emit(r, g, b)
+
+    # ── Histogram contrast interaction ────────────────────────────────────────
+
+    def _on_hist_range_released(self, lo_phys: float, hi_phys: float) -> None:
+        """Drag line released — convert physical → SI and notify the panel."""
+        scale = self._hist_scale
+        if scale:
+            lo_si = lo_phys / scale
+            hi_si = hi_phys / scale
+            self._hist_cur_lo_si = lo_si
+            self._hist_cur_hi_si = hi_si
+            self.display_clip_changed.emit(lo_si, hi_si)
+
+    def _on_hist_min_released(self, v: int) -> None:
+        """Min slider released — update the lo clip and move the drag line."""
+        lo_si = self._histogram.sl_to_si(v)
+        hi_si = self._hist_cur_hi_si
+        if hi_si is not None and lo_si < hi_si:
+            self._hist_cur_lo_si = lo_si
+            self.display_clip_changed.emit(lo_si, hi_si)
+            self._histogram.update_drag_lines(lo_si * self._hist_scale,
+                                              hi_si * self._hist_scale)
+
+    def _on_hist_max_released(self, v: int) -> None:
+        """Max slider released — update the hi clip and move the drag line."""
+        hi_si = self._histogram.sl_to_si(v)
+        lo_si = self._hist_cur_lo_si
+        if lo_si is not None and hi_si > lo_si:
+            self._hist_cur_hi_si = hi_si
+            self.display_clip_changed.emit(lo_si, hi_si)
+            self._histogram.update_drag_lines(lo_si * self._hist_scale,
+                                              hi_si * self._hist_scale)
+
+    def _on_hist_auto(self) -> None:
+        """Auto button — reset clip to 1–99 % percentile."""
+        if self._hist_auto_lo_si is not None and self._hist_auto_hi_si is not None:
+            self._hist_cur_lo_si = self._hist_auto_lo_si
+            self._hist_cur_hi_si = self._hist_auto_hi_si
+            self.display_clip_changed.emit(self._hist_auto_lo_si,
+                                           self._hist_auto_hi_si)
+            self._histogram.update_drag_lines(
+                self._hist_auto_lo_si * self._hist_scale,
+                self._hist_auto_hi_si * self._hist_scale)
+
+    def _on_hist_reset(self) -> None:
+        """Reset button — same as Auto for the FC sidebar."""
+        self._on_hist_auto()
