@@ -55,8 +55,15 @@ def plot_roi_line_profile(
     channel_unit_fn: Callable[[], tuple[float, str, str]],
     line_profile_panel,
     theme: dict,
-) -> None:
-    """Compute the line profile for *roi* and render it in *line_profile_panel*."""
+) -> dict | None:
+    """Compute the line profile for *roi*, render it, and return its live metrics.
+
+    The returned dict (``length``, ``x_unit``, ``length_px``, ``height_diff``,
+    ``z_unit``) lets callers show a live length/height readout. Returns ``None`` if
+    the profile could not be computed.
+    """
+    import math
+
     from probeflow.analysis.spec_plot import choose_display_unit
 
     try:
@@ -70,10 +77,11 @@ def plot_roi_line_profile(
         )
         scale, unit, name = channel_unit_fn()
         x_scale, x_unit = choose_display_unit("m", s_m)
+        y_vals = values * scale
         line_profile_panel.setVisible(True)
         line_profile_panel.plot_profile(
             s_m * x_scale,
-            values * scale,
+            y_vals,
             x_label=f"Distance [{x_unit}]",
             y_label=f"{name} [{unit}]" if unit else name,
             theme=theme,
@@ -83,5 +91,25 @@ def plot_roi_line_profile(
                 f"Line ROI: {roi.name} ({roi.id[:8]})",
                 theme=theme,
             )
+        # Live metrics — match the saved line_profile_measurement semantics:
+        # length = arc-length span, height_diff = peak-to-valley over the profile.
+        geom = roi.geometry or {}
+        length = float(s_m[-1] - s_m[0]) * x_scale if s_m.size else 0.0
+        length_px = math.hypot(
+            float(geom.get("x2", 0.0)) - float(geom.get("x1", 0.0)),
+            float(geom.get("y2", 0.0)) - float(geom.get("y1", 0.0)),
+        )
+        finite = y_vals[np.isfinite(y_vals)]
+        height_diff = (
+            float(np.max(finite) - np.min(finite)) if finite.size else None
+        )
+        return {
+            "length": length,
+            "x_unit": x_unit,
+            "length_px": length_px,
+            "height_diff": height_diff,
+            "z_unit": unit,
+        }
     except Exception as exc:
         line_profile_panel.show_empty(str(exc), theme=theme)
+        return None

@@ -13,7 +13,7 @@ from PySide6.QtGui import QAction, QActionGroup, QFont
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFileDialog, QFrame,
-    QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
+    QGridLayout, QGroupBox, QHBoxLayout, QLabel,
     QInputDialog, QMenuBar, QPushButton, QScrollArea, QSizePolicy, QSpinBox,
     QSplitter, QTabWidget, QVBoxLayout, QWidget,
 )
@@ -687,7 +687,7 @@ class FFTViewerDialog(QDialog):
         corr_lay.setSpacing(6)
         corr_lay.setContentsMargins(8, 8, 8, 6)
 
-        # Ideal-lattice target controls (read-only in this tab; editable in Expert)
+        # Ideal-lattice target controls for the lattice-correction workflow.
         self._fft_ideal_combo = QComboBox()
         self._fft_ideal_combo.addItems(["Match measured", "Square", "Rectangular", "Hexagonal", "Custom"])
         self._fft_ideal_combo.setCurrentText("Square")

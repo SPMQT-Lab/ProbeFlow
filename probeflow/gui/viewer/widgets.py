@@ -12,7 +12,7 @@ from PySide6.QtCore import Qt, QRect, Signal
 from PySide6.QtGui import (
     QBrush, QColor, QFont, QPainter, QPen,
 )
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QSpinBox, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 # ── Physical-axis ruler (top / left of the image) ───────────────────────────
 class RulerWidget(QWidget):
@@ -230,7 +230,6 @@ class LineProfilePanel(QWidget):
     export_csv_clicked = Signal()
     add_delta_measurement_clicked = Signal()
     add_profile_summary_clicked = Signal()
-    width_changed      = Signal(int)
 
     # Catppuccin Mocha colours used for measurement markers
     _MEAS_COLORS = ("#f38ba8", "#a6e3a1")  # red, green
@@ -241,24 +240,6 @@ class LineProfilePanel(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 2, 0, 0)
         lay.setSpacing(2)
-
-        ctrl_row = QHBoxLayout()
-        ctrl_row.setContentsMargins(0, 0, 0, 0)
-        ctrl_row.setSpacing(4)
-        _lbl = QLabel("Width:")
-        _lbl.setFont(ui_font(8))
-        ctrl_row.addWidget(_lbl)
-        self._width_spin = QSpinBox()
-        self._width_spin.setRange(1, 500)
-        self._width_spin.setValue(1)
-        self._width_spin.setSuffix(" px")
-        self._width_spin.setFixedWidth(70)
-        self._width_spin.setFont(ui_font(8))
-        self._width_spin.setToolTip("Averaging width perpendicular to the line (pixels)")
-        self._width_spin.valueChanged.connect(self.width_changed)
-        ctrl_row.addWidget(self._width_spin)
-        ctrl_row.addStretch()
-        lay.addLayout(ctrl_row)
 
         self._fig = Figure(figsize=(5.0, 1.8), dpi=80)
         self._fig.patch.set_alpha(0)
@@ -322,14 +303,6 @@ class LineProfilePanel(QWidget):
         self._canvas.mpl_connect("motion_notify_event", self._on_profile_motion)
         self._canvas.mpl_connect("button_press_event",  self._on_profile_click)
         self._canvas.mpl_connect("axes_leave_event",    self._on_profile_axes_leave)
-
-    # ── width spinbox ─────────────────────────────────────────────────────────
-
-    def set_width(self, width: int) -> None:
-        """Set spinbox to *width* without firing width_changed."""
-        self._width_spin.blockSignals(True)
-        self._width_spin.setValue(max(1, int(width)))
-        self._width_spin.blockSignals(False)
 
     # ── data access ───────────────────────────────────────────────────────────
 

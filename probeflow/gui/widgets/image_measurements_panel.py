@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QSizePolicy,
+    QSpinBox,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -52,6 +53,7 @@ class ImageMeasurementsPanel(QWidget):
     featureToLatticeRequested = Signal()
     latticeGridRequested = Signal()
     fftViewerRequested = Signal()
+    lineProfileWidthChanged = Signal(int)
 
     # Setup-style modes that map to a page of ``_setup_stack``.
     _MODES = [
@@ -149,6 +151,56 @@ class ImageMeasurementsPanel(QWidget):
             self._action_buttons[mode].setEnabled(available)
         if mode in self._action_status:
             self._action_status[mode].setText(message)
+
+    # ── line-profile live readout ──────────────────────────────────────────────
+
+    def set_line_profile_width(self, width: int) -> None:
+        """Set the line-profile width spinbox without firing lineProfileWidthChanged."""
+        self._lp_width_spin.blockSignals(True)
+        self._lp_width_spin.setValue(max(1, int(width)))
+        self._lp_width_spin.blockSignals(False)
+
+    def set_line_profile_live(
+        self,
+        *,
+        length: float | None = None,
+        x_unit: str = "",
+        length_px: float | None = None,
+        height_diff: float | None = None,
+        z_unit: str = "",
+        available: bool = True,
+    ) -> None:
+        """Update the live length/height headline for the active line ROI."""
+        if not available or length is None:
+            self.clear_line_profile_live()
+            return
+        px = f" ({int(length_px)} px)" if length_px is not None else ""
+        parts = [f"Length {length:.4g} {x_unit}{px}".rstrip()]
+        if height_diff is not None:
+            parts.append(f"Δheight {height_diff:.4g} {z_unit}".rstrip())
+        # Stack on separate lines so the readout fits the narrow column.
+        self._lp_live.setText("\n".join(parts))
+        self._lp_live.setStyleSheet("")  # fall back to the resultSummary QSS
+        self._refit_if_line_profile()
+
+    def clear_line_profile_live(self) -> None:
+        """Reset the live readout to its placeholder."""
+        self._lp_live.setText("Draw or select a line to measure.")
+        self._lp_live.setStyleSheet("color: palette(mid);")
+        self._refit_if_line_profile()
+
+    def _refit_if_line_profile(self) -> None:
+        """Re-cap the setup stack after the live readout's line count changes.
+
+        ``_fit_setup_stack`` only runs on page switches, so a readout growing from
+        one line (Length) to two (Length + Δheight) would otherwise clip until the
+        next switch. Recompute the cap in place when the line-profile page is shown.
+        """
+        stack = getattr(self, "_setup_stack", None)
+        if stack is not None and stack.currentIndex() == self._mode_pages.get(
+            "line_profile"
+        ):
+            self._fit_setup_stack(stack.currentIndex())
 
     # ── build ─────────────────────────────────────────────────────────────────
 
@@ -254,16 +306,16 @@ class ImageMeasurementsPanel(QWidget):
             "Add step height from selected ROIs", self.stepHeightRequested,
         ))
         self._mode_pages["step_height"] = 3
-        self._setup_stack.addWidget(self._action_page(
-            "line_profile", "Line profile",
-            "Height vs distance along the active line ROI — read step heights and "
-            "feature spacings directly off the curve below. Drag the line (or its "
-            "endpoints) to update it live; widen the line to average a strip.",
-            "Add current line profile", self.lineProfileRequested,
-        ))
+        self._setup_stack.addWidget(self._build_line_profile_page())
         self._mode_pages["line_profile"] = 4
         self._setup_stack.addWidget(self.line_periodicity_panel)
         self._mode_pages["line_periodicity"] = 5
+        # Size the stack to the *current* page, not the tallest one — otherwise a
+        # short tool (e.g. Line profile) inherits the feature panel's height and
+        # leaves a large dead gap below it. QStackedLayout always reserves the
+        # tallest child's height, so cap the stack to the current page's hint.
+        self._setup_stack.currentChanged.connect(self._fit_setup_stack)
+        self._fit_setup_stack(self._setup_stack.currentIndex())
         lay.addWidget(self._setup_stack)
 
         # Extra controls for one-shot tools (currently the Angle “Update” action).
@@ -407,6 +459,12 @@ class ImageMeasurementsPanel(QWidget):
             self._current_mode = key
             self._setup_stack.setCurrentIndex(self._mode_pages[key])
 
+    def _fit_setup_stack(self, idx: int) -> None:
+        """Collapse the stack to the current page's preferred height."""
+        w = self._setup_stack.widget(idx)
+        if w is not None:
+            self._setup_stack.setMaximumHeight(w.sizeHint().height())
+
     # ── helpers ────────────────────────────────────────────────────────────────
 
     def _collect_titles(self) -> dict[str, str]:
@@ -467,4 +525,61 @@ class ImageMeasurementsPanel(QWidget):
         lay.addStretch(1)
         self._action_buttons[mode_key] = button
         self._action_status[mode_key] = status_lbl
+        return page
+
+    def _build_line_profile_page(self) -> QWidget:
+        """Line-profile tool: live length readout first, save as a secondary action."""
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(6)
+
+        # Headline: live length (nm + px), updated as the line is moved/resized.
+        self._lp_live = QLabel("")
+        self._lp_live.setObjectName("resultSummary")
+        self._lp_live.setWordWrap(True)
+        self._lp_live.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        lay.addWidget(self._lp_live)
+
+        # Width of the averaging strip (moved here from beside the plot).
+        width_row = QHBoxLayout()
+        width_row.setContentsMargins(0, 0, 0, 0)
+        width_row.setSpacing(4)
+        width_row.addWidget(QLabel("Width:"))
+        self._lp_width_spin = QSpinBox()
+        self._lp_width_spin.setRange(1, 500)
+        self._lp_width_spin.setValue(1)
+        self._lp_width_spin.setSuffix(" px")
+        self._lp_width_spin.setFixedWidth(74)
+        self._lp_width_spin.setToolTip(
+            "Averaging width perpendicular to the line (pixels)."
+        )
+        self._lp_width_spin.valueChanged.connect(self.lineProfileWidthChanged)
+        width_row.addWidget(self._lp_width_spin)
+        width_row.addStretch(1)
+        lay.addLayout(width_row)
+
+        desc_lbl = QLabel("Profile of the curve shown below the image.")
+        desc_lbl.setWordWrap(True)
+        desc_lbl.setStyleSheet("color: palette(mid);")
+        lay.addWidget(desc_lbl)
+
+        button = QPushButton("Save profile to results")
+        button.setToolTip(
+            "Record the current line profile (length, height range) in the "
+            "results table below."
+        )
+        button.setDefault(False)
+        button.setAutoDefault(False)
+        button.clicked.connect(self.lineProfileRequested.emit)
+        lay.addWidget(button)
+
+        status_lbl = QLabel("")
+        status_lbl.setWordWrap(True)
+        status_lbl.setStyleSheet("color: palette(mid);")
+        lay.addWidget(status_lbl)
+
+        self._action_buttons["line_profile"] = button
+        self._action_status["line_profile"] = status_lbl
+        self.clear_line_profile_live()
         return page

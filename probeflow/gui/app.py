@@ -1430,9 +1430,11 @@ class ProbeFlowWindow(QMainWindow):
         dlg.finished.connect(_on_closed)
         # immediate_action_requested fires when user clicks "→ Feature Counting" /
         # "→ TV Denoising" so the viewer stays open and the action runs right away.
-        dlg.immediate_action_requested.connect(
-            lambda action, _d=dlg: self._load_from_viewer_live(_d, action)
-        )
+        # Only the image viewer exposes this signal; spectroscopy viewers don't.
+        if not is_spec:
+            dlg.immediate_action_requested.connect(
+                lambda action, _d=dlg: self._load_from_viewer_live(_d, action)
+            )
         dlg.show()
 
     def _track_open_viewer(self, dlg) -> None:

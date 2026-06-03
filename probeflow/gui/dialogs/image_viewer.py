@@ -421,7 +421,7 @@ class ImageViewerDialog(
 
         # ── Right: task-focused sidebar ───────────────────────────────────────
         right = QWidget()
-        right.setMinimumWidth(340)
+        right.setMinimumWidth(360)
         self._sidebar_panel = right
         right_lay = QVBoxLayout(right)
         right_lay.setContentsMargins(8, 4, 8, 4)
@@ -429,7 +429,7 @@ class ImageViewerDialog(
 
         self._sidebar_tabs = QTabWidget()
         self._sidebar_tabs.setDocumentMode(True)
-        self._sidebar_tabs.setMinimumWidth(320)
+        self._sidebar_tabs.setMinimumWidth(340)
         # Elide (not clip) when the row is tight so every tab stays visible and
         # clickable — never silently drop a tab off the right edge.
         self._sidebar_tabs.setElideMode(Qt.ElideRight)
@@ -942,7 +942,6 @@ class ImageViewerDialog(
         self._zoom_lbl.roi_context_menu_requested.connect(self._on_roi_canvas_context_menu)
         self._zoom_lbl.angle_points_ready.connect(self._on_angle_points_ready)
         self._line_profile_panel.export_csv_clicked.connect(self._on_export_line_profile_csv)
-        self._line_profile_panel.width_changed.connect(self._on_line_profile_width_changed)
 
         roi_hint_lbl = QLabel(
             "Choose a drawing tool above to create an ROI. Click an ROI to select "
@@ -1027,7 +1026,7 @@ class ImageViewerDialog(
         self._sidebar_collapsed = False
 
         splitter.addWidget(sidebar_wrap)
-        splitter.setSizes([900, 400])
+        splitter.setSizes([840, 460])
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 0)
         splitter.setCollapsible(1, False)
@@ -1061,6 +1060,9 @@ class ImageViewerDialog(
         )
         self._measurement_panel.lineProfileRequested.connect(
             self._image_measurements.add_current_line_profile_measurement
+        )
+        self._measurement_panel.lineProfileWidthChanged.connect(
+            self._on_line_profile_width_changed
         )
         # One-shot + dialog tools the panel's menu now hosts: connect each to the
         # viewer's existing handler (formerly the Measure-tab action buttons).

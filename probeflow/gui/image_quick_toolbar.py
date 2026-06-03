@@ -1,9 +1,9 @@
 """Quick-access toolbar for the image viewer.
 
-Three rows of buttons:
-  Row 1 — interaction/drawing-tool modes (mutually exclusive toggles + Clear)
-  Row 2 — common display, processing, and measurement actions
-  Row 3 — ROI / selection utilities (Mask, Invert)
+A single row of buttons:
+  drawing-tool modes (mutually exclusive toggles) + More + Clear, a separator,
+  then ROI/selection utilities (Mask, Invert) and common processing/measurement
+  actions (STM background, FFT).
 
 The toolbar emits ``mode_requested`` or ``action_requested`` signals and
 contains no processing or analysis logic itself.
@@ -67,6 +67,8 @@ _ROI_ACTION_BUTTONS: list[tuple[str, str, str, str]] = [
         "mask_selection",
     ),
     ("invert_selection", "Invert", "Invert the current area ROI or mask.", "invert_selection"),
+    ("stm_background", "STM bg", "Subtract an STM background plane.", "stm_background"),
+    ("open_fft", "FFT", "Open the FFT viewer for the current image.", "open_fft"),
 ]
 
 # Future ROI utility actions may include Grow, Shrink, and Specify.
@@ -75,16 +77,19 @@ _ROI_ACTION_BUTTONS: list[tuple[str, str, str, str]] = [
 # modification logic directly in the toolbar.
 
 _AREA_ACTIONS = {"mask_selection", "invert_selection"}
-_TOOLBAR_ICON_SIZE = QSize(18, 18)
+_TOOLBAR_BTN_SIZE = 43          # square icon buttons
+_TOOLBAR_ICON_SIZE = QSize(34, 34)
 
 
 class ImageQuickToolbar(QWidget):
-    """Two-row quick-access toolbar for the image viewer.
+    """Single-row quick-access toolbar for the image viewer.
 
-    Row 1 — drawing-tool modes (common ones inline, rarer ones under "More") + Clear.
-    Row 2 — ROI/selection utilities (Mask, Invert).
+    Drawing-tool modes (common ones inline, rarer ones under "More") + Clear, then
+    ROI/selection utilities (Mask, Invert) and common processing/measurement actions
+    (STM background, FFT).
 
-    Processing/measurement actions live in the sidebar tabs, not here.
+    Buttons with an icon asset render icon-only (the diagrams are self-explanatory);
+    pan and "More" have no icon and stay textual.
     """
 
     mode_requested = Signal(str)
@@ -139,20 +144,23 @@ class ImageQuickToolbar(QWidget):
         root.setContentsMargins(2, 2, 2, 2)
         root.setSpacing(3)
 
-        root.addLayout(self._build_mode_row())
-
-        sep1 = QFrame()
-        sep1.setFrameShape(QFrame.HLine)
-        sep1.setFrameShadow(QFrame.Sunken)
-        root.addWidget(sep1)
-
-        root.addLayout(self._build_roi_row())
-
-    def _build_mode_row(self) -> QHBoxLayout:
         row = QHBoxLayout()
         row.setSpacing(3)
         row.setContentsMargins(0, 0, 0, 0)
+        self._add_mode_buttons(row)
+        row.addWidget(self._vsep())
+        self._add_roi_buttons(row)
+        row.addStretch(1)
+        root.addLayout(row)
 
+    @staticmethod
+    def _vsep() -> QFrame:
+        sep = QFrame()
+        sep.setFrameShape(QFrame.VLine)
+        sep.setFrameShadow(QFrame.Sunken)
+        return sep
+
+    def _add_mode_buttons(self, row: QHBoxLayout) -> None:
         group = QButtonGroup(self)
         group.setExclusive(True)
 
@@ -161,7 +169,7 @@ class ImageQuickToolbar(QWidget):
             btn.setObjectName("modeToolBtn")  # enables the :checked highlight
             btn.setChecked(key == "pan")
             if key == "pan":
-                btn.setFont(ui_font(13))  # render the cursor glyph a touch larger
+                btn.setFont(ui_font(15))  # render the cursor glyph a touch larger
             btn.clicked.connect(lambda _checked=False, k=key: self.mode_requested.emit(k))
             group.addButton(btn)
             self._mode_btns[key] = btn
@@ -173,7 +181,7 @@ class ImageQuickToolbar(QWidget):
         self._more_btn.setText("More")
         self._more_btn.setCheckable(True)
         self._more_btn.setToolTip("More drawing tools")
-        self._more_btn.setFixedHeight(28)
+        self._more_btn.setFixedHeight(_TOOLBAR_BTN_SIZE)
         self._more_btn.setMinimumWidth(56)
         self._more_btn.setPopupMode(QToolButton.InstantPopup)
         self._more_btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
@@ -194,8 +202,6 @@ class ImageQuickToolbar(QWidget):
         self._more_btn.setMenu(more_menu)
         row.addWidget(self._more_btn)
 
-        row.addSpacing(6)
-
         clear_btn = self._make_btn(
             "Clear",
             "Clear all ROIs and the angle overlay from the image.",
@@ -205,23 +211,13 @@ class ImageQuickToolbar(QWidget):
         self._action_btns["clear_selection"] = clear_btn
         row.addWidget(clear_btn)
 
-        row.addStretch(1)
-        return row
-
-    def _build_roi_row(self) -> QHBoxLayout:
-        row = QHBoxLayout()
-        row.setSpacing(3)
-        row.setContentsMargins(0, 0, 0, 0)
-
+    def _add_roi_buttons(self, row: QHBoxLayout) -> None:
         for key, label, tip, icon_name in _ROI_ACTION_BUTTONS:
             btn = self._make_btn(label, tip, icon_name=icon_name)
             btn.clicked.connect(lambda _checked=False, k=key: self.action_requested.emit(k))
             btn.setEnabled(key not in _AREA_ACTIONS)
             self._action_btns[key] = btn
             row.addWidget(btn)
-
-        row.addStretch(1)
-        return row
 
     @staticmethod
     def _make_btn(
@@ -232,15 +228,26 @@ class ImageQuickToolbar(QWidget):
         checkable: bool = False,
     ) -> QPushButton:
         btn = QPushButton(label)
+        icon_only = False
         if icon_name:
             icon_path = asset_path(f"toolbar/{icon_name}.png")
             if icon_path.exists():
                 btn.setIcon(QIcon(str(icon_path)))
                 btn.setIconSize(_TOOLBAR_ICON_SIZE)
+                # The diagrams read clearly on their own; drop the text label and
+                # keep the meaning in the tooltip for a more compact toolbar.
+                btn.setText("")
+                icon_only = True
         btn.setCheckable(checkable)
-        btn.setFixedHeight(28)
-        btn.setMinimumWidth(46)
-        btn.setMaximumWidth(96)
+        btn.setFixedHeight(_TOOLBAR_BTN_SIZE)
+        if icon_only:
+            btn.setFixedWidth(_TOOLBAR_BTN_SIZE)  # square, so the glyph dominates
+            # The global QPushButton rule pads 12px horizontally, which would shrink
+            # the icon to a sliver. Trim it so the diagram fills the button.
+            btn.setStyleSheet("padding: 2px;")
+        else:
+            btn.setMinimumWidth(46)
+            btn.setMaximumWidth(96)
         btn.setToolTip(tip)
         btn.setDefault(False)
         btn.setAutoDefault(False)

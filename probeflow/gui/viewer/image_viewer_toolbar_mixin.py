@@ -244,13 +244,12 @@ class ImageViewerToolbarMixin:
         active_line_id = self._active_line_roi_id()
         is_line = tool_is_line or (active_line_id is not None)
         self._line_profile_panel.setVisible(is_line)
-        if is_line:
-            if active_line_id is not None:
-                self._on_roi_line_profile(active_line_id)
-            else:
-                self._line_profile_panel.show_empty(theme=self._t)
+        if is_line and active_line_id is not None:
+            self._on_roi_line_profile(active_line_id)
         else:
             self._line_profile_panel.show_empty(theme=self._t)
+            if hasattr(self, "_measurement_panel"):
+                self._measurement_panel.clear_line_profile_live()
 
     def _pixel_size_xy_m(self) -> tuple[float, float]:
         shape = self._current_array_shape()

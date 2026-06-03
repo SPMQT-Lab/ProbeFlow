@@ -244,14 +244,18 @@ class ImageViewerRoiMixin:
         roi = self._image_roi_set.get(roi_id) if self._image_roi_set else None
         if roi is None or roi.kind != "line" or self._display_arr is None:
             return
-        self._line_profile_panel.set_width(int(roi.geometry.get("width", 1)))
-        plot_roi_line_profile(
+        if hasattr(self, "_measurement_panel"):
+            self._measurement_panel.set_line_profile_width(
+                int(roi.geometry.get("width", 1))
+            )
+        metrics = plot_roi_line_profile(
             roi, self._display_arr,
             self._pixel_size_xy_m(),
             self._channel_unit,
             self._line_profile_panel,
             self._t,
         )
+        self._push_line_profile_live(metrics)
         if hasattr(self, "_status_lbl"):
             self._status_lbl.setText(f"Line profile shown for ROI '{roi.name}'.")
 
@@ -264,13 +268,24 @@ class ImageViewerRoiMixin:
             return
         from probeflow.core.roi import ROI as _ROI
         tmp_roi = _ROI(id=roi_id, name="", kind="line", geometry=dict(geometry))
-        plot_roi_line_profile(
+        metrics = plot_roi_line_profile(
             tmp_roi, self._display_arr,
             self._pixel_size_xy_m(),
             self._channel_unit,
             self._line_profile_panel,
             self._t,
         )
+        self._push_line_profile_live(metrics)
+
+    def _push_line_profile_live(self, metrics: dict | None) -> None:
+        """Forward live line-profile metrics to the Measure-tab readout."""
+        panel = getattr(self, "_measurement_panel", None)
+        if panel is None:
+            return
+        if metrics is None:
+            panel.clear_line_profile_live()
+        else:
+            panel.set_line_profile_live(**metrics)
 
     def _on_roi_geometry_changed(self, roi_id: str, geometry: dict) -> None:
         """Resize-handle drag released: commit new geometry and persist."""

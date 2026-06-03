@@ -231,11 +231,16 @@ class ImageMeasurementController:
                 result.values["height_nm"] = float((ys.max() - ys.min() + 1) * px_y_nm)
             roi_set = self._roi_set()
             n_inside = 0
+            ny, nx = shape
             if roi_set is not None:
                 for other in roi_set.rois:
-                    if other.kind == "point" and bool(
-                        (other.to_mask(shape) & area_mask).any()
-                    ):
+                    if other.kind != "point":
+                        continue
+                    # A point ROI is a single pixel — test membership by indexing
+                    # the area mask directly instead of allocating a full mask each.
+                    px = int(round(float(other.geometry.get("x", -1))))
+                    py = int(round(float(other.geometry.get("y", -1))))
+                    if 0 <= py < ny and 0 <= px < nx and bool(area_mask[py, px]):
                         n_inside += 1
             result.values["n_points_inside"] = int(n_inside)
             self._record(result)
@@ -288,7 +293,7 @@ class ImageMeasurementController:
         self.add_line_profile_measurement_for_roi(roi_id)
 
     def find_periodicity_for_active_line_roi(self) -> None:
-        from probeflow.analysis.line_periodicity import estimate_line_periodicity, format_result_text
+        from probeflow.analysis.line_periodicity import estimate_line_periodicity
 
         roi_id = self._active_line_roi_id()
         if roi_id is None:
