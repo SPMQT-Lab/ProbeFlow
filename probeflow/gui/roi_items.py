@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from probeflow.gui.typography import ui_font
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import (
     QBrush, QColor, QFont, QPainter, QPainterPath, QPen,
@@ -30,7 +31,7 @@ _BRUSH_INACTIVE = QBrush(QColor(137, 180, 250, 30))
 _BRUSH_ACTIVE   = QBrush(QColor(34, 211, 238, 50))
 _BRUSH_HOVER    = QBrush(QColor(249, 226, 175, 45))
 _BRUSH_NONE     = QBrush(Qt.NoBrush)
-_LABEL_FONT     = QFont("Helvetica", 8)
+_LABEL_FONT     = ui_font(8)
 _LABEL_COLOR    = QColor("#cdd6f4")
 _PEN_HANDLE     = QPen(QColor("#22D3EE"), 1.5)
 _BRUSH_HANDLE   = QBrush(QColor(34, 211, 238, 200))

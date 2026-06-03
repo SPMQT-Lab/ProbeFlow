@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from probeflow.gui.config import GUI_FONT_SIZES, GUI_FONT_DEFAULT
+from probeflow.gui.typography import ui_family
 
 NAVBAR_DARK_BG  = "#3273dc"
 NAVBAR_LIGHT_BG = "#ffffff"
@@ -102,7 +103,7 @@ def _build_qss(t: dict, font_pt: int = GUI_FONT_SIZES[GUI_FONT_DEFAULT]) -> str:
 QMainWindow, QWidget {{
     background-color: {t['main_bg']};
     color: {t['fg']};
-    font-family: Helvetica, Arial, sans-serif;
+    font-family: "{ui_family()}", Helvetica, Arial, sans-serif;
     font-size: {font_pt}pt;
 }}
 /* Labels are transparent so they sit cleanly on any surface (cards, sidebars). */
@@ -131,44 +132,48 @@ ConvertSidebar QLabel, ConvertPanel QLabel {{
 }}
 
 /* ── Buttons ──────────────────────────────────────────────────────────── */
-/* Secondary (default): subtle filled, bordered, rounded. */
+/* Secondary (default): borderless filled, rounded.  Height is governed by
+   min-height (not vertical padding) so widgets that set a small fixed height
+   (setFixedHeight(22), common across the app) keep their text un-clipped. */
 QPushButton {{
     background-color: {t['btn_bg']};
     color: {t['btn_fg']};
-    border: 1px solid {t['border']};
+    border: none;
     border-radius: 6px;
-    padding: 6px 14px;
+    padding: 0 12px;
+    min-height: 26px;
 }}
 QPushButton:hover {{ background-color: {t['hover']}; }}
 QPushButton:pressed {{ background-color: {t['sel_tint']}; }}
 QPushButton:disabled {{
     background-color: {t['main_bg']};
     color: {t['sub_fg']};
-    border-color: {t['sep']};
 }}
 /* Primary (accent). */
 QPushButton#accentBtn {{
     background-color: {t['accent_bg']};
     color: {t['accent_fg']};
-    border: 1px solid {t['accent_bg']};
     font-weight: 600;
 }}
 QPushButton#accentBtn:hover {{ background-color: {t['accent_bg']}; }}
 QPushButton#accentBtn:disabled {{
     background-color: {t['main_bg']};
     color: {t['sub_fg']};
-    border-color: {t['sep']};
 }}
-/* Ghost (navigation / low-emphasis): transparent, accent text. */
+/* Back / up navigation chip: accent-tinted so it clearly reads as "go back". */
 QPushButton#ghostBtn {{
-    background: transparent;
+    background-color: {t['sel_tint']};
     color: {t['accent_bg']};
     border: none;
-    border-radius: 6px;
-    padding: 4px 10px;
-    font-weight: 600;
+    border-radius: 8px;
+    padding: 6px 18px;
+    font-weight: 700;
+    font-size: 13pt;
 }}
-QPushButton#ghostBtn:hover {{ background-color: {t['sel_tint']}; }}
+QPushButton#ghostBtn:hover {{
+    background-color: {t['accent_bg']};
+    color: {t['accent_fg']};
+}}
 /* Segmented buttons (browse filters). */
 QPushButton#segBtnLeft, QPushButton#segBtnMid, QPushButton#segBtnRight {{
     background-color: {t['btn_bg']};
@@ -190,6 +195,16 @@ QPushButton#segBtnRight:checked {{
     border-color: {t['accent_bg']};
     font-weight: 600;
 }}
+/* Active drawing-tool highlight (toolbar mode toggles + the "More" popup). */
+QPushButton#modeToolBtn:checked {{
+    background-color: {t['accent_bg']};
+    color: {t['accent_fg']};
+    font-weight: 600;
+}}
+QToolButton#imageToolMore:checked {{
+    background-color: {t['accent_bg']};
+    color: {t['accent_fg']};
+}}
 /* Navbar buttons (on the coloured navbar). */
 QPushButton#navBtn {{
     color: #ffffff;
@@ -206,7 +221,8 @@ QComboBox {{
     color: {t['fg']};
     border: 1px solid {t['border']};
     border-radius: 6px;
-    padding: 5px 8px;
+    padding: 2px 8px;
+    min-height: 24px;
     selection-background-color: {t['accent_bg']};
 }}
 QComboBox:hover {{ border-color: {t['sub_fg']}; }}
@@ -232,7 +248,8 @@ QLineEdit, QDoubleSpinBox, QSpinBox {{
     color: {t['fg']};
     border: 1px solid {t['border']};
     border-radius: 6px;
-    padding: 5px 8px;
+    padding: 2px 8px;
+    min-height: 24px;
 }}
 QLineEdit:focus, QDoubleSpinBox:focus, QSpinBox:focus {{
     border: 1px solid {t['accent_bg']};
@@ -322,10 +339,10 @@ QTabBar {{ border: none; qproperty-drawBase: 0; }}
 QTabBar::tab {{
     background: transparent;
     color: {t['sub_fg']};
-    padding: 6px 12px;
+    padding: 6px 8px;
     border: none;
     border-bottom: 2px solid transparent;
-    min-width: 36px;
+    min-width: 30px;
 }}
 QTabBar::tab:selected {{
     color: {t['fg']};
@@ -405,12 +422,50 @@ QToolButton#sidebarCollapseBtn:hover {{
     background-color: {t['hover']};
     color: {t['fg']};
 }}
-QToolButton#sidebarCollapseBtn {{ margin: 0 4px 0 8px; font-size: 13pt; }}
+/* Bigger, clearer collapse/expand chevrons. */
+QToolButton#sidebarCollapseBtn {{ margin: 0 2px 0 4px; font-size: 19pt; }}
+QToolButton#sidebarExpandBtn {{ font-size: 19pt; color: {t['accent_bg']}; }}
 """
+
+
+def _build_palette(t: dict):
+    """Build a QPalette from the theme so ``palette(...)`` roles and native widget
+    bits (combo popups, disabled text, tooltips) resolve correctly in both modes.
+
+    The app styles most widgets via QSS; without a matching palette the unstyled
+    bits and any ``color: palette(mid)`` text fall back to Qt's default *light*
+    palette, which is unreadable in dark mode.
+    """
+    from PySide6.QtGui import QColor, QPalette
+
+    def c(key: str) -> "QColor":
+        return QColor(t[key])
+
+    p = QPalette()
+    p.setColor(QPalette.Window, c("main_bg"))
+    p.setColor(QPalette.WindowText, c("fg"))
+    p.setColor(QPalette.Base, c("entry_bg"))
+    p.setColor(QPalette.AlternateBase, c("surface"))
+    p.setColor(QPalette.Text, c("fg"))
+    p.setColor(QPalette.Button, c("btn_bg"))
+    p.setColor(QPalette.ButtonText, c("btn_fg"))
+    p.setColor(QPalette.ToolTipBase, c("raised"))
+    p.setColor(QPalette.ToolTipText, c("fg"))
+    p.setColor(QPalette.PlaceholderText, c("sub_fg"))
+    p.setColor(QPalette.Mid, c("sub_fg"))
+    p.setColor(QPalette.Midlight, c("sep"))
+    p.setColor(QPalette.Dark, c("border"))
+    p.setColor(QPalette.Highlight, c("accent_bg"))
+    p.setColor(QPalette.HighlightedText, c("accent_fg"))
+    p.setColor(QPalette.Link, c("accent_bg"))
+    p.setColor(QPalette.BrightText, c("err_fg"))
+    for role in (QPalette.Text, QPalette.WindowText, QPalette.ButtonText):
+        p.setColor(QPalette.Disabled, role, c("sub_fg"))
+    return p
 
 
 __all__ = [
     "NAVBAR_DARK_BG", "NAVBAR_LIGHT_BG", "NAVBAR_H",
     "THEMES",
-    "_sep", "_build_qss",
+    "_sep", "_build_qss", "_build_palette",
 ]

@@ -9,6 +9,7 @@ import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 
+from probeflow.gui.typography import ui_font
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
@@ -117,7 +118,7 @@ class PairCorrelationDialog(QDialog):
 
         # Source selector.
         src_lbl = QLabel("Source")
-        src_lbl.setFont(QFont("Helvetica", 8))
+        src_lbl.setFont(ui_font(8))
         lay.addWidget(src_lbl)
         self._src_cb = QComboBox()
         self._src_cb.addItems(list(self._sources.keys()) or ["(no points available)"])
@@ -160,13 +161,13 @@ class PairCorrelationDialog(QDialog):
 
         # Results block.
         self._result_lbl = QLabel("—")
-        self._result_lbl.setFont(QFont("Helvetica", 8))
+        self._result_lbl.setFont(ui_font(8))
         self._result_lbl.setWordWrap(True)
         self._result_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
         lay.addWidget(self._result_lbl)
 
         self._warning_lbl = QLabel("")
-        self._warning_lbl.setFont(QFont("Helvetica", 8))
+        self._warning_lbl.setFont(ui_font(8))
         self._warning_lbl.setWordWrap(True)
         self._warning_lbl.setStyleSheet("color: #c07000;")
         lay.addWidget(self._warning_lbl)

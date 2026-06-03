@@ -7,6 +7,7 @@ import numpy as np
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
+from probeflow.gui.typography import ui_font
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
@@ -215,13 +216,13 @@ class FFTViewerDialog(QDialog):
 
         def _lbl(text):
             lb = QLabel(text)
-            lb.setFont(QFont("Helvetica", 9))
+            lb.setFont(ui_font(9))
             return lb
 
         def _combo(items, min_width=80):
             c = QComboBox()
             c.addItems(items)
-            c.setFont(QFont("Helvetica", 9))
+            c.setFont(ui_font(9))
             c.setFixedHeight(24)
             c.setMinimumWidth(min_width)
             return c
@@ -294,7 +295,7 @@ class FFTViewerDialog(QDialog):
         tb.addStretch(1)
 
         show_tools_btn = QPushButton("Show tools")
-        show_tools_btn.setFont(QFont("Helvetica", 9))
+        show_tools_btn.setFont(ui_font(9))
         show_tools_btn.setFixedHeight(24)
         show_tools_btn.setMinimumWidth(86)
         show_tools_btn.setCheckable(True)
@@ -304,7 +305,7 @@ class FFTViewerDialog(QDialog):
         self._show_tools_btn = show_tools_btn
 
         focus_btn = QPushButton("Focus FFT")
-        focus_btn.setFont(QFont("Helvetica", 9))
+        focus_btn.setFont(ui_font(9))
         focus_btn.setFixedHeight(24)
         focus_btn.setMinimumWidth(86)
         focus_btn.setCheckable(True)
@@ -323,7 +324,7 @@ class FFTViewerDialog(QDialog):
             ("  −  ", "Zoom out",                       lambda: self._zoom_by(2.0)),
         ]:
             btn = QPushButton(label)
-            btn.setFont(QFont("Helvetica", 9))
+            btn.setFont(ui_font(9))
             btn.setFixedHeight(24)
             btn.setMinimumWidth(44)
             btn.setToolTip(tip)
@@ -332,7 +333,7 @@ class FFTViewerDialog(QDialog):
 
         tb.addSpacing(8)
         exp_btn = QPushButton("Export PNG…")
-        exp_btn.setFont(QFont("Helvetica", 9))
+        exp_btn.setFont(ui_font(9))
         exp_btn.setFixedHeight(24)
         exp_btn.setMinimumWidth(96)
         exp_btn.setToolTip("Save the current FFT view as a PNG file.")
@@ -341,7 +342,7 @@ class FFTViewerDialog(QDialog):
 
         tb.addSpacing(8)
         grid_btn = QPushButton("Grid")
-        grid_btn.setFont(QFont("Helvetica", 9))
+        grid_btn.setFont(ui_font(9))
         grid_btn.setFixedHeight(24)
         grid_btn.setMinimumWidth(68)
         grid_btn.setToolTip("Switch to the Grid tab (creates a lattice overlay if none exists)")
@@ -384,7 +385,7 @@ class FFTViewerDialog(QDialog):
         side_lay.setContentsMargins(8, 8, 8, 8)
         side_lay.setSpacing(8)
         cursor_title = QLabel("Cursor")
-        cursor_title.setFont(QFont("Helvetica", 9, QFont.Bold))
+        cursor_title.setFont(ui_font(9, weight=QFont.Bold))
         self._cursor_readout_lbl = QLabel("Move over the FFT")
         self._cursor_readout_lbl.setFont(QFont("Courier", 8))
         self._cursor_readout_lbl.setWordWrap(True)
@@ -397,7 +398,7 @@ class FFTViewerDialog(QDialog):
 
         self._tab_widget = QTabWidget()
         self._tab_widget.setMinimumHeight(300)
-        self._tab_widget.setFont(QFont("Helvetica", 9))
+        self._tab_widget.setFont(ui_font(9))
 
         # ── Tab 0: Inspect ───────────────────────────────────────────────────
         inspect_tab = QWidget()
@@ -406,7 +407,7 @@ class FFTViewerDialog(QDialog):
         inspect_lay.setSpacing(8)
 
         intensity_grp = QGroupBox("Intensity")
-        intensity_grp.setFont(QFont("Helvetica", 9))
+        intensity_grp.setFont(ui_font(9))
         int_lay = QVBoxLayout(intensity_grp)
         int_lay.setContentsMargins(6, 6, 6, 4)
         self._hist_panel = HistogramPanel(parent=intensity_grp)
@@ -414,7 +415,7 @@ class FFTViewerDialog(QDialog):
         inspect_lay.addWidget(intensity_grp, 1)
 
         radial_grp = QGroupBox("Radial profile")
-        radial_grp.setFont(QFont("Helvetica", 9))
+        radial_grp.setFont(ui_font(9))
         rad_lay = QVBoxLayout(radial_grp)
         self._radial_fig = Figure(figsize=(1, 1), dpi=90)
         self._radial_fig.patch.set_facecolor(bg)
@@ -448,7 +449,7 @@ class FFTViewerDialog(QDialog):
         self._grid_extent_spin = QSpinBox()
         self._grid_extent_spin.setRange(1, 200)
         self._grid_extent_spin.setValue(12)
-        self._grid_extent_spin.setFont(QFont("Helvetica", 9))
+        self._grid_extent_spin.setFont(ui_font(9))
         self._grid_extent_spin.setFixedHeight(24)
         self._grid_extent_spin.setToolTip("How many reciprocal-lattice repeats to draw in each direction.")
         self._grid_extent_spin.valueChanged.connect(self._on_grid_extent_changed)
@@ -465,11 +466,11 @@ class FFTViewerDialog(QDialog):
             "Click Draw Grid to overlay a reciprocal lattice.\n"
             "Drag the g₁/g₂ handles to align with Bragg peaks."
         )
-        self._grid_placeholder_lbl.setFont(QFont("Helvetica", 9))
+        self._grid_placeholder_lbl.setFont(ui_font(9))
         self._grid_placeholder_lbl.setAlignment(Qt.AlignCenter)
         self._grid_placeholder_lbl.setWordWrap(True)
         self._grid_draw_btn = QPushButton("Draw Grid")
-        self._grid_draw_btn.setFont(QFont("Helvetica", 9))
+        self._grid_draw_btn.setFont(ui_font(9))
         self._grid_draw_btn.setFixedHeight(26)
         self._grid_draw_btn.setToolTip(
             "Create a hexagonal reciprocal-lattice overlay on the FFT. "
@@ -482,7 +483,7 @@ class FFTViewerDialog(QDialog):
 
         # Known structure section (moved here from Correction tab)
         ref_grp = QGroupBox("Known structure")
-        ref_grp.setFont(QFont("Helvetica", 9))
+        ref_grp.setFont(ui_font(9))
         ref_grp.setMinimumHeight(120)
         ref_grid = QGridLayout(ref_grp)
         ref_grid.setContentsMargins(8, 7, 8, 4)
@@ -491,7 +492,7 @@ class FFTViewerDialog(QDialog):
 
         structure_row = QHBoxLayout()
         self._structure_combo = QComboBox()
-        self._structure_combo.setFont(QFont("Helvetica", 9))
+        self._structure_combo.setFont(ui_font(9))
         self._structure_combo.setFixedHeight(24)
         self._structure_combo.setToolTip("Known surface lattice used for shell guides and undistortion target.")
         self._structure_combo.currentIndexChanged.connect(self._on_structure_selected)
@@ -503,7 +504,7 @@ class FFTViewerDialog(QDialog):
             self._structure_update_btn,
             self._structure_delete_btn,
         ):
-            btn.setFont(QFont("Helvetica", 8))
+            btn.setFont(ui_font(8))
             btn.setFixedHeight(23)
             structure_row.addWidget(btn)
         self._structure_save_btn.clicked.connect(self._on_save_structure)
@@ -511,14 +512,14 @@ class FFTViewerDialog(QDialog):
         self._structure_delete_btn.clicked.connect(self._on_delete_structure)
 
         self._bragg_enable_cb = QCheckBox("Show shell rings")
-        self._bragg_enable_cb.setFont(QFont("Helvetica", 9))
+        self._bragg_enable_cb.setFont(ui_font(9))
         self._bragg_enable_cb.setChecked(True)
         self._bragg_enable_cb.setToolTip("Overlay the expected Bragg-shell radii from the known lattice.")
         self._bragg_enable_cb.toggled.connect(self._on_bragg_changed)
 
         self._bragg_sym_combo = QComboBox()
         self._bragg_sym_combo.addItems(["Square", "Hexagonal"])
-        self._bragg_sym_combo.setFont(QFont("Helvetica", 9))
+        self._bragg_sym_combo.setFont(ui_font(9))
         self._bragg_sym_combo.setFixedHeight(24)
         self._bragg_sym_combo.setToolTip("Surface symmetry used for the predicted reciprocal-lattice shells.")
         self._bragg_sym_combo.currentIndexChanged.connect(self._on_bragg_symmetry_changed)
@@ -526,20 +527,20 @@ class FFTViewerDialog(QDialog):
         self._bragg_a_spin.setRange(0.001, 999.0)
         self._bragg_a_spin.setValue(2.46)
         self._bragg_a_spin.setDecimals(3)
-        self._bragg_a_spin.setFont(QFont("Helvetica", 9))
+        self._bragg_a_spin.setFont(ui_font(9))
         self._bragg_a_spin.setFixedHeight(24)
         self._bragg_a_spin.setToolTip("Approximate real-space lattice spacing for predicted Bragg shells.")
         self._bragg_a_spin.valueChanged.connect(self._on_bragg_changed)
         self._bragg_unit_combo = QComboBox()
         self._bragg_unit_combo.addItems(["Å", "nm"])
-        self._bragg_unit_combo.setFont(QFont("Helvetica", 9))
+        self._bragg_unit_combo.setFont(ui_font(9))
         self._bragg_unit_combo.setFixedHeight(24)
         self._bragg_unit_combo.setToolTip("Unit for the reference lattice spacing.")
         self._bragg_unit_combo.currentIndexChanged.connect(self._on_bragg_changed)
         self._bragg_max_shells_spin = QSpinBox()
         self._bragg_max_shells_spin.setRange(1, 12)
         self._bragg_max_shells_spin.setValue(5)
-        self._bragg_max_shells_spin.setFont(QFont("Helvetica", 9))
+        self._bragg_max_shells_spin.setFont(ui_font(9))
         self._bragg_max_shells_spin.setFixedHeight(24)
         self._bragg_max_shells_spin.setToolTip("Maximum number of visible predicted shell families.")
         self._bragg_max_shells_spin.valueChanged.connect(self._on_bragg_changed)
@@ -572,7 +573,7 @@ class FFTViewerDialog(QDialog):
 
         # Compare section
         compare_grp = QGroupBox("Compare with known structure")
-        compare_grp.setFont(QFont("Helvetica", 9))
+        compare_grp.setFont(ui_font(9))
         compare_lay = QVBoxLayout(compare_grp)
         compare_lay.setContentsMargins(8, 7, 8, 4)
         self._fft_measured_lbl = QLabel(
@@ -588,7 +589,7 @@ class FFTViewerDialog(QDialog):
 
         # Clear Grid button at the bottom of the Grid tab
         self._clear_grid_btn = QPushButton("Clear Grid")
-        self._clear_grid_btn.setFont(QFont("Helvetica", 9))
+        self._clear_grid_btn.setFont(ui_font(9))
         self._clear_grid_btn.setFixedHeight(24)
         self._clear_grid_btn.setToolTip("Remove the reciprocal-space lattice overlay")
         self._clear_grid_btn.setEnabled(False)
@@ -608,7 +609,7 @@ class FFTViewerDialog(QDialog):
         self._fft_ideal_combo = QComboBox()
         self._fft_ideal_combo.addItems(["Match measured", "Square", "Rectangular", "Hexagonal", "Custom"])
         self._fft_ideal_combo.setCurrentText("Square")
-        self._fft_ideal_combo.setFont(QFont("Helvetica", 9))
+        self._fft_ideal_combo.setFont(ui_font(9))
         self._fft_ideal_combo.setFixedHeight(24)
         self._fft_ideal_combo.setToolTip("Ideal direct lattice to map the measured FFT-derived lattice onto.")
         self._fft_ideal_combo.currentIndexChanged.connect(self._on_fft_ideal_changed)
@@ -631,7 +632,7 @@ class FFTViewerDialog(QDialog):
         self._fft_ideal_angle_spin.setFixedHeight(24)
         self._fft_ideal_angle_spin.valueChanged.connect(self._on_fft_ideal_changed)
         self._fft_preserve_orientation_cb = QCheckBox("Preserve image orientation")
-        self._fft_preserve_orientation_cb.setFont(QFont("Helvetica", 9))
+        self._fft_preserve_orientation_cb.setFont(ui_font(9))
         self._fft_preserve_orientation_cb.setChecked(True)
         self._fft_preserve_orientation_cb.setToolTip("Apply only stretch/shear and remove the fitted rigid rotation.")
         self._fft_preserve_orientation_cb.toggled.connect(self._on_fft_ideal_changed)
@@ -656,7 +657,7 @@ class FFTViewerDialog(QDialog):
         corr_lay.addWidget(self._fft_correction_lbl)
 
         self._fft_correction_status_lbl = QLabel("No reciprocal grid yet")
-        self._fft_correction_status_lbl.setFont(QFont("Helvetica", 8))
+        self._fft_correction_status_lbl.setFont(ui_font(8))
         self._fft_correction_status_lbl.setWordWrap(True)
         corr_lay.addWidget(self._fft_correction_status_lbl)
 
@@ -669,19 +670,19 @@ class FFTViewerDialog(QDialog):
 
         action_row = QHBoxLayout()
         self._fft_preview_btn = QPushButton("Preview corrected image")
-        self._fft_preview_btn.setFont(QFont("Helvetica", 9))
+        self._fft_preview_btn.setFont(ui_font(9))
         self._fft_preview_btn.setFixedHeight(24)
         self._fft_preview_btn.setEnabled(False)
         self._fft_preview_btn.setToolTip("Show the affine-corrected real-space image in the left preview rail.")
         self._fft_preview_btn.clicked.connect(self._on_fft_preview_correction)
         self._fft_clear_preview_btn = QPushButton("Clear preview")
-        self._fft_clear_preview_btn.setFont(QFont("Helvetica", 9))
+        self._fft_clear_preview_btn.setFont(ui_font(9))
         self._fft_clear_preview_btn.setFixedHeight(24)
         self._fft_clear_preview_btn.setEnabled(False)
         self._fft_clear_preview_btn.clicked.connect(self._on_fft_clear_preview)
         self._fft_apply_btn = QPushButton("Apply correction")
         self._fft_apply_btn.setObjectName("accentBtn")
-        self._fft_apply_btn.setFont(QFont("Helvetica", 9))
+        self._fft_apply_btn.setFont(ui_font(9))
         self._fft_apply_btn.setFixedHeight(24)
         self._fft_apply_btn.setEnabled(False)
         self._fft_apply_btn.setToolTip("Append this FFT-derived affine lattice correction to the image processing history.")
@@ -693,7 +694,7 @@ class FFTViewerDialog(QDialog):
         corr_lay.addLayout(action_row)
 
         piezo_grp = QGroupBox("Piezo constants")
-        piezo_grp.setFont(QFont("Helvetica", 9))
+        piezo_grp.setFont(ui_font(9))
         piezo_lay = QVBoxLayout(piezo_grp)
         piezo_lay.setContentsMargins(8, 8, 8, 6)
         piezo_lay.setSpacing(5)
@@ -712,7 +713,7 @@ class FFTViewerDialog(QDialog):
         piezo_row.addWidget(self._piezo_y_edit)
         piezo_row.addStretch(1)
         self._piezo_copy_btn = QPushButton("Copy recommendation")
-        self._piezo_copy_btn.setFont(QFont("Helvetica", 9))
+        self._piezo_copy_btn.setFont(ui_font(9))
         self._piezo_copy_btn.setFixedHeight(22)
         self._piezo_copy_btn.setEnabled(False)
         self._piezo_copy_btn.clicked.connect(self._copy_piezo_recommendation)
@@ -744,7 +745,7 @@ class FFTViewerDialog(QDialog):
 
         def _collapsible_group(title: str, checked: bool = False):
             grp = QGroupBox(title)
-            grp.setFont(QFont("Helvetica", 9))
+            grp.setFont(ui_font(9))
             grp.setCheckable(True)
             grp.setChecked(checked)
             outer = QVBoxLayout(grp)
@@ -794,11 +795,11 @@ class FFTViewerDialog(QDialog):
         advanced_lay.addWidget(correction_opts_grp)
 
         display_grp = QGroupBox("Display")
-        display_grp.setFont(QFont("Helvetica", 9))
+        display_grp.setFont(ui_font(9))
         display_grp_lay = QVBoxLayout(display_grp)
         display_grp_lay.setContentsMargins(8, 8, 8, 6)
         self._fft_equal_aspect_cb = QCheckBox("Preserve equal q_x/q_y aspect while zoomed")
-        self._fft_equal_aspect_cb.setFont(QFont("Helvetica", 9))
+        self._fft_equal_aspect_cb.setFont(ui_font(9))
         self._fft_equal_aspect_cb.setChecked(False)
         self._fft_equal_aspect_cb.setToolTip(
             "Off (default): zoom uses the full canvas width — the visible q-window "
@@ -904,7 +905,7 @@ class FFTViewerDialog(QDialog):
         preview_lay.setContentsMargins(0, 4, 0, 0)
         preview_lay.setSpacing(2)
         preview_title = QLabel("Corrected preview")
-        preview_title.setFont(QFont("Helvetica", 9, QFont.Bold))
+        preview_title.setFont(ui_font(9, weight=QFont.Bold))
         preview_lay.addWidget(preview_title)
         self._fig_preview = Figure(figsize=(2.7, 2.1), dpi=90)
         self._fig_preview.patch.set_facecolor(bg)
@@ -924,7 +925,7 @@ class FFTViewerDialog(QDialog):
 
         # ── status bar ────────────────────────────────────────────────────────
         self._status_lbl = QLabel("")
-        self._status_lbl.setFont(QFont("Helvetica", 8))
+        self._status_lbl.setFont(ui_font(8))
         self._status_lbl.setAlignment(Qt.AlignLeft)
         lay.addWidget(self._status_lbl)
 
@@ -2356,7 +2357,7 @@ class FFTViewerDialog(QDialog):
             "what is removed or isolated in real space. The residual is "
             "original − result.")
         intro.setWordWrap(True)
-        intro.setFont(QFont("Helvetica", 9))
+        intro.setFont(ui_font(9))
         intro.setToolTip(_tip(
             "Make FFT filtering auditable: drop circle/ellipse selections on "
             "Fourier features, choose Remove or Keep, and preview the "
@@ -2483,7 +2484,7 @@ class FFTViewerDialog(QDialog):
 
         self._recon_status_lbl = QLabel("")
         self._recon_status_lbl.setWordWrap(True)
-        self._recon_status_lbl.setFont(QFont("Helvetica", 8))
+        self._recon_status_lbl.setFont(ui_font(8))
         lay.addWidget(self._recon_status_lbl)
 
         lay.addStretch(1)
@@ -2688,7 +2689,7 @@ class FFTViewerDialog(QDialog):
             "set by the fast-scan speed. Mark it, check the cursor frequency, "
             "then preview and apply a symmetric notch.")
         intro.setWordWrap(True)
-        intro.setFont(QFont("Helvetica", 9))
+        intro.setFont(ui_font(9))
         intro.setToolTip(_tip(
             "Find and remove mains pickup — the 50/60 Hz electrical hum that "
             "appears as faint, regularly-spaced stripes. Use it when a scan "
@@ -2769,7 +2770,7 @@ class FFTViewerDialog(QDialog):
 
         self._mains_status_lbl = QLabel("")
         self._mains_status_lbl.setWordWrap(True)
-        self._mains_status_lbl.setFont(QFont("Helvetica", 8))
+        self._mains_status_lbl.setFont(ui_font(8))
         gl.addWidget(self._mains_status_lbl)
         lay.addWidget(grp)
 

@@ -9,6 +9,7 @@ import numpy as np
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
+from probeflow.gui.typography import ui_font
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
@@ -126,7 +127,7 @@ class SpecViewerDialog(QDialog):
         lay.setSpacing(6)
 
         self._title = QLabel(self._entry.stem)
-        self._title.setFont(QFont("Helvetica", 12, QFont.Bold))
+        self._title.setFont(ui_font(12, weight=QFont.Bold))
         self._title.setAlignment(Qt.AlignCenter)
         lay.addWidget(self._title)
 
@@ -138,37 +139,37 @@ class SpecViewerDialog(QDialog):
         self._channels_lay.setContentsMargins(6, 6, 6, 6)
         self._channels_lay.setSpacing(4)
         ch_header = QLabel("Channels")
-        ch_header.setFont(QFont("Helvetica", 10, QFont.Bold))
+        ch_header.setFont(ui_font(10, weight=QFont.Bold))
         self._channels_lay.addWidget(ch_header)
 
         # Unit-override selectors for height (Z) and current channels.
         unit_box = QGroupBox("Display units")
-        unit_box.setFont(QFont("Helvetica", 9, QFont.Bold))
+        unit_box.setFont(ui_font(9, weight=QFont.Bold))
         unit_lay = QGridLayout(unit_box)
         unit_lay.setContentsMargins(6, 4, 6, 4)
         unit_lay.setSpacing(2)
 
         z_lbl = QLabel("Z:")
-        z_lbl.setFont(QFont("Helvetica", 9))
+        z_lbl.setFont(ui_font(9))
         self._z_unit_cb = QComboBox()
         self._z_unit_cb.addItems(["Auto", "pm", "Å", "nm", "µm", "m"])
-        self._z_unit_cb.setFont(QFont("Helvetica", 9))
+        self._z_unit_cb.setFont(ui_font(9))
         self._z_unit_cb.currentTextChanged.connect(
             lambda v: self._on_unit_changed("m", v))
 
         i_lbl = QLabel("I:")
-        i_lbl.setFont(QFont("Helvetica", 9))
+        i_lbl.setFont(ui_font(9))
         self._i_unit_cb = QComboBox()
         self._i_unit_cb.addItems(["Auto", "fA", "pA", "nA", "µA", "A"])
-        self._i_unit_cb.setFont(QFont("Helvetica", 9))
+        self._i_unit_cb.setFont(ui_font(9))
         self._i_unit_cb.currentTextChanged.connect(
             lambda v: self._on_unit_changed("A", v))
 
         v_lbl = QLabel("V:")
-        v_lbl.setFont(QFont("Helvetica", 9))
+        v_lbl.setFont(ui_font(9))
         self._v_unit_cb = QComboBox()
         self._v_unit_cb.addItems(["Auto", "µV", "mV", "V"])
-        self._v_unit_cb.setFont(QFont("Helvetica", 9))
+        self._v_unit_cb.setFont(ui_font(9))
         self._v_unit_cb.currentTextChanged.connect(
             lambda v: self._on_unit_changed("V", v))
 
@@ -182,27 +183,27 @@ class SpecViewerDialog(QDialog):
         self._channels_lay.addWidget(unit_box)
 
         analysis_box = QGroupBox("Spectrum display")
-        analysis_box.setFont(QFont("Helvetica", 9, QFont.Bold))
+        analysis_box.setFont(ui_font(9, weight=QFont.Bold))
         analysis_box.setToolTip(_DISPLAY_PIPELINE_TOOLTIP)
         analysis_lay = QGridLayout(analysis_box)
         analysis_lay.setContentsMargins(6, 4, 6, 4)
         analysis_lay.setSpacing(3)
 
         self._file_lbl = QLabel(_shorten_filename(self._entry.path.name))
-        self._file_lbl.setFont(QFont("Helvetica", 8))
+        self._file_lbl.setFont(ui_font(8))
         self._file_lbl.setWordWrap(False)
         self._file_lbl.setToolTip(str(self._entry.path))
         self._x_axis_lbl = QLabel("x: —")
-        self._x_axis_lbl.setFont(QFont("Helvetica", 8))
+        self._x_axis_lbl.setFont(ui_font(8))
 
         self._signal_cb = QComboBox()
-        self._signal_cb.setFont(QFont("Helvetica", 9))
+        self._signal_cb.setFont(ui_font(9))
         self._signal_cb.setToolTip("Choose the channel to plot/export as displayed data.")
         self._signal_cb.currentTextChanged.connect(self._on_signal_changed)
 
         self._smoothing_cb = QComboBox()
         self._smoothing_cb.addItems(["None", "Gaussian", "Savitzky-Golay"])
-        self._smoothing_cb.setFont(QFont("Helvetica", 9))
+        self._smoothing_cb.setFont(ui_font(9))
         self._smoothing_cb.setToolTip(_SMOOTHING_TOOLTIP)
         self._smoothing_cb.currentTextChanged.connect(self._on_processing_changed)
 
@@ -210,7 +211,7 @@ class SpecViewerDialog(QDialog):
         self._smooth_points_spin.setRange(3, 9999)
         self._smooth_points_spin.setSingleStep(2)
         self._smooth_points_spin.setValue(7)
-        self._smooth_points_spin.setFont(QFont("Helvetica", 9))
+        self._smooth_points_spin.setFont(ui_font(9))
         self._smooth_points_spin.setToolTip(
             "Smoothing window in points. Savitzky-Golay requires an odd value "
             "greater than the polynomial order."
@@ -221,7 +222,7 @@ class SpecViewerDialog(QDialog):
         self._savgol_order_spin = QSpinBox()
         self._savgol_order_spin.setRange(0, 12)
         self._savgol_order_spin.setValue(2)
-        self._savgol_order_spin.setFont(QFont("Helvetica", 9))
+        self._savgol_order_spin.setFont(ui_font(9))
         self._savgol_order_spin.setToolTip(
             "Savitzky-Golay polynomial order. Must be smaller than the odd window length."
         )
@@ -230,7 +231,7 @@ class SpecViewerDialog(QDialog):
 
         self._derivative_cb = QComboBox()
         self._derivative_cb.addItems(["Off", _DERIVATIVE_NUMERIC_LABEL])
-        self._derivative_cb.setFont(QFont("Helvetica", 9))
+        self._derivative_cb.setFont(ui_font(9))
         self._derivative_cb.setToolTip(
             "Compute a numerical derivative of the displayed y channel with respect to x."
         )
@@ -238,7 +239,7 @@ class SpecViewerDialog(QDialog):
 
         self._normalize_cb = QComboBox()
         self._normalize_cb.addItems(NORMALIZATION_LABELS)
-        self._normalize_cb.setFont(QFont("Helvetica", 9))
+        self._normalize_cb.setFont(ui_font(9))
         self._normalize_cb.setToolTip(_NORMALIZATION_TOOLTIP)
         self._normalize_cb.currentTextChanged.connect(self._on_processing_changed)
 
@@ -247,7 +248,7 @@ class SpecViewerDialog(QDialog):
         self._norm_constant_spin.setDecimals(6)
         self._norm_constant_spin.setSingleStep(1.0)
         self._norm_constant_spin.setValue(1.0)
-        self._norm_constant_spin.setFont(QFont("Helvetica", 9))
+        self._norm_constant_spin.setFont(ui_font(9))
         self._norm_constant_spin.setToolTip(
             "Constant normalization uses y_display = y_input / constant. "
             "The original data are not changed."
@@ -256,20 +257,20 @@ class SpecViewerDialog(QDialog):
         self._norm_constant_spin.editingFinished.connect(self._on_processing_changed)
 
         self._norm_channel_cb = QComboBox()
-        self._norm_channel_cb.setFont(QFont("Helvetica", 9))
+        self._norm_channel_cb.setFont(ui_font(9))
         self._norm_channel_cb.setToolTip(
             "Channel normalization uses y_display = y_input / selected_channel."
         )
         self._norm_channel_cb.currentTextChanged.connect(self._on_processing_changed)
 
         self._formula_lbl = QLabel("Display: y")
-        self._formula_lbl.setFont(QFont("Helvetica", 8))
+        self._formula_lbl.setFont(ui_font(8))
         self._formula_lbl.setWordWrap(True)
         self._formula_lbl.setToolTip(_DISPLAY_PIPELINE_TOOLTIP)
 
         self._outlier_cb = QComboBox()
         self._outlier_cb.addItems(["Off", "MAD", "Jump"])
-        self._outlier_cb.setFont(QFont("Helvetica", 9))
+        self._outlier_cb.setFont(ui_font(9))
         self._outlier_cb.setToolTip(
             "Mask outliers from displayed/exported arrays; original loaded data stay intact."
         )
@@ -280,14 +281,14 @@ class SpecViewerDialog(QDialog):
         self._outlier_threshold_spin.setDecimals(2)
         self._outlier_threshold_spin.setSingleStep(0.5)
         self._outlier_threshold_spin.setValue(6.0)
-        self._outlier_threshold_spin.setFont(QFont("Helvetica", 9))
+        self._outlier_threshold_spin.setFont(ui_font(9))
         self._outlier_threshold_spin.setToolTip("Robust outlier threshold for display masking.")
         self._outlier_threshold_spin.valueChanged.connect(self._on_processing_changed)
         self._outlier_threshold_spin.editingFinished.connect(self._on_processing_changed)
 
         self._plot_mode_cb = QComboBox()
         self._plot_mode_cb.addItems(["Separate", "Overlay", "Waterfall"])
-        self._plot_mode_cb.setFont(QFont("Helvetica", 9))
+        self._plot_mode_cb.setFont(ui_font(9))
         self._plot_mode_cb.setToolTip("Choose separate axes, overlaid traces, or waterfall offset.")
         self._plot_mode_cb.currentTextChanged.connect(self._redraw)
 
@@ -296,7 +297,7 @@ class SpecViewerDialog(QDialog):
         self._offset_spin.setDecimals(4)
         self._offset_spin.setSingleStep(1.0)
         self._offset_spin.setValue(0.0)
-        self._offset_spin.setFont(QFont("Helvetica", 9))
+        self._offset_spin.setFont(ui_font(9))
         self._offset_spin.setToolTip(
             "Vertical offset applied last, in displayed Y units. Raw data are unchanged."
         )
@@ -380,15 +381,15 @@ class SpecViewerDialog(QDialog):
         lay.addWidget(splitter, 1)
 
         self._status = QLabel("Loading…")
-        self._status.setFont(QFont("Helvetica", 9))
+        self._status.setFont(ui_font(9))
         lay.addWidget(self._status)
 
         self._cursor_lbl = QLabel("Cursor: —")
-        self._cursor_lbl.setFont(QFont("Helvetica", 9))
+        self._cursor_lbl.setFont(ui_font(9))
         lay.addWidget(self._cursor_lbl)
 
         self._measure_lbl = QLabel("Measurement: off")
-        self._measure_lbl.setFont(QFont("Helvetica", 9))
+        self._measure_lbl.setFont(ui_font(9))
         self._measure_lbl.setWordWrap(True)
         self._measure_lbl.setToolTip(
             "Crosshair measurements use the displayed trace, not the raw spectrum."

@@ -19,6 +19,7 @@ import numpy as np
 import os as _os
 _os.environ.setdefault("QT_API", "pyside6")
 
+from probeflow.gui.typography import ui_font
 from PySide6.QtCore import Qt, QThreadPool, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
@@ -86,7 +87,7 @@ class FeatureCountingWindow(QMainWindow):
 
         # ── Status bar (created before controller so status_cb is valid) ─────
         self._status_bar = QStatusBar()
-        self._status_bar.setFont(QFont("Helvetica", 10))
+        self._status_bar.setFont(ui_font(10))
         self.setStatusBar(self._status_bar)
 
         # ── Controller ───────────────────────────────────────────────────────

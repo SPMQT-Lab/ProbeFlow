@@ -24,6 +24,7 @@ import numpy as np
 import os as _os
 _os.environ.setdefault("QT_API", "pyside6")
 
+from probeflow.gui.typography import ui_font
 from PySide6.QtCore import QObject, QPointF, QRectF, QRunnable, Qt, QTimer, Signal, Slot
 from PySide6.QtGui import (
     QBrush, QColor, QCursor, QFont, QImage, QPainterPath, QPen, QPixmap,
@@ -312,7 +313,7 @@ class _FeatureView(QGraphicsView):
         item = QGraphicsTextItem(text)
         item.setPos(x, y)
         item.setDefaultTextColor(QColor(color))
-        item.setFont(QFont("Helvetica", font_size))
+        item.setFont(ui_font(font_size))
         self._add(item)
 
     def add_line(self, x1: float, y1: float, x2: float, y2: float,
@@ -589,12 +590,12 @@ class FeaturesPanel(QWidget):
         top_row = QHBoxLayout()
         top_row.setSpacing(6)
         self._title = QLabel("FeatureCounting - load a scan from the Browse tab, then run an analysis.")
-        self._title.setFont(QFont("Helvetica", 11, QFont.Bold))
+        self._title.setFont(ui_font(11, weight=QFont.Bold))
         self._title.setWordWrap(True)
         top_row.addWidget(self._title, 1)
 
         _back_btn = QPushButton("← Browse")
-        _back_btn.setFont(QFont("Helvetica", 9))
+        _back_btn.setFont(ui_font(9))
         _back_btn.setFixedHeight(28)
         _back_btn.setToolTip("Go back to the thumbnail browser")
         _back_btn.setCursor(QCursor(Qt.PointingHandCursor))
@@ -616,13 +617,13 @@ class FeaturesPanel(QWidget):
         _fit_btn = QPushButton("⟲ Fit")
         _fit_btn.setFixedHeight(24)
         _fit_btn.setToolTip("Reset zoom to show the full image")
-        _fit_btn.setFont(QFont("Helvetica", 9))
+        _fit_btn.setFont(ui_font(9))
         _fit_btn.clicked.connect(self.reset_view)
         _vt.addWidget(_fit_btn)
 
         self._overlay_toggle_btn = QPushButton("👁 Original")
         self._overlay_toggle_btn.setFixedHeight(24)
-        self._overlay_toggle_btn.setFont(QFont("Helvetica", 9))
+        self._overlay_toggle_btn.setFont(ui_font(9))
         self._overlay_toggle_btn.setToolTip(
             "Toggle between the original image and the classified overlay.\n"
             "Use this to judge how accurate the segmentation is.")
@@ -632,7 +633,7 @@ class FeaturesPanel(QWidget):
 
         _vt.addStretch(1)
         _hint = QLabel("Scroll to zoom · Drag to pan")
-        _hint.setFont(QFont("Helvetica", 8))
+        _hint.setFont(ui_font(8))
         _hint.setStyleSheet("color: #888;")
         _vt.addWidget(_hint)
         lay.addLayout(_vt)
@@ -644,7 +645,7 @@ class FeaturesPanel(QWidget):
         self._results_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self._results_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self._results_table.setFixedHeight(160)
-        self._results_table.setFont(QFont("Helvetica", 9))
+        self._results_table.setFont(ui_font(9))
         lay.addWidget(self._results_table)
 
 
@@ -895,8 +896,8 @@ class FeaturesPanel(QWidget):
                 table_rows.append((label, n_bin, pct, hex_color, False))
 
         # Populate the table — 3 columns: class (angle) | N | %
-        _bold_font   = QFont("Helvetica", 9, QFont.Bold)
-        _normal_font = QFont("Helvetica", 9)
+        _bold_font   = ui_font(9, weight=QFont.Bold)
+        _normal_font = ui_font(9)
         self._results_table.setColumnCount(3)
         self._results_table.setHorizontalHeaderLabels(["class (angle)", "N", "%"])
         self._results_table.setRowCount(len(table_rows))
@@ -1422,7 +1423,7 @@ class FeaturesSidebar(QWidget):
         sl.setContentsMargins(10, 4, 10, 8)
         sl.setSpacing(0)
         self._status_lbl = QLabel("Load a scan to begin.")
-        self._status_lbl.setFont(QFont("Helvetica", 9))
+        self._status_lbl.setFont(ui_font(9))
         self._status_lbl.setWordWrap(True)
         sl.addWidget(self._status_lbl)
         lay.addWidget(sw)
@@ -1443,7 +1444,7 @@ class FeaturesSidebar(QWidget):
 
         # ── Load & Plane ───────────────────────────────────────────────────────
         load_btn = QPushButton("Load primary scan from Browse")
-        load_btn.setFont(QFont("Helvetica", 10))
+        load_btn.setFont(ui_font(10))
         load_btn.setFixedHeight(30)
         load_btn.setCursor(QCursor(Qt.PointingHandCursor))
         load_btn.setObjectName("accentBtn")
@@ -1469,13 +1470,13 @@ class FeaturesSidebar(QWidget):
         # ── Scan Processing ────────────────────────────────────────────────────
         lay.addWidget(_sep())
         proc_title = QLabel("Scan Processing")
-        proc_title.setFont(QFont("Helvetica", 10, QFont.Bold))
+        proc_title.setFont(ui_font(10, weight=QFont.Bold))
         lay.addWidget(proc_title)
 
         proc_hint = QLabel(
             "Apply before segmenting. Zero-plane subtracts sample tilt "
             "by clicking 3 substrate reference points.")
-        proc_hint.setFont(QFont("Helvetica", 8))
+        proc_hint.setFont(ui_font(8))
         proc_hint.setWordWrap(True)
         proc_hint.setStyleSheet("color: #888;")
         lay.addWidget(proc_hint)
@@ -1486,7 +1487,7 @@ class FeaturesSidebar(QWidget):
 
         self._zero_plane_btn = QPushButton("📐 Set Zero Plane")
         self._zero_plane_btn.setCheckable(True)
-        self._zero_plane_btn.setFont(QFont("Helvetica", 9))
+        self._zero_plane_btn.setFont(ui_font(9))
         self._zero_plane_btn.setFixedHeight(28)
         self._zero_plane_btn.setCursor(QCursor(Qt.PointingHandCursor))
         self._zero_plane_btn.setToolTip(_tip(
@@ -1498,7 +1499,7 @@ class FeaturesSidebar(QWidget):
         lay.addWidget(self._zero_plane_btn)
 
         self._reset_proc_btn = QPushButton("↩ Reset to Original")
-        self._reset_proc_btn.setFont(QFont("Helvetica", 9))
+        self._reset_proc_btn.setFont(ui_font(9))
         self._reset_proc_btn.setFixedHeight(26)
         self._reset_proc_btn.setCursor(QCursor(Qt.PointingHandCursor))
         self._reset_proc_btn.setToolTip(_tip(
@@ -1512,7 +1513,7 @@ class FeaturesSidebar(QWidget):
 
         # ── Segmentation Settings ──────────────────────────────────────────────
         seg_title = QLabel("Segmentation Settings")
-        seg_title.setFont(QFont("Helvetica", 10, QFont.Bold))
+        seg_title.setFont(ui_font(10, weight=QFont.Bold))
         lay.addWidget(seg_title)
 
         # Threshold slider (0–255)
@@ -1585,7 +1586,7 @@ class FeaturesSidebar(QWidget):
         lay.addWidget(self._max_area_slider)
 
         self._invert_cb = QCheckBox("Invert (segment dark features)")
-        self._invert_cb.setFont(QFont("Helvetica", 9))
+        self._invert_cb.setFont(ui_font(9))
         self._invert_cb.setToolTip(_tip(
             "Segment dark features instead of bright ones. Turn this on to "
             "find pits, vacancies or depressions; leave it off for adatoms, "
@@ -1597,19 +1598,19 @@ class FeaturesSidebar(QWidget):
         # ── Exclusion Mask ─────────────────────────────────────────────────────
         lay.addWidget(_sep())
         mask_lbl = QLabel("Exclusion Mask")
-        mask_lbl.setFont(QFont("Helvetica", 10, QFont.Bold))
+        mask_lbl.setFont(ui_font(10, weight=QFont.Bold))
         lay.addWidget(mask_lbl)
 
         mask_hint = QLabel(
             "Paint step edges or regions to exclude from segmentation.")
-        mask_hint.setFont(QFont("Helvetica", 8))
+        mask_hint.setFont(ui_font(8))
         mask_hint.setWordWrap(True)
         mask_hint.setStyleSheet("color: #888;")
         lay.addWidget(mask_hint)
 
         # ── Algorithmic step-edge exclusion (reproducible alternative to painting) ─
         self._step_exclude_cb = QCheckBox("Exclude step edges (auto)")
-        self._step_exclude_cb.setFont(QFont("Helvetica", 9))
+        self._step_exclude_cb.setFont(ui_font(9))
         self._step_exclude_cb.setToolTip(_tip(
             "Detect substrate step edges from the topography and drop molecules "
             "sitting on them — a reproducible alternative to painting over the "
@@ -1620,7 +1621,7 @@ class FeaturesSidebar(QWidget):
         def _step_spin(label, lo, hi, val, step, decimals, suffix, tip):
             row = QHBoxLayout()
             lab = QLabel(label)
-            lab.setFont(QFont("Helvetica", 9))
+            lab.setFont(ui_font(9))
             row.addWidget(lab)
             row.addStretch(1)
             sp = QDoubleSpinBox()
@@ -1683,7 +1684,7 @@ class FeaturesSidebar(QWidget):
 
         self._mask_btn = QPushButton("✏  Draw exclusion mask")
         self._mask_btn.setCheckable(True)
-        self._mask_btn.setFont(QFont("Helvetica", 9))
+        self._mask_btn.setFont(ui_font(9))
         self._mask_btn.setFixedHeight(28)
         self._mask_btn.setCursor(QCursor(Qt.PointingHandCursor))
         self._mask_btn.setToolTip(_tip(
@@ -1695,7 +1696,7 @@ class FeaturesSidebar(QWidget):
         lay.addWidget(self._mask_btn)
 
         self._clear_mask_btn = QPushButton("🗑  Clear mask")
-        self._clear_mask_btn.setFont(QFont("Helvetica", 9))
+        self._clear_mask_btn.setFont(ui_font(9))
         self._clear_mask_btn.setFixedHeight(26)
         self._clear_mask_btn.setCursor(QCursor(Qt.PointingHandCursor))
         self._clear_mask_btn.setToolTip(_tip(
@@ -1724,7 +1725,7 @@ class FeaturesSidebar(QWidget):
         # ── Phase 1 action buttons ─────────────────────────────────────────────
         lay.addWidget(_sep())
         self._segment_btn = QPushButton("Apply Segmentation")
-        self._segment_btn.setFont(QFont("Helvetica", 10, QFont.Bold))
+        self._segment_btn.setFont(ui_font(10, weight=QFont.Bold))
         self._segment_btn.setFixedHeight(34)
         self._segment_btn.setObjectName("accentBtn")
         self._segment_btn.setCursor(QCursor(Qt.PointingHandCursor))
@@ -1736,7 +1737,7 @@ class FeaturesSidebar(QWidget):
         lay.addWidget(self._segment_btn)
 
         self._clear_seg_btn = QPushButton("Remove Segmentation")
-        self._clear_seg_btn.setFont(QFont("Helvetica", 9))
+        self._clear_seg_btn.setFont(ui_font(9))
         self._clear_seg_btn.setFixedHeight(28)
         self._clear_seg_btn.setCursor(QCursor(Qt.PointingHandCursor))
         self._clear_seg_btn.setToolTip(_tip(
@@ -1746,7 +1747,7 @@ class FeaturesSidebar(QWidget):
         lay.addWidget(self._clear_seg_btn)
 
         self._advance_btn = QPushButton("Move to Phase 2 →")
-        self._advance_btn.setFont(QFont("Helvetica", 10))
+        self._advance_btn.setFont(ui_font(10))
         self._advance_btn.setFixedHeight(30)
         self._advance_btn.setCursor(QCursor(Qt.PointingHandCursor))
         self._advance_btn.setToolTip(_tip(
@@ -1770,7 +1771,7 @@ class FeaturesSidebar(QWidget):
         # ── Back button + segmentation count ──────────────────────────────────
         back_row = QHBoxLayout()
         back_btn = QPushButton("← Settings")
-        back_btn.setFont(QFont("Helvetica", 9))
+        back_btn.setFont(ui_font(9))
         back_btn.setFixedHeight(26)
         back_btn.setCursor(QCursor(Qt.PointingHandCursor))
         back_btn.setToolTip(_tip(
@@ -1782,7 +1783,7 @@ class FeaturesSidebar(QWidget):
         lay.addLayout(back_row)
 
         self._segment_count_lbl = QLabel("Segmentation not run yet.")
-        self._segment_count_lbl.setFont(QFont("Helvetica", 9, QFont.Bold))
+        self._segment_count_lbl.setFont(ui_font(9, weight=QFont.Bold))
         self._segment_count_lbl.setWordWrap(True)
         lay.addWidget(self._segment_count_lbl)
 
@@ -1813,7 +1814,7 @@ class FeaturesSidebar(QWidget):
                             ("classify",  "Classify")]:
             b = QPushButton(label)
             b.setCheckable(True)
-            b.setFont(QFont("Helvetica", 9))
+            b.setFont(ui_font(9))
             b.setFixedHeight(26)
             b.setCursor(QCursor(Qt.PointingHandCursor))
             b.setToolTip(_tip(_mode_tips[key]))
@@ -1833,7 +1834,7 @@ class FeaturesSidebar(QWidget):
         lay.addWidget(_sep())
 
         self._run_btn = QPushButton("▶ Run")
-        self._run_btn.setFont(QFont("Helvetica", 10, QFont.Bold))
+        self._run_btn.setFont(ui_font(10, weight=QFont.Bold))
         self._run_btn.setFixedHeight(32)
         self._run_btn.setObjectName("accentBtn")
         self._run_btn.setCursor(QCursor(Qt.PointingHandCursor))
@@ -1846,7 +1847,7 @@ class FeaturesSidebar(QWidget):
         lay.addWidget(self._run_btn)
 
         self._clear_cls_btn = QPushButton("Remove Classification")
-        self._clear_cls_btn.setFont(QFont("Helvetica", 9))
+        self._clear_cls_btn.setFont(ui_font(9))
         self._clear_cls_btn.setFixedHeight(28)
         self._clear_cls_btn.setCursor(QCursor(Qt.PointingHandCursor))
         self._clear_cls_btn.setToolTip(_tip(
@@ -1857,7 +1858,7 @@ class FeaturesSidebar(QWidget):
         lay.addWidget(self._clear_cls_btn)
 
         self._export_btn = QPushButton("Export JSON…")
-        self._export_btn.setFont(QFont("Helvetica", 9))
+        self._export_btn.setFont(ui_font(9))
         self._export_btn.setFixedHeight(28)
         self._export_btn.setCursor(QCursor(Qt.PointingHandCursor))
         self._export_btn.setToolTip(_tip(
@@ -1883,7 +1884,7 @@ class FeaturesSidebar(QWidget):
             "Segmentation settings (threshold, area filters, exclusion mask) "
             "are in Phase 1 — press '← Settings' to change them.\n\n"
             "Press ▶ Run to re-run segmentation with the current settings.")
-        info.setFont(QFont("Helvetica", 9))
+        info.setFont(ui_font(9))
         info.setWordWrap(True)
         info.setStyleSheet("color: #888;")
         l.addWidget(info)
@@ -1896,7 +1897,7 @@ class FeaturesSidebar(QWidget):
         l.setSpacing(4)
 
         crop_btn = QPushButton("Crop template from image…")
-        crop_btn.setFont(QFont("Helvetica", 9))
+        crop_btn.setFont(ui_font(9))
         crop_btn.setFixedHeight(28)
         crop_btn.setCursor(QCursor(Qt.PointingHandCursor))
         crop_btn.setToolTip(_tip(
@@ -1935,7 +1936,7 @@ class FeaturesSidebar(QWidget):
         l.addLayout(row2)
 
         hint = QLabel("Tip: draw a tight rectangle over one motif. Distance 0 → auto.")
-        hint.setFont(QFont("Helvetica", 8))
+        hint.setFont(ui_font(8))
         hint.setWordWrap(True)
         l.addWidget(hint)
         return w
@@ -1948,7 +1949,7 @@ class FeaturesSidebar(QWidget):
         info = QLabel(
             "Extracts primitive lattice vectors via SIFT keypoint clustering.\n"
             "Best on atomically-resolved images with a clear repeating motif.")
-        info.setFont(QFont("Helvetica", 9))
+        info.setFont(ui_font(9))
         info.setWordWrap(True)
         l.addWidget(info)
         return w
@@ -1963,13 +1964,13 @@ class FeaturesSidebar(QWidget):
             "① Press 'Apply Settings' to find particles.\n"
             "② Click particles on the image to assign class labels.\n"
             "③ Press ▶ Run to classify all remaining particles.")
-        info.setFont(QFont("Helvetica", 9))
+        info.setFont(ui_font(9))
         info.setWordWrap(True)
         l.addWidget(info)
 
         # ── Threshold Settings group ───────────────────────────────────────────
         thr_box = QGroupBox("Threshold Settings")
-        thr_box.setFont(QFont("Helvetica", 9))
+        thr_box.setFont(ui_font(9))
         thr_box_lay = QVBoxLayout(thr_box)
         thr_box_lay.setSpacing(4)
 
@@ -2010,7 +2011,7 @@ class FeaturesSidebar(QWidget):
         for key, label in [("manual", "Manual"), ("otsu", "Otsu"),
                             ("gmm", "GMM"), ("distribution", "Distribution")]:
             rb = QRadioButton(label)
-            rb.setFont(QFont("Helvetica", 9))
+            rb.setFont(ui_font(9))
             rb.setToolTip(_tip(_thr_tips[key]))
             rb.toggled.connect(
                 lambda checked, k=key:
@@ -2023,7 +2024,7 @@ class FeaturesSidebar(QWidget):
 
         # ── Encoding Settings group ────────────────────────────────────────────
         enc_box = QGroupBox("Encoding Settings")
-        enc_box.setFont(QFont("Helvetica", 9))
+        enc_box.setFont(ui_font(9))
         enc_box_lay = QVBoxLayout(enc_box)
         enc_box_lay.setSpacing(4)
 
@@ -2045,7 +2046,7 @@ class FeaturesSidebar(QWidget):
                             ("pca_kmeans", "PCA + KMeans"),
                             ("auto",      "Auto Select")]:
             rb = QRadioButton(label)
-            rb.setFont(QFont("Helvetica", 9))
+            rb.setFont(ui_font(9))
             rb.setToolTip(_tip(_enc_tips[key]))
             self._enc_group.addButton(rb)
             enc_box_lay.addWidget(rb)
@@ -2055,7 +2056,7 @@ class FeaturesSidebar(QWidget):
 
         # ── Augmentation & options ─────────────────────────────────────────────
         self._rotate_aug_cb = QCheckBox("Rotation Augmentation")
-        self._rotate_aug_cb.setFont(QFont("Helvetica", 9))
+        self._rotate_aug_cb.setFont(ui_font(9))
         self._rotate_aug_cb.setToolTip(_tip(
             "Generate 36 rotated copies (0–350°, every 10°) of each labelled "
             "sample before matching, so a molecule is recognised whatever its "
@@ -2063,13 +2064,13 @@ class FeaturesSidebar(QWidget):
         l.addWidget(self._rotate_aug_cb)
 
         rot_hint = QLabel("36 rotations × 10° — orientation-invariant matching.")
-        rot_hint.setFont(QFont("Helvetica", 8))
+        rot_hint.setFont(ui_font(8))
         rot_hint.setStyleSheet("color: #888;")
         rot_hint.setWordWrap(True)
         l.addWidget(rot_hint)
 
         self._sharpness_cb = QCheckBox("Sharpness-sensitive")
-        self._sharpness_cb.setFont(QFont("Helvetica", 9))
+        self._sharpness_cb.setFont(ui_font(9))
         self._sharpness_cb.setToolTip(_tip(
             "Add edge sharpness (variance of the Laplacian) as an extra "
             "matching feature. Use it when two classes have the same shape "
@@ -2079,7 +2080,7 @@ class FeaturesSidebar(QWidget):
         l.addWidget(_sep())
 
         undo_btn = QPushButton("↩ Undo last label")
-        undo_btn.setFont(QFont("Helvetica", 9))
+        undo_btn.setFont(ui_font(9))
         undo_btn.setFixedHeight(26)
         undo_btn.setCursor(QCursor(Qt.PointingHandCursor))
         undo_btn.setToolTip(_tip(

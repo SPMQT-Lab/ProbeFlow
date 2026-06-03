@@ -7,6 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from probeflow.gui.typography import ui_font
 from PySide6.QtCore import QProcess, Qt, Signal
 from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QTextEdit, QVBoxLayout, QWidget
@@ -222,12 +223,12 @@ class DeveloperTerminalWidget(QWidget):
         bar_lay.setContentsMargins(8, 0, 8, 0)
         bar_lay.setSpacing(6)
         title_lbl = QLabel("TERMINAL")
-        title_lbl.setFont(QFont("Helvetica", 8, QFont.Bold))
+        title_lbl.setFont(ui_font(8, weight=QFont.Bold))
         bar_lay.addWidget(title_lbl)
         bar_lay.addStretch()
 
         ext_btn = QPushButton("Open External Terminal")
-        ext_btn.setFont(QFont("Helvetica", 8))
+        ext_btn.setFont(ui_font(8))
         ext_btn.setFixedHeight(22)
         ext_btn.setToolTip(
             "Open a real system terminal in this directory.\n"
@@ -236,7 +237,7 @@ class DeveloperTerminalWidget(QWidget):
         bar_lay.addWidget(ext_btn)
 
         clear_btn = QPushButton("Clear")
-        clear_btn.setFont(QFont("Helvetica", 8))
+        clear_btn.setFont(ui_font(8))
         clear_btn.setFixedHeight(22)
         clear_btn.clicked.connect(self._clear)
         bar_lay.addWidget(clear_btn)
@@ -388,7 +389,7 @@ class _DevSidebar(QWidget):
         lay.setSpacing(8)
 
         title = QLabel("Developer Mode")
-        title.setFont(QFont("Helvetica", 11, QFont.Bold))
+        title.setFont(ui_font(11, weight=QFont.Bold))
         lay.addWidget(title)
 
         info = QLabel(
@@ -398,12 +399,12 @@ class _DevSidebar(QWidget):
             "⚠  Interactive tools (claude, ipython, vim) need a real PTY.\n"
             "Use 'Open External Terminal' to launch WSL / Windows Terminal."
         )
-        info.setFont(QFont("Helvetica", 9))
+        info.setFont(ui_font(9))
         info.setWordWrap(True)
         lay.addWidget(info)
 
         example_lbl = QLabel("Quick examples:")
-        example_lbl.setFont(QFont("Helvetica", 9, QFont.Bold))
+        example_lbl.setFont(ui_font(9, weight=QFont.Bold))
         lay.addWidget(example_lbl)
 
         examples = QLabel(

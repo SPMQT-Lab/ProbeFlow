@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Callable
 
 import numpy as np
+from probeflow.gui.typography import ui_font
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont, QImage, QPixmap, QValidator
 from PySide6.QtWidgets import (
@@ -199,10 +200,10 @@ class ThresholdDialog(QDialog):
         # ── Spinboxes (precise numeric entry, scientific notation) ────────────
         self._lower_spin = _SciSpinBox()
         self._lower_spin.setValue(lo_init)
-        self._lower_spin.setFont(QFont("Helvetica", 8))
+        self._lower_spin.setFont(ui_font(8))
         self._upper_spin = _SciSpinBox()
         self._upper_spin.setValue(hi_init)
-        self._upper_spin.setFont(QFont("Helvetica", 8))
+        self._upper_spin.setFont(ui_font(8))
 
         self._lower_spin.editingFinished.connect(self._on_spinbox_changed)
         self._upper_spin.editingFinished.connect(self._on_spinbox_changed)
@@ -216,16 +217,16 @@ class ThresholdDialog(QDialog):
 
         # ── % in range label ──────────────────────────────────────────────────
         self._pct_lbl = QLabel()
-        self._pct_lbl.setFont(QFont("Helvetica", 8))
+        self._pct_lbl.setFont(ui_font(8))
         self._pct_lbl.setAlignment(Qt.AlignCenter)
         self._update_pct_label(lo_init, hi_init)
 
         # ── Mode selector ─────────────────────────────────────────────────────
         mode_row = QHBoxLayout()
         mode_lbl = QLabel("Mode:")
-        mode_lbl.setFont(QFont("Helvetica", 8))
+        mode_lbl.setFont(ui_font(8))
         self._mode_cb = QComboBox()
-        self._mode_cb.setFont(QFont("Helvetica", 8))
+        self._mode_cb.setFont(ui_font(8))
         self._mode_cb.addItem("Clip (set out-of-range to NaN)", "clip")
         self._mode_cb.addItem("Binarize (0 outside, 1 inside)", "binarize")
         mode_row.addWidget(mode_lbl)
@@ -234,9 +235,9 @@ class ThresholdDialog(QDialog):
         # ── Highlight colour selector ─────────────────────────────────────────
         hl_row = QHBoxLayout()
         hl_lbl = QLabel("Highlight:")
-        hl_lbl.setFont(QFont("Helvetica", 8))
+        hl_lbl.setFont(ui_font(8))
         self._highlight_cb = QComboBox()
-        self._highlight_cb.setFont(QFont("Helvetica", 8))
+        self._highlight_cb.setFont(ui_font(8))
         self._highlight_cb.addItem("None", None)
         for name in self._HIGHLIGHT_COLORS:
             self._highlight_cb.addItem(name, name)

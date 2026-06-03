@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import math
 
+from probeflow.gui.typography import ui_font
 from PySide6.QtCore import QPointF, QRectF
 from PySide6.QtGui import QBrush, QColor, QFont, QPen
 from PySide6.QtWidgets import (
@@ -56,7 +57,7 @@ class AngleOverlayItem(QGraphicsItemGroup):
         self._arm2.setZValue(9)
         self._txt = QGraphicsTextItem()
         self._txt.setDefaultTextColor(QColor("#22D3EE"))
-        f = QFont("Helvetica", 10)
+        f = ui_font(10)
         f.setBold(True)
         self._txt.setFont(f)
         self._txt.setZValue(11)

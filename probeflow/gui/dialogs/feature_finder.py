@@ -8,6 +8,7 @@ import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 
+from probeflow.gui.typography import ui_font
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
@@ -111,7 +112,7 @@ class FeatureFinderDialog(QDialog):
 
         # ── Detection mode ──────────────────────────────────────────────────
         mode_lbl = QLabel("Detection mode")
-        mode_lbl.setFont(QFont("Helvetica", 10, QFont.Bold))
+        mode_lbl.setFont(ui_font(10, weight=QFont.Bold))
         lay.addWidget(mode_lbl)
 
         mode_row = QHBoxLayout()
@@ -131,7 +132,7 @@ class FeatureFinderDialog(QDialog):
 
         # ── Threshold mode ──────────────────────────────────────────────────
         thr_lbl = QLabel("Threshold mode")
-        thr_lbl.setFont(QFont("Helvetica", 10, QFont.Bold))
+        thr_lbl.setFont(ui_font(10, weight=QFont.Bold))
         lay.addWidget(thr_lbl)
 
         thr_row = QHBoxLayout()
@@ -188,7 +189,7 @@ class FeatureFinderDialog(QDialog):
         # ── Detection settings ──────────────────────────────────────────────
         lay.addWidget(_sep())
         det_lbl = QLabel("Detection settings")
-        det_lbl.setFont(QFont("Helvetica", 10, QFont.Bold))
+        det_lbl.setFont(ui_font(10, weight=QFont.Bold))
         lay.addWidget(det_lbl)
 
         dist_row = QHBoxLayout()
@@ -222,18 +223,18 @@ class FeatureFinderDialog(QDialog):
 
         preview_btn = QPushButton("Update preview")
         preview_btn.setFixedHeight(30)
-        preview_btn.setFont(QFont("Helvetica", 10, QFont.Bold))
+        preview_btn.setFont(ui_font(10, weight=QFont.Bold))
         preview_btn.clicked.connect(self._run_detection)
         lay.addWidget(preview_btn)
 
         self._count_lbl = QLabel("Detected features: —")
-        self._count_lbl.setFont(QFont("Helvetica", 9))
+        self._count_lbl.setFont(ui_font(9))
         lay.addWidget(self._count_lbl)
 
         # ── Export coordinates ──────────────────────────────────────────────
         lay.addWidget(_sep())
         export_lbl = QLabel("Export")
-        export_lbl.setFont(QFont("Helvetica", 10, QFont.Bold))
+        export_lbl.setFont(ui_font(10, weight=QFont.Bold))
         lay.addWidget(export_lbl)
 
         export_csv_btn = QPushButton("Export coordinates CSV…")
@@ -244,7 +245,7 @@ class FeatureFinderDialog(QDialog):
         # ── Feature image ───────────────────────────────────────────────────
         lay.addWidget(_sep())
         feat_lbl = QLabel("Feature image")
-        feat_lbl.setFont(QFont("Helvetica", 10, QFont.Bold))
+        feat_lbl.setFont(ui_font(10, weight=QFont.Bold))
         lay.addWidget(feat_lbl)
 
         radius_row = QHBoxLayout()
@@ -280,7 +281,7 @@ class FeatureFinderDialog(QDialog):
         lay.addWidget(fft_btn)
 
         self._status_lbl = QLabel("")
-        self._status_lbl.setFont(QFont("Helvetica", 8))
+        self._status_lbl.setFont(ui_font(8))
         self._status_lbl.setWordWrap(True)
         lay.addWidget(self._status_lbl)
 

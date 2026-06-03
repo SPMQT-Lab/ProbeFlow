@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Optional
 
+from probeflow.gui.typography import ui_font
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QGridLayout, QHBoxLayout, QLabel,
@@ -48,7 +49,7 @@ class SpecMappingDialog(QDialog):
         hdr = QLabel(
             "Pick the parent image for each spectrum. Unassigned spectra "
             "show no marker on any image.")
-        hdr.setFont(QFont("Helvetica", 10))
+        hdr.setFont(ui_font(10))
         hdr.setWordWrap(True)
         v.addWidget(hdr)
 
@@ -201,7 +202,7 @@ class ViewerSpecMappingDialog(QDialog):
         hdr = QLabel(
             f"Tick the spectra to associate with <b>{self._image_stem}</b>. "
             "Ticking one that is already mapped to a different image will move it.")
-        hdr.setFont(QFont("Helvetica", 9))
+        hdr.setFont(ui_font(9))
         hdr.setWordWrap(True)
         v.addWidget(hdr)
 

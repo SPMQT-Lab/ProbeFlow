@@ -19,6 +19,7 @@ from typing import Optional
 
 import numpy as np
 
+from probeflow.gui.typography import ui_font
 from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import (
     QBrush, QColor, QFont, QKeySequence, QPainter, QPainterPath, QPen,
@@ -102,7 +103,7 @@ class ImageCanvas(QGraphicsView):
             painter.setBrush(QBrush(QColor("#FFD700")))
             painter.setPen(QPen(QColor("black"), 1.5))
             painter.drawEllipse(QPointF(0, 0), 7, 7)
-            painter.setFont(QFont("Helvetica", 6, QFont.Bold))
+            painter.setFont(ui_font(6, weight=QFont.Bold))
             painter.setPen(QPen(QColor("black")))
             from PySide6.QtCore import QRectF
             painter.drawText(QRectF(-7, -7, 14, 14), Qt.AlignCenter, self._label)
@@ -129,7 +130,7 @@ class ImageCanvas(QGraphicsView):
             painter.setPen(QPen(QColor("black"), 1.5))
             painter.drawEllipse(QPointF(0, 0), r, r)
             if self._label:
-                painter.setFont(QFont("Helvetica", 6, QFont.Bold))
+                painter.setFont(ui_font(6, weight=QFont.Bold))
                 painter.setPen(QPen(QColor("black")))
                 from PySide6.QtCore import QRectF
                 painter.drawText(QRectF(-r, -r, 2 * r, 2 * r), Qt.AlignCenter, self._label)
@@ -174,7 +175,7 @@ class ImageCanvas(QGraphicsView):
 
         self._text_overlay_item = QGraphicsTextItem()
         self._text_overlay_item.setDefaultTextColor(QColor("#cdd6f4"))
-        self._text_overlay_item.setFont(QFont("Helvetica", 14))
+        self._text_overlay_item.setFont(ui_font(14))
         self._text_overlay_item.setZValue(30)
         self._text_overlay_item.setVisible(False)
         scene.addItem(self._text_overlay_item)

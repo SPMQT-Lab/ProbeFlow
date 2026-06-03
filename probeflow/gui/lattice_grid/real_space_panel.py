@@ -8,6 +8,7 @@ from typing import Optional
 
 import numpy as np
 
+from probeflow.gui.typography import ui_font
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
@@ -134,7 +135,7 @@ class LatticeGridPanel(QWidget):
         outer_lay.setSpacing(0)
 
         self._tabs = QTabWidget()
-        self._tabs.setFont(QFont("Helvetica", 9))
+        self._tabs.setFont(ui_font(9))
         outer_lay.addWidget(self._tabs)
 
         # ── helpers ───────────────────────────────────────────────────────────
@@ -146,7 +147,7 @@ class LatticeGridPanel(QWidget):
             ) -> QDoubleSpinBox:
                 row = QHBoxLayout()
                 lbl = QLabel(label)
-                lbl.setFont(QFont("Helvetica", 9))
+                lbl.setFont(ui_font(9))
                 lbl.setMinimumWidth(68)
                 spin = QDoubleSpinBox()
                 spin.setRange(lo, hi)
@@ -154,7 +155,7 @@ class LatticeGridPanel(QWidget):
                 spin.setDecimals(decimals)
                 if suffix:
                     spin.setSuffix(f" {suffix}")
-                spin.setFont(QFont("Helvetica", 9))
+                spin.setFont(ui_font(9))
                 spin.setFixedHeight(22)
                 row.addWidget(lbl)
                 row.addWidget(spin, 1)
@@ -172,7 +173,7 @@ class LatticeGridPanel(QWidget):
 
         # ── edit active ───────────────────────────────────────────────────────
         self._edit_cb = QCheckBox("Edit grid (drag handles)")
-        self._edit_cb.setFont(QFont("Helvetica", 9, QFont.Bold))
+        self._edit_cb.setFont(ui_font(9, weight=QFont.Bold))
         self._edit_cb.setChecked(True)
         self._edit_cb.toggled.connect(self._on_active_toggled)
         lay.addWidget(self._edit_cb)
@@ -183,26 +184,26 @@ class LatticeGridPanel(QWidget):
         type_row.addWidget(QLabel("Type:"))
         self._type_combo = QComboBox()
         self._type_combo.addItems(["Square", "Rectangular", "Hexagonal"])
-        self._type_combo.setFont(QFont("Helvetica", 9))
+        self._type_combo.setFont(ui_font(9))
         self._type_combo.currentIndexChanged.connect(self._on_type_changed)
         type_row.addWidget(self._type_combo, 1)
         lay.addLayout(type_row)
 
         self._lock_cb = QCheckBox("Lock lattice constraint")
-        self._lock_cb.setFont(QFont("Helvetica", 9))
+        self._lock_cb.setFont(ui_font(9))
         self._lock_cb.setChecked(True)
         self._lock_cb.toggled.connect(self._on_locked_changed)
         lay.addWidget(self._lock_cb)
 
         self._ab_equal_cb = QCheckBox("a = b  (equal vector lengths)")
-        self._ab_equal_cb.setFont(QFont("Helvetica", 9))
+        self._ab_equal_cb.setFont(ui_font(9))
         self._ab_equal_cb.setChecked(False)
         self._ab_equal_cb.toggled.connect(self._on_ab_equal_changed)
         lay.addWidget(self._ab_equal_cb)
 
         # ── parameters group ──────────────────────────────────────────────────
         params_grp = QGroupBox("Parameters")
-        params_grp.setFont(QFont("Helvetica", 9))
+        params_grp.setFont(ui_font(9))
         params_lay = QVBoxLayout(params_grp)
         params_lay.setSpacing(3)
         params_lay.setContentsMargins(6, 6, 6, 4)
@@ -226,12 +227,12 @@ class LatticeGridPanel(QWidget):
 
         cells_row = QHBoxLayout()
         cells_lbl = QLabel("Cells ±:")
-        cells_lbl.setFont(QFont("Helvetica", 9))
+        cells_lbl.setFont(ui_font(9))
         cells_lbl.setMinimumWidth(68)
         self._cells_spin = QSpinBox()
         self._cells_spin.setRange(1, 200)
         self._cells_spin.setValue(self._item.cells)
-        self._cells_spin.setFont(QFont("Helvetica", 9))
+        self._cells_spin.setFont(ui_font(9))
         self._cells_spin.setFixedHeight(22)
         cells_row.addWidget(cells_lbl)
         cells_row.addWidget(self._cells_spin, 1)
@@ -253,7 +254,7 @@ class LatticeGridPanel(QWidget):
 
         # ── display group ─────────────────────────────────────────────────────
         disp_grp = QGroupBox("Display")
-        disp_grp.setFont(QFont("Helvetica", 9))
+        disp_grp.setFont(ui_font(9))
         disp_lay = QVBoxLayout(disp_grp)
         disp_lay.setSpacing(2)
         disp_lay.setContentsMargins(6, 6, 6, 4)
@@ -262,7 +263,7 @@ class LatticeGridPanel(QWidget):
         self._show_handles_cb = QCheckBox("Show handles")
         self._show_labels_cb  = QCheckBox("Show labels")
         for cb in (self._show_grid_cb, self._show_handles_cb, self._show_labels_cb):
-            cb.setFont(QFont("Helvetica", 9))
+            cb.setFont(ui_font(9))
             cb.setChecked(True)
             cb.toggled.connect(self._on_visibility_changed)
             disp_lay.addWidget(cb)
@@ -270,13 +271,13 @@ class LatticeGridPanel(QWidget):
         lay.addWidget(disp_grp)
 
         reset_btn = QPushButton("Reset origin to centre")
-        reset_btn.setFont(QFont("Helvetica", 9))
+        reset_btn.setFont(ui_font(9))
         reset_btn.setFixedHeight(24)
         reset_btn.clicked.connect(self._on_reset_origin)
         lay.addWidget(reset_btn)
 
         meas_grp = QGroupBox("Measured")
-        meas_grp.setFont(QFont("Helvetica", 9))
+        meas_grp.setFont(ui_font(9))
         meas_lay = QVBoxLayout(meas_grp)
         meas_lay.setContentsMargins(6, 6, 6, 4)
         self._meas_lbl = QLabel("")
@@ -290,11 +291,11 @@ class LatticeGridPanel(QWidget):
         lay.addStretch(1)
         exp_row = QHBoxLayout()
         exp_with_btn = QPushButton("Export with grid…")
-        exp_with_btn.setFont(QFont("Helvetica", 9))
+        exp_with_btn.setFont(ui_font(9))
         exp_with_btn.setFixedHeight(24)
         exp_with_btn.clicked.connect(self._on_export_with_grid)
         exp_grid_btn = QPushButton("Export grid only…")
-        exp_grid_btn.setFont(QFont("Helvetica", 9))
+        exp_grid_btn.setFont(ui_font(9))
         exp_grid_btn.setFixedHeight(24)
         exp_grid_btn.clicked.connect(self._on_export_grid_only)
         exp_row.addWidget(exp_with_btn)
@@ -313,7 +314,7 @@ class LatticeGridPanel(QWidget):
 
         # ── ideal lattice group ───────────────────────────────────────────────
         ideal_grp = QGroupBox("Known structure")
-        ideal_grp.setFont(QFont("Helvetica", 9))
+        ideal_grp.setFont(ui_font(9))
         ideal_lay = QVBoxLayout(ideal_grp)
         ideal_lay.setSpacing(3)
         ideal_lay.setContentsMargins(6, 6, 6, 4)
@@ -321,10 +322,10 @@ class LatticeGridPanel(QWidget):
 
         structure_row = QHBoxLayout()
         structure_lbl = QLabel("Structure:")
-        structure_lbl.setFont(QFont("Helvetica", 9))
+        structure_lbl.setFont(ui_font(9))
         structure_lbl.setMinimumWidth(68)
         self._structure_combo = QComboBox()
-        self._structure_combo.setFont(QFont("Helvetica", 9))
+        self._structure_combo.setFont(ui_font(9))
         self._structure_combo.setFixedHeight(22)
         self._structure_combo.setToolTip("Known surface lattice used as the correction target.")
         self._structure_combo.currentIndexChanged.connect(self._on_structure_selected)
@@ -336,7 +337,7 @@ class LatticeGridPanel(QWidget):
             self._structure_update_btn,
             self._structure_delete_btn,
         ):
-            btn.setFont(QFont("Helvetica", 8))
+            btn.setFont(ui_font(8))
             btn.setFixedHeight(22)
         self._structure_save_btn.clicked.connect(self._on_save_structure)
         self._structure_update_btn.clicked.connect(self._on_update_structure)
@@ -350,10 +351,10 @@ class LatticeGridPanel(QWidget):
 
         preset_row = QHBoxLayout()
         preset_lbl = QLabel("Preset:")
-        preset_lbl.setFont(QFont("Helvetica", 9))
+        preset_lbl.setFont(ui_font(9))
         preset_lbl.setMinimumWidth(68)
         self._ideal_preset_combo = QComboBox()
-        self._ideal_preset_combo.setFont(QFont("Helvetica", 9))
+        self._ideal_preset_combo.setFont(ui_font(9))
         self._ideal_preset_combo.setFixedHeight(22)
         self._ideal_preset_combo.addItems([
             "Match grid", "Square", "Rectangular", "Hexagonal", "Custom",
@@ -369,7 +370,7 @@ class LatticeGridPanel(QWidget):
             f"|b| ({self._unit_label}):", 0.001, a_max * 2, 0.01, 3, self._unit_label,
         )
         self._ideal_ab_cb = QCheckBox("ideal a = b")
-        self._ideal_ab_cb.setFont(QFont("Helvetica", 9))
+        self._ideal_ab_cb.setFont(ui_font(9))
         self._ideal_ab_cb.setChecked(False)
         self._ideal_ab_cb.setVisible(False)
         ideal_lay.addWidget(self._ideal_ab_cb)
@@ -389,7 +390,7 @@ class LatticeGridPanel(QWidget):
 
         # ── measured lattice display ──────────────────────────────────────────
         meas_dist_grp = QGroupBox("Measured lattice")
-        meas_dist_grp.setFont(QFont("Helvetica", 9))
+        meas_dist_grp.setFont(ui_font(9))
         meas_dist_lay = QVBoxLayout(meas_dist_grp)
         meas_dist_lay.setContentsMargins(6, 6, 6, 4)
         self._measured_lbl = QLabel("(tune grid above)")
@@ -401,7 +402,7 @@ class LatticeGridPanel(QWidget):
 
         # ── correction display ────────────────────────────────────────────────
         corr_grp = QGroupBox("Correction: measured → ideal")
-        corr_grp.setFont(QFont("Helvetica", 9))
+        corr_grp.setFont(ui_font(9))
         corr_lay = QVBoxLayout(corr_grp)
         corr_lay.setContentsMargins(6, 6, 6, 4)
         self._correction_lbl = QLabel("(enter ideal lattice above)")
@@ -416,7 +417,7 @@ class LatticeGridPanel(QWidget):
 
         # ── correction options ────────────────────────────────────────────────
         opts_grp = QGroupBox("Advanced correction options")
-        opts_grp.setFont(QFont("Helvetica", 9))
+        opts_grp.setFont(ui_font(9))
         opts_grp.setCheckable(True)
         opts_grp.setChecked(False)
         opts_lay = QVBoxLayout(opts_grp)
@@ -424,12 +425,12 @@ class LatticeGridPanel(QWidget):
         opts_lay.setContentsMargins(6, 6, 6, 4)
 
         self._expand_cb = QCheckBox("Expand canvas to fit corrected image")
-        self._expand_cb.setFont(QFont("Helvetica", 9))
+        self._expand_cb.setFont(ui_font(9))
         self._expand_cb.setChecked(True)
         opts_lay.addWidget(self._expand_cb)
 
         self._preserve_orientation_cb = QCheckBox("Preserve image orientation")
-        self._preserve_orientation_cb.setFont(QFont("Helvetica", 9))
+        self._preserve_orientation_cb.setFont(ui_font(9))
         self._preserve_orientation_cb.setChecked(True)
         self._preserve_orientation_cb.setToolTip(
             "Remove the global rotation from the measured-to-ideal correction.\n"
@@ -441,10 +442,10 @@ class LatticeGridPanel(QWidget):
 
         interp_row = QHBoxLayout()
         interp_lbl = QLabel("Interpolation:")
-        interp_lbl.setFont(QFont("Helvetica", 9))
+        interp_lbl.setFont(ui_font(9))
         interp_lbl.setMinimumWidth(85)
         self._interp_combo = QComboBox()
-        self._interp_combo.setFont(QFont("Helvetica", 9))
+        self._interp_combo.setFont(ui_font(9))
         self._interp_combo.setFixedHeight(22)
         self._interp_combo.addItems(["Bilinear", "Nearest", "Bicubic"])
         interp_row.addWidget(interp_lbl)
@@ -453,10 +454,10 @@ class LatticeGridPanel(QWidget):
 
         fill_row = QHBoxLayout()
         fill_lbl = QLabel("Fill:")
-        fill_lbl.setFont(QFont("Helvetica", 9))
+        fill_lbl.setFont(ui_font(9))
         fill_lbl.setMinimumWidth(85)
         self._fill_combo = QComboBox()
-        self._fill_combo.setFont(QFont("Helvetica", 9))
+        self._fill_combo.setFont(ui_font(9))
         self._fill_combo.setFixedHeight(22)
         self._fill_combo.addItems(["NaN", "Background", "Zero"])
         fill_row.addWidget(fill_lbl)
@@ -467,24 +468,24 @@ class LatticeGridPanel(QWidget):
 
         # ── preview status ────────────────────────────────────────────────────
         self._preview_status_lbl = QLabel("")
-        self._preview_status_lbl.setFont(QFont("Helvetica", 8))
+        self._preview_status_lbl.setFont(ui_font(8))
         self._preview_status_lbl.setWordWrap(True)
         self._preview_status_lbl.setVisible(False)
         dist_lay.addWidget(self._preview_status_lbl)
 
         # ── action buttons ────────────────────────────────────────────────────
         self._preview_btn = QPushButton("Preview correction")
-        self._preview_btn.setFont(QFont("Helvetica", 9))
+        self._preview_btn.setFont(ui_font(9))
         self._preview_btn.setFixedHeight(24)
         self._preview_btn.setEnabled(False)
         self._preview_btn.clicked.connect(self._on_preview)
         self._clear_preview_btn = QPushButton("Clear preview")
-        self._clear_preview_btn.setFont(QFont("Helvetica", 9))
+        self._clear_preview_btn.setFont(ui_font(9))
         self._clear_preview_btn.setFixedHeight(24)
         self._clear_preview_btn.setEnabled(False)
         self._clear_preview_btn.clicked.connect(self._on_clear_preview)
         self._apply_btn = QPushButton("Apply correction")
-        self._apply_btn.setFont(QFont("Helvetica", 9))
+        self._apply_btn.setFont(ui_font(9))
         self._apply_btn.setFixedHeight(24)
         self._apply_btn.setEnabled(False)
         self._apply_btn.clicked.connect(self._on_apply)

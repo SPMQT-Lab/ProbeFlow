@@ -9,6 +9,7 @@ import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 
+from probeflow.gui.typography import ui_font
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
@@ -133,7 +134,7 @@ class FeatureLatticeDialog(QDialog):
 
         # Source selector.
         src_lbl = QLabel("Feature source")
-        src_lbl.setFont(QFont("Helvetica", 8))
+        src_lbl.setFont(ui_font(8))
         lay.addWidget(src_lbl)
         self._src_cb = QComboBox()
         self._src_cb.addItems(list(self._sources.keys()) or ["(no points)"])
@@ -148,7 +149,7 @@ class FeatureLatticeDialog(QDialog):
         lat_info = QLabel(
             f"Lattice: a={a_nm:.3g} nm  b={b_nm:.3g} nm"
         )
-        lat_info.setFont(QFont("Helvetica", 8))
+        lat_info.setFont(ui_font(8))
         lat_info.setWordWrap(True)
         lay.addWidget(lat_info)
 
@@ -180,13 +181,13 @@ class FeatureLatticeDialog(QDialog):
         lay.addWidget(_sep())
 
         self._result_lbl = QLabel("—")
-        self._result_lbl.setFont(QFont("Helvetica", 8))
+        self._result_lbl.setFont(ui_font(8))
         self._result_lbl.setWordWrap(True)
         self._result_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
         lay.addWidget(self._result_lbl)
 
         self._overlay_cb = QCheckBox("Show displacement overlay")
-        self._overlay_cb.setFont(QFont("Helvetica", 8))
+        self._overlay_cb.setFont(ui_font(8))
         self._overlay_cb.setChecked(True)
         self._overlay_cb.toggled.connect(self._refresh_plot)
         lay.addWidget(self._overlay_cb)

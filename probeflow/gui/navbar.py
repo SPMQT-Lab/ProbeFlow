@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from probeflow.gui.typography import ui_font
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QAction, QCursor, QFont, QPixmap
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
@@ -43,7 +44,7 @@ class Navbar(QWidget):
             lay.addWidget(self._logo_lbl)
 
         title_lbl = QLabel("ProbeFlow")
-        title_lbl.setFont(QFont("Helvetica", 12, QFont.Bold))
+        title_lbl.setFont(ui_font(12, weight=QFont.Bold))
         title_lbl.setStyleSheet("background: transparent;")
         lay.addWidget(title_lbl)
         lay.addStretch()

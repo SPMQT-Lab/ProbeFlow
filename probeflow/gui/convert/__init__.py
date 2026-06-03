@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from probeflow.gui.typography import ui_font
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QCursor, QFont
 from PySide6.QtWidgets import (
@@ -39,12 +40,12 @@ class ConvertPanel(QWidget):
         in_row = QHBoxLayout()
         in_lbl = QLabel("Input folder:")
         in_lbl.setFixedWidth(110)
-        in_lbl.setFont(QFont("Helvetica", 11))
+        in_lbl.setFont(ui_font(11))
         self.input_entry = QLineEdit()
-        self.input_entry.setFont(QFont("Helvetica", 11))
+        self.input_entry.setFont(ui_font(11))
         self.input_entry.setPlaceholderText("Select folder with .dat files…")
         in_btn = QPushButton("Browse")
-        in_btn.setFont(QFont("Helvetica", 10))
+        in_btn.setFont(ui_font(10))
         in_btn.setFixedWidth(80)
         in_btn.clicked.connect(self._browse_input)
         in_row.addWidget(in_lbl)
@@ -54,7 +55,7 @@ class ConvertPanel(QWidget):
 
         # Custom output checkbox + row (hidden by default)
         self._custom_out_cb = QCheckBox("Custom output folder")
-        self._custom_out_cb.setFont(QFont("Helvetica", 11))
+        self._custom_out_cb.setFont(ui_font(11))
         self._custom_out_cb.setChecked(cfg.get("custom_output", False))
         self._custom_out_cb.toggled.connect(self._toggle_output_row)
         lay.addWidget(self._custom_out_cb)
@@ -64,12 +65,12 @@ class ConvertPanel(QWidget):
         out_row.setContentsMargins(0, 0, 0, 0)
         out_lbl = QLabel("Output folder:")
         out_lbl.setFixedWidth(110)
-        out_lbl.setFont(QFont("Helvetica", 11))
+        out_lbl.setFont(ui_font(11))
         self.output_entry = QLineEdit()
-        self.output_entry.setFont(QFont("Helvetica", 11))
+        self.output_entry.setFont(ui_font(11))
         self.output_entry.setPlaceholderText("Defaults to input folder…")
         out_btn = QPushButton("Browse")
-        out_btn.setFont(QFont("Helvetica", 10))
+        out_btn.setFont(ui_font(10))
         out_btn.setFixedWidth(80)
         out_btn.clicked.connect(self._browse_output)
         out_row.addWidget(out_lbl)
@@ -82,9 +83,9 @@ class ConvertPanel(QWidget):
 
         log_hdr = QHBoxLayout()
         log_lbl = QLabel("Conversion log")
-        log_lbl.setFont(QFont("Helvetica", 11, QFont.Bold))
+        log_lbl.setFont(ui_font(11, weight=QFont.Bold))
         clear_btn = QPushButton("Clear")
-        clear_btn.setFont(QFont("Helvetica", 10))
+        clear_btn.setFont(ui_font(10))
         clear_btn.setFixedWidth(60)
         clear_btn.clicked.connect(lambda: self.log_text.clear())
         log_hdr.addWidget(log_lbl)
@@ -141,7 +142,7 @@ class ConvertSidebar(QWidget):
         lay.setSpacing(8)
 
         hdr = QLabel("Output format")
-        hdr.setFont(QFont("Helvetica", 12, QFont.Bold))
+        hdr.setFont(ui_font(12, weight=QFont.Bold))
         lay.addWidget(hdr)
 
         self.png_cb = QCheckBox("PNG preview")
@@ -149,14 +150,14 @@ class ConvertSidebar(QWidget):
         self.png_cb.setChecked(cfg.get("do_png", False))
         self.sxm_cb.setChecked(cfg.get("do_sxm", True))
         for cb in (self.png_cb, self.sxm_cb):
-            cb.setFont(QFont("Helvetica", 11))
+            cb.setFont(ui_font(11))
             lay.addWidget(cb)
 
         lay.addWidget(_sep())
 
         self._adv_btn = QPushButton("[+] Advanced")
         self._adv_btn.setFlat(True)
-        self._adv_btn.setFont(QFont("Helvetica", 10))
+        self._adv_btn.setFont(ui_font(10))
         self._adv_btn.setCursor(QCursor(Qt.PointingHandCursor))
         self._adv_btn.clicked.connect(self._toggle_adv)
         lay.addWidget(self._adv_btn)
@@ -169,13 +170,13 @@ class ConvertSidebar(QWidget):
         def _spin_row(label: str, val: float, mn: float, mx: float):
             row  = QHBoxLayout()
             lbl  = QLabel(label)
-            lbl.setFont(QFont("Helvetica", 10))
+            lbl.setFont(ui_font(10))
             lbl.setFixedWidth(100)
             spin = QDoubleSpinBox()
             spin.setRange(mn, mx)
             spin.setValue(val)
             spin.setSingleStep(0.5)
-            spin.setFont(QFont("Helvetica", 10))
+            spin.setFont(ui_font(10))
             row.addWidget(lbl)
             row.addWidget(spin)
             adv_lay.addLayout(row)
@@ -189,7 +190,7 @@ class ConvertSidebar(QWidget):
         lay.addWidget(_sep())
 
         self.run_btn = QPushButton("  RUN  ")
-        self.run_btn.setFont(QFont("Helvetica", 14, QFont.Bold))
+        self.run_btn.setFont(ui_font(14, weight=QFont.Bold))
         self.run_btn.setFixedHeight(48)
         self.run_btn.setCursor(QCursor(Qt.PointingHandCursor))
         self.run_btn.setObjectName("accentBtn")
@@ -198,7 +199,7 @@ class ConvertSidebar(QWidget):
         lay.addWidget(_sep())
 
         self.fcount_lbl = QLabel("")
-        self.fcount_lbl.setFont(QFont("Helvetica", 10))
+        self.fcount_lbl.setFont(ui_font(10))
         self.fcount_lbl.setWordWrap(True)
         lay.addWidget(self.fcount_lbl)
 
@@ -209,7 +210,7 @@ class ConvertSidebar(QWidget):
             "The University of Queensland\n"
             "Original code by Rohan Platts"
         )
-        credit.setFont(QFont("Helvetica", 9))
+        credit.setFont(ui_font(9))
         credit.setAlignment(Qt.AlignCenter)
         lay.addWidget(credit)
 

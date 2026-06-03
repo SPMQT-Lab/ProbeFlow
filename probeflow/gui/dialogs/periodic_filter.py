@@ -4,6 +4,7 @@ import numpy as np
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
+from probeflow.gui.typography import ui_font
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
@@ -66,7 +67,7 @@ class PeriodicFilterDialog(FFTViewerDialog):
             "the left panel shows a live preview of the filtered image."
         )
         help_lbl.setWordWrap(True)
-        help_lbl.setFont(QFont("Helvetica", 9))
+        help_lbl.setFont(ui_font(9))
         lay.addWidget(help_lbl)
 
         lay.addLayout(self._build_toolbar_row())
@@ -120,12 +121,12 @@ class PeriodicFilterDialog(FFTViewerDialog):
 
         radius_row = QHBoxLayout()
         radius_lbl = QLabel("Notch radius:")
-        radius_lbl.setFont(QFont("Helvetica", 8))
+        radius_lbl.setFont(ui_font(8))
         self._radius_sl = QSlider(Qt.Horizontal)
         self._radius_sl.setRange(1, 20)
         self._radius_sl.setValue(max(1, min(20, int(round(self._radius_px_init)))))
         self._radius_val = QLabel(f"{self._radius_sl.value()} px")
-        self._radius_val.setFont(QFont("Helvetica", 8))
+        self._radius_val.setFont(ui_font(8))
         self._radius_val.setMinimumWidth(30)
         self._radius_sl.valueChanged.connect(self._on_radius_changed)
         radius_row.addWidget(radius_lbl)
@@ -135,7 +136,7 @@ class PeriodicFilterDialog(FFTViewerDialog):
 
         self._selected_lbl = QLabel("Selected peaks: none")
         self._selected_lbl.setWordWrap(True)
-        self._selected_lbl.setFont(QFont("Helvetica", 8))
+        self._selected_lbl.setFont(ui_font(8))
         notch_inner.addWidget(self._selected_lbl)
 
         notch_row = QHBoxLayout()
@@ -165,7 +166,7 @@ class PeriodicFilterDialog(FFTViewerDialog):
         lay.addLayout(btn_row)
 
         self._status_lbl = QLabel("")
-        self._status_lbl.setFont(QFont("Helvetica", 8))
+        self._status_lbl.setFont(ui_font(8))
         self._status_lbl.setAlignment(Qt.AlignLeft)
         lay.addWidget(self._status_lbl)
 

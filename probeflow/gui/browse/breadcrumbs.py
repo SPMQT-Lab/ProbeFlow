@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
+from probeflow.gui.typography import ui_font
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QCursor, QFont
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QSizePolicy, QWidget
@@ -104,7 +105,7 @@ class _BreadcrumbBar(QWidget):
         self._clear_segments()
         if self._root is None or self._current is None:
             placeholder = QLabel("No folder open")
-            placeholder.setFont(QFont("Helvetica", 10))
+            placeholder.setFont(ui_font(10))
             self._segments_lay.addWidget(placeholder)
             self._restyle_segments()
             return
@@ -126,10 +127,10 @@ class _BreadcrumbBar(QWidget):
         for i, (name, path) in enumerate(segments):
             if i:
                 sep = QLabel("›")
-                sep.setFont(QFont("Helvetica", 11))
+                sep.setFont(ui_font(11))
                 self._segments_lay.addWidget(sep)
             btn = QPushButton(name)
-            btn.setFont(QFont("Helvetica", 10, QFont.Bold if i == len(segments) - 1 else QFont.Normal))
+            btn.setFont(ui_font(10, weight=QFont.Bold if i == len(segments) - 1 else QFont.Normal))
             btn.setCursor(QCursor(Qt.PointingHandCursor))
             btn.setFlat(True)
             btn.clicked.connect(lambda _=False, p=path: self.segment_clicked.emit(p))

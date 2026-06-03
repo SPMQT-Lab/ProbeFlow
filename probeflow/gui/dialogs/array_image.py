@@ -11,6 +11,7 @@ from pathlib import Path
 
 import numpy as np
 
+from probeflow.gui.typography import ui_font
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
@@ -64,12 +65,12 @@ class ArrayImageDialog(QDialog):
         root.setSpacing(6)
 
         heading = QLabel(title)
-        heading.setFont(QFont("Helvetica", 11, QFont.Bold))
+        heading.setFont(ui_font(11, weight=QFont.Bold))
         heading.setAlignment(Qt.AlignCenter)
         root.addWidget(heading)
 
         info = QLabel(self._info_text())
-        info.setFont(QFont("Helvetica", 9))
+        info.setFont(ui_font(9))
         info.setAlignment(Qt.AlignCenter)
         root.addWidget(info)
 

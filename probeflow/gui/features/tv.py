@@ -14,6 +14,7 @@ import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 
+from probeflow.gui.typography import ui_font
 from PySide6.QtCore import QObject, QRunnable, Qt, Signal, Slot
 from PySide6.QtGui import QCursor, QFont
 from PySide6.QtWidgets import (
@@ -85,7 +86,7 @@ class TVPanel(QWidget):
         lay.setSpacing(6)
 
         self._title = QLabel("TV-denoise - load a scan from the Browse tab.")
-        self._title.setFont(QFont("Helvetica", 11, QFont.Bold))
+        self._title.setFont(ui_font(11, weight=QFont.Bold))
         self._title.setWordWrap(True)
         lay.addWidget(self._title)
 
@@ -99,7 +100,7 @@ class TVPanel(QWidget):
         lay.addWidget(self._canvas, 1)
 
         powered = QLabel("Powered by AiSurf")
-        powered.setFont(QFont("Helvetica", 8))
+        powered.setFont(ui_font(8))
         powered.setAlignment(Qt.AlignCenter)
         powered.setStyleSheet("color: #888;")
         lay.addWidget(powered)
@@ -201,7 +202,7 @@ class TVSidebar(QWidget):
         lay.setSpacing(6)
 
         load_btn = QPushButton("Load primary scan from Browse")
-        load_btn.setFont(QFont("Helvetica", 10))
+        load_btn.setFont(ui_font(10))
         load_btn.setFixedHeight(30)
         load_btn.setCursor(QCursor(Qt.PointingHandCursor))
         load_btn.setObjectName("accentBtn")
@@ -218,7 +219,7 @@ class TVSidebar(QWidget):
         lay.addWidget(_sep())
 
         params_lbl = QLabel("Denoise parameters")
-        params_lbl.setFont(QFont("Helvetica", 11, QFont.Bold))
+        params_lbl.setFont(ui_font(11, weight=QFont.Bold))
         lay.addWidget(params_lbl)
 
         # Method ───────────────────────────────────────────────────────────────
@@ -284,7 +285,7 @@ class TVSidebar(QWidget):
 
         # Run / Revert / Save ──────────────────────────────────────────────────
         self._run_btn = QPushButton("Run")
-        self._run_btn.setFont(QFont("Helvetica", 10, QFont.Bold))
+        self._run_btn.setFont(ui_font(10, weight=QFont.Bold))
         self._run_btn.setFixedHeight(32)
         self._run_btn.setObjectName("accentBtn")
         self._run_btn.setCursor(QCursor(Qt.PointingHandCursor))
@@ -292,21 +293,21 @@ class TVSidebar(QWidget):
         lay.addWidget(self._run_btn)
 
         self._revert_btn = QPushButton("Revert")
-        self._revert_btn.setFont(QFont("Helvetica", 9))
+        self._revert_btn.setFont(ui_font(9))
         self._revert_btn.setFixedHeight(26)
         self._revert_btn.setCursor(QCursor(Qt.PointingHandCursor))
         self._revert_btn.clicked.connect(self.revert_requested.emit)
         lay.addWidget(self._revert_btn)
 
         self._save_btn = QPushButton("Save denoised PNG…")
-        self._save_btn.setFont(QFont("Helvetica", 9))
+        self._save_btn.setFont(ui_font(9))
         self._save_btn.setFixedHeight(28)
         self._save_btn.setCursor(QCursor(Qt.PointingHandCursor))
         self._save_btn.clicked.connect(self.save_png_requested.emit)
         lay.addWidget(self._save_btn)
 
         self._status_lbl = QLabel("Load a scan to begin.")
-        self._status_lbl.setFont(QFont("Helvetica", 9))
+        self._status_lbl.setFont(ui_font(9))
         self._status_lbl.setWordWrap(True)
         lay.addWidget(self._status_lbl)
 

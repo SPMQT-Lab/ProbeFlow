@@ -4,6 +4,7 @@ import shutil
 import subprocess
 import webbrowser
 
+from probeflow.gui.typography import ui_font
 from PySide6.QtCore import QSize, Qt, QUrl
 from PySide6.QtGui import QCursor, QDesktopServices, QFont, QMovie, QPixmap
 from PySide6.QtWidgets import QDialog, QFrame, QLabel, QPushButton, QVBoxLayout
@@ -71,7 +72,7 @@ class AboutDialog(QDialog):
 
         def _row(text, size=11, bold=False, sub=False):
             lbl = QLabel(text)
-            f   = QFont("Helvetica", size)
+            f   = ui_font(size)
             f.setBold(bold)
             lbl.setFont(f)
             lbl.setAlignment(Qt.AlignCenter)
@@ -92,7 +93,7 @@ class AboutDialog(QDialog):
         lay.addWidget(_sep())
 
         gh_btn = QPushButton("View on GitHub")
-        gh_btn.setFont(QFont("Helvetica", 11))
+        gh_btn.setFont(ui_font(11))
         gh_btn.setCursor(QCursor(Qt.PointingHandCursor))
         gh_btn.setObjectName("accentBtn")
         gh_btn.setFixedHeight(36)

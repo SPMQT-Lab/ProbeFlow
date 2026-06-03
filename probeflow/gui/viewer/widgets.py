@@ -7,6 +7,7 @@ from typing import Optional
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
+from probeflow.gui.typography import ui_font
 from PySide6.QtCore import Qt, QRect, Signal
 from PySide6.QtGui import (
     QBrush, QColor, QFont, QPainter, QPen,
@@ -72,7 +73,7 @@ class RulerWidget(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         painter.setPen(QPen(QColor("#cdd6f4"), 1))
-        painter.setFont(QFont("Helvetica", 7))
+        painter.setFont(ui_font(7))
 
         step = self._nice_step(self._scan_nm)
         if step <= 0:
@@ -210,7 +211,7 @@ class ScaleBarWidget(QWidget):
         else:
             txt = f"{length_nm:g} nm"
         painter.setPen(QPen(QColor("black"), 0))
-        painter.setFont(QFont("Helvetica", 10, QFont.Bold))
+        painter.setFont(ui_font(10, weight=QFont.Bold))
         painter.drawText(QRect(x0, y0 + self.BAR_HEIGHT_PX + self.LABEL_GAP_PX,
                                 bar_px, 16),
                          Qt.AlignCenter, txt)
@@ -245,14 +246,14 @@ class LineProfilePanel(QWidget):
         ctrl_row.setContentsMargins(0, 0, 0, 0)
         ctrl_row.setSpacing(4)
         _lbl = QLabel("Width:")
-        _lbl.setFont(QFont("Helvetica", 8))
+        _lbl.setFont(ui_font(8))
         ctrl_row.addWidget(_lbl)
         self._width_spin = QSpinBox()
         self._width_spin.setRange(1, 500)
         self._width_spin.setValue(1)
         self._width_spin.setSuffix(" px")
         self._width_spin.setFixedWidth(70)
-        self._width_spin.setFont(QFont("Helvetica", 8))
+        self._width_spin.setFont(ui_font(8))
         self._width_spin.setToolTip("Averaging width perpendicular to the line (pixels)")
         self._width_spin.valueChanged.connect(self.width_changed)
         ctrl_row.addWidget(self._width_spin)
@@ -267,7 +268,7 @@ class LineProfilePanel(QWidget):
         lay.addWidget(self._canvas)
 
         self._meas_label = QLabel("")
-        self._meas_label.setFont(QFont("Helvetica", 8))
+        self._meas_label.setFont(ui_font(8))
         self._meas_label.setAlignment(Qt.AlignCenter)
         self._meas_label.setStyleSheet("color: #cdd6f4;")
         self._meas_label.setVisible(False)
@@ -276,7 +277,7 @@ class LineProfilePanel(QWidget):
         btn_row = QHBoxLayout()
         btn_row.setContentsMargins(0, 0, 0, 0)
         self._add_delta_btn = QPushButton("Add Δ measurement")
-        self._add_delta_btn.setFont(QFont("Helvetica", 8))
+        self._add_delta_btn.setFont(ui_font(8))
         self._add_delta_btn.setFixedHeight(20)
         self._add_delta_btn.setEnabled(False)
         self._add_delta_btn.setToolTip(
@@ -285,7 +286,7 @@ class LineProfilePanel(QWidget):
         self._add_delta_btn.clicked.connect(self.add_delta_measurement_clicked)
         btn_row.addWidget(self._add_delta_btn)
         self._add_summary_btn = QPushButton("Add profile summary")
-        self._add_summary_btn.setFont(QFont("Helvetica", 8))
+        self._add_summary_btn.setFont(ui_font(8))
         self._add_summary_btn.setFixedHeight(20)
         self._add_summary_btn.setEnabled(False)
         self._add_summary_btn.setToolTip(
@@ -295,7 +296,7 @@ class LineProfilePanel(QWidget):
         btn_row.addWidget(self._add_summary_btn)
         btn_row.addStretch()
         self._export_btn = QPushButton("Export CSV…")
-        self._export_btn.setFont(QFont("Helvetica", 8))
+        self._export_btn.setFont(ui_font(8))
         self._export_btn.setFixedHeight(20)
         self._export_btn.setEnabled(False)
         self._export_btn.setToolTip("Export line profile data as CSV")

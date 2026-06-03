@@ -9,6 +9,7 @@ import numpy as np
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
+from probeflow.gui.typography import ui_font
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
@@ -97,7 +98,7 @@ class SpecOverlayDialog(QDialog):
         lay.setSpacing(6)
 
         title = QLabel("Selected spectra")
-        title.setFont(QFont("Helvetica", 12, QFont.Bold))
+        title.setFont(ui_font(12, weight=QFont.Bold))
         title.setAlignment(Qt.AlignCenter)
         lay.addWidget(title)
 
@@ -114,12 +115,12 @@ class SpecOverlayDialog(QDialog):
         ctrl_lay.setSpacing(5)
 
         self._count_lbl = QLabel("Loading…")
-        self._count_lbl.setFont(QFont("Helvetica", 9))
+        self._count_lbl.setFont(ui_font(9))
         self._count_lbl.setWordWrap(True)
         ctrl_lay.addWidget(self._count_lbl)
 
         self._channel_cb = QComboBox()
-        self._channel_cb.setFont(QFont("Helvetica", 9))
+        self._channel_cb.setFont(ui_font(9))
         self._channel_cb.setToolTip("Common signal channel to overlay/export as displayed data.")
         self._channel_cb.currentTextChanged.connect(self._redraw)
         ctrl_lay.addWidget(QLabel("Signal axis"))
@@ -195,7 +196,7 @@ class SpecOverlayDialog(QDialog):
         ctrl_lay.addWidget(self._norm_channel_cb)
 
         self._formula_lbl = QLabel("Display: y")
-        self._formula_lbl.setFont(QFont("Helvetica", 8))
+        self._formula_lbl.setFont(ui_font(8))
         self._formula_lbl.setWordWrap(True)
         self._formula_lbl.setToolTip(_DISPLAY_PIPELINE_TOOLTIP)
         ctrl_lay.addWidget(QLabel("Formula"))
@@ -235,7 +236,7 @@ class SpecOverlayDialog(QDialog):
         ctrl_lay.addWidget(self._offset_spin)
 
         self._measure_lbl = QLabel("Measurement: off")
-        self._measure_lbl.setFont(QFont("Helvetica", 9))
+        self._measure_lbl.setFont(ui_font(9))
         self._measure_lbl.setWordWrap(True)
         self._measure_lbl.setToolTip(
             "Crosshair measurements use the displayed trace, not the raw spectrum."

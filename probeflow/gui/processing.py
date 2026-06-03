@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from probeflow.gui.typography import ui_font
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
@@ -38,7 +39,7 @@ class ProcessingControlPanel(QWidget):
                 target = lay
             row = QHBoxLayout()
             lbl = QLabel(label)
-            lbl.setFont(QFont("Helvetica", 8))
+            lbl.setFont(ui_font(8))
             if lbl_width >= 90:
                 lbl.setFixedWidth(lbl_width)
             else:
@@ -46,7 +47,7 @@ class ProcessingControlPanel(QWidget):
                 lbl.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
             cb = QComboBox()
             cb.addItems(items)
-            cb.setFont(QFont("Helvetica", 8))
+            cb.setFont(ui_font(8))
             cb.setMinimumWidth(0)
             cb.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             row.addWidget(lbl)
@@ -60,13 +61,13 @@ class ProcessingControlPanel(QWidget):
             rl = QHBoxLayout(w)
             rl.setContentsMargins(0, 0, 0, 0)
             lbl = QLabel(label)
-            lbl.setFont(QFont("Helvetica", 8))
+            lbl.setFont(ui_font(8))
             lbl.setMaximumWidth(44)
             sl = QSlider(Qt.Horizontal)
             sl.setRange(mn, mx)
             sl.setValue(init)
             val_lbl = QLabel(fmt.format(v=init))
-            val_lbl.setFont(QFont("Helvetica", 8))
+            val_lbl.setFont(ui_font(8))
             val_lbl.setFixedWidth(28)
             sl.valueChanged.connect(
                 lambda v, vl=val_lbl, f=fmt: vl.setText(f.format(v=v)))
@@ -77,13 +78,13 @@ class ProcessingControlPanel(QWidget):
 
         def _col_lbl(text: str, target):
             lbl = QLabel(text)
-            lbl.setFont(QFont("Helvetica", 7, QFont.Bold))
+            lbl.setFont(ui_font(7, weight=QFont.Bold))
             lbl.setAlignment(Qt.AlignCenter)
             target.addWidget(lbl)
 
         # ── Line corrections (full-width in both modes) ───────────────────────
         line_lbl = QLabel("Line corrections")
-        line_lbl.setFont(QFont("Helvetica", 7, QFont.Bold))
+        line_lbl.setFont(ui_font(7, weight=QFont.Bold))
         line_lbl.setAlignment(Qt.AlignCenter)
         lay.addWidget(line_lbl)
 
@@ -108,10 +109,10 @@ class ProcessingControlPanel(QWidget):
         polarity_row = QHBoxLayout()
         polarity_row.setContentsMargins(0, 0, 0, 0)
         polarity_label = QLabel("Polarity:")
-        polarity_label.setFont(QFont("Helvetica", 8))
+        polarity_label.setFont(ui_font(8))
         self._bad_line_polarity_combo = QComboBox()
         self._bad_line_polarity_combo.addItems(["Bright", "Dark"])
-        self._bad_line_polarity_combo.setFont(QFont("Helvetica", 8))
+        self._bad_line_polarity_combo.setFont(ui_font(8))
         self._bad_line_polarity_combo.setToolTip(
             "Bright detects segments higher than nearby scan lines. "
             "Dark detects segments lower than nearby scan lines."
@@ -122,7 +123,7 @@ class ProcessingControlPanel(QWidget):
         threshold_row = QHBoxLayout()
         threshold_row.setContentsMargins(0, 0, 0, 0)
         threshold_label = QLabel("Threshold:")
-        threshold_label.setFont(QFont("Helvetica", 8))
+        threshold_label.setFont(ui_font(8))
         self._bad_line_threshold_spin = QDoubleSpinBox()
         self._bad_line_threshold_spin.setRange(0.5, 50.0)
         self._bad_line_threshold_spin.setSingleStep(0.5)
@@ -138,7 +139,7 @@ class ProcessingControlPanel(QWidget):
         min_len_row = QHBoxLayout()
         min_len_row.setContentsMargins(0, 0, 0, 0)
         min_len_label = QLabel("Min length:")
-        min_len_label.setFont(QFont("Helvetica", 8))
+        min_len_label.setFont(ui_font(8))
         self._bad_line_min_len_spin = QDoubleSpinBox()
         self._bad_line_min_len_spin.setRange(1, 512)
         self._bad_line_min_len_spin.setSingleStep(1)
@@ -155,7 +156,7 @@ class ProcessingControlPanel(QWidget):
         adj_row = QHBoxLayout()
         adj_row.setContentsMargins(0, 0, 0, 0)
         adj_label = QLabel("Max adjacent:")
-        adj_label.setFont(QFont("Helvetica", 8))
+        adj_label.setFont(ui_font(8))
         self._bad_line_adjacent_spin = QDoubleSpinBox()
         self._bad_line_adjacent_spin.setRange(1, 32)
         self._bad_line_adjacent_spin.setSingleStep(1)
@@ -172,14 +173,14 @@ class ProcessingControlPanel(QWidget):
         preview_row = QHBoxLayout()
         preview_row.setContentsMargins(0, 0, 0, 0)
         self._bad_line_preview_btn = QPushButton("Preview detection")
-        self._bad_line_preview_btn.setFont(QFont("Helvetica", 8))
+        self._bad_line_preview_btn.setFont(ui_font(8))
         self._bad_line_preview_btn.setToolTip(
             "Highlight candidate bad scan-line segments without modifying data."
         )
         preview_row.addWidget(self._bad_line_preview_btn)
         blo.addLayout(preview_row)
         self._bad_line_preview_lbl = QLabel("Preview: not run")
-        self._bad_line_preview_lbl.setFont(QFont("Helvetica", 8))
+        self._bad_line_preview_lbl.setFont(ui_font(8))
         self._bad_line_preview_lbl.setWordWrap(True)
         blo.addWidget(self._bad_line_preview_lbl)
         lay.addWidget(self._bad_line_options)
@@ -207,14 +208,14 @@ class ProcessingControlPanel(QWidget):
 
         _col_lbl("Background", R)
         self._simple_background_btn = QPushButton("Simple background")
-        self._simple_background_btn.setFont(QFont("Helvetica", 8))
+        self._simple_background_btn.setFont(ui_font(8))
         self._simple_background_btn.setToolTip(
             "Automated plane subtraction (order-1 polynomial fit on the whole image)."
         )
         self._simple_background_btn.clicked.connect(self.simple_background_requested.emit)
         R.addWidget(self._simple_background_btn)
         self._stm_background_btn = QPushButton("STM Background...")
-        self._stm_background_btn.setFont(QFont("Helvetica", 8))
+        self._stm_background_btn.setFont(ui_font(8))
         self._stm_background_btn.setToolTip(
             "Open the ImageJ-style scan-line background tool with profile and image previews."
         )

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from probeflow.gui.typography import ui_font
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QAction, QCursor, QFont, QPixmap
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QMenu, QVBoxLayout, QWidget
@@ -48,7 +49,7 @@ class _BrowseCard(QFrame):
         lbl_text = entry.stem if len(entry.stem) <= 22 else entry.stem[:20] + ".."
         self.name_lbl = QLabel(lbl_text)
         self.name_lbl.setAlignment(Qt.AlignCenter)
-        self.name_lbl.setFont(QFont("Helvetica", 10))
+        self.name_lbl.setFont(ui_font(10))
         # Don't reserve space for name_lbl when it's hidden in compact mode.
         _sp = self.name_lbl.sizePolicy()
         _sp.setRetainSizeWhenHidden(False)
@@ -56,7 +57,7 @@ class _BrowseCard(QFrame):
 
         self.meta_lbl = QLabel(meta_text)
         self.meta_lbl.setAlignment(Qt.AlignCenter)
-        self.meta_lbl.setFont(QFont("Helvetica", 9))
+        self.meta_lbl.setFont(ui_font(9))
 
         lay.addWidget(self.img_lbl)
         lay.addWidget(self.name_lbl)

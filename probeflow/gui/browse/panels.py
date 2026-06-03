@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 
+from probeflow.gui.typography import ui_font
 from PySide6.QtCore import Qt, QThreadPool, Signal, Slot
 from PySide6.QtGui import QColor, QCursor, QFont, QPixmap
 from PySide6.QtWidgets import (
@@ -75,7 +76,7 @@ class BrowseToolPanel(QWidget):
 
         # ── Open folder button ─────────────────────────────────────────────────
         open_btn = QPushButton("Open folder…")
-        open_btn.setFont(QFont("Helvetica", 9))
+        open_btn.setFont(ui_font(9))
         open_btn.setFixedHeight(30)
         open_btn.setCursor(QCursor(Qt.PointingHandCursor))
         open_btn.setObjectName("accentBtn")
@@ -95,7 +96,7 @@ class BrowseToolPanel(QWidget):
         for i, (label, mode) in enumerate(_modes):
             btn = QPushButton(label)
             btn.setCheckable(True)
-            btn.setFont(QFont("Helvetica", 9))
+            btn.setFont(ui_font(9))
             btn.setFixedHeight(26)
             btn.setCursor(QCursor(Qt.PointingHandCursor))
             # Segmented-control shape: rounded corners only on outer edges
@@ -120,28 +121,28 @@ class BrowseToolPanel(QWidget):
 
         # ── Thumbnail appearance ──────────────────────────────────────────────
         appearance_lbl = QLabel("Thumbnail appearance")
-        appearance_lbl.setFont(QFont("Helvetica", 11, QFont.Bold))
+        appearance_lbl.setFont(ui_font(11, weight=QFont.Bold))
         lay.addWidget(appearance_lbl)
 
         cm_lbl = QLabel("Colormap")
-        cm_lbl.setFont(QFont("Helvetica", 9, QFont.Bold))
+        cm_lbl.setFont(ui_font(9, weight=QFont.Bold))
         lay.addWidget(cm_lbl)
 
         self.cmap_cb = QComboBox()
         self.cmap_cb.addItems(CMAP_NAMES)
         self.cmap_cb.setCurrentText(cfg.get("colormap", DEFAULT_CMAP_LABEL))
-        self.cmap_cb.setFont(QFont("Helvetica", 10))
+        self.cmap_cb.setFont(ui_font(10))
         self.cmap_cb.currentTextChanged.connect(self._on_colormap_changed)
         lay.addWidget(self.cmap_cb)
 
         thumb_lbl = QLabel("Thumbnail channel")
-        thumb_lbl.setFont(QFont("Helvetica", 9, QFont.Bold))
+        thumb_lbl.setFont(ui_font(9, weight=QFont.Bold))
         lay.addWidget(thumb_lbl)
 
         self.thumbnail_channel_cb = QComboBox()
         self.thumbnail_channel_cb.addItems(THUMBNAIL_CHANNEL_OPTIONS)
         self.thumbnail_channel_cb.setCurrentText(THUMBNAIL_CHANNEL_DEFAULT)
-        self.thumbnail_channel_cb.setFont(QFont("Helvetica", 10))
+        self.thumbnail_channel_cb.setFont(ui_font(10))
         self.thumbnail_channel_cb.setToolTip(
             "Choose which forward scan channel is used for browse thumbnails. "
             "Files without that channel fall back to Z."
@@ -151,12 +152,12 @@ class BrowseToolPanel(QWidget):
         lay.addWidget(self.thumbnail_channel_cb)
 
         align_lbl = QLabel("Align rows")
-        align_lbl.setFont(QFont("Helvetica", 9, QFont.Bold))
+        align_lbl.setFont(ui_font(9, weight=QFont.Bold))
         lay.addWidget(align_lbl)
         self.align_rows_cb = QComboBox()
         self.align_rows_cb.addItems(["None", "Median", "Mean"])
         self.align_rows_cb.setCurrentText("None")
-        self.align_rows_cb.setFont(QFont("Helvetica", 10))
+        self.align_rows_cb.setFont(ui_font(10))
         self.align_rows_cb.setToolTip(
             "Preview-only thumbnail row alignment. Full-size viewer data opens raw."
         )
@@ -164,19 +165,19 @@ class BrowseToolPanel(QWidget):
         lay.addWidget(self.align_rows_cb)
 
         size_lbl = QLabel("Thumbnail size")
-        size_lbl.setFont(QFont("Helvetica", 9, QFont.Bold))
+        size_lbl.setFont(ui_font(9, weight=QFont.Bold))
         lay.addWidget(size_lbl)
         self.size_cb = QComboBox()
         self.size_cb.addItems(["Large", "Small"])
         self.size_cb.setCurrentText(cfg.get("thumbnail_size", "large").capitalize())
-        self.size_cb.setFont(QFont("Helvetica", 10))
+        self.size_cb.setFont(ui_font(10))
         self.size_cb.currentTextChanged.connect(
             lambda t: self.thumbnail_size_changed.emit(t.lower()))
         lay.addWidget(self.size_cb)
         lay.addWidget(_sep())
 
         self._map_spectra_btn = QPushButton("Map spectra to images\u2026")
-        self._map_spectra_btn.setFont(QFont("Helvetica", 9))
+        self._map_spectra_btn.setFont(ui_font(9))
         self._map_spectra_btn.setFixedHeight(28)
         self._map_spectra_btn.setCursor(QCursor(Qt.PointingHandCursor))
         self._map_spectra_btn.setToolTip(
@@ -187,7 +188,7 @@ class BrowseToolPanel(QWidget):
         lay.addWidget(self._map_spectra_btn)
 
         self._overlay_spectra_btn = QPushButton("Overlay selected spectra…")
-        self._overlay_spectra_btn.setFont(QFont("Helvetica", 9))
+        self._overlay_spectra_btn.setFont(ui_font(9))
         self._overlay_spectra_btn.setFixedHeight(28)
         self._overlay_spectra_btn.setCursor(QCursor(Qt.PointingHandCursor))
         self._overlay_spectra_btn.setToolTip(
@@ -199,7 +200,7 @@ class BrowseToolPanel(QWidget):
         lay.addWidget(_sep())
 
         fc_btn = QPushButton("🔬  Feature Counting")
-        fc_btn.setFont(QFont("Helvetica", 10, QFont.Bold))
+        fc_btn.setFont(ui_font(10, weight=QFont.Bold))
         fc_btn.setFixedHeight(34)
         fc_btn.setCursor(QCursor(Qt.PointingHandCursor))
         fc_btn.setObjectName("accentBtn")
@@ -278,7 +279,7 @@ class BrowseInfoPanel(QWidget):
         summary_lay.setSpacing(3)
 
         self.name_lbl = QLabel("No scan selected")
-        self.name_lbl.setFont(QFont("Helvetica", 10, QFont.Bold))
+        self.name_lbl.setFont(ui_font(10, weight=QFont.Bold))
         self.name_lbl.setWordWrap(True)
         self.name_lbl.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
         summary_lay.addWidget(self.name_lbl)
@@ -297,9 +298,9 @@ class BrowseInfoPanel(QWidget):
         for i, (title, key) in enumerate(_QI_ROWS):
             r, c = divmod(i, 2)
             t_lbl = QLabel(title + ":")
-            t_lbl.setFont(QFont("Helvetica", 8))
+            t_lbl.setFont(ui_font(8))
             v_lbl = QLabel("—")
-            v_lbl.setFont(QFont("Helvetica", 10, QFont.Bold))
+            v_lbl.setFont(ui_font(10, weight=QFont.Bold))
             qi_grid.addWidget(t_lbl, r, c * 2)
             qi_grid.addWidget(v_lbl, r, c * 2 + 1)
             self._qi[key] = v_lbl
@@ -307,7 +308,7 @@ class BrowseInfoPanel(QWidget):
         summary_lay.addWidget(_sep())
 
         ch_hdr = QLabel("Channels")
-        ch_hdr.setFont(QFont("Helvetica", 11, QFont.Bold))
+        ch_hdr.setFont(ui_font(11, weight=QFont.Bold))
         summary_lay.addWidget(ch_hdr)
 
         self._ch_widget = QWidget()
@@ -327,7 +328,7 @@ class BrowseInfoPanel(QWidget):
         # (Pixels / Size / Bias / Setpoint) is what users want at a glance;
         # the full header table is dense and only useful occasionally.
         self._meta_toggle = QPushButton("[+] Show all metadata")
-        self._meta_toggle.setFont(QFont("Helvetica", 9, QFont.Bold))
+        self._meta_toggle.setFont(ui_font(9, weight=QFont.Bold))
         self._meta_toggle.setFixedHeight(24)
         self._meta_toggle.setCursor(QCursor(Qt.PointingHandCursor))
         self._meta_toggle.setToolTip(
@@ -343,7 +344,7 @@ class BrowseInfoPanel(QWidget):
         meta_lay.setSpacing(4)
         self.search_box = QLineEdit()
         self.search_box.setPlaceholderText("Search…")
-        self.search_box.setFont(QFont("Helvetica", 10))
+        self.search_box.setFont(ui_font(10))
         self.search_box.setFixedHeight(28)
         self.search_box.textChanged.connect(self._filter_meta)
         meta_lay.addWidget(self.search_box)
@@ -359,7 +360,7 @@ class BrowseInfoPanel(QWidget):
         self.meta_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.meta_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.meta_table.setAlternatingRowColors(True)
-        self.meta_table.setFont(QFont("Helvetica", 10))
+        self.meta_table.setFont(ui_font(10))
         self.meta_table.verticalHeader().setDefaultSectionSize(22)
         self.meta_table.setShowGrid(False)
         meta_lay.addWidget(self.meta_table, 1)
@@ -504,7 +505,7 @@ class BrowseInfoPanel(QWidget):
             img_lbl.setFrameShape(QFrame.StyledPanel)
             img_lbl.setText("—")
             nm_lbl = QLabel(name)
-            nm_lbl.setFont(QFont("Helvetica", 9))
+            nm_lbl.setFont(ui_font(9))
             nm_lbl.setAlignment(Qt.AlignCenter)
             nm_lbl.setWordWrap(True)
             cell_lay.addWidget(img_lbl)

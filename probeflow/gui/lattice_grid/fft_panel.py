@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 from dataclasses import replace
 
+from probeflow.gui.typography import ui_font
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
@@ -65,18 +66,18 @@ class FFTLatticePanel(QWidget):
         type_row.addWidget(QLabel("Type:"))
         self._type_combo = QComboBox()
         self._type_combo.addItems(["Square", "Rectangular", "Hexagonal"])
-        self._type_combo.setFont(QFont("Helvetica", 9))
+        self._type_combo.setFont(ui_font(9))
         self._type_combo.currentIndexChanged.connect(self._on_type_changed)
         type_row.addWidget(self._type_combo, 1)
         lay.addLayout(type_row)
 
         self._lock_cb = QCheckBox("Lock lattice constraint")
-        self._lock_cb.setFont(QFont("Helvetica", 9))
+        self._lock_cb.setFont(ui_font(9))
         self._lock_cb.toggled.connect(self._on_locked_changed)
         lay.addWidget(self._lock_cb)
 
         params_grp = QGroupBox("Parameters")
-        params_grp.setFont(QFont("Helvetica", 9))
+        params_grp.setFont(ui_font(9))
         params_lay = QGridLayout(params_grp)
         params_lay.setHorizontalSpacing(8)
         params_lay.setVerticalSpacing(4)
@@ -84,7 +85,7 @@ class FFTLatticePanel(QWidget):
 
         def _make_label(label):
             lb = QLabel(label)
-            lb.setFont(QFont("Helvetica", 9))
+            lb.setFont(ui_font(9))
             lb.setMinimumWidth(64)
             return lb
 
@@ -95,7 +96,7 @@ class FFTLatticePanel(QWidget):
             sp.setDecimals(dec)
             if sfx:
                 sp.setSuffix(f" {sfx}")
-            sp.setFont(QFont("Helvetica", 9))
+            sp.setFont(ui_font(9))
             sp.setFixedHeight(22)
             params_lay.addWidget(_make_label(label), row, col * 2)
             params_lay.addWidget(sp, row, col * 2 + 1)
@@ -105,7 +106,7 @@ class FFTLatticePanel(QWidget):
             sp = QSpinBox()
             sp.setRange(lo, hi)
             sp.setValue(value)
-            sp.setFont(QFont("Helvetica", 9))
+            sp.setFont(ui_font(9))
             sp.setFixedHeight(22)
             params_lay.addWidget(_make_label(label), row, col * 2)
             params_lay.addWidget(sp, row, col * 2 + 1)
@@ -140,7 +141,7 @@ class FFTLatticePanel(QWidget):
         install_no_wheel_spinboxes(params_grp)
 
         disp_grp = QGroupBox("Display")
-        disp_grp.setFont(QFont("Helvetica", 9))
+        disp_grp.setFont(ui_font(9))
         disp_lay = QHBoxLayout(disp_grp)
         disp_lay.setSpacing(10)
         disp_lay.setContentsMargins(8, 8, 8, 6)
@@ -148,7 +149,7 @@ class FFTLatticePanel(QWidget):
         self._show_handles_cb = QCheckBox("Show handles")
         self._show_labels_cb  = QCheckBox("Show labels")
         for cb in (self._show_grid_cb, self._show_handles_cb, self._show_labels_cb):
-            cb.setFont(QFont("Helvetica", 9))
+            cb.setFont(ui_font(9))
             cb.setChecked(True)
             cb.toggled.connect(self._on_visibility_changed)
             disp_lay.addWidget(cb)
@@ -156,13 +157,13 @@ class FFTLatticePanel(QWidget):
         lay.addWidget(disp_grp)
 
         reset_btn = QPushButton("Reset origin to FFT centre")
-        reset_btn.setFont(QFont("Helvetica", 9))
+        reset_btn.setFont(ui_font(9))
         reset_btn.setFixedHeight(24)
         reset_btn.clicked.connect(self._on_reset_origin)
         lay.addWidget(reset_btn)
 
         meas_grp = QGroupBox("Measured")
-        meas_grp.setFont(QFont("Helvetica", 9))
+        meas_grp.setFont(ui_font(9))
         meas_lay = QVBoxLayout(meas_grp)
         meas_lay.setContentsMargins(6, 6, 6, 4)
         self._meas_lbl = QLabel("")
@@ -177,7 +178,7 @@ class FFTLatticePanel(QWidget):
             "FFT-derived direct lattice measurements can be used for affine "
             "image correction from the FFT viewer."
         )
-        fft_note.setFont(QFont("Helvetica", 8))
+        fft_note.setFont(ui_font(8))
         fft_note.setWordWrap(True)
         fft_note.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         lay.addWidget(fft_note)

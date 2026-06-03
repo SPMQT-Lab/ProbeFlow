@@ -11,13 +11,16 @@ contains no processing or analysis logic itself.
 
 from __future__ import annotations
 
-from PySide6.QtCore import QSize, Signal
-from PySide6.QtGui import QIcon
+from PySide6.QtCore import Qt, QSize, Signal
+from PySide6.QtGui import QAction, QActionGroup, QIcon
+from probeflow.gui.typography import ui_font
 from PySide6.QtWidgets import (
     QButtonGroup,
     QFrame,
     QHBoxLayout,
+    QMenu,
     QPushButton,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -25,8 +28,10 @@ from PySide6.QtWidgets import (
 from probeflow.core.resources import asset_path
 
 
+# Common drawing tools shown directly on the mode row.  The default "pan" tool is
+# shown as a plain cursor symbol (it selects ROIs and drags to pan — no drawing).
 _MODE_BUTTONS: list[tuple[str, str, str, str]] = [
-    ("pan",       "Pan",     "Navigate the image by dragging. Does not create ROIs.", "pan"),
+    ("pan",       "↖",       "Cursor — click an ROI to select it, or drag to pan the image.", ""),
     (
         "rectangle",
         "Rect",
@@ -39,8 +44,6 @@ _MODE_BUTTONS: list[tuple[str, str, str, str]] = [
         "Draw an elliptical ROI for processing or measurement.  [E]",
         "ellipse",
     ),
-    ("polygon",   "Poly",    "Draw a polygon ROI by clicking vertices.  [P]", "polygon"),
-    ("freehand",  "Free",    "Draw a freehand ROI.  [F]", "freehand"),
     (
         "line",
         "Line",
@@ -50,25 +53,10 @@ _MODE_BUTTONS: list[tuple[str, str, str, str]] = [
     ("point",     "Point",   "Place a point ROI.  [T]", "point"),
 ]
 
-_ACTION_BUTTONS: list[tuple[str, str, str, str]] = [
-    (
-        "auto_contrast",
-        "Auto",
-        "Autoscale image contrast using the current display settings.",
-        "auto_contrast",
-    ),
-    ("plane_background", "Plane",     "Open simple plane/background subtraction.", "plane_background"),
-    ("stm_background",   "STM BG",   "Open STM scan-line background subtraction.", "stm_background"),
-    ("bad_lines",        "Bad lines", "Open bad scan-line correction.", "bad_lines"),
-    ("open_fft",         "FFT",       "Fit FFT Bragg peaks to a known structure.", "open_fft"),
-    ("open_lattice_grid", "Grid",     "Fit a real-space lattice grid to a known structure.", "open_lattice_grid"),
-    (
-        "line_periodicity",
-        "Period",
-        "Estimate spacing from the selected line ROI and save known structures.",
-        "line_periodicity",
-    ),
-    ("line_profile",     "Profile",   "Show a line profile for the selected line ROI.", "line_profile"),
+# Less-common drawing tools tucked behind the "More" popup.
+_MORE_MODE_BUTTONS: list[tuple[str, str, str, str]] = [
+    ("polygon",   "Polygon",  "Draw a polygon ROI by clicking vertices.  [P]", "polygon"),
+    ("freehand",  "Freehand", "Draw a freehand ROI.  [F]", "freehand"),
 ]
 
 _ROI_ACTION_BUTTONS: list[tuple[str, str, str, str]] = [
@@ -86,13 +74,18 @@ _ROI_ACTION_BUTTONS: list[tuple[str, str, str, str]] = [
 # then exposed here as toolbar actions. Do not implement ROI geometry
 # modification logic directly in the toolbar.
 
-_LINE_ACTIONS = {"line_periodicity", "line_profile"}
 _AREA_ACTIONS = {"mask_selection", "invert_selection"}
 _TOOLBAR_ICON_SIZE = QSize(18, 18)
 
 
 class ImageQuickToolbar(QWidget):
-    """Three-row quick-access toolbar for the image viewer."""
+    """Two-row quick-access toolbar for the image viewer.
+
+    Row 1 — drawing-tool modes (common ones inline, rarer ones under "More") + Clear.
+    Row 2 — ROI/selection utilities (Mask, Invert).
+
+    Processing/measurement actions live in the sidebar tabs, not here.
+    """
 
     mode_requested = Signal(str)
     action_requested = Signal(str)
@@ -101,16 +94,23 @@ class ImageQuickToolbar(QWidget):
         super().__init__(parent)
         self._mode_btns: dict[str, QPushButton] = {}
         self._action_btns: dict[str, QPushButton] = {}
+        self._more_actions: dict[str, QAction] = {}
+        self._more_btn: QToolButton | None = None
         self._build()
 
     # ── public API ────────────────────────────────────────────────────────────
 
     def set_active_mode(self, key: str) -> None:
-        """Check the toggle for *key* and uncheck all others."""
+        """Check the toggle for *key* and uncheck all others (incl. the More popup)."""
         for k, btn in self._mode_btns.items():
             btn.blockSignals(True)
             btn.setChecked(k == key)
             btn.blockSignals(False)
+        in_more = key in self._more_actions
+        if self._more_btn is not None:
+            self._more_btn.setChecked(in_more)
+        for k, act in self._more_actions.items():
+            act.setChecked(k == key)
 
     def set_action_enabled(
         self,
@@ -146,13 +146,6 @@ class ImageQuickToolbar(QWidget):
         sep1.setFrameShadow(QFrame.Sunken)
         root.addWidget(sep1)
 
-        root.addLayout(self._build_action_row())
-
-        sep2 = QFrame()
-        sep2.setFrameShape(QFrame.HLine)
-        sep2.setFrameShadow(QFrame.Sunken)
-        root.addWidget(sep2)
-
         root.addLayout(self._build_roi_row())
 
     def _build_mode_row(self) -> QHBoxLayout:
@@ -165,11 +158,41 @@ class ImageQuickToolbar(QWidget):
 
         for key, label, tip, icon_name in _MODE_BUTTONS:
             btn = self._make_btn(label, tip, icon_name=icon_name, checkable=True)
+            btn.setObjectName("modeToolBtn")  # enables the :checked highlight
             btn.setChecked(key == "pan")
+            if key == "pan":
+                btn.setFont(ui_font(13))  # render the cursor glyph a touch larger
             btn.clicked.connect(lambda _checked=False, k=key: self.mode_requested.emit(k))
             group.addButton(btn)
             self._mode_btns[key] = btn
             row.addWidget(btn)
+
+        # "More" popup for the less-common drawing tools (Polygon, Freehand).
+        self._more_btn = QToolButton()
+        self._more_btn.setObjectName("imageToolMore")
+        self._more_btn.setText("More")
+        self._more_btn.setCheckable(True)
+        self._more_btn.setToolTip("More drawing tools")
+        self._more_btn.setFixedHeight(28)
+        self._more_btn.setMinimumWidth(56)
+        self._more_btn.setPopupMode(QToolButton.InstantPopup)
+        self._more_btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        more_menu = QMenu(self._more_btn)
+        more_group = QActionGroup(self)
+        more_group.setExclusive(True)
+        for key, label, tip, icon_name in _MORE_MODE_BUTTONS:
+            act = QAction(label, self)
+            act.setCheckable(True)
+            act.setToolTip(tip)
+            icon_path = asset_path(f"toolbar/{icon_name}.png")
+            if icon_path.exists():
+                act.setIcon(QIcon(str(icon_path)))
+            act.triggered.connect(lambda _checked=False, k=key: self.mode_requested.emit(k))
+            more_group.addAction(act)
+            more_menu.addAction(act)
+            self._more_actions[key] = act
+        self._more_btn.setMenu(more_menu)
+        row.addWidget(self._more_btn)
 
         row.addSpacing(6)
 
@@ -181,22 +204,6 @@ class ImageQuickToolbar(QWidget):
         clear_btn.clicked.connect(lambda: self.action_requested.emit("clear_selection"))
         self._action_btns["clear_selection"] = clear_btn
         row.addWidget(clear_btn)
-
-        row.addStretch(1)
-        return row
-
-    def _build_action_row(self) -> QHBoxLayout:
-        row = QHBoxLayout()
-        row.setSpacing(3)
-        row.setContentsMargins(0, 0, 0, 0)
-
-        for key, label, tip, icon_name in _ACTION_BUTTONS:
-            btn = self._make_btn(label, tip, icon_name=icon_name)
-            btn.clicked.connect(lambda _checked=False, k=key: self.action_requested.emit(k))
-            if key in _LINE_ACTIONS:
-                btn.setEnabled(False)
-            self._action_btns[key] = btn
-            row.addWidget(btn)
 
         row.addStretch(1)
         return row

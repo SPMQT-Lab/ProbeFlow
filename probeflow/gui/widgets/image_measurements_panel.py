@@ -4,7 +4,7 @@ The panel is a **master → detail** surface:
 
 * the **menu** lists the measurement tools, grouped, plus a "Results (N)" entry;
 * picking a tool opens a **detail** view that shows *only* that tool's controls and
-  the shared results table, with a "‹ Tools" button back to the menu.
+  the shared results table, with a "← Tools" button back to the menu.
 
 This keeps a chosen tool's output (e.g. an angle) front-and-centre instead of buried
 under every other option.  The panel holds no analysis logic — tools either drive the
@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QSizePolicy,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -85,6 +86,14 @@ class ImageMeasurementsPanel(QWidget):
             ("Lattice grid…", "lattice_grid", "dialog"),
         ]),
     ]
+
+    # Compact labels for the menu grid (full text lives in each button's tooltip).
+    _SHORT_LABELS = {
+        "line_periodicity": "Periodicity",
+        "point_fft": "Point / FFT",
+        "pair_correlation": "Pair corr…",
+        "feature_to_lattice": "Feature→lat…",
+    }
 
     _DIALOG_SIGNALS = {
         "feature_finder": "featureFinderRequested",
@@ -171,10 +180,16 @@ class ImageMeasurementsPanel(QWidget):
             grid.setContentsMargins(0, 0, 0, 0)
             grid.setHorizontalSpacing(4)
             grid.setVerticalSpacing(4)
+            grid.setColumnStretch(0, 1)
+            grid.setColumnStretch(1, 1)
             n = len(tools)
             for i, (label, key, _kind) in enumerate(tools):
-                btn = QPushButton(label)
+                btn = QPushButton(self._SHORT_LABELS.get(key, label))
+                btn.setToolTip(label.rstrip("…"))
                 btn.setFixedHeight(26)
+                # Let buttons shrink to the column instead of forcing overflow.
+                btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+                btn.setMinimumWidth(0)
                 btn.setDefault(False)
                 btn.setAutoDefault(False)
                 btn.clicked.connect(lambda _c=False, k=key: self._open_tool(k))
@@ -202,7 +217,7 @@ class ImageMeasurementsPanel(QWidget):
         lay.setSpacing(6)
 
         header = QHBoxLayout()
-        self._back_btn = QPushButton("‹  Tools")
+        self._back_btn = QPushButton("←  Tools")
         self._back_btn.setObjectName("ghostBtn")
         self._back_btn.setCursor(Qt.PointingHandCursor)
         self._back_btn.setDefault(False)

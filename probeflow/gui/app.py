@@ -21,6 +21,7 @@ _os.environ.setdefault("QT_API", "pyside6")
 import matplotlib
 matplotlib.use("QtAgg")
 
+from probeflow.gui.typography import ui_font
 from PySide6.QtCore import (
     Qt, QObject, QRunnable, QThreadPool,
     Signal, Slot,
@@ -70,7 +71,9 @@ from probeflow.gui.desktop_layout import (
 from probeflow.gui.styling import (
     THEMES,
     _build_qss,
+    _build_palette,
 )
+from probeflow.gui.typography import ui_family
 from probeflow.gui.models import (
     FolderEntry,
     SxmFile,
@@ -419,7 +422,7 @@ class ProbeFlowWindow(QMainWindow):
 
         # Status bar
         self._status_bar = QStatusBar()
-        self._status_bar.setFont(QFont("Helvetica", 10))
+        self._status_bar.setFont(ui_font(10))
         self.setStatusBar(self._status_bar)
         self._status_bar.showMessage("Open a folder to browse scans")
 
@@ -1110,7 +1113,7 @@ class ProbeFlowWindow(QMainWindow):
             tbl.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
             tbl.verticalHeader().setVisible(False)
             tbl.setEditTriggers(QAbstractItemView.NoEditTriggers)
-            tbl.setFont(QFont("Helvetica", 9))
+            tbl.setFont(ui_font(9))
             for row, k in enumerate(sorted(header)):
                 tbl.setItem(row, 0, QTableWidgetItem(str(k)))
                 tbl.setItem(row, 1, QTableWidgetItem(str(header[k])))
@@ -1573,7 +1576,8 @@ class ProbeFlowWindow(QMainWindow):
     def _apply_theme(self):
         t = THEMES["dark" if self._dark else "light"]
         app = QApplication.instance()
-        app.setFont(QFont("Helvetica", GUI_FONT_SIZES[self._gui_font_size]))
+        app.setFont(QFont(ui_family(), GUI_FONT_SIZES[self._gui_font_size]))
+        app.setPalette(_build_palette(t))
         app.setStyleSheet(_build_qss(t, GUI_FONT_SIZES[self._gui_font_size]))
         self._grid.apply_theme(t)
         self._browse_tools.apply_theme(t)
@@ -1642,6 +1646,8 @@ def main(*, open_survey: "Optional[Path]" = None,
          browse_folder: "Optional[Path]" = None) -> None:
     app    = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("ProbeFlow")
+    from probeflow.gui.tooltips import install_global_tooltips
+    install_global_tooltips(app)
     window = ProbeFlowWindow(open_survey=open_survey, browse_folder=browse_folder)
     if getattr(window, "_show_maximized_on_start", False):
         window.showMaximized()

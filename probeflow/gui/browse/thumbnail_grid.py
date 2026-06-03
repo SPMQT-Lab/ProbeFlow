@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional, Union
 
+from probeflow.gui.typography import ui_font
 from PySide6.QtCore import Qt, QThreadPool, QTimer, Signal, Slot
 from PySide6.QtGui import QCursor, QFont, QPixmap
 from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget
@@ -65,12 +66,12 @@ class ThumbnailGrid(QWidget):
         tb_lay.setSpacing(0)
 
         self._path_lbl = QLabel("No folder open")
-        self._path_lbl.setFont(QFont("Helvetica", 10))
+        self._path_lbl.setFont(ui_font(10))
         self._path_lbl.setStyleSheet("background: transparent;")
 
         self._refresh_btn = QPushButton("⟳")
         self._refresh_btn.setFixedSize(24, 20)
-        self._refresh_btn.setFont(QFont("Helvetica", 11))
+        self._refresh_btn.setFont(ui_font(11))
         self._refresh_btn.setCursor(QCursor(Qt.PointingHandCursor))
         self._refresh_btn.setToolTip(
             "Rescan the current folder for new files (F5).\n"
@@ -130,7 +131,7 @@ class ThumbnailGrid(QWidget):
         # empty-state placeholder
         self._empty_lbl = QLabel("Open a folder to browse SXM scans")
         self._empty_lbl.setAlignment(Qt.AlignCenter)
-        self._empty_lbl.setFont(QFont("Helvetica", 12))
+        self._empty_lbl.setFont(ui_font(12))
         self._grid.addWidget(self._empty_lbl, 0, 0)
 
     # ── Public API ────────────────────────────────────────────────────────────
@@ -247,7 +248,7 @@ class ThumbnailGrid(QWidget):
         if not entries:
             self._empty_lbl = QLabel("No scans, spectra, or subfolders here")
             self._empty_lbl.setAlignment(Qt.AlignCenter)
-            self._empty_lbl.setFont(QFont("Helvetica", 12))
+            self._empty_lbl.setFont(ui_font(12))
             self._grid.addWidget(self._empty_lbl, 0, 0)
             return
 

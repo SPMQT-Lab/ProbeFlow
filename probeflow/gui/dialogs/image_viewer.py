@@ -17,6 +17,7 @@ import numpy as np
 import os as _os
 _os.environ.setdefault("QT_API", "pyside6")
 
+from probeflow.gui.typography import ui_font
 from PySide6.QtCore import (
     Qt, QThreadPool,
     Signal, Slot,
@@ -269,10 +270,10 @@ class ImageViewerDialog(
         header_row.setContentsMargins(2, 0, 2, 0)
         header_row.setSpacing(10)
         self._title_lbl = QLabel()
-        self._title_lbl.setFont(QFont("Helvetica", 12, QFont.Bold))
+        self._title_lbl.setFont(ui_font(12, weight=QFont.Bold))
         header_row.addWidget(self._title_lbl)
         self._conditions_lbl = QLabel()
-        self._conditions_lbl.setFont(QFont("Helvetica", 9))
+        self._conditions_lbl.setFont(ui_font(9))
         self._conditions_lbl.setStyleSheet("color: palette(mid);")
         self._conditions_lbl.setAlignment(Qt.AlignVCenter)
         header_row.addWidget(self._conditions_lbl)
@@ -305,7 +306,7 @@ class ImageViewerDialog(
 
         self._zoom_out_btn = QPushButton("−")
         self._zoom_out_btn.setFixedSize(30, 26)
-        self._zoom_out_btn.setFont(QFont("Helvetica", 11))
+        self._zoom_out_btn.setFont(ui_font(11))
         self._zoom_out_btn.setToolTip("Zoom out")
         self._zoom_out_btn.clicked.connect(lambda: self._zoom_lbl.zoom_by(1 / 1.25))
         toolbar.addWidget(self._zoom_out_btn)
@@ -313,7 +314,7 @@ class ImageViewerDialog(
         self._zoom_reset_btn = QPushButton("1:1")
         self._zoom_reset_btn.setMinimumWidth(42)
         self._zoom_reset_btn.setFixedHeight(26)
-        self._zoom_reset_btn.setFont(QFont("Helvetica", 9))
+        self._zoom_reset_btn.setFont(ui_font(9))
         self._zoom_reset_btn.setToolTip("Reset to native raster size")
         self._zoom_reset_btn.clicked.connect(self._zoom_lbl.reset_zoom)
         toolbar.addWidget(self._zoom_reset_btn)
@@ -321,38 +322,38 @@ class ImageViewerDialog(
         self._zoom_fit_btn = QPushButton("Fit")
         self._zoom_fit_btn.setMinimumWidth(40)
         self._zoom_fit_btn.setFixedHeight(26)
-        self._zoom_fit_btn.setFont(QFont("Helvetica", 9))
+        self._zoom_fit_btn.setFont(ui_font(9))
         self._zoom_fit_btn.setToolTip("Fit image to available space")
         self._zoom_fit_btn.clicked.connect(self._zoom_lbl.fit_to_view)
         toolbar.addWidget(self._zoom_fit_btn)
 
         self._zoom_in_btn = QPushButton("+")
         self._zoom_in_btn.setFixedSize(30, 26)
-        self._zoom_in_btn.setFont(QFont("Helvetica", 11))
+        self._zoom_in_btn.setFont(ui_font(11))
         self._zoom_in_btn.setToolTip("Zoom in")
         self._zoom_in_btn.clicked.connect(lambda: self._zoom_lbl.zoom_by(1.25))
         toolbar.addWidget(self._zoom_in_btn)
 
         channel_lbl = QLabel("Channel")
-        channel_lbl.setFont(QFont("Helvetica", 8, QFont.Bold))
+        channel_lbl.setFont(ui_font(8, weight=QFont.Bold))
         toolbar.addSpacing(8)
         toolbar.addWidget(channel_lbl)
 
         self._ch_cb = QComboBox()
         self._ch_cb.addItems(PLANE_NAMES)
-        self._ch_cb.setFont(QFont("Helvetica", 8))
+        self._ch_cb.setFont(ui_font(8))
         self._ch_cb.setMinimumWidth(170)
         self._ch_cb.currentIndexChanged.connect(self._on_channel_changed)
         toolbar.addWidget(self._ch_cb)
 
         # Per-image colormap — does not affect browser thumbnails
         cmap_lbl = QLabel("Colormap")
-        cmap_lbl.setFont(QFont("Helvetica", 8, QFont.Bold))
+        cmap_lbl.setFont(ui_font(8, weight=QFont.Bold))
         toolbar.addSpacing(8)
         toolbar.addWidget(cmap_lbl)
         self._viewer_cmap_cb = QComboBox()
         self._viewer_cmap_cb.addItems(CMAP_NAMES)
-        self._viewer_cmap_cb.setFont(QFont("Helvetica", 8))
+        self._viewer_cmap_cb.setFont(ui_font(8))
         _initial_cmap_label = next(
             (lbl for lbl, k in STM_COLORMAPS
              if k == self._viewer_colormap or lbl == self._viewer_colormap),
@@ -363,12 +364,12 @@ class ImageViewerDialog(
         toolbar.addWidget(self._viewer_cmap_cb)
 
         self._coord_lbl = QLabel("—")
-        self._coord_lbl.setFont(QFont("Helvetica", 8))
+        self._coord_lbl.setFont(ui_font(8))
         self._coord_lbl.setMinimumWidth(140)
         toolbar.addWidget(self._coord_lbl)
 
         zoom_hint = QLabel("Ctrl+scroll to zoom")
-        zoom_hint.setFont(QFont("Helvetica", 8))
+        zoom_hint.setFont(ui_font(8))
         toolbar.addWidget(zoom_hint)
         toolbar.addStretch()
         help_btn = QPushButton("?")
@@ -421,8 +422,11 @@ class ImageViewerDialog(
         self._sidebar_tabs = QTabWidget()
         self._sidebar_tabs.setDocumentMode(True)
         self._sidebar_tabs.setMinimumWidth(320)
-        self._sidebar_tabs.setElideMode(Qt.ElideNone)
+        # Elide (not clip) when the row is tight so every tab stays visible and
+        # clickable — never silently drop a tab off the right edge.
+        self._sidebar_tabs.setElideMode(Qt.ElideRight)
         self._sidebar_tabs.tabBar().setUsesScrollButtons(False)
+        self._sidebar_tabs.tabBar().setExpanding(False)
         right_lay.addWidget(self._sidebar_tabs, 1)
         self._sidebar_tab_indices: dict[str, int] = {}
         # (key, label, tooltip) in tab order — also drives the collapsed rail.
@@ -432,7 +436,7 @@ class ImageViewerDialog(
         self._sidebar_collapse_btn = QToolButton()
         self._sidebar_collapse_btn.setObjectName("sidebarCollapseBtn")
         self._sidebar_collapse_btn.setText("›")
-        self._sidebar_collapse_btn.setFixedSize(22, 22)
+        self._sidebar_collapse_btn.setFixedSize(30, 30)
         self._sidebar_collapse_btn.setCursor(QCursor(Qt.PointingHandCursor))
         self._sidebar_collapse_btn.setToolTip("Collapse the panel to widen the image")
         self._sidebar_collapse_btn.setAutoRaise(True)
@@ -486,7 +490,7 @@ class ImageViewerDialog(
             btn.setCheckable(True)
             btn.setChecked(expanded)
             btn.setFlat(True)
-            btn.setFont(QFont("Helvetica", 9, QFont.Bold))
+            btn.setFont(ui_font(9, weight=QFont.Bold))
             btn.setCursor(QCursor(Qt.PointingHandCursor))
             target_lay.addWidget(btn)
 
@@ -510,13 +514,13 @@ class ImageViewerDialog(
             row = QHBoxLayout(w)
             row.setContentsMargins(0, 0, 0, 0)
             lbl = QLabel(label)
-            lbl.setFont(QFont("Helvetica", 8))
+            lbl.setFont(ui_font(8))
             spin = QDoubleSpinBox()
             spin.setRange(float(mn), float(mx))
             spin.setDecimals(decimals)
             spin.setSingleStep(float(step))
             spin.setValue(float(init))
-            spin.setFont(QFont("Helvetica", 8))
+            spin.setFont(ui_font(8))
             row.addWidget(lbl)
             row.addWidget(spin, 1)
             return w, spin
@@ -538,10 +542,10 @@ class ImageViewerDialog(
         disp_scope_row.setSpacing(6)
         disp_scope_row.setContentsMargins(0, 0, 0, 0)
         _disp_scope_lbl = QLabel("Contrast scope")
-        _disp_scope_lbl.setFont(QFont("Helvetica", 8))
+        _disp_scope_lbl.setFont(ui_font(8))
         self._display_scope_cb = QComboBox()
         self._display_scope_cb.addItems(["Whole image", "Active ROI"])
-        self._display_scope_cb.setFont(QFont("Helvetica", 8))
+        self._display_scope_cb.setFont(ui_font(8))
         self._display_scope_cb.setToolTip(
             "Active ROI: the brightness/contrast sliders edit the active area\n"
             "ROI's own range. Each region is composited with its own scaling,\n"
@@ -553,7 +557,7 @@ class ImageViewerDialog(
         display_lay.addLayout(disp_scope_row)
 
         self._hide_rois_cb = QCheckBox("Hide ROI overlays")
-        self._hide_rois_cb.setFont(QFont("Helvetica", 8))
+        self._hide_rois_cb.setFont(ui_font(8))
         self._hide_rois_cb.setToolTip(
             "Hide every ROI overlay so the composited image can be inspected.\n"
             "ROIs are unchanged; untick to show them again."
@@ -578,7 +582,7 @@ class ImageViewerDialog(
         # owned by the dialog) so its existing updaters stay safe without cluttering
         # the Process tab.
         self._history_text = QLabel("", self)
-        self._history_text.setFont(QFont("Helvetica", 8))
+        self._history_text.setFont(ui_font(8))
         self._history_text.setWordWrap(True)
         self._history_text.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self._history_text.hide()
@@ -594,18 +598,18 @@ class ImageViewerDialog(
         zero_col.setSpacing(3)
         zero_col.setContentsMargins(0, 0, 0, 0)
         _zero_hdr = QLabel("Zero ref.")
-        _zero_hdr.setFont(QFont("Helvetica", 7, QFont.Bold))
+        _zero_hdr.setFont(ui_font(7, weight=QFont.Bold))
         _zero_hdr.setAlignment(Qt.AlignCenter)
         zero_col.addWidget(_zero_hdr)
         self._set_zero_plane_btn = QPushButton("Set zero plane")
         self._set_zero_plane_btn.setCheckable(True)
-        self._set_zero_plane_btn.setFont(QFont("Helvetica", 8))
+        self._set_zero_plane_btn.setFont(ui_font(8))
         self._set_zero_plane_btn.setFixedHeight(24)
         self._set_zero_plane_btn.setToolTip("Click 3 points on the image to define a zero-height plane.")
         self._set_zero_plane_btn.toggled.connect(self._on_set_zero_plane_mode_toggled)
         zero_col.addWidget(self._set_zero_plane_btn)
         self._set_zero_clear_btn = QPushButton("Hide Points")
-        self._set_zero_clear_btn.setFont(QFont("Helvetica", 8))
+        self._set_zero_clear_btn.setFont(ui_font(8))
         self._set_zero_clear_btn.setFixedHeight(22)
         self._set_zero_clear_btn.setToolTip(
             "Hide zero-plane reference point markers; processing is unchanged."
@@ -618,12 +622,12 @@ class ImageViewerDialog(
         sel_col.setSpacing(3)
         sel_col.setContentsMargins(0, 0, 0, 0)
         _sel_hdr = QLabel("ROI filters")
-        _sel_hdr.setFont(QFont("Helvetica", 7, QFont.Bold))
+        _sel_hdr.setFont(ui_font(7, weight=QFont.Bold))
         _sel_hdr.setAlignment(Qt.AlignCenter)
         sel_col.addWidget(_sel_hdr)
         self._scope_cb = QComboBox()
         self._scope_cb.addItems(["Whole image", "ROI filters only"])
-        self._scope_cb.setFont(QFont("Helvetica", 8))
+        self._scope_cb.setFont(ui_font(8))
         self._scope_cb.setToolTip(
             "ROI filters only: smooth/high-pass/edge/FFT apply inside the "
             "active area ROI; background and scan-line corrections remain whole-image.")
@@ -635,7 +639,7 @@ class ImageViewerDialog(
         processing_lay.addLayout(zs_row)
 
         self._roi_status_lbl = QLabel("ROI filter scope: whole image")
-        self._roi_status_lbl.setFont(QFont("Helvetica", 8))
+        self._roi_status_lbl.setFont(ui_font(8))
         self._roi_status_lbl.setWordWrap(True)
         processing_lay.addWidget(self._roi_status_lbl)
 
@@ -645,7 +649,7 @@ class ImageViewerDialog(
         ar_row = QHBoxLayout()
         ar_row.setSpacing(4)
         proc_apply_btn = QPushButton("Apply processing")
-        proc_apply_btn.setFont(QFont("Helvetica", 8, QFont.Bold))
+        proc_apply_btn.setFont(ui_font(8, weight=QFont.Bold))
         proc_apply_btn.setFixedHeight(28)
         proc_apply_btn.setObjectName("accentBtn")
         proc_apply_btn.setToolTip(
@@ -654,7 +658,7 @@ class ImageViewerDialog(
         )
         proc_apply_btn.clicked.connect(self._on_apply_processing)
         proc_reset_btn = QPushButton("Reset")
-        proc_reset_btn.setFont(QFont("Helvetica", 8))
+        proc_reset_btn.setFont(ui_font(8))
         proc_reset_btn.setFixedHeight(28)
         proc_reset_btn.setToolTip(
             "Discard all processing (background, FFT, smoothing, set-zero, …) "
@@ -668,14 +672,14 @@ class ImageViewerDialog(
         ur_row = QHBoxLayout()
         ur_row.setSpacing(4)
         self._proc_undo_btn = QPushButton("↶ Undo")
-        self._proc_undo_btn.setFont(QFont("Helvetica", 8))
+        self._proc_undo_btn.setFont(ui_font(8))
         self._proc_undo_btn.setFixedHeight(24)
         self._proc_undo_btn.setToolTip(
             "Restore the processing state from before the last Apply / Reset "
             "(Ctrl+Z).")
         self._proc_undo_btn.clicked.connect(self._on_undo_processing)
         self._proc_redo_btn = QPushButton("Redo ↷")
-        self._proc_redo_btn.setFont(QFont("Helvetica", 8))
+        self._proc_redo_btn.setFont(ui_font(8))
         self._proc_redo_btn.setFixedHeight(24)
         self._proc_redo_btn.setToolTip(
             "Reapply a state that was just undone (Ctrl+Y or Ctrl+Shift+Z).")
@@ -692,7 +696,7 @@ class ImageViewerDialog(
 
         # ── Save PNG — always visible ─────────────────────────────────────────
         self._save_png_btn = QPushButton("⬇  Save PNG copy…")
-        self._save_png_btn.setFont(QFont("Helvetica", 8, QFont.Bold))
+        self._save_png_btn.setFont(ui_font(8, weight=QFont.Bold))
         self._save_png_btn.setFixedHeight(26)
         self._save_png_btn.setObjectName("accentBtn")
         self._save_png_btn.clicked.connect(self._on_save_png)
@@ -706,10 +710,10 @@ class ImageViewerDialog(
 
         def _summary_row(row: int, name: str, attr: str, *, elide: bool = False) -> QLabel:
             key_lbl = QLabel(name)
-            key_lbl.setFont(QFont("Helvetica", 8, QFont.Bold))
+            key_lbl.setFont(ui_font(8, weight=QFont.Bold))
             key_lbl.setStyleSheet("color: palette(mid);")
             val_lbl = _ElidedLabel("--") if elide else QLabel("--")
-            val_lbl.setFont(QFont("Helvetica", 8))
+            val_lbl.setFont(ui_font(8))
             val_lbl.setWordWrap(False)
             val_lbl.setSizePolicy(
                 QSizePolicy.Ignored if elide else QSizePolicy.Preferred,
@@ -731,29 +735,29 @@ class ImageViewerDialog(
         export_lay.addWidget(summary)
 
         self._export_provenance_chk = QCheckBox("Write provenance")
-        self._export_provenance_chk.setFont(QFont("Helvetica", 8))
+        self._export_provenance_chk.setFont(ui_font(8))
         self._export_provenance_chk.setChecked(True)
         export_lay.addWidget(self._export_provenance_chk)
 
         self._export_scalebar_chk = QCheckBox("Include scale bar")
-        self._export_scalebar_chk.setFont(QFont("Helvetica", 8))
+        self._export_scalebar_chk.setFont(ui_font(8))
         self._export_scalebar_chk.setChecked(True)
         export_lay.addWidget(self._export_scalebar_chk)
 
         self._save_pdf_btn = QPushButton("Save PDF copy…")
-        self._save_pdf_btn.setFont(QFont("Helvetica", 8, QFont.Bold))
+        self._save_pdf_btn.setFont(ui_font(8, weight=QFont.Bold))
         self._save_pdf_btn.setFixedHeight(26)
         self._save_pdf_btn.clicked.connect(self._on_save_pdf)
         export_lay.addWidget(self._save_pdf_btn)
 
         self._save_sxm_btn = QPushButton("Save SXM copy…")
-        self._save_sxm_btn.setFont(QFont("Helvetica", 8, QFont.Bold))
+        self._save_sxm_btn.setFont(ui_font(8, weight=QFont.Bold))
         self._save_sxm_btn.setFixedHeight(26)
         self._save_sxm_btn.clicked.connect(self._on_save_sxm)
         export_lay.addWidget(self._save_sxm_btn)
 
         self._save_gwy_btn = QPushButton("Save GWY copy…")
-        self._save_gwy_btn.setFont(QFont("Helvetica", 8, QFont.Bold))
+        self._save_gwy_btn.setFont(ui_font(8, weight=QFont.Bold))
         self._save_gwy_btn.setFixedHeight(26)
         self._save_gwy_btn.setToolTip(
             "Export a Gwyddion .gwy file. Requires the optional gwyfile package."
@@ -768,7 +772,7 @@ class ImageViewerDialog(
         )
 
         send_feat_btn = QPushButton("→ Feature Counting")
-        send_feat_btn.setFont(QFont("Helvetica", 8))
+        send_feat_btn.setFont(ui_font(8))
         send_feat_btn.setFixedHeight(24)
         send_feat_btn.setToolTip(
             "Send the current processed image to Feature Counting (viewer stays open)")
@@ -776,7 +780,7 @@ class ImageViewerDialog(
         send_lay.addWidget(send_feat_btn)
 
         send_tv_btn = QPushButton("→ TV Denoising")
-        send_tv_btn.setFont(QFont("Helvetica", 8))
+        send_tv_btn.setFont(ui_font(8))
         send_tv_btn.setFixedHeight(24)
         send_tv_btn.setToolTip(
             "Send the current processed image to TV Denoising (viewer stays open)")
@@ -802,17 +806,17 @@ class ImageViewerDialog(
         advanced_lay.setSpacing(6)
         self._advanced_widget.hide()
         _adv_title = QLabel("Advanced tools")
-        _adv_title.setFont(QFont("Helvetica", 10, QFont.Bold))
+        _adv_title.setFont(ui_font(10, weight=QFont.Bold))
         advanced_lay.addWidget(_adv_title)
 
         periodic_btn = QPushButton("Periodic FFT filter…")
-        periodic_btn.setFont(QFont("Helvetica", 8))
+        periodic_btn.setFont(ui_font(8))
         periodic_btn.setFixedHeight(24)
         periodic_btn.clicked.connect(self._on_periodic_filter)
         advanced_lay.addWidget(periodic_btn)
 
         fft_viewer_btn = QPushButton("FFT viewer…")
-        fft_viewer_btn.setFont(QFont("Helvetica", 8))
+        fft_viewer_btn.setFont(ui_font(8))
         fft_viewer_btn.setFixedHeight(24)
         fft_viewer_btn.setToolTip(
             "Open the FFT viewer to fit reciprocal Bragg peaks to a known "
@@ -821,16 +825,16 @@ class ImageViewerDialog(
         advanced_lay.addWidget(fft_viewer_btn)
 
         radial_fft_lbl = QLabel("Radial FFT")
-        radial_fft_lbl.setFont(QFont("Helvetica", 7, QFont.Bold))
+        radial_fft_lbl.setFont(ui_font(7, weight=QFont.Bold))
         radial_fft_lbl.setAlignment(Qt.AlignCenter)
         advanced_lay.addWidget(radial_fft_lbl)
         fft_mode_row = QHBoxLayout()
         fft_mode_row.setContentsMargins(0, 0, 0, 0)
         fft_mode_lbl = QLabel("Mode:")
-        fft_mode_lbl.setFont(QFont("Helvetica", 8))
+        fft_mode_lbl.setFont(ui_font(8))
         self._advanced_fft_combo = QComboBox()
         self._advanced_fft_combo.addItems(["None", "Low-pass", "High-pass"])
-        self._advanced_fft_combo.setFont(QFont("Helvetica", 8))
+        self._advanced_fft_combo.setFont(ui_font(8))
         self._advanced_fft_combo.setToolTip(
             "Global radial low/high-pass FFT filter. Use Apply processing to commit it."
         )
@@ -844,14 +848,14 @@ class ImageViewerDialog(
         )
         advanced_lay.addWidget(self._advanced_fft_cutoff_w)
         self._advanced_fft_soft_cb = QCheckBox("Soft border")
-        self._advanced_fft_soft_cb.setFont(QFont("Helvetica", 8))
+        self._advanced_fft_soft_cb.setFont(ui_font(8))
         self._advanced_fft_soft_cb.setToolTip(
             "Cosine-taper the image edges before FFT to suppress ringing artefacts."
         )
         advanced_lay.addWidget(self._advanced_fft_soft_cb)
 
         undistort_lbl = QLabel("Linear undistort (drift)")
-        undistort_lbl.setFont(QFont("Helvetica", 7, QFont.Bold))
+        undistort_lbl.setFont(ui_font(7, weight=QFont.Bold))
         undistort_lbl.setAlignment(Qt.AlignCenter)
         advanced_lay.addWidget(undistort_lbl)
 
@@ -868,13 +872,13 @@ class ImageViewerDialog(
         )
 
         self._spec_show_cb = QCheckBox("Show spec positions")
-        self._spec_show_cb.setFont(QFont("Helvetica", 8))
+        self._spec_show_cb.setFont(ui_font(8))
         self._spec_show_cb.setChecked(False)
         self._spec_show_cb.toggled.connect(self._on_spec_show_toggled)
         spec_lay.addWidget(self._spec_show_cb)
 
         self._map_spectra_here_btn = QPushButton("Map spectra to this image…")
-        self._map_spectra_here_btn.setFont(QFont("Helvetica", 8))
+        self._map_spectra_here_btn.setFont(ui_font(8))
         self._map_spectra_here_btn.setFixedHeight(24)
         self._map_spectra_here_btn.setToolTip(
             "Pick which spectroscopy files in this folder belong to the "
@@ -910,7 +914,7 @@ class ImageViewerDialog(
             "each region its own brightness/contrast, and use “Hide ROI "
             "overlays” there to inspect the result."
         )
-        roi_hint_lbl.setFont(QFont("Helvetica", 8))
+        roi_hint_lbl.setFont(ui_font(8))
         roi_hint_lbl.setWordWrap(True)
         roi_hint_lbl.setStyleSheet("color: palette(mid);")
         roi_lay.addWidget(roi_hint_lbl)
@@ -922,7 +926,7 @@ class ImageViewerDialog(
         # its tool buttons emit signals the viewer connects to its handlers.
 
         self._status_lbl = QLabel("")
-        self._status_lbl.setFont(QFont("Helvetica", 8))
+        self._status_lbl.setFont(ui_font(8))
         self._status_lbl.setWordWrap(True)
         self._status_lbl.setText(
             "Tip: click ROIs to select them. Right-click the image or an ROI for actions."
@@ -964,7 +968,7 @@ class ImageViewerDialog(
             rail_btn = QToolButton()
             rail_btn.setObjectName("sidebarRailBtn")
             rail_btn.setText(_rail_abbrev.get(_label, _label[:4]))
-            rail_btn.setFont(QFont("Helvetica", 8))
+            rail_btn.setFont(ui_font(8))
             rail_btn.setToolTip(_tip or _label)
             rail_btn.setCursor(QCursor(Qt.PointingHandCursor))
             rail_btn.setAutoRaise(True)
@@ -1076,21 +1080,21 @@ class ImageViewerDialog(
         # navigation row
         nav_row = QHBoxLayout()
         self._prev_btn = QPushButton("← Prev")
-        self._prev_btn.setFont(QFont("Helvetica", 10))
+        self._prev_btn.setFont(ui_font(10))
         self._prev_btn.setFixedWidth(90)
         self._prev_btn.clicked.connect(self._go_prev)
 
         self._pos_lbl = QLabel()
         self._pos_lbl.setAlignment(Qt.AlignCenter)
-        self._pos_lbl.setFont(QFont("Helvetica", 10))
+        self._pos_lbl.setFont(ui_font(10))
 
         self._next_btn = QPushButton("Next →")
-        self._next_btn.setFont(QFont("Helvetica", 10))
+        self._next_btn.setFont(ui_font(10))
         self._next_btn.setFixedWidth(90)
         self._next_btn.clicked.connect(self._go_next)
 
         close_btn = QPushButton("Close")
-        close_btn.setFont(QFont("Helvetica", 10))
+        close_btn.setFont(ui_font(10))
         close_btn.setFixedWidth(80)
         close_btn.clicked.connect(self.accept)
 

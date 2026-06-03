@@ -12,6 +12,7 @@ from typing import Optional
 import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
+from probeflow.gui.typography import ui_font
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
@@ -94,12 +95,12 @@ class HistogramPanel(QWidget):
             rl = QHBoxLayout(w)
             rl.setContentsMargins(0, 0, 0, 0)
             lbl = QLabel(label)
-            lbl.setFont(QFont("Helvetica", 8))
+            lbl.setFont(ui_font(8))
             lbl.setFixedWidth(74)
             sl = QSlider(Qt.Horizontal)
             sl.setRange(0, 1000)
             val_lbl = QLabel("—")
-            val_lbl.setFont(QFont("Helvetica", 8))
+            val_lbl.setFont(ui_font(8))
             val_lbl.setFixedWidth(48)
             val_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
             rl.addWidget(lbl)
@@ -141,13 +142,13 @@ class HistogramPanel(QWidget):
         # ── Auto / Reset buttons ───────────────────────────────────────────────
         actions_row = QHBoxLayout()
         self._auto_btn = QPushButton("Auto")
-        self._auto_btn.setFont(QFont("Helvetica", 8))
+        self._auto_btn.setFont(ui_font(8))
         self._auto_btn.setFixedHeight(22)
         self._auto_btn.setToolTip(
             "Autoscale display bounds to the current image's 1%–99% percentiles.")
         self._auto_btn.clicked.connect(self.autoClipRequested)
         self._reset_btn = QPushButton("Reset")
-        self._reset_btn.setFont(QFont("Helvetica", 8))
+        self._reset_btn.setFont(ui_font(8))
         self._reset_btn.setFixedHeight(22)
         self._reset_btn.setToolTip(
             "Reset display range to the default (1%–99% percentile).")
@@ -159,7 +160,7 @@ class HistogramPanel(QWidget):
 
         # ── Clip value readout label ───────────────────────────────────────────
         self._clip_lbl = QLabel("")
-        self._clip_lbl.setFont(QFont("Helvetica", 8))
+        self._clip_lbl.setFont(ui_font(8))
         self._clip_lbl.setAlignment(Qt.AlignCenter)
         lay.addWidget(self._clip_lbl)
         lay.addStretch()
