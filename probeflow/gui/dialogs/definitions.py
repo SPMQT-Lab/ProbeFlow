@@ -747,7 +747,7 @@ _ROI_REFERENCE_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "  line = two endpoints plus optional averaging width\n"
             "  point = one fixed pixel coordinate\n\n"
             "action context:\n"
-            "  selected ROI(s) in the ROI Manager list win when present\n"
+            "  selected ROI(s) in the ROI Manager list when present\n"
             "  otherwise use ROISet.active_roi_id\n"
             "  sidecar path = <scan stem>.rois.json",
         ),

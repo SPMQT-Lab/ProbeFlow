@@ -76,7 +76,7 @@ def test_roi_reference_has_action_scope_and_tool_behaviour():
         "x = image column, y = image row",
         "active_roi_id",
         ".rois.json",
-        "selected ROI(s) in ROI Manager dock win",
+        "selected ROI(s) in the ROI Manager list when present",
         "ROI filters only",
         "STM background from ROI",
         "correction is applied to the full image",
