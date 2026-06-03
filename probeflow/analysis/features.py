@@ -728,11 +728,17 @@ def classify_particles(
     # each embedding vector, scaled by sharpness_weight so it contributes
     # meaningfully to the cosine similarity.  This pulls fuzzy and sharp
     # molecules apart even when their pixel patterns look nearly identical.
+    #
+    # Bug-fix: when rotate_augment=True each original sample becomes 36 rotated
+    # copies in scrops/s_emb.  Repeat each sample's sharpness value to match.
     if use_sharpness:
         p_sharp = np.array([getattr(p,  "sharpness", 0.0) for p in all_particles],
                            dtype=np.float64)
         s_sharp = np.array([getattr(sp, "sharpness", 0.0) for sp in sample_particles],
                            dtype=np.float64)
+        n_aug = scrops.shape[0] // max(1, len(sample_particles))
+        if n_aug > 1:
+            s_sharp = np.repeat(s_sharp, n_aug)
         all_sharp = np.concatenate([p_sharp, s_sharp])
         sharp_mean = float(all_sharp.mean())
         sharp_std  = float(all_sharp.std()) + 1e-8
