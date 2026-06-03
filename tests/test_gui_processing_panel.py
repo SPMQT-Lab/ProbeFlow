@@ -1308,9 +1308,6 @@ def test_feature_finder_receives_active_area_roi_mask(qapp, monkeypatch):
         def __init__(self, *args, **kwargs):
             captured["roi_mask"] = kwargs.get("roi_mask")
 
-        def show(self):
-            captured["shown"] = True
-
     monkeypatch.setattr(
         feature_finder_module,
         "FeatureFinderDialog",
@@ -1323,6 +1320,9 @@ def test_feature_finder_receives_active_area_roi_mask(qapp, monkeypatch):
     dlg._pixel_size_xy_m = lambda: (1e-9, 1e-9)
     dlg._t = {}
     dlg._status_lbl = _FakeStatus()
+    # Tools now open via the modal-overlay helper (which needs a real QWidget);
+    # stub it since this test only checks the ROI mask handed to the dialog.
+    dlg._present_modal_tool = lambda _d, **_kw: captured.__setitem__("shown", True)
 
     dlg._on_open_feature_finder()
 

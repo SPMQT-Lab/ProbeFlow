@@ -103,17 +103,22 @@ def test_update_angle_without_overlay_is_a_noop(qapp, monkeypatch):
 
 
 def test_dock_panels_into_window_redocks_floating_panel(qapp, monkeypatch):
+    # The ROI/Measurements panels now live in the sidebar tabs; only transient
+    # tool docks (e.g. the lattice grid) remain dockable. _dock_panels_into_window
+    # should re-dock any such floating dock hosted in the viewer's QMainWindow.
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QDockWidget
+
     dlg = _dialog(monkeypatch)
     try:
-        dlg._measurement_dock.setFloating(True)
-        assert dlg._measurement_dock.isFloating()
+        dock = QDockWidget("Tool", dlg._viewer_main)
+        dlg._viewer_main.addDockWidget(Qt.RightDockWidgetArea, dock)
+        dock.setFloating(True)
+        assert dock.isFloating()
 
         dlg._dock_panels_into_window()
 
-        assert not dlg._measurement_dock.isFloating()
-        # isVisible() tracks the (unshown) parent window; isHidden() reflects the
-        # dock's own explicit state, which must not be hidden after re-docking.
-        assert not dlg._measurement_dock.isHidden()
+        assert not dock.isFloating()
     finally:
         dlg.close()
         dlg.deleteLater()

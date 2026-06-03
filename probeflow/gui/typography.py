@@ -10,6 +10,11 @@ Tune the whole app's text here — adjust ``_SIZE_MAP`` or ``ui_family``.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # type-only import; keeps this module Qt-free at runtime import
+    from PySide6.QtGui import QFont
+
 # NB: Qt is imported lazily inside the functions so that importing this module
 # (and therefore styling.py) stays Qt-free — pure GUI helpers must import without
 # pulling in PySide6 (see tests/test_layout_compatibility.py).

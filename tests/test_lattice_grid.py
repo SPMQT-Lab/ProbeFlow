@@ -741,13 +741,14 @@ def test_image_info_uses_display_array_without_numpy_truth_value(monkeypatch, qa
         def __init__(self, *, current_shape=None, **_kwargs):
             captured["shape"] = current_shape
 
-        def show(self):
-            captured["shown"] = True
-
     monkeypatch.setattr(image_info, "ImageInfoDialog", FakeImageInfoDialog)
 
     class FakeViewer(ImageViewerToolsMixin):
         _track_modeless_child = lambda self, *a: None
+        # Image info now opens via the modal-overlay helper rather than dlg.show().
+        def _present_modal_tool(self, dlg, **_kw):
+            captured["shown"] = True
+            return None
 
     viewer = FakeViewer()
     viewer._entries = [SimpleNamespace(path=Path("/missing.sxm"))]
