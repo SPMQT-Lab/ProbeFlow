@@ -1182,15 +1182,18 @@ class FeaturesPanel(QWidget):
             self._redraw()
 
     def _on_particle_right_clicked(self, scene_x: float, scene_y: float) -> None:
-        """Right-click on the canvas — show an 'Unclassify' context menu when a
-        classified particle (non-'other') is clicked close enough to the cursor."""
-        if (self._overlay_mode != "classify"
-                or not self._classifications
-                or not self._particles
-                or self._arr is None):
+        """Right-click on the canvas — context menu for both labeling phases.
+
+        * **Labeling phase** (``_overlay_mode == "particles"`` and
+          ``_current_mode == "classify"``): offer to remove the manual sample
+          label assigned to the nearest particle (supports Ctrl+Z undo too).
+        * **Post-classification phase** (``_overlay_mode == "classify"``):
+          offer to unclassify a non-'other' particle (set its class to 'other').
+        """
+        if not self._particles or self._arr is None:
             return
 
-        # Find the nearest particle centroid within 15 % of the image diagonal.
+        # ── Find the nearest particle within 15 % of the image diagonal ─────────
         best_p, best_dist_sq = None, float("inf")
         for p in self._particles:
             cx = p.centroid_x_m / self._pixel_size_x_m
@@ -1204,27 +1207,42 @@ class FeaturesPanel(QWidget):
         if best_p is None or best_dist_sq > max_dist_sq:
             return
 
-        # Look up its classification.
-        classify_map = {c.particle_index: c for c in self._classifications}
-        cls = classify_map.get(best_p.index)
-        if cls is None or cls.class_name == "other":
-            return   # already 'other' or not classified — nothing to undo
-
-        menu = QMenu(self)
-        action = menu.addAction(
-            f"Unclassify #{best_p.index}  (class '{cls.class_name}' → 'other')")
-        chosen = menu.exec(QCursor.pos())
-        if chosen is None:
+        # ── CASE 1: manual labeling phase (before running classification) ────────
+        if self._overlay_mode == "particles" and self._current_mode == "classify":
+            label_info = self._sample_labels.get(best_p.index)
+            if label_info is None:
+                return   # particle has no label — nothing to remove
+            menu = QMenu(self)
+            action = menu.addAction(
+                f"Remove label '{label_info['name']}'  (particle #{best_p.index})")
+            chosen = menu.exec(QCursor.pos())
+            if chosen is None:
+                return
+            import copy
+            self._label_history.append(copy.deepcopy(self._sample_labels))
+            del self._sample_labels[best_p.index]
+            self._redraw()
             return
 
-        # Rebuild the classification list with that particle set to 'other'.
-        from dataclasses import replace as _dc_replace
-        new_cls = [
-            _dc_replace(c, class_name="other") if c.particle_index == best_p.index else c
-            for c in self._classifications
-        ]
-        # Re-apply via set_classifications so the table and overlay both update.
-        self.set_classifications(new_cls, meta=self._classification_meta)
+        # ── CASE 2: post-classification phase ────────────────────────────────────
+        if self._overlay_mode == "classify" and self._classifications:
+            classify_map = {c.particle_index: c for c in self._classifications}
+            cls = classify_map.get(best_p.index)
+            if cls is None or cls.class_name == "other":
+                return   # already 'other' or not classified — nothing to undo
+            menu = QMenu(self)
+            action = menu.addAction(
+                f"Unclassify #{best_p.index}  (class '{cls.class_name}' → 'other')")
+            chosen = menu.exec(QCursor.pos())
+            if chosen is None:
+                return
+            from dataclasses import replace as _dc_replace
+            new_cls = [
+                _dc_replace(c, class_name="other") if c.particle_index == best_p.index else c
+                for c in self._classifications
+            ]
+            # Re-apply via set_classifications so the table and overlay both update.
+            self.set_classifications(new_cls, meta=self._classification_meta)
 
     def _on_crop_completed(self, x0: int, y0: int, x1: int, y1: int) -> None:
         """Handle template crop rectangle from _FeatureView."""

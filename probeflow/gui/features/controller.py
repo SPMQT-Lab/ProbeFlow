@@ -315,13 +315,15 @@ class FeatureCountingController(QObject):
         self._status_cb(f"Segmentation: {n} particle(s)")
 
     def _on_advance_phase2(self) -> None:
-        """Move to Phase 2 — auto-disarms mask painting."""
+        """Move to Phase 2 — auto-disarms mask painting and zero-plane pick mode."""
         particles = self._panel.get_particles()
         if not particles:
             self._sidebar.set_status(
                 "No particles found yet — click 'Apply Segmentation' first.")
             return
         self._sidebar.stop_mask_painting()
+        self._sidebar.disarm_zero_plane()          # ensure zero-plane btn is unchecked
+        self._panel.set_zero_plane_armed(False)    # ensure view click mode is disarmed
         self._sidebar.set_segment_count(len(particles))
         if self._sidebar.current_mode() == "classify":
             self._panel.set_mode("classify")
@@ -513,6 +515,8 @@ class FeatureCountingController(QObject):
 
     def _on_reset_to_original(self) -> None:
         self._panel.reset_to_original()
+        self._sidebar.disarm_zero_plane()          # un-arm the sidebar button
+        self._panel.set_zero_plane_armed(False)    # un-arm the view directly
         self._sidebar.set_status(
             "Reverted to original scan. Run 'Apply Segmentation' again if needed.")
         self._status_cb("Zero-plane correction removed.")
@@ -522,6 +526,7 @@ class FeatureCountingController(QObject):
         if arr is not None:
             self._sidebar.update_histogram(arr)
         self._sidebar.disarm_zero_plane()
+        self._panel.set_zero_plane_armed(False)   # disarm view directly (disarm_zero_plane blocks signals)
         n = len(self._panel._zero_plane_pts)
         if n < 3:
             # Degenerate triangle — tell user to retry
