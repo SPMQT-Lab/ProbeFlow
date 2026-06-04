@@ -4,8 +4,8 @@ from __future__ import annotations
 import math
 
 from probeflow.gui.typography import ui_font
-from PySide6.QtCore import QPointF, QRectF
-from PySide6.QtGui import QBrush, QColor, QFont, QPen
+from PySide6.QtCore import QPointF
+from PySide6.QtGui import QBrush, QColor, QPen
 from PySide6.QtWidgets import (
     QGraphicsEllipseItem,
     QGraphicsItem,

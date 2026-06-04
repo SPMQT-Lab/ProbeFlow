@@ -6,7 +6,7 @@ import webbrowser
 
 from probeflow.gui.typography import ui_font
 from PySide6.QtCore import QSize, Qt, QUrl
-from PySide6.QtGui import QCursor, QDesktopServices, QFont, QMovie, QPixmap
+from PySide6.QtGui import QCursor, QDesktopServices, QMovie, QPixmap
 from PySide6.QtWidgets import QDialog, QFrame, QLabel, QPushButton, QVBoxLayout
 
 from probeflow.core.resources import asset_path

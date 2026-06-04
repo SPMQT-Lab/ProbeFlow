@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import math
 import os
-import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 

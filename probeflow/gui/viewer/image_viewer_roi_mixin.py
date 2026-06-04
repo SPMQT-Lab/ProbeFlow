@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from probeflow.core import AREA_ROI_KINDS
 from probeflow.gui.models import SxmFile
-from probeflow.gui.roi_context import active_line_roi_context
 from probeflow.gui.viewer import (
     activate_roi,
     active_roi,

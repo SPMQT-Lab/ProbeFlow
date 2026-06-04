@@ -9,7 +9,6 @@ import numpy as np
 import pytest
 
 from probeflow.analysis.feature_lattice import (
-    FeatureLatticeComparison,
     compare_features_to_lattice,
     default_match_radius,
 )

@@ -6,7 +6,6 @@ import numpy as np
 import pytest
 
 from probeflow.analysis.feature_finder import (
-    FeatureDetectionResult,
     FeaturePoint,
     feature_points_to_image,
     find_image_features,

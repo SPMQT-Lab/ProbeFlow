@@ -38,7 +38,6 @@ from probeflow.spectroscopy.export import (
 from probeflow.spectroscopy.measurement import (
     SpectrumDeltaMeasurement,
     SpectrumMeasurementPoint,
-    nearest_point_across_traces,
 )
 from probeflow.spectroscopy.models import (
     DisplayedSpectrum,

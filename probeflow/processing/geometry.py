@@ -7,7 +7,6 @@ from typing import Any, Optional
 
 import numpy as np
 
-from ._image_utils import _finite_median
 
 
 # ═════════════════════════════════════════════════════════════════════════════

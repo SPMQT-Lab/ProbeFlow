@@ -317,12 +317,6 @@ _FLOAT_RE = re.compile(r"[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?")
 # Unit-prefix helpers moved to ``probeflow.measurements.formatting``
 # (review arch-backend #5, 2026-05-28).  Re-exported here so callers
 # that import them from ``spec_plot`` keep working.
-from probeflow.measurements.formatting import (  # noqa: E402
-    _UNIT_PREFIX_TABLE,
-    _ZERO_VALUE_DISPLAY_DEFAULTS,
-    choose_display_unit,
-    lookup_unit_scale,
-)
 
 
 def _parse_sxm_offset(hdr: dict) -> tuple[float, float]:

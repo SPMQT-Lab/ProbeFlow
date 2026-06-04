@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 from probeflow.gui.typography import ui_font
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import (
-    QBrush, QColor, QFont, QPainter, QPainterPath, QPen,
+    QBrush, QColor, QPainter, QPainterPath, QPen,
 )
 from PySide6.QtWidgets import (
     QGraphicsEllipseItem, QGraphicsItem, QGraphicsItemGroup,

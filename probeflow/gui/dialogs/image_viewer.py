@@ -6,10 +6,6 @@ GUI refactor (now re-exported via ``probeflow.gui.compat``).
 
 from __future__ import annotations
 
-import copy
-import json
-import sys
-from pathlib import Path
 from typing import Any, Optional
 
 import numpy as np
@@ -17,100 +13,43 @@ import numpy as np
 import os as _os
 _os.environ.setdefault("QT_API", "pyside6")
 
-from probeflow.gui.typography import ui_font
 from PySide6.QtCore import (
     Qt, QThreadPool,
-    Signal, Slot,
+    Signal,
 )
 from PySide6.QtGui import (
-    QAction, QActionGroup, QCursor, QFont, QKeySequence,
     QPixmap,
 )
 from PySide6.QtWidgets import (
-    QAbstractItemView, QButtonGroup, QCheckBox, QComboBox,
-    QDialog, QDockWidget, QDoubleSpinBox, QFileDialog, QFrame, QGridLayout,
-    QHBoxLayout, QLabel, QMainWindow, QMenu, QPushButton,
-    QScrollArea, QSizePolicy, QSplitter, QStackedWidget,
-    QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView,
-    QToolButton, QVBoxLayout, QWidget,
+    QDialog,
 )
 
-from probeflow.gui.config import (
-    CONFIG_PATH,
-    GITHUB_URL,
-    GUI_FONT_SIZES,
-    GUI_FONT_DEFAULT,
-    LOGO_PATH,
-    normalise_gui_font_size,
-    load_config,
-    save_config,
-)
-from probeflow.gui.desktop_layout import (
-    apply_screen_fraction_geometry,
-    b64_to_qbytearray,
-    qbytearray_to_b64,
-    restore_geometry_or_default,
-)
-from probeflow.gui.styling import THEMES, _build_qss, _sep
-from probeflow.gui.utils import _open_url, _format_scan_conditions
+from probeflow.gui.utils import _format_scan_conditions
 from probeflow.gui.models import PLANE_NAMES, SxmFile
-from probeflow.gui.rendering import (
-    CMAP_KEY,
-    CMAP_NAMES,
-    DEFAULT_CMAP_KEY,
-    DEFAULT_CMAP_LABEL,
-    STM_COLORMAPS,
-)
 from probeflow.gui.workers import ViewerLoader
 from probeflow.gui.viewer.display_range import DisplayRangeController
-from probeflow.gui.viewer.histogram import HistogramPanel
-from probeflow.gui.viewer.widgets import LineProfilePanel, RulerWidget, ScaleBarWidget
 from probeflow.gui.viewer import (
     BadLinePreviewController,
     DeferredPlaneAction,
     DisplaySliderController,
-    ImageMeasurementController,
     ProcessingUndoController,
     SetZeroPlaneController,
     SpecOverlayController,
     resolve_channel_unit,
 )
-from probeflow.gui.widgets import ImageMeasurementsPanel
-from probeflow.gui.image_canvas import ImageCanvas
-from probeflow.gui.roi_manager_dock import ROIManagerPanel
-from probeflow.gui.viewer.floating_panel import FloatingPanelManager, ModalOverlay
 from probeflow.processing.gui_adapter import processing_state_from_gui
 from probeflow.processing.state import (
     apply_processing_state_with_calibration,
-    assert_roi_references_resolved,
     missing_roi_references,
 )
 from probeflow.provenance import (
     ProcessingHistory,
     append_processing_state,
-    build_export_record,
     display_lines,
-    processing_history_from_scan,
 )
-from probeflow.gui.processing import ProcessingControlPanel
-from probeflow.core import AREA_ROI_KINDS
 from probeflow.gui.roi_context import (
-    active_area_roi_context,
-    active_line_roi_context,
     area_roi_mask,
-    collect_point_source_records,
-    point_source_arrays_m,
-    point_source_arrays_px,
-    point_source_metadata,
-    selected_or_active_area_roi_context,
 )
-from probeflow.gui.viewer.tool_launch import (
-    feature_lattice_launch_context,
-    lattice_grid_launch_context,
-    pair_correlation_launch_context,
-)
-from probeflow.gui.viewer.shortcuts import viewer_command
-from probeflow.core.scan_loader import load_scan
 from probeflow.gui.viewer.scan_load import load_scan_for_viewer, ViewerScanData
 from probeflow.gui.dialogs.image_viewer_build_mixin import ImageViewerBuildMixin
 from probeflow.gui.dialogs.image_viewer_chrome_mixin import ImageViewerChromeMixin
@@ -121,14 +60,9 @@ from probeflow.gui.viewer.image_viewer_processing_export_mixin import (
 from probeflow.gui.viewer.image_viewer_roi_mixin import ImageViewerRoiMixin
 from probeflow.gui.viewer.image_viewer_toolbar_mixin import ImageViewerToolbarMixin
 from probeflow.gui.viewer.image_viewer_tools_mixin import ImageViewerToolsMixin
-from probeflow.gui.viewer.window_menu import populate_window_menu
 
 # Dialogs imported from their specific submodule files to avoid circular imports
 # (this module lives inside probeflow.gui.dialogs).
-from probeflow.gui.dialogs.about import AboutDialog
-from probeflow.gui.dialogs.definitions import _DefinitionsDialog
-from probeflow.gui.dialogs.fft_viewer import FFTViewerDialog
-from probeflow.gui.dialogs.periodic_filter import PeriodicFilterDialog
 from probeflow.gui.dialogs.stm_background import STMBackgroundDialog
 
 

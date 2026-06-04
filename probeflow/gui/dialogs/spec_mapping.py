@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Optional
 
 from probeflow.gui.typography import ui_font
-from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QGridLayout, QHBoxLayout, QLabel,
     QPushButton, QScrollArea, QVBoxLayout, QWidget,

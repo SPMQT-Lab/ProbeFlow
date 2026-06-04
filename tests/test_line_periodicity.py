@@ -3,11 +3,8 @@
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 from probeflow.analysis.line_periodicity import (
-    PeriodicityDiagnostic,
-    PeriodicityResult,
     estimate_line_periodicity,
     format_period,
     format_result_text,

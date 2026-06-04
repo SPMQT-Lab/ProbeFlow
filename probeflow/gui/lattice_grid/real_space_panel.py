@@ -38,7 +38,6 @@ from probeflow.analysis.lattice_distortion import (
     compute_correction,
 )
 from probeflow.analysis.lattice_grid import (
-    LatticeGrid,
     LatticeKind,
     RealSpaceCalibration,
     format_real_space_measurements,

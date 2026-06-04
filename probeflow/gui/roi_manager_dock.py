@@ -22,7 +22,7 @@ from typing import Callable
 from PySide6.QtCore import QEvent, Qt
 from PySide6.QtWidgets import (
     QAbstractItemView, QComboBox, QDockWidget, QGridLayout, QHBoxLayout,
-    QInputDialog, QLabel, QListWidget, QListWidgetItem, QMenu, QPushButton,
+    QInputDialog, QListWidget, QListWidgetItem, QMenu, QPushButton,
     QSizePolicy, QVBoxLayout, QWidget,
 )
 

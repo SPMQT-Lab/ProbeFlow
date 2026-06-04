@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import math
-import weakref
 
 import numpy as np
 
@@ -12,9 +10,9 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QFont
 from PySide6.QtWidgets import (
     QApplication,
-    QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFileDialog, QFrame,
+    QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFrame,
     QGridLayout, QGroupBox, QHBoxLayout, QLabel,
-    QInputDialog, QMenuBar, QPushButton, QScrollArea, QSizePolicy, QSpinBox,
+    QMenuBar, QPushButton, QScrollArea, QSizePolicy, QSpinBox,
     QSplitter, QTabWidget, QVBoxLayout, QWidget,
 )
 

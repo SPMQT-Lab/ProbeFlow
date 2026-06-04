@@ -13,7 +13,6 @@ from scipy.ndimage import gaussian_filter
 from ._image_utils import (
     _finite_mean,
     _finite_median,
-    _nonnegative_finite,
     _positive_finite,
 )
 

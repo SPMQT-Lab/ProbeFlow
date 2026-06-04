@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 from typing import Callable
 
 import numpy as np
@@ -11,7 +10,6 @@ from matplotlib.figure import Figure
 
 from probeflow.gui.typography import ui_font
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,

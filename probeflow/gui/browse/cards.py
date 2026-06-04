@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from probeflow.gui.typography import ui_font
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QAction, QCursor, QFont, QPixmap
+from PySide6.QtGui import QAction, QCursor, QPixmap
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QMenu, QVBoxLayout, QWidget
 
 from probeflow.gui.models import FolderEntry, SxmFile, VertFile, _card_meta_str

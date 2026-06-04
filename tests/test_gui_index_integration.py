@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import logging
 import os
-import importlib
 from pathlib import Path
 
 import numpy as np
@@ -27,15 +26,7 @@ from probeflow.gui import (
     _card_meta_str,
     _scan_items_to_sxm,
     _spec_items_to_vert,
-    BrowseInfoPanel,
-    BrowseToolPanel,
-    GUI_FONT_DEFAULT,
-    GUI_FONT_SIZES,
-    load_config,
-    Navbar,
-    normalise_gui_font_size,
     resolve_thumbnail_plane_index,
-    save_config,
     THUMBNAIL_CHANNEL_DEFAULT,
     SxmFile,
     VertFile,

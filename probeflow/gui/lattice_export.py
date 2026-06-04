@@ -31,7 +31,6 @@ def export_grid(
                       white background (PDF) without the image data.
     """
     from PySide6.QtGui import QImage, QPainter, QColor
-    from PySide6.QtCore import QRectF
     from PySide6.QtWidgets import QGraphicsPixmapItem, QStyleOptionGraphicsItem
 
     scene = item.scene()

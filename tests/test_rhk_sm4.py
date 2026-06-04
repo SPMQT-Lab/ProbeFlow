@@ -15,7 +15,6 @@ from probeflow.gui.rendering import render_scan_image
 from probeflow.core.file_type import FileType, is_rhk_sm4, sniff_file_type
 from probeflow.io.readers.rhk_sm4 import (
     GUID_SIZE,
-    MAGIC_OFFSET,
     MAGIC_TOTAL_SIZE,
     OBJECT_SIZE,
     PAGE_HEADER_SIZE,

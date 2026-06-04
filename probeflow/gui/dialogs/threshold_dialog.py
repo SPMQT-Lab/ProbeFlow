@@ -13,7 +13,7 @@ from typing import Callable
 import numpy as np
 from probeflow.gui.typography import ui_font
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QFont, QImage, QPixmap, QValidator
+from PySide6.QtGui import QImage, QPixmap, QValidator
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,

@@ -3,22 +3,18 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
 from scipy.ndimage import (
     gaussian_filter,
     laplace as _nd_laplace,
-    maximum_filter,
 )
 from scipy.signal import windows as _sp_windows
 
 from ._image_utils import (
     _finite_mean,
-    _finite_median,
     _nonnegative_finite,
-    _positive_finite,
     _nan_normalized_gaussian,
 )
 

@@ -21,7 +21,6 @@ _os.environ.setdefault("QT_API", "pyside6")
 
 from probeflow.gui.typography import ui_font
 from PySide6.QtCore import Qt, QThreadPool, Signal
-from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QMainWindow,
     QSplitter,

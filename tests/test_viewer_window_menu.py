@@ -205,7 +205,6 @@ def test_cycle_viewer_windows_wraps_around(qapp):
     from PySide6.QtWidgets import QDialog
     from probeflow.gui.viewer.window_menu import (
         cycle_viewer_windows,
-        focus_window,
         owned_viewer_windows,
     )
 

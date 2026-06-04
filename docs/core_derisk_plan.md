@@ -107,9 +107,15 @@ synthetic Scans can be written without a real source file.
       registry + op metadata.
 - [ ] 3.4 Remove the dead `if/elif`.
 
-### Phase 4 — Lint hygiene (low risk, anytime)
-- [ ] 4.1 Narrow the global `F401/F403` ignore to per-file ignores on the
-      genuine re-export shims; fix/annotate dead imports that surface.
+### Phase 4 — Lint hygiene (low risk) — _done_
+- [x] 4.1 Removed the global `F401/F403/F405` ignore from `pyproject.toml`.
+      Dead-import / star-import detection is now ON tree-wide; the genuine
+      re-export shims (package `__init__`s + `gui/processing.py`) keep per-file
+      ignores, and intentional single re-exports use `# noqa: F401`. ~150 dead
+      imports were removed (the bulk were post-split residue in
+      `image_viewer.py`). Verified: all touched modules import cleanly, umbrella
+      package imports succeed, and the backend/test suites pass — so no implicit
+      re-export was broken.
 
 ## Suggested merge order
 Phase 0 → Phase 1 → Phase 4 → Phase 2 (per-method) → Phase 3 (batched).

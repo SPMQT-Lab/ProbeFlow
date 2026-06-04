@@ -9,7 +9,6 @@ it runs once from ``ImageViewerDialog.__init__`` and relies on the other mixins
 
 from __future__ import annotations
 
-import copy
 
 from probeflow.gui.image_canvas import ImageCanvas
 from probeflow.gui.models import PLANE_NAMES

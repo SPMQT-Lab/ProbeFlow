@@ -7,7 +7,7 @@ from typing import Optional, Union
 
 from probeflow.gui.typography import ui_font
 from PySide6.QtCore import Qt, QThreadPool, QTimer, Signal, Slot
-from PySide6.QtGui import QCursor, QFont, QPixmap
+from PySide6.QtGui import QCursor, QPixmap
 from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget
 
 from probeflow.core.scan_loader import load_scan as _default_load_scan

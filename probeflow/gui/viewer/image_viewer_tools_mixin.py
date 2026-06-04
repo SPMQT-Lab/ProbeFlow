@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QDialog, QDockWidget
+from PySide6.QtWidgets import QDialog
 
 from probeflow.gui.dialogs.fft_viewer import FFTViewerDialog
 from probeflow.gui.dialogs.periodic_filter import PeriodicFilterDialog
