@@ -1213,7 +1213,7 @@ class FeaturesPanel(QWidget):
             if label_info is None:
                 return   # particle has no label — nothing to remove
             menu = QMenu(self)
-            action = menu.addAction(
+            menu.addAction(
                 f"Remove label '{label_info['name']}'  (particle #{best_p.index})")
             chosen = menu.exec(QCursor.pos())
             if chosen is None:
