@@ -1231,7 +1231,7 @@ class FeaturesPanel(QWidget):
             if cls is None or cls.class_name == "other":
                 return   # already 'other' or not classified — nothing to undo
             menu = QMenu(self)
-            action = menu.addAction(
+            menu.addAction(
                 f"Unclassify #{best_p.index}  (class '{cls.class_name}' → 'other')")
             chosen = menu.exec(QCursor.pos())
             if chosen is None:
