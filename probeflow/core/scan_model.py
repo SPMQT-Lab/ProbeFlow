@@ -196,6 +196,18 @@ class Scan:
         Ny, Nx = self.planes[0].shape
         return (Nx, Ny)
 
+    # ── Export delegations ────────────────────────────────────────────────────
+    # The writer imports below are deliberately function-local, for two reasons
+    # (do NOT hoist them to module level — see core de-risk plan Phase 2):
+    #   1. They break a real cycle: io.writers.{sxm,png,pdf,gwy} import this
+    #      module (Scan / PLANE_CANON_*) at runtime.
+    #   2. They defer heavy/optional deps — png and pdf pull matplotlib — so a
+    #      plain ``import probeflow.core`` stays lightweight (no matplotlib/PIL)
+    #      for CLI, headless, and batch use.
+    # Because the imports are hidden from static analysis, every delegation is
+    # exercised by tests/test_scan_model_roundtrip.py so a renamed writer
+    # function or kwarg fails in CI, not at the caller's first save.
+
     def save_sxm(self, out_path, **kwargs) -> None:
         """Write this Scan to a Nanonis ``.sxm`` file."""
         from probeflow.io.writers.sxm import write_sxm

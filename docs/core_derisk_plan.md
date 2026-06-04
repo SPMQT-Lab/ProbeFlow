@@ -86,18 +86,34 @@ op-dispatch completeness + GUI-adapter coverage, so the op *set* is guarded; the
 (arch-backend #9) is closed and guarded by `tests/test_op_vocab.py` +
 `tests/test_core_op_vocab_invariants.py`.
 
-### Phase 2 — Untangle the `Scan` god-object (smallest steps)
-- [ ] 2.1 History getter/setter → statically-checkable delegation
-      (`TYPE_CHECKING` import).
-- [ ] 2.2–2.6 Each `save_*` method → thin delegation to `io.writers.x(scan,…)`,
-      one commit each; internal call sites use the writer directly.
-- [ ] 2.7 Optionally drop shims once call sites are migrated.
+### Phase 2 — `Scan` god-object — _re-assessed & addressed_
 
-Finding surfaced during Phase 0: `save_sxm` → `write_sxm` reads the *source*
-`.sxm` file on disk to reuse its header cushion, so it raises
-`FileNotFoundError` for an in-memory `Scan` whose `source_path` doesn't exist.
-Consider, during Phase 2, making the header-cushion source explicit/optional so
-synthetic Scans can be written without a real source file.
+Re-assessment (from tracing the actual dependencies): the function-local
+imports in `Scan.save_*` / `processing_history` are **not** removable without a
+regression. Two independent reasons:
+
+1. **Real runtime cycle.** `io.writers.{sxm,png,pdf,gwy}` import this module at
+   runtime (`Scan`, and `PLANE_CANON_*` in sxm, used in an `isinstance`-style
+   layout check) — so hoisting the writer imports into `scan_model` would cycle.
+2. **Heavy-dep deferral.** `png`/`pdf` pull `matplotlib`. A plain
+   `import probeflow.core` currently pulls **no** heavy deps (verified); making
+   the writer imports top-level would drag `matplotlib` into every CLI/headless/
+   batch import. The lazy imports are *load-bearing*, not accidental.
+
+So the lazy delegations are kept by design. The actual risk they posed
+("renamed writer fails only at the caller's first save") is mitigated instead by:
+- [x] A `core de-risk Phase 2` comment in `scan_model` documenting *why* the
+      imports are local, so they aren't "tidied" into top-level imports later.
+- [x] Full delegation test coverage in `tests/test_scan_model_roundtrip.py`:
+      `save_png` / `save_csv` / `save_pdf` round-trip; `save()` suffix dispatch;
+      a resolve-guard that imports every writer (incl. `write_sxm`) and asserts
+      each `Scan.save_*` method exists; `save_gwy` skips without optional
+      `gwyfile`; history getter/setter idempotency. A renamed writer now fails
+      in CI, not at the user's call.
+
+Carried forward (not blocking): `save_sxm` reads the source `.sxm` on disk for
+its header cushion, so it can't round-trip a synthetic Scan — making that source
+optional remains a nice-to-have, tracked here.
 
 ### Phase 3 — Consolidate the dispatcher
 - [ ] 3.1 Introduce an op registry alongside the `if/elif`; test coverage ==

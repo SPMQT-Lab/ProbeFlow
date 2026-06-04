@@ -13,6 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from probeflow.core.scan_model import Scan
 
@@ -49,6 +50,43 @@ def test_save_csv_smoke(tmp_path):
     out = tmp_path / "out.csv"
     _scan().save_csv(out, plane_idx=0)
     assert out.exists() and out.stat().st_size > 0
+
+
+def test_save_pdf_smoke(tmp_path):
+    out = tmp_path / "out.pdf"
+    _scan().save_pdf(out, plane_idx=0)
+    assert out.exists() and out.stat().st_size > 0
+
+
+def test_save_gwy_smoke(tmp_path):
+    # .gwy writing needs the optional 'gwyfile' package; skip if absent.
+    pytest.importorskip("gwyfile")
+    out = tmp_path / "out.gwy"
+    _scan().save_gwy(out, plane_idx=0)
+    assert out.exists() and out.stat().st_size > 0
+
+
+def test_save_dispatch_by_suffix(tmp_path):
+    """``Scan.save`` routes by suffix to the right writer (csv here)."""
+    out = tmp_path / "dispatched.csv"
+    _scan().save(out, plane_idx=0)
+    assert out.exists() and out.stat().st_size > 0
+
+
+def test_all_save_delegations_resolve():
+    """Every Scan.save_* method exists and its lazily-imported writer is
+    importable under the expected name. Guards the sxm delegation too (which the
+    synthetic round-trip can't exercise) so a renamed writer fails here."""
+    from probeflow.io.writers.csv import write_csv  # noqa: F401
+    from probeflow.io.writers.gwy import write_gwy  # noqa: F401
+    from probeflow.io.writers.pdf import write_pdf  # noqa: F401
+    from probeflow.io.writers.png import write_png  # noqa: F401
+    from probeflow.io.writers.sxm import write_sxm  # noqa: F401
+    from probeflow.io.writers import save_scan  # noqa: F401
+
+    scan = _scan()
+    for meth in ("save_sxm", "save_png", "save_pdf", "save_csv", "save_gwy", "save"):
+        assert callable(getattr(scan, meth)), meth
 
 
 def test_processing_history_roundtrip_is_idempotent():
