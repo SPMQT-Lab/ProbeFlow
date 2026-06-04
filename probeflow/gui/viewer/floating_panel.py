@@ -345,8 +345,12 @@ class ModalOverlay(QWidget):
         return super().eventFilter(obj, event)
 
     def mousePressEvent(self, event):
-        # Mouse events only reach the scrim when the click is outside the hosted
-        # widget (the child consumes its own); any such click dismisses.
+        # A click on an empty (non-interactive) area of the tool card propagates
+        # up to the scrim because no child consumed it — that must NOT dismiss.
+        # Only dismiss when the click is genuinely outside the card (on the dim).
+        card = getattr(self, "_card", None)
+        if card is not None and card.geometry().contains(event.position().toPoint()):
+            return
         self.dismiss()
 
     def keyPressEvent(self, event):
