@@ -315,8 +315,14 @@ _FLOAT_RE = re.compile(r"[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?")
 # prefix — the heuristic in ``choose_display_unit`` walks this list and picks
 # the prefix that puts the typical magnitude into [0.1, 1000].
 # Unit-prefix helpers moved to ``probeflow.measurements.formatting``
-# (review arch-backend #5, 2026-05-28).  Re-exported here so callers
-# that import them from ``spec_plot`` keep working.
+# (review arch-backend #5, 2026-05-28).  Re-exported here so the many callers
+# that do ``from probeflow.analysis.spec_plot import choose_display_unit`` keep
+# working (GUI viewers, roi_analysis, channel_util, tests). Deliberate re-export
+# — keep the noqa so dead-import detection doesn't strip it (core de-risk Ph.4).
+from probeflow.measurements.formatting import (  # noqa: E402, F401
+    choose_display_unit,
+    lookup_unit_scale,
+)
 
 
 def _parse_sxm_offset(hdr: dict) -> tuple[float, float]:
