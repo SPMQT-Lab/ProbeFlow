@@ -420,6 +420,16 @@ def apply_processing_state(
 
     import probeflow.processing as _proc
 
+    # Op dispatch is a long if/elif on purpose (core de-risk Phase 3 decision):
+    # the branches are genuinely heterogeneous — they resolve ROIs, build params
+    # dataclasses, thread pixel calibration, recurse for nested ROI steps, and
+    # take an operand resolver. A name→handler registry would have to thread a
+    # shared context object through every handler (arch-backend #18), a large
+    # change to the most central function for little safety gain: the op set is
+    # already drift-guarded (tests/test_pipeline_connectivity.py asserts every
+    # _SUPPORTED_OPS op dispatches here AND through the calibrated wrapper), and
+    # there is no duplicated op-classification to drift (the calibrated path
+    # detects shape changes empirically, not by an op-name set).
     for step in state.steps:
         p = step.params
         if step.op == "remove_bad_lines":

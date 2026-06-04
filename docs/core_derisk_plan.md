@@ -115,13 +115,35 @@ Carried forward (not blocking): `save_sxm` reads the source `.sxm` on disk for
 its header cushion, so it can't round-trip a synthetic Scan — making that source
 optional remains a nice-to-have, tracked here.
 
-### Phase 3 — Consolidate the dispatcher
-- [ ] 3.1 Introduce an op registry alongside the `if/elif`; test coverage ==
-      `_SUPPORTED_OPS`.
-- [ ] 3.2 Migrate ops into the registry in small batches.
-- [ ] 3.3 Fold `apply_geometric_op_to_scan` + calibration variant onto the same
-      registry + op metadata.
-- [ ] 3.4 Remove the dead `if/elif`.
+### Phase 3 — dispatcher — _re-assessed & addressed_
+
+Re-assessment (same discipline as Phase 2): a name→handler **registry was not
+worth the risk** for this dispatcher.
+
+- The `if/elif` branches are genuinely heterogeneous (ROI resolution, params
+  dataclasses, calibration threading, nested-ROI recursion, operand resolver),
+  so a registry would have to thread a shared **context object** through ~25
+  handlers — the deferred arch-backend #18 — i.e. a large rewrite of the single
+  most central function.
+- The error it would guard against is already covered: `_SUPPORTED_OPS` ↔
+  dispatch drift is caught by `test_pipeline_connectivity`, and there is **no
+  duplicated op-classification** to drift — the "second/third dispatcher" worry
+  from the review was overstated: `apply_processing_state_with_calibration`
+  loops over `apply_processing_state` and detects shape changes *empirically*
+  (not via an op-name set), and `apply_geometric_op_to_scan` is a distinct
+  Scan-level op (now sourcing names from `op_vocab`).
+
+Delivered instead (low-risk, genuinely closes a gap):
+- [x] 3.1 Calibration-path op coverage: `test_pipeline_connectivity` now also
+      runs **every** `_SUPPORTED_OPS` op through
+      `apply_processing_state_with_calibration` (the path the GUI/CLI use), plus
+      a `_ROI_ELIGIBLE_OPS ⊆ _SUPPORTED_OPS` invariant.
+- [x] 3.2 Documented the dispatcher design decision in `state.py` so the
+      if/elif isn't "registry-ified" later without weighing the context-object
+      cost.
+
+Deferred (tracked, not a defect): a context-object refactor (arch-backend #18)
+would be the prerequisite to a clean registry if op count grows substantially.
 
 ### Phase 4 — Lint hygiene (low risk) — _done_
 - [x] 4.1 Removed the global `F401/F403/F405` ignore from `pyproject.toml`.

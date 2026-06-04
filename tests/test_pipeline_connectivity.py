@@ -16,10 +16,12 @@ import numpy as np
 import pytest
 
 from probeflow.processing.state import (
+    _ROI_ELIGIBLE_OPS,
     _SUPPORTED_OPS,
     ProcessingState,
     ProcessingStep,
     apply_processing_state,
+    apply_processing_state_with_calibration,
 )
 from probeflow.processing.gui_adapter import processing_state_from_gui
 
@@ -105,6 +107,27 @@ class TestSupportedOpsCompleteness:
             f"_MINIMAL_PARAMS is missing entries for: {missing}. "
             "Add entries to _MINIMAL_PARAMS to keep this audit complete."
         )
+
+    @pytest.mark.parametrize("op", sorted(_SUPPORTED_OPS))
+    def test_op_dispatches_through_calibration_path(self, op):
+        """Every supported op must also dispatch through the calibrated wrapper
+        (the path the GUI and CLI actually use), with pixel sizes threaded and
+        a scan_range to update. Catches a calibration-wrapper change that drops
+        or mishandles an op — not covered by the array-only dispatch test."""
+        arr = np.linspace(0, 1, 64, dtype=np.float64).reshape(8, 8)
+        params = _MINIMAL_PARAMS.get(op, {})
+        state = ProcessingState(steps=[ProcessingStep(op, params)])
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            result, new_range = apply_processing_state_with_calibration(
+                arr, state, roi_set=None, scan_range_m=(1e-8, 1e-8),
+            )
+        assert result.ndim == 2
+        assert new_range is None or len(new_range) == 2
+
+    def test_roi_eligible_ops_are_supported(self):
+        """An ROI-nestable op must be a real supported op."""
+        assert _ROI_ELIGIBLE_OPS <= _SUPPORTED_OPS
 
     def test_unknown_op_raises_at_construction(self):
         with pytest.raises(ValueError, match="Unknown"):
