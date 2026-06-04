@@ -32,6 +32,7 @@ from probeflow.core.processing_state import (  # noqa: F401
     ProcessingState,
     ProcessingStep,
 )
+from probeflow.processing import op_vocab
 
 
 def apply_operation_with_optional_roi(
@@ -665,8 +666,7 @@ def apply_processing_state(
                 ),
                 mask,
             )
-        elif step.op in ("flip_horizontal", "flip_vertical",
-                         "rotate_90_cw", "rotate_180", "rotate_270_cw"):
+        elif step.op in op_vocab.SIMPLE_GEOMETRIC_OPS:
             fn = getattr(_proc, step.op)
             a = fn(a)
         elif step.op == "rotate_arbitrary":
@@ -905,22 +905,12 @@ def apply_geometric_op_to_scan(
 
     image_shape = scan.planes[0].shape  # (Ny, Nx)
 
-    # Normalize the operation to the short form used by ROI.transform
-    # so the rest of this function (including the LOSSLESS frozenset,
-    # the per-plane dispatch, and the scan-range swap) only has to
-    # know one vocabulary.  Aliases mirror those in
-    # probeflow.core.roi.ROISet.transform_all.
-    _LONG_TO_SHORT = {
-        "rotate_90_cw": "rot90_cw",
-        "rotate_180": "rot180",
-        "rotate_270_cw": "rot270_cw",
-    }
-    canonical_op = _LONG_TO_SHORT.get(operation, operation)
-
-    _LOSSLESS = frozenset({
-        "flip_horizontal", "flip_vertical",
-        "rot90_cw", "rot180", "rot270_cw",
-    })
+    # Normalize the operation to the short form used by ROI.transform so the
+    # rest of this function (the LOSSLESS check, the per-plane dispatch, and the
+    # scan-range swap) only has to know one vocabulary. The vocabulary lives in
+    # probeflow.processing.op_vocab (review arch-backend #9 / core de-risk Ph.1).
+    canonical_op = op_vocab.to_short(operation)
+    _LOSSLESS = op_vocab.LOSSLESS_OPS
 
     for i, plane in enumerate(scan.planes):
         if canonical_op == "flip_horizontal":
@@ -947,7 +937,7 @@ def apply_geometric_op_to_scan(
     # Swap scan_range_m for operations that transpose width and height.
     # 90° and 270° rotations exchange the physical X and Y extents;
     # flips and 180° rotation leave the aspect ratio unchanged.
-    if canonical_op in ("rot90_cw", "rot270_cw"):
+    if canonical_op in op_vocab.DIMENSION_SWAPPING_OPS:
         w, h = scan.scan_range_m
         scan.scan_range_m = (h, w)
     elif canonical_op == "flip_horizontal" and hasattr(scan, "plane_names"):

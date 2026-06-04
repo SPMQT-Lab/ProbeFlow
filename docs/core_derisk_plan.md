@@ -62,10 +62,11 @@ op-dispatch completeness + GUI-adapter coverage, so the op *set* is guarded; the
       `test_pipeline_connectivity`; extend only if gaps appear.
 
 ### Phase 1 — Single op-vocabulary source of truth
-- [ ] 1.1 New `processing/op_vocab.py`: canonical names, `LONG_TO_SHORT` /
-      `SHORT_TO_LONG`, `LOSSLESS_OPS`, `GEOMETRIC_OPS`, `SHAPE_CHANGING_OPS`;
-      internal-consistency test. No callers yet.
-- [ ] 1.2 Point `processing/state.py` at it.
+- [x] 1.1 New `processing/op_vocab.py`: `LONG_TO_SHORT`/`SHORT_TO_LONG` +
+      `to_short`/`to_long`, `LOSSLESS_OPS`, `DIMENSION_SWAPPING_OPS`,
+      `SIMPLE_GEOMETRIC_OPS`; consistency test (`tests/test_op_vocab.py`).
+- [x] 1.2 Point `processing/state.py` at it (dropped its private `_LONG_TO_SHORT`
+      / `_LOSSLESS` and the inline dim-swap + grouped-branch name lists).
 - [ ] 1.3 Point `core/roi.py` `transform`/`transform_all` at it. ⚠ highest care.
 - [ ] 1.4 Point `processing/gui_adapter.py` and `cli/*` at it.
 - [ ] 1.5 Resolve the layer of `_SUPPORTED_OPS` (keep in core + re-export, lean).
