@@ -155,6 +155,26 @@ would be the prerequisite to a clean registry if op count grows substantially.
       package imports succeed, and the backend/test suites pass — so no implicit
       re-export was broken.
 
+## Follow-ups discovered
+
+### Pooled-worker signals destroyed off the main thread (one fix landed)
+A hard `SIGSEGV` opening Feature Finder/Counting traced to a `QThreadPool`
+QRunnable auto-deleting on the *worker* thread while it solely owned a
+parentless `*Signals` QObject — destroying that QObject (with cross-thread
+connections) off the main thread corrupts Qt internals; the crash surfaced in
+the app-level tooltip event filter.
+
+- **Fixed (FC crash path):** `_FeaturesWorker` (features) and `_ScanLoadWorker`
+  (app) now parent their auto-created signals to the `QApplication` and
+  `deleteLater()` them after emit. Guarded by `tests/test_worker_signals_lifetime.py`
+  (runs in a real GUI env; this headless box can't construct a `QApplication`).
+- **Same latent antipattern, not yet changed (no reported crash, change is
+  untestable here):** `ThumbnailLoader`, `FolderThumbnailLoader`,
+  `SpecThumbnailLoader`, `ViewerLoader`, `ConversionWorker` (`gui/workers.py`)
+  and `_ScanLoaderWorker` (`gui/dialogs/image_arithmetic.py`). A shared
+  `app`-parented-signals helper + per-run `deleteLater()` should be applied to
+  all of them; `_TVWorker` is already safe (its signals are owned by the window).
+
 ## Suggested merge order
 Phase 0 → Phase 1 → Phase 4 → Phase 2 (per-method) → Phase 3 (batched).
 Each phase leaves the codebase fully working; stopping after any one banks real

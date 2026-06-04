@@ -31,6 +31,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QButtonGroup,
     QCheckBox,
     QComboBox,
@@ -403,7 +404,21 @@ class _FeaturesWorker(QRunnable):
         self._px_x    = float(pixel_size_x_m)
         self._px_y    = float(pixel_size_y_m)
         self._params  = params
-        self.signals  = signals if signals is not None else _FeaturesWorkerSignals()
+        # Lifetime safety: this QRunnable is auto-deleted by QThreadPool on the
+        # *worker* thread when run() returns. If it were the sole owner of a
+        # parentless QObject (the signals), that QObject — which carries
+        # cross-thread signal/slot connections — would be destroyed off the main
+        # thread, corrupting Qt's internals (observed as a SIGSEGV in an
+        # unrelated app-level event filter). Parent the auto-created signals to a
+        # main-thread owner (the QApplication, created on the main thread) so
+        # Shiboken never C++-destroys it from the worker thread; run() then
+        # deleteLater()s it so there is no per-run accumulation.
+        if signals is not None:
+            self.signals = signals
+            self._owns_signals = False
+        else:
+            self.signals = _FeaturesWorkerSignals(QApplication.instance())
+            self._owns_signals = True
         # Keep _signals for the existing internal .emit() calls below.
         self._signals = self.signals
 
@@ -460,6 +475,13 @@ class _FeaturesWorker(QRunnable):
             self._signals.finished.emit(self._mode, res, "")
         except Exception as exc:
             self._signals.finished.emit(self._mode, None, str(exc))
+        finally:
+            # Reclaim a worker-owned signals object on the main thread (it is
+            # parented to the QApplication). deleteLater() is thread-safe and
+            # posts the deletion to the object's (main) thread, so it never runs
+            # during this worker's off-thread teardown.
+            if self._owns_signals:
+                self._signals.deleteLater()
 
 
 class FeaturesPanel(QWidget):

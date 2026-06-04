@@ -115,7 +115,12 @@ class _ScanLoadWorker(QRunnable):
 
     def __init__(self, load_fn, entry, plane_idx: int) -> None:
         super().__init__()
-        self.signals   = _ScanLoadSignals()
+        # Parent the signals to the QApplication (main thread). QThreadPool
+        # auto-deletes this QRunnable on the *worker* thread; without a
+        # main-thread parent the sole-owned signals QObject would be destroyed
+        # off-thread, corrupting Qt internals (a SIGSEGV seen in an unrelated
+        # app event filter). run() deleteLater()s it to avoid accumulation.
+        self.signals   = _ScanLoadSignals(QApplication.instance())
         self._load_fn  = load_fn
         self._entry    = entry
         self._plane_idx = plane_idx
@@ -126,6 +131,8 @@ class _ScanLoadWorker(QRunnable):
             self.signals.finished.emit(result, "")
         except Exception as exc:  # noqa: BLE001
             self.signals.finished.emit(None, str(exc))
+        finally:
+            self.signals.deleteLater()
 
 
 # ── Main window ───────────────────────────────────────────────────────────────
