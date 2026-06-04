@@ -256,7 +256,19 @@ class FeatureCountingController(QObject):
         gen = self._preview_generation
 
         if self._pending_preview_worker is not None:
-            self._preview_pool.tryTake(self._pending_preview_worker)
+            # The previous preview worker may already have run and been
+            # auto-deleted by the pool, leaving a dangling Python wrapper —
+            # touching it then raises "Internal C++ object already deleted".
+            # tryTake only succeeds while it is still queued; a failed take is
+            # harmless because superseded previews are discarded by the
+            # generation check in _on_preview_finished.
+            try:
+                if self._preview_pool.tryTake(self._pending_preview_worker):
+                    # Removed before running, so its run() (which deleteLater()s
+                    # the app-parented signals) never fires — release them here.
+                    self._pending_preview_worker.signals.deleteLater()
+            except RuntimeError:
+                pass  # already ran + auto-deleted; nothing to cancel
             self._pending_preview_worker = None
 
         worker = _FeaturesWorker(
