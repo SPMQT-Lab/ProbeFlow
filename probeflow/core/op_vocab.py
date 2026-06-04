@@ -6,9 +6,10 @@ the "lossless" set, and the "dimension-swapping" set were duplicated across
 CLI. That spread had no single owner and drifted (review arch-backend #9).
 
 This module owns the vocabulary; the de-risking plan (Phase 1, see
-``docs/core_derisk_plan.md``) points those call sites here. It is intentionally
-tiny, dependency-free, and importable from any layer (``core`` included), so it
-does not reintroduce a layering cycle.
+``docs/core_derisk_plan.md``) points those call sites here. It lives in ``core``
+(the lowest layer, alongside ``_SUPPORTED_OPS``) because both ``core.roi`` and
+``processing`` need it — hosting it in ``processing`` would force a
+``core → processing`` import inversion. It is tiny and dependency-free.
 
 Naming conventions
 ------------------

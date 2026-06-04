@@ -62,14 +62,20 @@ op-dispatch completeness + GUI-adapter coverage, so the op *set* is guarded; the
       `test_pipeline_connectivity`; extend only if gaps appear.
 
 ### Phase 1 — Single op-vocabulary source of truth
-- [x] 1.1 New `processing/op_vocab.py`: `LONG_TO_SHORT`/`SHORT_TO_LONG` +
-      `to_short`/`to_long`, `LOSSLESS_OPS`, `DIMENSION_SWAPPING_OPS`,
-      `SIMPLE_GEOMETRIC_OPS`; consistency test (`tests/test_op_vocab.py`).
+- [x] 1.1 New op-vocab module: `LONG_TO_SHORT`/`SHORT_TO_LONG` + `to_short`/
+      `to_long`, `LOSSLESS_OPS`, `DIMENSION_SWAPPING_OPS`, `SIMPLE_GEOMETRIC_OPS`;
+      consistency test (`tests/test_op_vocab.py`).
 - [x] 1.2 Point `processing/state.py` at it (dropped its private `_LONG_TO_SHORT`
       / `_LOSSLESS` and the inline dim-swap + grouped-branch name lists).
-- [ ] 1.3 Point `core/roi.py` `transform`/`transform_all` at it. ⚠ highest care.
+- [x] 1.3 Point `core/roi.py` at it (`transform` alias map, the lossless check,
+      and `_post_transform_shape` dim-swap). `transform_all` delegates to
+      `transform`, so no separate map there.
+- [x] 1.5 (done early) The module lives in **`core/op_vocab.py`**, not
+      `processing/`: `core.roi` needs it, and hosting it in `processing` would
+      force a `core → processing` import inversion. It sits alongside
+      `_SUPPORTED_OPS` (already in `core/processing_state.py`), so the op
+      vocabulary now has a single owner in the lowest layer.
 - [ ] 1.4 Point `processing/gui_adapter.py` and `cli/*` at it.
-- [ ] 1.5 Resolve the layer of `_SUPPORTED_OPS` (keep in core + re-export, lean).
 
 ### Phase 2 — Untangle the `Scan` god-object (smallest steps)
 - [ ] 2.1 History getter/setter → statically-checkable delegation

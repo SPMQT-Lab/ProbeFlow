@@ -31,6 +31,12 @@ from typing import Any, Literal
 
 import numpy as np
 
+from probeflow.core.op_vocab import (
+    DIMENSION_SWAPPING_OPS,
+    LOSSLESS_OPS,
+    to_short,
+)
+
 
 # ── Geometry helpers ──────────────────────────────────────────────────────────
 
@@ -61,7 +67,7 @@ def _transform_point(
 def _post_transform_shape(operation: str, image_shape: tuple[int, int]) -> tuple[int, int]:
     """Return the image shape after a geometric operation."""
     Ny, Nx = image_shape
-    if operation in ("rot90_cw", "rot270_cw"):
+    if operation in DIMENSION_SWAPPING_OPS:
         return Nx, Ny   # rows and cols swap
     return Ny, Nx       # shape unchanged for 180°, flips
 
@@ -292,11 +298,7 @@ class ROI:
         rotate_arbitrary
             Always returns None.
         """
-        operation = {
-            "rotate_90_cw": "rot90_cw",
-            "rotate_180": "rot180",
-            "rotate_270_cw": "rot270_cw",
-        }.get(operation, operation)
+        operation = to_short(operation)
 
         if operation == "rotate_arbitrary":
             return None
@@ -304,8 +306,7 @@ class ROI:
         if operation == "crop":
             return self._transform_crop(params, image_shape)
 
-        if operation in ("flip_horizontal", "flip_vertical",
-                         "rot90_cw", "rot180", "rot270_cw"):
+        if operation in LOSSLESS_OPS:
             return self._transform_lossless(operation, image_shape)
 
         raise ValueError(f"ROI.transform: unknown operation {operation!r}")

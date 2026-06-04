@@ -32,7 +32,7 @@ from probeflow.core.processing_state import (  # noqa: F401
     ProcessingState,
     ProcessingStep,
 )
-from probeflow.processing import op_vocab
+from probeflow.core import op_vocab
 
 
 def apply_operation_with_optional_roi(
@@ -908,7 +908,7 @@ def apply_geometric_op_to_scan(
     # Normalize the operation to the short form used by ROI.transform so the
     # rest of this function (the LOSSLESS check, the per-plane dispatch, and the
     # scan-range swap) only has to know one vocabulary. The vocabulary lives in
-    # probeflow.processing.op_vocab (review arch-backend #9 / core de-risk Ph.1).
+    # probeflow.core.op_vocab (review arch-backend #9 / core de-risk Ph.1).
     canonical_op = op_vocab.to_short(operation)
     _LOSSLESS = op_vocab.LOSSLESS_OPS
 

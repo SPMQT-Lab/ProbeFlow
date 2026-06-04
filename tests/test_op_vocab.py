@@ -1,14 +1,14 @@
 """Consistency guards for the centralized op vocabulary (Phase 1).
 
-These lock ``processing/op_vocab.py`` as a faithful single source of truth for
-the geometric-operation names/aliases before the call sites in core/roi.py,
+These lock ``core/op_vocab.py`` as a faithful single source of truth for the
+geometric-operation names/aliases before the call sites in core/roi.py,
 processing/state.py, processing/gui_adapter.py and the CLI are pointed at it.
 """
 
 from __future__ import annotations
 
 from probeflow.core.processing_state import _SUPPORTED_OPS
-from probeflow.processing import op_vocab as ov
+from probeflow.core import op_vocab as ov
 
 
 def test_alias_maps_are_inverse():
