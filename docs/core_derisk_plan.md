@@ -168,12 +168,15 @@ the app-level tooltip event filter.
   (app) now parent their auto-created signals to the `QApplication` and
   `deleteLater()` them after emit. Guarded by `tests/test_worker_signals_lifetime.py`
   (runs in a real GUI env; this headless box can't construct a `QApplication`).
-- **Same latent antipattern, not yet changed (no reported crash, change is
-  untestable here):** `ThumbnailLoader`, `FolderThumbnailLoader`,
-  `SpecThumbnailLoader`, `ViewerLoader`, `ConversionWorker` (`gui/workers.py`)
-  and `_ScanLoaderWorker` (`gui/dialogs/image_arithmetic.py`). A shared
-  `app`-parented-signals helper + per-run `deleteLater()` should be applied to
-  all of them; `_TVWorker` is already safe (its signals are owned by the window).
+- **Fixed (same antipattern, swept):** introduced a shared `_PooledWorker` base
+  (`gui/workers.py`) that parents its signals to the `QApplication` and
+  `deleteLater()`s them after `work()`. Migrated `ThumbnailLoader`,
+  `FolderThumbnailLoader`, `SpecThumbnailLoader`, `ViewerLoader`,
+  `ConversionWorker`, and `_ScanLoaderWorker` (`image_arithmetic`) onto it.
+  `ChannelLoader` was confirmed safe (its signals are created and retained by the
+  caller, `browse/panels.py`) and left as a plain `QRunnable`; `_TVWorker` is
+  likewise window-owned. So every fire-and-forget pooled worker now owns its
+  signals on the main thread.
 
 ## Suggested merge order
 Phase 0 → Phase 1 → Phase 4 → Phase 2 (per-method) → Phase 3 (batched).

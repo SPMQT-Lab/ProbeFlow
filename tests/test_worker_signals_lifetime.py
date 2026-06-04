@@ -63,6 +63,37 @@ def test_scan_load_worker_signals_parented_to_app(qapp):
     assert w.signals.parent() is qapp
 
 
+def test_pooled_worker_base_parents_signals_and_runs_work(qapp):
+    """The shared _PooledWorker base parents its signals to the app and runs
+    work() (not run()). Covers the migrated browse/viewer/conversion workers."""
+    from PySide6.QtCore import QObject, Signal
+    from probeflow.gui.workers import _PooledWorker
+
+    class _Sig(QObject):
+        done = Signal()
+
+    ran = []
+
+    class _W(_PooledWorker):
+        def __init__(self):
+            super().__init__(_Sig())
+
+        def work(self):
+            ran.append(True)
+
+    w = _W()
+    assert w.signals.parent() is qapp
+    w.run()                      # base run() -> work() + deleteLater(signals)
+    assert ran == [True]
+
+
+def test_conversion_worker_signals_parented_to_app(qapp):
+    from probeflow.gui.workers import ConversionWorker
+
+    w = ConversionWorker("in", "out", False, False, 1.0, 99.0)
+    assert w.signals.parent() is qapp
+
+
 def test_scan_load_worker_runs_on_pool_without_crash(qapp):
     """Smoke: run a worker through a real QThreadPool and pump the event loop.
     Exercises the auto-delete-on-worker-thread teardown that the fix guards."""

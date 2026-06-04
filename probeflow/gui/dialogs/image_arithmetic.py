@@ -7,7 +7,7 @@ from typing import Any
 
 import numpy as np
 
-from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, Signal
+from PySide6.QtCore import QObject, Qt, QThreadPool, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from probeflow.core.scan_loader import load_scan
+from probeflow.gui.workers import _PooledWorker
 
 
 class _ScanLoaderSignals(QObject):
@@ -31,17 +32,15 @@ class _ScanLoaderSignals(QObject):
     failed   = Signal(int, str)      # (entry_index, error_message)
 
 
-class _ScanLoaderWorker(QRunnable):
+class _ScanLoaderWorker(_PooledWorker):
     """Load a scan file off the GUI thread."""
 
     def __init__(self, entry_index: int, path: Path) -> None:
-        super().__init__()
-        self.setAutoDelete(True)
+        super().__init__(_ScanLoaderSignals())
         self._entry_index = entry_index
         self._path = path
-        self.signals = _ScanLoaderSignals()
 
-    def run(self) -> None:
+    def work(self) -> None:
         try:
             scan = load_scan(self._path)
             self.signals.finished.emit(self._entry_index, scan)

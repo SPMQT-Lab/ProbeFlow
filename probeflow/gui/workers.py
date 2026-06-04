@@ -13,6 +13,7 @@ _log = logging.getLogger(__name__)
 import numpy as np
 from PySide6.QtCore import QObject, QRunnable, Signal
 from PySide6.QtGui import QPixmap
+from PySide6.QtWidgets import QApplication
 
 from probeflow.gui.models import SxmFile, VertFile, browse_entry_key
 from probeflow.core.resources import FILE_CUSHIONS_DIR
@@ -69,19 +70,53 @@ def _log_preview_failure(loader_name: str, action: str, path, exc: Exception) ->
     )
 
 
+class _PooledWorker(QRunnable):
+    """Base for fire-and-forget ``QThreadPool`` workers that own their signals.
+
+    QThreadPool auto-deletes a finished QRunnable on the *worker* thread. If the
+    runnable is the sole owner of a parentless ``*Signals`` QObject — which
+    carries cross-thread signal/slot connections — that QObject gets destroyed
+    off the main thread, corrupting Qt's internals (observed as a hard SIGSEGV
+    inside the app-level tooltip event filter). This base parents the signals to
+    the main-thread ``QApplication`` so Shiboken never C++-destroys it from the
+    worker thread, and ``deleteLater()``s it after ``work()`` so there is no
+    per-run accumulation.
+
+    Subclasses implement :meth:`work` (not ``run``) and pass their signals
+    object to ``super().__init__()``. Workers whose signals are created and
+    retained by the *caller* (e.g. ``ChannelLoader``) must not use this base —
+    the caller owns that lifetime.
+    """
+
+    def __init__(self, signals: QObject) -> None:
+        super().__init__()
+        self.setAutoDelete(True)
+        app = QApplication.instance()
+        if app is not None:
+            signals.setParent(app)
+        self.signals = signals
+
+    def run(self) -> None:
+        try:
+            self.work()
+        finally:
+            self.signals.deleteLater()
+
+    def work(self) -> None:  # pragma: no cover - overridden by subclasses
+        raise NotImplementedError
+
+
 # ── Worker: thumbnail ─────────────────────────────────────────────────────────
 class ThumbnailSignals(QObject):
     loaded = Signal(str, QPixmap, object)  # stem, pixmap, token
 
 
-class ThumbnailLoader(QRunnable):
+class ThumbnailLoader(_PooledWorker):
     def __init__(self, entry: SxmFile, colormap: str, token, w: int, h: int,
                  clip_low: float = 1.0, clip_high: float = 99.0,
                  processing: dict = None,
                  thumbnail_channel: str = THUMBNAIL_CHANNEL_DEFAULT):
-        super().__init__()
-        self.setAutoDelete(True)
-        self.signals    = ThumbnailSignals()
+        super().__init__(ThumbnailSignals())
         self.entry      = entry
         self.colormap   = colormap
         self.token      = token
@@ -92,7 +127,7 @@ class ThumbnailLoader(QRunnable):
         self.processing = processing or {}
         self.thumbnail_channel = thumbnail_channel
 
-    def run(self):
+    def work(self):
         from probeflow.core import browse_cache
 
         mtime_ns, size = _file_identity(self.entry.path)
@@ -129,16 +164,14 @@ class FolderThumbnailSignals(QObject):
     loaded = Signal(str, list, object)  # folder_key, list[QPixmap | None], token
 
 
-class FolderThumbnailLoader(QRunnable):
+class FolderThumbnailLoader(_PooledWorker):
     """Render a small set of preview thumbnails for a subfolder card."""
 
     def __init__(self, folder_key: str, sample_paths: list[Path],
                  colormap: str, token, w: int, h: int,
                  clip_low: float = 1.0, clip_high: float = 99.0,
                  thumbnail_channel: str = THUMBNAIL_CHANNEL_DEFAULT):
-        super().__init__()
-        self.setAutoDelete(True)
-        self.signals       = FolderThumbnailSignals()
+        super().__init__(FolderThumbnailSignals())
         self.folder_key    = folder_key
         self.sample_paths  = list(sample_paths)
         self.colormap      = colormap
@@ -149,7 +182,7 @@ class FolderThumbnailLoader(QRunnable):
         self.clip_high     = clip_high
         self.thumbnail_channel = thumbnail_channel
 
-    def run(self):
+    def work(self):
         from probeflow.core import browse_cache
 
         pixmaps: list = []
@@ -187,18 +220,16 @@ class FolderThumbnailLoader(QRunnable):
 
 
 # ── Worker: spec thumbnail ────────────────────────────────────────────────────
-class SpecThumbnailLoader(QRunnable):
+class SpecThumbnailLoader(_PooledWorker):
     def __init__(self, entry: VertFile, token, w: int, h: int, dark: bool = True):
-        super().__init__()
-        self.setAutoDelete(True)
-        self.signals = ThumbnailSignals()
+        super().__init__(ThumbnailSignals())
         self.entry   = entry
         self.token   = token
         self.w       = w
         self.h       = h
         self.dark    = dark
 
-    def run(self):
+    def work(self):
         try:
             img = render_spec_thumbnail(self.entry.path, size=(self.w, self.h),
                                         dark=self.dark)
@@ -255,7 +286,7 @@ class ViewerSignals(QObject):
     failed = Signal(str, object)
 
 
-class ViewerLoader(QRunnable):
+class ViewerLoader(_PooledWorker):
     def __init__(self, entry: SxmFile, colormap: str, token,
                  size: Optional[tuple[int, int]] = None,
                  plane_idx: int = 0, clip_low: float = 1.0,
@@ -263,9 +294,7 @@ class ViewerLoader(QRunnable):
                  vmin: Optional[float] = None, vmax: Optional[float] = None,
                  arr: Optional[np.ndarray] = None,
                  region_levels: Optional[list] = None):
-        super().__init__()
-        self.setAutoDelete(True)
-        self.signals    = ViewerSignals()
+        super().__init__(ViewerSignals())
         self.entry      = entry
         self.colormap   = colormap
         self.token      = token
@@ -279,7 +308,7 @@ class ViewerLoader(QRunnable):
         self.arr        = arr
         self.region_levels = region_levels
 
-    def run(self):
+    def work(self):
         try:
             img = render_scan_image(
                 scan_path=None if self.arr is not None else self.entry.path,
@@ -309,13 +338,11 @@ class ConversionSignals(QObject):
     finished = Signal(str)
 
 
-class ConversionWorker(QRunnable):
+class ConversionWorker(_PooledWorker):
     def __init__(self, in_dir: str, out_dir: str,
                  do_png: bool, do_sxm: bool,
                  clip_low: float, clip_high: float):
-        super().__init__()
-        self.setAutoDelete(True)
-        self.signals   = ConversionSignals()
+        super().__init__(ConversionSignals())
         self.in_dir    = in_dir
         # if no custom output, use the input dir as base
         self.out_dir   = out_dir if out_dir else in_dir
@@ -324,7 +351,7 @@ class ConversionWorker(QRunnable):
         self.clip_low  = clip_low
         self.clip_high = clip_high
 
-    def run(self):
+    def work(self):
         def _log(msg, tag="info"):
             self.signals.log_msg.emit(msg, tag)
 
