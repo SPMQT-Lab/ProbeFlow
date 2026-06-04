@@ -342,7 +342,7 @@ class ROI:
             cx, cy = float(g["cx"]), float(g["cy"])
             rx, ry = float(g["rx"]), float(g["ry"])
             new_cx, new_cy = tp(cx, cy)
-            if operation in ("rot90_cw", "rot270_cw"):
+            if operation in DIMENSION_SWAPPING_OPS:
                 new_rx, new_ry = ry, rx
             else:
                 new_rx, new_ry = rx, ry

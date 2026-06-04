@@ -75,7 +75,16 @@ op-dispatch completeness + GUI-adapter coverage, so the op *set* is guarded; the
       force a `core → processing` import inversion. It sits alongside
       `_SUPPORTED_OPS` (already in `core/processing_state.py`), so the op
       vocabulary now has a single owner in the lowest layer.
-- [ ] 1.4 Point `processing/gui_adapter.py` and `cli/*` at it.
+- [x] 1.4 Point `processing/gui_adapter.py` at it (its `SIMPLE_GEOMETRIC_OPS`
+      membership list). The `cli/*` files use individual op names in one-off
+      factory functions / argparse wiring — legitimate single-use, not a
+      consolidatable set or alias map, so they were left as-is.
+
+**Phase 1 complete.** The geometric-op vocabulary now has a single owner
+(`core/op_vocab.py`); `core/roi.py`, `processing/state.py`, and
+`processing/gui_adapter.py` all source it from there. The drift hazard
+(arch-backend #9) is closed and guarded by `tests/test_op_vocab.py` +
+`tests/test_core_op_vocab_invariants.py`.
 
 ### Phase 2 — Untangle the `Scan` god-object (smallest steps)
 - [ ] 2.1 History getter/setter → statically-checkable delegation

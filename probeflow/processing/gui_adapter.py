@@ -8,6 +8,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 import warnings
 
+from probeflow.core.op_vocab import SIMPLE_GEOMETRIC_OPS
+
 if TYPE_CHECKING:
     from probeflow.core.scan_model import Scan
     from probeflow.processing.state import ProcessingState
@@ -277,8 +279,7 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
         except (TypeError, KeyError) as exc:
             _warn_skipped_step("geometric_ops", str(exc) or "invalid operation spec")
             continue
-        if op_name in ("flip_horizontal", "flip_vertical",
-                       "rotate_90_cw", "rotate_180", "rotate_270_cw"):
+        if op_name in SIMPLE_GEOMETRIC_OPS:
             _append_step(ProcessingStep(op_name, {}))
         elif op_name == "affine_lattice_correction":
             import numpy as _np
