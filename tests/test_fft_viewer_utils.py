@@ -307,7 +307,7 @@ def test_fft_grid_correction_preview_and_apply_hooks(qapp):
         assert applied[0][1]["source"] == "fft_reciprocal_grid"
         assert applied[0][1]["fft_source"] == "whole_image"
         assert "fft_roi_id" not in applied[0][1]
-        assert applied[0][1]["known_structure"]["name"] == "Hexagonal 2.46 Å"
+        assert applied[0][1]["known_structure"]["name"] == "Hexagonal"
     finally:
         dlg.close()
         dlg.deleteLater()

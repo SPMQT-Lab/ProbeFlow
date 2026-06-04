@@ -529,9 +529,6 @@ class FFTViewerLatticeMixin:
             if widget is not None:
                 widget.setParent(None)
         lay.addWidget(self._grid_placeholder_lbl)
-        draw_btn = getattr(self, "_grid_draw_btn", None)
-        if draw_btn is not None:
-            lay.addWidget(draw_btn)
         lbl = getattr(self, "_grid_measure_lbl", None)
         if lbl is not None:
             lbl.setText("No grid — click Draw Grid to start")

@@ -514,22 +514,39 @@ class FFTViewerDialog(
         self._grid_measure_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
         grid_outer_lay.addWidget(self._grid_measure_lbl)
 
-        # Grid extent control row (lives here, used by panel)
-        extent_row = QHBoxLayout()
-        extent_row.addWidget(QLabel("Grid orders ±:"))
+        # Grid extent (mesh size) — created here, placed inside the Known
+        # structure group below so it isn't a floating row.
         self._grid_extent_spin = QSpinBox()
         self._grid_extent_spin.setRange(1, 200)
         self._grid_extent_spin.setValue(12)
         self._grid_extent_spin.setFont(ui_font(9))
         self._grid_extent_spin.setFixedHeight(24)
+        self._grid_extent_spin.setMaximumWidth(72)
         self._grid_extent_spin.setToolTip("How many reciprocal-lattice repeats to draw in each direction.")
         self._grid_extent_spin.valueChanged.connect(self._on_grid_extent_changed)
-        extent_row.addWidget(self._grid_extent_spin)
-        extent_row.addStretch(1)
-        grid_outer_lay.addLayout(extent_row)
 
-        # Panel container: initially shows placeholder + Draw Grid button;
-        # replaced by FFTLatticePanel when a grid is created.
+        # Draw + Clear Grid share a single row.
+        self._grid_draw_btn = QPushButton("Draw Grid")
+        self._grid_draw_btn.setFont(ui_font(9))
+        self._grid_draw_btn.setFixedHeight(26)
+        self._grid_draw_btn.setToolTip(
+            "Create a hexagonal reciprocal-lattice overlay on the FFT. "
+            "Drag the handles to align g₁/g₂ with Bragg peaks."
+        )
+        self._grid_draw_btn.clicked.connect(lambda: self._on_open_fft_lattice())
+        self._clear_grid_btn = QPushButton("Clear Grid")
+        self._clear_grid_btn.setFont(ui_font(9))
+        self._clear_grid_btn.setFixedHeight(26)
+        self._clear_grid_btn.setToolTip("Remove the reciprocal-space lattice overlay")
+        self._clear_grid_btn.setEnabled(False)
+        self._clear_grid_btn.clicked.connect(self._on_clear_fft_lattice)
+        grid_btn_row = QHBoxLayout()
+        grid_btn_row.addWidget(self._grid_draw_btn)
+        grid_btn_row.addWidget(self._clear_grid_btn)
+        grid_outer_lay.addLayout(grid_btn_row)
+
+        # Panel container: initially shows the placeholder hint; replaced by
+        # FFTLatticePanel when a grid is created.
         grid_panel_container = QWidget()
         self._grid_tab_lay = QVBoxLayout(grid_panel_container)
         self._grid_tab_lay.setContentsMargins(0, 0, 0, 0)
@@ -540,16 +557,7 @@ class FFTViewerDialog(
         self._grid_placeholder_lbl.setFont(ui_font(9))
         self._grid_placeholder_lbl.setAlignment(Qt.AlignCenter)
         self._grid_placeholder_lbl.setWordWrap(True)
-        self._grid_draw_btn = QPushButton("Draw Grid")
-        self._grid_draw_btn.setFont(ui_font(9))
-        self._grid_draw_btn.setFixedHeight(26)
-        self._grid_draw_btn.setToolTip(
-            "Create a hexagonal reciprocal-lattice overlay on the FFT. "
-            "Drag the handles to align g₁/g₂ with Bragg peaks."
-        )
-        self._grid_draw_btn.clicked.connect(lambda: self._on_open_fft_lattice())
         self._grid_tab_lay.addWidget(self._grid_placeholder_lbl)
-        self._grid_tab_lay.addWidget(self._grid_draw_btn)
         grid_outer_lay.addWidget(grid_panel_container)
 
         # Known structure section (moved here from Correction tab)
@@ -577,7 +585,9 @@ class FFTViewerDialog(
         ):
             btn.setFont(ui_font(8))
             btn.setFixedHeight(23)
+            btn.setMaximumWidth(72)
             structure_row.addWidget(btn)
+        structure_row.addStretch(1)
         self._structure_save_btn.clicked.connect(self._on_save_structure)
         self._structure_update_btn.clicked.connect(self._on_update_structure)
         self._structure_delete_btn.clicked.connect(self._on_delete_structure)
@@ -634,7 +644,9 @@ class FFTViewerDialog(
         ref_grid.addLayout(a_value_row, 1, 3)
         ref_grid.addWidget(QLabel("Shells:"), 2, 0)
         ref_grid.addWidget(self._bragg_max_shells_spin, 2, 1)
-        ref_grid.addWidget(self._bragg_enable_cb, 2, 2, 1, 2)
+        ref_grid.addWidget(QLabel("Grid orders ±:"), 2, 2)
+        ref_grid.addWidget(self._grid_extent_spin, 2, 3)
+        ref_grid.addWidget(self._bragg_enable_cb, 3, 0, 1, 4)
         ref_grid.setColumnStretch(1, 1)
         ref_grid.setColumnStretch(3, 1)
         self._bragg_radius_lbl = QLabel("Shells: —")
@@ -642,7 +654,7 @@ class FFTViewerDialog(
         self._bragg_radius_lbl.setWordWrap(True)
         self._bragg_radius_lbl.setMaximumHeight(34)
         self._bragg_radius_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        ref_grid.addWidget(self._bragg_radius_lbl, 3, 0, 1, 4)
+        ref_grid.addWidget(self._bragg_radius_lbl, 4, 0, 1, 4)
         self._refresh_structure_combo(self._active_known_structure.name)
         self._apply_known_structure_to_fft(self._active_known_structure, refresh=False)
         grid_outer_lay.addWidget(ref_grp)
@@ -663,14 +675,7 @@ class FFTViewerDialog(
         compare_lay.addWidget(self._fft_measured_lbl)
         grid_outer_lay.addWidget(compare_grp)
 
-        # Clear Grid button at the bottom of the Grid tab
-        self._clear_grid_btn = QPushButton("Clear Grid")
-        self._clear_grid_btn.setFont(ui_font(9))
-        self._clear_grid_btn.setFixedHeight(24)
-        self._clear_grid_btn.setToolTip("Remove the reciprocal-space lattice overlay")
-        self._clear_grid_btn.setEnabled(False)
-        self._clear_grid_btn.clicked.connect(self._on_clear_fft_lattice)
-        grid_outer_lay.addWidget(self._clear_grid_btn)
+        # (Clear Grid now lives in the Draw/Clear row at the top of the tab.)
         grid_outer_lay.addStretch(1)
         grid_scroll.setWidget(grid_inner)
         self._grid_tab_index = self._tab_widget.addTab(grid_scroll, "Grid")

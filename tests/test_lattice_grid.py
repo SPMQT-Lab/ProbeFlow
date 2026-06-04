@@ -634,7 +634,7 @@ def test_ideal_lattice_presets_control_enabled_fields(qapp):
     cal = RealSpaceCalibration.from_scan_range((10e-9, 10e-9), 100, 100)
     panel = LatticeGridPanel(_FakeGridItem(grid), _FakeController(), cal, 100, 100)
     try:
-        assert panel._structure_combo.currentText() == "Hexagonal 2.46 Å"
+        assert panel._structure_combo.currentText() == "Hexagonal"
         assert panel._ideal_preset_combo.currentText() == "Hexagonal"
         assert "Undistort: y/x=" in panel._correction_lbl.text()
 

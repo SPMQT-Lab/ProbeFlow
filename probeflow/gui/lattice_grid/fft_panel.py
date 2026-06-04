@@ -7,7 +7,6 @@ from dataclasses import replace
 
 from probeflow.gui.typography import ui_font
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -26,7 +25,6 @@ from probeflow.analysis.lattice_grid import (
     LatticeGrid,
     LatticeKind,
     ReciprocalCalibration,
-    format_reciprocal_measurements,
 )
 from probeflow.gui.no_wheel import install_no_wheel_spinboxes
 
@@ -118,32 +116,24 @@ class FFTLatticePanel(QWidget):
             params_lay.addWidget(sp, row, col * 2 + 1)
             return sp
 
-        self._ox_spin  = _double_cell(0, 0, "Origin x:", 0, float(self._image_w), 1, 1, "px")
-        self._oy_spin  = _double_cell(0, 1, "Origin y:", 0, float(self._image_h), 1, 1, "px")
-        self._g1_spin  = _double_cell(1, 0, "|g1|:", 0.001, 1000.0, 0.01, 3, "nm⁻¹")
-        self._g2_spin  = _double_cell(1, 1, "|g2|:", 0.001, 1000.0, 0.01, 3, "nm⁻¹")
-        self._rot_spin = _double_cell(2, 0, "Rotation:", -180, 180, 0.1, 1, "°")
-
-        self._angle_ab_spin = _double_cell(2, 1, "Angle g1-g2:", 1.0, 179.0, 0.1, 2, "°")
+        # Three label/field pairs per row, using the panel width. |g1|/|g2|/angle
+        # are live measurements (they update as the grid handles are dragged);
+        # origin and rotation were dropped — use "Reset origin to FFT centre" and
+        # drag the handles instead.
+        self._g1_spin  = _double_cell(0, 0, "|g1|:", 0.001, 1000.0, 0.01, 3, "nm⁻¹")
+        self._g2_spin  = _double_cell(0, 1, "|g2|:", 0.001, 1000.0, 0.01, 3, "nm⁻¹")
+        self._angle_ab_spin = _double_cell(0, 2, "Angle g1-g2:", 1.0, 179.0, 0.1, 2, "°")
         self._angle_ab_spin.setEnabled(False)
 
-        self._cells_spin = _int_cell(3, 0, "Cells ±:", 1, 200, 12)
-
-        self._line_width_spin = _double_cell(3, 1, "Line width:", 0.25, 10.0, 0.25, 2, "px")
+        self._cells_spin = _int_cell(1, 0, "Cells ±:", 1, 200, 12)
+        self._line_width_spin = _double_cell(1, 1, "Line width:", 0.25, 10.0, 0.25, 2, "px")
         self._line_width_spin.setValue(1.5)
-        # Keep the two label/field pairs packed to the left at a compact width;
-        # absorb the slack in a trailing column instead of stretching the fields.
-        params_lay.setColumnStretch(1, 0)
-        params_lay.setColumnStretch(3, 0)
-        params_lay.setColumnStretch(4, 1)
+        params_lay.setColumnStretch(6, 1)
 
         lay.addWidget(params_grp)
 
-        self._ox_spin.valueChanged.connect(self._on_origin_changed)
-        self._oy_spin.valueChanged.connect(self._on_origin_changed)
         self._g1_spin.valueChanged.connect(self._on_g1_changed)
         self._g2_spin.valueChanged.connect(self._on_g2_changed)
-        self._rot_spin.valueChanged.connect(self._on_rotation_changed)
         self._angle_ab_spin.valueChanged.connect(self._on_angle_ab_changed)
         self._cells_spin.valueChanged.connect(self._on_cells_changed)
         self._line_width_spin.valueChanged.connect(self._on_line_width_changed)
@@ -171,18 +161,6 @@ class FFTLatticePanel(QWidget):
         reset_btn.clicked.connect(self._on_reset_origin)
         lay.addWidget(reset_btn)
 
-        meas_grp = QGroupBox("Measured")
-        meas_grp.setFont(ui_font(9))
-        meas_lay = QVBoxLayout(meas_grp)
-        meas_lay.setContentsMargins(6, 6, 6, 4)
-        self._meas_lbl = QLabel("")
-        self._meas_lbl.setFont(QFont("Courier", 8))
-        self._meas_lbl.setAlignment(Qt.AlignTop | Qt.AlignLeft)
-        self._meas_lbl.setWordWrap(True)
-        self._meas_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        meas_lay.addWidget(self._meas_lbl)
-        lay.addWidget(meas_grp)
-
         fft_note = QLabel(
             "FFT-derived direct lattice measurements can be used for affine "
             "image correction from the FFT viewer."
@@ -209,10 +187,6 @@ class FFTLatticePanel(QWidget):
             return
         self._updating_controls = True
         try:
-            ox, oy = grid.origin_px
-            self._ox_spin.setValue(ox)
-            self._oy_spin.setValue(oy)
-            self._rot_spin.setValue(grid.a_angle_deg())
             self._angle_ab_spin.setValue(grid.angle_deg())
             self._cells_spin.setValue(self._overlay._cells)
             self._line_width_spin.setValue(self._overlay._line_width_px)
@@ -232,37 +206,6 @@ class FFTLatticePanel(QWidget):
         finally:
             self._updating_controls = False
 
-        self._refresh_measurement_label()
-
-    def _refresh_measurement_label(self) -> None:
-        grid = self._overlay.grid()
-        if grid is None:
-            return
-        try:
-            d = format_reciprocal_measurements(grid, self._cal)
-            lines = [
-                d["g1"],
-                d["g2"],
-                f"angle = {d['angle']}",
-                f"area = {d['area_q']}",
-                d["direct_a"],
-                d["direct_b"],
-                d["direct_angle"],
-            ]
-        except Exception as exc:
-            lines = [f"(error: {exc})"]
-        self._meas_lbl.setText("\n".join(lines))
-
-    def _on_origin_changed(self, _v: float) -> None:
-        if self._updating_controls:
-            return
-        grid = self._overlay.grid()
-        if grid is None:
-            return
-        new_grid = grid.reset_origin(self._ox_spin.value(), self._oy_spin.value())
-        self._overlay.set_grid(new_grid)
-        self._refresh_measurement_label()
-
     def _on_g1_changed(self, value: float) -> None:
         if self._updating_controls:
             return
@@ -275,7 +218,6 @@ class FFTLatticePanel(QWidget):
         factor = value / old_g1
         new_grid = grid.set_a_length_px(grid.a_length_px() * factor)
         self._overlay.set_grid(new_grid)
-        self._refresh_measurement_label()
 
     def _on_g2_changed(self, value: float) -> None:
         if self._updating_controls:
@@ -289,16 +231,6 @@ class FFTLatticePanel(QWidget):
         factor = value / old_g2
         new_grid = grid.set_b_length_px(grid.b_length_px() * factor)
         self._overlay.set_grid(new_grid)
-        self._refresh_measurement_label()
-
-    def _on_rotation_changed(self, value: float) -> None:
-        if self._updating_controls:
-            return
-        grid = self._overlay.grid()
-        if grid is None:
-            return
-        self._overlay.set_grid(grid.set_rotation_deg(value))
-        self._refresh_measurement_label()
 
     def _on_cells_changed(self, value: int) -> None:
         if self._updating_controls:
@@ -328,7 +260,6 @@ class FFTLatticePanel(QWidget):
         b_angle_rad = math.radians(grid.a_angle_deg() + value)
         new_b = (lb_px * math.cos(b_angle_rad), lb_px * math.sin(b_angle_rad))
         self._overlay.set_grid(replace(grid, b_px=new_b))
-        self._refresh_measurement_label()
 
     def _on_line_width_changed(self, value: float) -> None:
         if self._updating_controls:

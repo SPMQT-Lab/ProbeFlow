@@ -64,20 +64,24 @@ class FFTViewerReconstructMixin:
             "Add an elliptical selection with independent width/height handles "
             "— for elongated or streaky Fourier features."))
         add_ellipse.clicked.connect(lambda: self._on_add_selection("ellipse"))
-        add_row.addWidget(add_circle)
-        add_row.addWidget(add_ellipse)
-        sg.addLayout(add_row)
-        del_row = QHBoxLayout()
         del_btn = QPushButton("Delete selected")
         del_btn.setToolTip(_tip("Remove the currently-selected Fourier region."))
         del_btn.clicked.connect(self._on_delete_selection)
         clr_btn = QPushButton("Clear selections")
         clr_btn.setToolTip(_tip("Remove all Fourier selections."))
         clr_btn.clicked.connect(self._on_clear_selections)
+        # 2×2 button block at a compact width instead of full-width rows.
+        for b in (add_circle, add_ellipse, del_btn, clr_btn):
+            b.setMaximumWidth(150)
+        add_row.addWidget(add_circle)
+        add_row.addWidget(add_ellipse)
+        add_row.addStretch(1)
+        sg.addLayout(add_row)
+        del_row = QHBoxLayout()
         del_row.addWidget(del_btn)
         del_row.addWidget(clr_btn)
+        del_row.addStretch(1)
         sg.addLayout(del_row)
-        lay.addWidget(sgrp)
 
         # ── mask options ───────────────────────────────────────────────────────
         ogrp = QGroupBox("Mask")
@@ -116,7 +120,13 @@ class FFTViewerReconstructMixin:
         soft_row.addWidget(self._recon_soft_spin)
         soft_row.addStretch(1)
         og.addLayout(soft_row)
-        lay.addWidget(ogrp)
+
+        # Selections + Mask share one row — the FFT dialog is wide enough.
+        top_row = QHBoxLayout()
+        top_row.setSpacing(6)
+        top_row.addWidget(sgrp, 1)
+        top_row.addWidget(ogrp, 1)
+        lay.addLayout(top_row)
 
         # ── preview / apply ─────────────────────────────────────────────────────
         view_row = QHBoxLayout()

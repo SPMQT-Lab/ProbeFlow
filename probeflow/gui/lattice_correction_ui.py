@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Iterable
 
 from probeflow.analysis.lattice_distortion import IdealLattice, LatticeCorrection
@@ -51,7 +51,7 @@ class PiezoConstantRecommendation:
 
 
 DEFAULT_STRUCTURE = KnownStructure(
-    name="Hexagonal 2.46 Å",
+    name="Hexagonal",
     symmetry="hexagonal",
     a_nm=0.246,
     b_nm=0.246,
@@ -84,10 +84,25 @@ def structure_from_dict(data: object) -> KnownStructure | None:
     return KnownStructure(name, symmetry, a_nm, b_nm, angle_deg, unit)
 
 
+# Legacy default-structure name that baked the lattice constant into the string
+# (it went stale when the user edited Lattice a). Migrate it to the plain name.
+_LEGACY_DEFAULT_NAMES = {"hexagonal 2.46 å"}
+
+
+def _migrate_legacy_name(structure: KnownStructure) -> KnownStructure:
+    if structure.name.strip().casefold() in _LEGACY_DEFAULT_NAMES:
+        return replace(structure, name=DEFAULT_STRUCTURE.name)
+    return structure
+
+
 def structures_from_config(cfg: dict | None) -> list[KnownStructure]:
     raw = (cfg or {}).get(CONFIG_KEY, [])
     items = raw if isinstance(raw, list) else []
-    structures = [s for s in (structure_from_dict(item) for item in items) if s is not None]
+    structures = [
+        _migrate_legacy_name(s)
+        for s in (structure_from_dict(item) for item in items)
+        if s is not None
+    ]
     return structures or [DEFAULT_STRUCTURE]
 
 

@@ -16,8 +16,8 @@ import numpy as np
 from probeflow.gui._tooltips import tip as _tip
 from probeflow.gui.typography import ui_font
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QDoubleSpinBox, QFrame, QGroupBox, QHBoxLayout,
-    QLabel, QPushButton, QScrollArea, QSpinBox, QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QDoubleSpinBox, QFrame, QGridLayout, QGroupBox,
+    QHBoxLayout, QLabel, QPushButton, QScrollArea, QSpinBox, QVBoxLayout, QWidget,
 )
 
 
@@ -52,10 +52,12 @@ class FFTViewerMainsMixin:
             "frequency."))
         lay.addWidget(intro)
 
-        # ── overlay + prediction controls ──────────────────────────────────────
+        # ── overlay + prediction controls (two-column grid) ─────────────────────
         grp = QGroupBox("Predict & overlay")
-        gl = QVBoxLayout(grp)
-        gl.setSpacing(4)
+        gl = QGridLayout(grp)
+        gl.setHorizontalSpacing(8)
+        gl.setVerticalSpacing(4)
+        gl.setContentsMargins(8, 7, 8, 4)
 
         self._mains_overlay_cb = QCheckBox("Show mains-pickup overlay")
         self._mains_overlay_cb.setToolTip(_tip(
@@ -64,10 +66,7 @@ class FFTViewerMainsMixin:
             "diagnostic guide. Turn it on to check whether a suspicious FFT "
             "spot is really mains before removing anything."))
         self._mains_overlay_cb.toggled.connect(self._on_mains_changed)
-        gl.addWidget(self._mains_overlay_cb)
 
-        freq_row = QHBoxLayout()
-        freq_row.addWidget(QLabel("Frequency:"))
         self._mains_freq_combo = QComboBox()
         self._mains_freq_combo.addItems(["50 Hz", "60 Hz"])
         self._mains_freq_combo.setToolTip(_tip(
@@ -75,32 +74,16 @@ class FFTViewerMainsMixin:
             "(North America). Choose the one for where the data was taken."))
         self._mains_freq_combo.currentIndexChanged.connect(self._on_mains_changed)
         self._mains_freq_combo.setMaximumWidth(_FIELD_W)
-        freq_row.addWidget(self._mains_freq_combo)
-        freq_row.addStretch(1)
-        gl.addLayout(freq_row)
 
-        harm_row = QHBoxLayout()
-        harm_row.addWidget(QLabel("Harmonics:"))
-        self._mains_auto_cb = QCheckBox("Auto to Nyquist")
-        self._mains_auto_cb.setChecked(True)
-        self._mains_auto_cb.setToolTip(_tip(
-            "Mark every mains harmonic that fits before the FFT Nyquist limit."))
-        self._mains_auto_cb.toggled.connect(self._on_mains_changed)
-        harm_row.addWidget(self._mains_auto_cb)
-        self._mains_harm_spin = QSpinBox()
-        self._mains_harm_spin.setRange(1, 20)
-        self._mains_harm_spin.setValue(3)
-        self._mains_harm_spin.setEnabled(False)
-        self._mains_harm_spin.setToolTip(_tip(
-            "Manual number of mains harmonics to mark when Auto is off."))
-        self._mains_harm_spin.valueChanged.connect(self._on_mains_changed)
-        self._mains_harm_spin.setMaximumWidth(64)
-        harm_row.addWidget(self._mains_harm_spin)
-        harm_row.addStretch(1)
-        gl.addLayout(harm_row)
+        self._mains_fast_combo = QComboBox()
+        self._mains_fast_combo.addItems(["Horizontal", "Vertical"])
+        self._mains_fast_combo.setToolTip(_tip(
+            "Which image direction was scanned fast. Mains stripes run across "
+            "this direction. Leave on Horizontal unless the scan was rotated "
+            "or transposed."))
+        self._mains_fast_combo.currentIndexChanged.connect(self._on_mains_changed)
+        self._mains_fast_combo.setMaximumWidth(_FIELD_W)
 
-        speed_row = QHBoxLayout()
-        speed_row.addWidget(QLabel("Scan speed:"))
         self._mains_speed_spin = QDoubleSpinBox()
         self._mains_speed_spin.setRange(0.0, 1e6)
         self._mains_speed_spin.setDecimals(3)
@@ -113,37 +96,47 @@ class FFTViewerMainsMixin:
             "from your scan parameters; the overlay needs it."))
         self._mains_speed_spin.valueChanged.connect(self._on_mains_changed)
         self._mains_speed_spin.setMaximumWidth(_WIDE_FIELD_W)
-        speed_row.addWidget(self._mains_speed_spin)
-        speed_row.addStretch(1)
-        gl.addLayout(speed_row)
 
-        axis_row = QHBoxLayout()
-        axis_row.addWidget(QLabel("Fast axis:"))
-        self._mains_fast_combo = QComboBox()
-        self._mains_fast_combo.addItems(["Horizontal", "Vertical"])
-        self._mains_fast_combo.setToolTip(_tip(
-            "Which image direction was scanned fast. Mains stripes run across "
-            "this direction. Leave on Horizontal unless the scan was rotated "
-            "or transposed."))
-        self._mains_fast_combo.currentIndexChanged.connect(self._on_mains_changed)
-        self._mains_fast_combo.setMaximumWidth(_WIDE_FIELD_W)
-        axis_row.addWidget(self._mains_fast_combo)
-        axis_row.addStretch(1)
-        gl.addLayout(axis_row)
+        self._mains_harm_spin = QSpinBox()
+        self._mains_harm_spin.setRange(1, 20)
+        self._mains_harm_spin.setValue(3)
+        self._mains_harm_spin.setEnabled(False)
+        self._mains_harm_spin.setToolTip(_tip(
+            "Manual number of mains harmonics to mark when Auto is off."))
+        self._mains_harm_spin.valueChanged.connect(self._on_mains_changed)
+        self._mains_harm_spin.setMaximumWidth(_FIELD_W)
+
+        self._mains_auto_cb = QCheckBox("Auto harmonics to Nyquist")
+        self._mains_auto_cb.setChecked(True)
+        self._mains_auto_cb.setToolTip(_tip(
+            "Mark every mains harmonic that fits before the FFT Nyquist limit."))
+        self._mains_auto_cb.toggled.connect(self._on_mains_changed)
+
+        gl.addWidget(self._mains_overlay_cb, 0, 0, 1, 4)
+        gl.addWidget(QLabel("Frequency:"), 1, 0)
+        gl.addWidget(self._mains_freq_combo, 1, 1)
+        gl.addWidget(QLabel("Fast axis:"), 1, 2)
+        gl.addWidget(self._mains_fast_combo, 1, 3)
+        gl.addWidget(QLabel("Scan speed:"), 2, 0)
+        gl.addWidget(self._mains_speed_spin, 2, 1)
+        gl.addWidget(QLabel("Harmonics:"), 2, 2)
+        gl.addWidget(self._mains_harm_spin, 2, 3)
+        gl.addWidget(self._mains_auto_cb, 3, 0, 1, 4)
+        gl.setColumnStretch(4, 1)
 
         self._mains_status_lbl = QLabel("")
         self._mains_status_lbl.setWordWrap(True)
         self._mains_status_lbl.setFont(ui_font(8))
-        gl.addWidget(self._mains_status_lbl)
+        gl.addWidget(self._mains_status_lbl, 4, 0, 1, 5)
         lay.addWidget(grp)
 
-        # ── suppression controls ────────────────────────────────────────────────
+        # ── suppression controls (two-column grid) ──────────────────────────────
         sgrp = QGroupBox("Suppress")
-        sl = QVBoxLayout(sgrp)
-        sl.setSpacing(4)
+        sl = QGridLayout(sgrp)
+        sl.setHorizontalSpacing(8)
+        sl.setVerticalSpacing(4)
+        sl.setContentsMargins(8, 7, 8, 4)
 
-        rad_row = QHBoxLayout()
-        rad_row.addWidget(QLabel("Notch radius:"))
         self._mains_radius_spin = QSpinBox()
         self._mains_radius_spin.setRange(1, 20)
         self._mains_radius_spin.setValue(3)
@@ -151,12 +144,7 @@ class FFTViewerMainsMixin:
         self._mains_radius_spin.setToolTip(_tip(
             "Width of each mains streak notch in FFT pixels."))
         self._mains_radius_spin.setMaximumWidth(_FIELD_W)
-        rad_row.addWidget(self._mains_radius_spin)
-        rad_row.addStretch(1)
-        sl.addLayout(rad_row)
 
-        min_q_row = QHBoxLayout()
-        min_q_row.addWidget(QLabel("Minimum |q|:"))
         self._mains_min_q_spin = QDoubleSpinBox()
         self._mains_min_q_spin.setRange(0.0, 1e6)
         self._mains_min_q_spin.setDecimals(3)
@@ -167,16 +155,19 @@ class FFTViewerMainsMixin:
             "Protect low-q signal by leaving a central circle unchanged."))
         self._mains_min_q_spin.valueChanged.connect(self._on_mains_changed)
         self._mains_min_q_spin.setMaximumWidth(_WIDE_FIELD_W)
-        min_q_row.addWidget(self._mains_min_q_spin)
-        min_q_row.addStretch(1)
-        sl.addLayout(min_q_row)
+
+        sl.addWidget(QLabel("Notch radius:"), 0, 0)
+        sl.addWidget(self._mains_radius_spin, 0, 1)
+        sl.addWidget(QLabel("Minimum |q|:"), 0, 2)
+        sl.addWidget(self._mains_min_q_spin, 0, 3)
+        sl.setColumnStretch(4, 1)
 
         self._mains_residual_cb = QCheckBox("Show residual (removed signal)")
         self._mains_residual_cb.setToolTip(_tip(
             "Preview the residual (original − filtered) instead of the filtered "
             "image. Check it looks like noise/stripes, not real features, "
             "before applying."))
-        sl.addWidget(self._mains_residual_cb)
+        sl.addWidget(self._mains_residual_cb, 1, 0, 1, 5)
 
         btn_row = QHBoxLayout()
         self._mains_preview_btn = QPushButton("Preview")
@@ -195,11 +186,13 @@ class FFTViewerMainsMixin:
             "harmonics, scan speed and notch settings in the processing "
             "history, so the removal is reproducible."))
         self._mains_apply_btn.clicked.connect(self._on_mains_apply)
+        for b in (self._mains_preview_btn, self._mains_clear_btn, self._mains_apply_btn):
+            b.setMaximumWidth(110)
         btn_row.addWidget(self._mains_preview_btn)
         btn_row.addWidget(self._mains_clear_btn)
         btn_row.addStretch(1)
         btn_row.addWidget(self._mains_apply_btn)
-        sl.addLayout(btn_row)
+        sl.addLayout(btn_row, 2, 0, 1, 5)
         lay.addWidget(sgrp)
 
         lay.addStretch(1)
