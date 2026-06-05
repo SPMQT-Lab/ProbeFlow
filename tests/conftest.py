@@ -65,7 +65,6 @@ def _qt_application_preflight() -> tuple[bool, str]:
 
 
 def pytest_collection_modifyitems(config, items):
-    _ = config
     gui_items = []
     for item in items:
         module_name = Path(str(getattr(item, "path", getattr(item, "fspath", "")))).name
@@ -79,14 +78,26 @@ def pytest_collection_modifyitems(config, items):
         return
 
     ok, reason = _qt_application_preflight()
-    if ok:
+    if not ok:
+        marker = pytest.mark.skip(
+            reason=f"Qt QApplication preflight failed in subprocess ({reason})"
+        )
+        for item in gui_items:
+            item.add_marker(marker)
         return
 
-    marker = pytest.mark.skip(
-        reason=f"Qt QApplication preflight failed in subprocess ({reason})"
-    )
-    for item in gui_items:
-        item.add_marker(marker)
+    # Qt works here: run each GUI test in its own forked subprocess. Offscreen
+    # Qt is a single process-wide QApplication with a global QThreadPool and a
+    # PySide wrapper cache keyed by C++ pointer address; objects leaked by one
+    # test get their address (and stale Python wrapper) reused by a later test,
+    # which surfaces as an intermittent SIGSEGV or a bogus AttributeError on a
+    # recycled wrapper. A fresh address space per test removes the reuse entirely
+    # and contains any residual crash to a single reported test instead of
+    # aborting the whole run. Requires pytest-forked; without it the marker is a
+    # harmless no-op and the tests run in-process (the prior behaviour).
+    if config.pluginmanager.hasplugin("forked"):
+        for item in gui_items:
+            item.add_marker(pytest.mark.forked)
 
 
 @pytest.fixture(autouse=True)
