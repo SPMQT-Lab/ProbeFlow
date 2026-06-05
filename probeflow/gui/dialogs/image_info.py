@@ -132,6 +132,11 @@ class ImageInfoDialog(QDialog):
                 # Convert A → pA for display
                 sp_pA = metadata.setpoint * 1e12
                 _row("Setpoint", f"{sp_pA:.4g} pA")
+            elif metadata.feedback_setpoint is not None:
+                # Non-current feedback (e.g. constant-Δf AFM): report in native units.
+                label = metadata.feedback_setpoint_label or "Feedback setpoint"
+                unit = f" {metadata.feedback_setpoint_unit}" if metadata.feedback_setpoint_unit else ""
+                _row(label, f"{metadata.feedback_setpoint:.4g}{unit}")
             else:
                 _row("Setpoint", "—")
 

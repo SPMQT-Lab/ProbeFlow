@@ -182,6 +182,36 @@ class TestCreatecSetpointExtraction:
         meta = read_scan_metadata(TESTDATA / "createc_scan_island_60nm.dat")
         assert meta.setpoint is None
 
+    def test_constant_df_afm_does_not_report_setpoint_as_current(self):
+        # FBChannel=4, PLLOn=1: SetPoint (7.000) is a Δf in Hz, not a current.
+        # FBLogIset (700) is a stale current-loop value. Neither is amps.
+        _bias, setpoint, _comment, _dt = _extract_createc_fields({
+            "FBChannel": "4",
+            "PLLOn": "1",
+            "SetPoint": "7.000",
+            "FBLogIset": "700.0",
+        })
+        assert setpoint is None
+
+    def test_pll_off_current_channel_still_reads_setpoint_as_amps(self):
+        _bias, setpoint, _comment, _dt = _extract_createc_fields({
+            "FBChannel": "0",
+            "PLLOn": "0",
+            "SetPoint": "1.01E-10",
+        })
+        assert setpoint == pytest.approx(1.01e-10)
+
+    def test_qplus_afm_fixture_reports_df_setpoint_not_current(self):
+        meta = read_scan_metadata(TESTDATA / "createc_scan_qplus_10ch_afm.dat")
+        assert meta.setpoint is None
+        assert meta.feedback_setpoint == pytest.approx(7.0)
+        assert meta.feedback_setpoint_unit == "Hz"
+        assert meta.feedback_setpoint_label == "Δf setpoint"
+
+    def test_stm_fixture_has_no_feedback_setpoint(self):
+        meta = read_scan_metadata(TESTDATA / "createc_scan_overview_240nm_pos.dat")
+        assert meta.feedback_setpoint is None
+
 
 class TestNanonisSetpointExtraction:
     def test_converted_dat_header_preserves_z_controller_setpoint(self):
@@ -195,3 +225,24 @@ class TestNanonisSetpointExtraction:
         _bias, setpoint, _comment, _dt = _extract_nanonis_fields(sxm_hdr)
 
         assert setpoint == pytest.approx(dat_meta.setpoint)
+
+    def test_qplus_afm_conversion_does_not_emit_current_setpoint(self):
+        # The constant-Δf qPlus AFM fixture has SetPoint=7.000 Hz with FBChannel=4
+        # / PLLOn=1.  Writing that into Z-CONTROLLER as "7.000E+0 A" would
+        # propagate the bogus 7e+12 pA tunnel current, so the converter must label
+        # the controller with the frequency-shift channel instead.
+        dat_meta = read_scan_metadata(TESTDATA / "createc_scan_qplus_10ch_afm.dat")
+        sxm_hdr = construct_hdr(
+            dict(dat_meta.raw_header),
+            TESTDATA / "createc_scan_qplus_10ch_afm.dat",
+            num_chan=4,
+        )
+
+        z_controller = sxm_hdr["Z-CONTROLLER"]
+        assert "A" not in z_controller.split("\n")[-1].split("\t")[3]
+        assert "Hz" in z_controller
+        assert "Frequency Shift" in z_controller
+
+        # The Nanonis-side extractor must not read any current out of the header.
+        _bias, setpoint, _comment, _dt = _extract_nanonis_fields(sxm_hdr)
+        assert setpoint is None

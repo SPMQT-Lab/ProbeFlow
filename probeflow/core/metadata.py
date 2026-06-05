@@ -20,7 +20,7 @@ from pathlib import Path
 import re
 from typing import Any
 
-from probeflow.core.common import _f
+from probeflow.core.common import _f, _i
 
 
 # ── ScanMetadata dataclass ────────────────────────────────────────────────────
@@ -43,6 +43,12 @@ class ScanMetadata:
     scan_range: tuple[float, float] | None = None  # (total_width_m, total_height_m) in metres
     bias: float | None = None                   # V
     setpoint: float | None = None               # A (tunnel current setpoint)
+    # Active feedback setpoint when the Z loop does not run on the tunnel
+    # current — e.g. constant-Δf qPlus AFM, where SetPoint is a frequency shift
+    # in hertz rather than a current.  None for ordinary constant-current STM.
+    feedback_setpoint: float | None = None      # native feedback-channel units
+    feedback_setpoint_unit: str | None = None   # e.g. "Hz"
+    feedback_setpoint_label: str | None = None  # e.g. "Δf setpoint"
     comment: str | None = None
     acquisition_datetime: str | None = None
     raw_header: dict[str, Any] = field(default_factory=dict)
@@ -68,8 +74,14 @@ def metadata_from_scan(scan) -> ScanMetadata:
 
     display_name = Path(scan.source_path).stem if scan.source_path else ""
 
+    feedback_setpoint = feedback_setpoint_unit = feedback_setpoint_label = None
     if scan.source_format == "dat":
         bias, setpoint, comment, acq_dt = _extract_createc_fields(hdr)
+        (
+            feedback_setpoint,
+            feedback_setpoint_unit,
+            feedback_setpoint_label,
+        ) = _extract_createc_feedback_setpoint(hdr)
         experiment_metadata = dict(getattr(scan, "experiment_metadata", {}) or {})
     elif scan.source_format == "sxm":
         bias, setpoint, comment, acq_dt = _extract_nanonis_fields(hdr)
@@ -92,6 +104,9 @@ def metadata_from_scan(scan) -> ScanMetadata:
         scan_range=scan_range,
         bias=bias,
         setpoint=setpoint,
+        feedback_setpoint=feedback_setpoint,
+        feedback_setpoint_unit=feedback_setpoint_unit,
+        feedback_setpoint_label=feedback_setpoint_label,
         comment=comment,
         acquisition_datetime=acq_dt,
         raw_header=hdr,
@@ -104,6 +119,11 @@ def metadata_from_createc_dat_report(report) -> ScanMetadata:
 
     hdr = dict(report.header)
     bias, setpoint, comment, acq_dt = _extract_createc_fields(hdr)
+    (
+        feedback_setpoint,
+        feedback_setpoint_unit,
+        feedback_setpoint_label,
+    ) = _extract_createc_feedback_setpoint(hdr)
     plane_names, units = _createc_report_plane_metadata(report)
     from probeflow.io.createc_interpretation import createc_dat_experiment_metadata
     experiment_metadata = createc_dat_experiment_metadata(hdr)
@@ -123,6 +143,9 @@ def metadata_from_createc_dat_report(report) -> ScanMetadata:
         scan_range=scan_range,
         bias=bias,
         setpoint=setpoint,
+        feedback_setpoint=feedback_setpoint,
+        feedback_setpoint_unit=feedback_setpoint_unit,
+        feedback_setpoint_label=feedback_setpoint_label,
         comment=comment,
         acquisition_datetime=acq_dt,
         raw_header=hdr,
@@ -243,12 +266,21 @@ def _extract_createc_fields(hdr: dict) -> tuple:
     # Setpoint current: old headers use Current[A], newer ones often use
     # SetPoint in amps. FBLogIset is a pA-style fallback and can be zero for
     # off-feedback/AFM scans, which should remain unknown in the summary.
-    setpoint = _positive_or_none(_f(hdr.get("Current[A]")))
-    if setpoint is None:
-        setpoint = _positive_or_none(_f(hdr.get("SetPoint")))
-    if setpoint is None:
-        fb_log_pA = _positive_or_none(_f(hdr.get("FBLogIset")))
-        setpoint = fb_log_pA * 1e-12 if fb_log_pA is not None else None
+    #
+    # These keys only describe a tunnel current when the Z feedback actually
+    # runs on the current channel.  For constant-Δf qPlus AFM the feedback runs
+    # off the PLL frequency-shift channel and SetPoint is a Δf in hertz, while a
+    # stale FBLogIset (e.g. 700) lingers from the current loop — reading either
+    # as amps yields nonsense like 7e+12 pA, so report no current setpoint.
+    if _createc_feedback_is_current(hdr):
+        setpoint = _positive_or_none(_f(hdr.get("Current[A]")))
+        if setpoint is None:
+            setpoint = _positive_or_none(_f(hdr.get("SetPoint")))
+        if setpoint is None:
+            fb_log_pA = _positive_or_none(_f(hdr.get("FBLogIset")))
+            setpoint = fb_log_pA * 1e-12 if fb_log_pA is not None else None
+    else:
+        setpoint = None
 
     # Comment / title: "Titel" (German for title)
     raw_titel = hdr.get("Titel", "")
@@ -264,6 +296,50 @@ def _positive_or_none(value: float | None) -> float | None:
     if value is None:
         return None
     return value if value > 0 else None
+
+
+def _createc_feedback_is_current(hdr: dict) -> bool:
+    """Return True when the Createc Z feedback runs on the tunnel-current channel.
+
+    Createc stores the active feedback setpoint in ``SetPoint`` using the units
+    of whatever signal the Z loop regulates.  For constant-current STM
+    (``FBChannel`` 0/absent, PLL off) that value is a tunnel current in amps; for
+    constant-Δf qPlus AFM the loop runs off the PLL frequency-shift channel
+    (``FBChannel`` ≠ 0 and/or ``PLLOn=1``) and ``SetPoint`` is a Δf in hertz.
+    """
+
+    fb_channel = _i(hdr.get("FBChannel"), None)
+    if fb_channel not in (None, 0):
+        return False
+    if _createc_truthy(hdr.get("PLLOn")):
+        return False
+    return True
+
+
+def _extract_createc_feedback_setpoint(hdr: dict) -> tuple[float | None, str | None, str | None]:
+    """Return ``(value, unit, label)`` for a non-current Createc feedback loop.
+
+    Only meaningful when :func:`_createc_feedback_is_current` is False.  The
+    constant-Δf qPlus AFM case is reported as a frequency shift in hertz; other
+    non-current loops fall back to a generic unitless setpoint.
+    """
+
+    if _createc_feedback_is_current(hdr):
+        return (None, None, None)
+
+    value = _f(hdr.get("SetPoint"))
+    if value is None:
+        return (None, None, None)
+
+    if _createc_truthy(hdr.get("PLLOn")) or _i(hdr.get("FBChannel"), None) == 4:
+        return (value, "Hz", "Δf setpoint")
+    return (value, None, "Feedback setpoint")
+
+
+def _createc_truthy(value) -> bool:
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _extract_nanonis_fields(hdr: dict) -> tuple:

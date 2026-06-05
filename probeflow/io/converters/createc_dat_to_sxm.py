@@ -13,6 +13,10 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 
 from probeflow.io.common import _f, setup_logging
+from probeflow.core.metadata import (
+    _createc_feedback_is_current,
+    _extract_createc_feedback_setpoint,
+)
 from probeflow.io.readers.createc_dat import (
     has_canonical_stm_four_channel_layout,
     has_legacy_stm_two_channel_layout,
@@ -227,10 +231,22 @@ def construct_hdr(
 
     comment = (dat_hdr.get("Titel", "") or "Empty").strip()
 
-    z_name = "log Current" if str(dat_hdr.get("FBLog", "0")).strip() == "1" else "Current"
-    z_on   = "0" if str(dat_hdr.get("FBOff", "0")).strip() == "1" else "1"
-    setp   = _f(str(dat_hdr.get("SetPoint", "0")).replace(",", "."), 0.0)
-    setp_str = sci(setp, 3) + " A"
+    z_on = "0" if str(dat_hdr.get("FBOff", "0")).strip() == "1" else "1"
+    if _createc_feedback_is_current(dat_hdr):
+        z_name = "log Current" if str(dat_hdr.get("FBLog", "0")).strip() == "1" else "Current"
+        setp = _f(str(dat_hdr.get("SetPoint", "0")).replace(",", "."), 0.0)
+        setp_str = sci(setp, 3) + " A"
+    else:
+        # Non-current feedback (e.g. constant-Δf qPlus AFM): the Z loop runs off
+        # the PLL frequency-shift channel, so SetPoint is in that channel's
+        # native units (Hz), not amps.  Emitting "7.000E+0 A" here would propagate
+        # the bogus 7e+12 pA tunnel current.  Label the controller with the real
+        # feedback channel/unit instead so downstream readers see no current.
+        fb_value, fb_unit, _fb_label = _extract_createc_feedback_setpoint(dat_hdr)
+        z_name = "Frequency Shift" if fb_unit == "Hz" else "Feedback"
+        setp_str = sci(fb_value if fb_value is not None else 0.0, 3)
+        if fb_unit:
+            setp_str += f" {fb_unit}"
 
     hdr: Dict[str, str] = {
         "NANONIS_VERSION": "2",
