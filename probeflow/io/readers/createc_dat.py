@@ -228,20 +228,52 @@ def _split_createc_dat_payload(path: Path, raw: bytes) -> tuple[bytes, bytes]:
 
     marker = b"DATA"
     pos = raw.find(marker)
-    while pos >= 0:
-        start = pos + len(marker)
-        if start < len(raw) and raw[start] == 0x78:
-            try:
-                return raw[:pos], zlib.decompress(raw[start:])
-            except zlib.error:
-                pass
-        pos = raw.find(marker, start)
-
-    if marker not in raw:
+    if pos < 0:
         raise ValueError(
             f"{path.name}: missing DATA marker — not a valid Createc .dat file"
         )
-    raise ValueError(f"{path.name}: zlib decompression failed after DATA marker")
+
+    # ``zlib.decompress`` already tolerates trailing bytes after a complete
+    # stream, so reaching the end of this loop means no DATA marker was followed
+    # by an inflatable zlib stream.  Track which way it failed so the message can
+    # distinguish a truncated/corrupt payload (re-copy the file) from a Createc
+    # layout this reader does not support (a code gap).
+    zlib_header_seen = False
+    last_zlib_error: zlib.error | None = None
+    while pos >= 0:
+        start = pos + len(marker)
+        if start < len(raw) and raw[start] == 0x78:
+            zlib_header_seen = True
+            try:
+                return raw[:pos], zlib.decompress(raw[start:])
+            except zlib.error as exc:
+                last_zlib_error = exc
+        pos = raw.find(marker, start)
+
+    token = _createc_format_token(raw)
+    if zlib_header_seen:
+        # A zlib header (0x78) was present but the stream would not inflate —
+        # almost always a file that was incompletely written or copied (a scan
+        # still being saved, or a partial/interrupted network-drive copy).
+        raise ValueError(
+            f"{path.name}: the compressed image payload after the DATA marker is "
+            f"corrupt or truncated ({last_zlib_error}); the file may be "
+            f"incompletely written or copied (file is {len(raw)} bytes, "
+            f"format token {token!r})"
+        )
+    # No 0x78 zlib header followed any DATA marker: the image block is not in the
+    # zlib-compressed layout this reader supports.
+    raise ValueError(
+        f"{path.name}: no zlib-compressed image payload found after the DATA "
+        f"marker — unsupported Createc .dat variant (format token {token!r})"
+    )
+
+
+def _createc_format_token(raw: bytes) -> str:
+    """Return the leading Createc format token (e.g. ``[Paramco32]``) for messages."""
+
+    head = raw[:64].split(b"\r\n", 1)[0].split(b"\n", 1)[0]
+    return head.decode("ascii", "replace").strip()
 
 
 def _parse_createc_dat_header(hb: bytes) -> dict[str, str]:
