@@ -22,7 +22,7 @@ import numpy as np
 from probeflow.gui.typography import ui_font
 from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import (
-    QBrush, QColor, QFont, QKeySequence, QPainter, QPainterPath, QPen,
+    QBrush, QColor, QFont, QImage, QKeySequence, QPainter, QPainterPath, QPen,
     QPixmap, QTransform,
 )
 from PySide6.QtWidgets import (
@@ -172,6 +172,7 @@ class ImageCanvas(QGraphicsView):
         self._bad_segment_items: list[QGraphicsRectItem] = []
         self._feature_points: list[object] = []
         self._feature_point_items: list[QGraphicsEllipseItem] = []
+        self._mask_overlay_item: Optional[QGraphicsPixmapItem] = None
 
         self._text_overlay_item = QGraphicsTextItem()
         self._text_overlay_item.setDefaultTextColor(QColor("#cdd6f4"))
@@ -422,6 +423,46 @@ class ImageCanvas(QGraphicsView):
         for item in self._bad_segment_items:
             self.scene().removeItem(item)
         self._bad_segment_items.clear()
+
+    # ── active-mask overlay ───────────────────────────────────────────────────
+
+    def set_mask_overlay(
+        self,
+        mask,
+        *,
+        color: tuple[int, int, int] = (255, 59, 48),
+        alpha: int = 110,
+    ) -> None:
+        """Show a non-destructive semi-transparent overlay of a boolean *mask*.
+
+        Rendered as a single pixmap item in image-pixel coordinates (1 px = 1
+        scene unit, like the underlying image), at a Z below the ROI handles so
+        it never blocks interaction.  Follows the ``set_bad_segment_overlay``
+        precedent.
+        """
+        self.clear_mask_overlay()
+        if mask is None:
+            return
+        m = np.asarray(mask, dtype=bool)
+        if m.ndim != 2 or not m.any():
+            return
+        h, w = m.shape
+        rgba = np.zeros((h, w, 4), dtype=np.uint8)
+        rgba[m, 0] = color[0]
+        rgba[m, 1] = color[1]
+        rgba[m, 2] = color[2]
+        rgba[m, 3] = int(np.clip(alpha, 0, 255))
+        qimg = QImage(rgba.data, w, h, rgba.strides[0], QImage.Format_RGBA8888).copy()
+        item = QGraphicsPixmapItem(QPixmap.fromImage(qimg))
+        item.setZValue(20)  # above the image, below ROI shapes/handles
+        item.setAcceptedMouseButtons(Qt.NoButton)
+        self.scene().addItem(item)
+        self._mask_overlay_item = item
+
+    def clear_mask_overlay(self) -> None:
+        if self._mask_overlay_item is not None:
+            self.scene().removeItem(self._mask_overlay_item)
+            self._mask_overlay_item = None
 
     # ── detected feature points ──────────────────────────────────────────────
 

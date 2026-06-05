@@ -33,7 +33,9 @@ from probeflow.core.roi import (
     ResizeHandle,
     resize_handles,
     resize_roi,
+    roi_from_mask,
 )
+from probeflow.core.mask import ImageMask, MaskSet, mask_name
 
 __all__ = [
     "PLANE_CANON_NAMES",
@@ -55,4 +57,8 @@ __all__ = [
     "ResizeHandle",
     "resize_handles",
     "resize_roi",
+    "roi_from_mask",
+    "ImageMask",
+    "MaskSet",
+    "mask_name",
 ]

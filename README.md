@@ -57,6 +57,13 @@ suite. What it does today:
   periodic-spot notch filters, TV denoising, point/plane zeroing, lossless and
   arbitrary geometry transforms, and derived arithmetic channels. Steps are
   recorded as a processing state so an export can be reproduced.
+- **Advanced edge detection** (Process tab) — **Canny** and **Sobel/Scharr**
+  detectors with a live, non-destructive overlay preview and STM-tuned presets.
+  Results become reusable analysis objects: an overlay, a new image, an **active
+  mask**, or ROI(s). The active-mask layer (Masks tab) supports morphological
+  cleanup (remove small objects, fill holes, dilate/erode/open/close,
+  skeletonize), restricts statistics, excludes regions from a plane fit (via
+  mask→ROI), and is saved to a `<scan>.masks.json` sidecar.
 - **FFT tools** (the FFT viewer) — inspect the magnitude and radial profile with
   q in nm⁻¹; overlay a draggable reciprocal-lattice grid and apply an affine
   lattice correction; show Bragg-shell rings for a known structure; predict and

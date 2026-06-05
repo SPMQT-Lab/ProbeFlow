@@ -17,6 +17,7 @@ class ProcessingControlPanel(QWidget):
     bad_line_preview_settings_changed = Signal()
     stm_background_requested = Signal()
     simple_background_requested = Signal()
+    advanced_edge_requested = Signal()
 
     QUICK_KEYS = ("align_rows", "remove_bad_lines")
 
@@ -270,6 +271,15 @@ class ProcessingControlPanel(QWidget):
         self._edge_sigma_w.setVisible(False)
         self._edge_combo.currentIndexChanged.connect(
             lambda i: self._edge_sigma_w.setVisible(i != 0))
+
+        self._advanced_edge_btn = QPushButton("Advanced Edge Detection...")
+        self._advanced_edge_btn.setFont(ui_font(8))
+        self._advanced_edge_btn.setToolTip(
+            "Open the Canny / Sobel-Scharr edge detector with a live overlay preview. "
+            "Outputs can become a mask, ROI(s), or a new image."
+        )
+        self._advanced_edge_btn.clicked.connect(self.advanced_edge_requested.emit)
+        L.addWidget(self._advanced_edge_btn)
 
         L.addStretch()
         lay.addWidget(self._filter_section)

@@ -10,6 +10,7 @@ from probeflow.gui.dialogs.definitions import (
     _DefinitionsPanel,
     render_roi_reference_html,
 )
+from probeflow.gui.dialogs.edge_detection import EdgeDetectionDialog
 from probeflow.gui.dialogs.feature_finder import FeatureFinderDialog
 from probeflow.gui.dialogs.feature_lattice_dialog import FeatureLatticeDialog
 from probeflow.gui.dialogs.fft_viewer import FFTViewerDialog
@@ -23,6 +24,7 @@ from probeflow.gui.dialogs.image_viewer import ImageViewerDialog
 
 __all__ = [
     "AboutDialog",
+    "EdgeDetectionDialog",
     "_DEFINITIONS_HTML",
     "_ROI_REFERENCE_HTML",
     "_DefinitionsDialog",

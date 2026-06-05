@@ -4,6 +4,7 @@ from probeflow.processing.bad_lines import *      # noqa: F401,F403
 from probeflow.processing.background import *     # noqa: F401,F403
 from probeflow.processing.alignment import *      # noqa: F401,F403
 from probeflow.processing.filters import *        # noqa: F401,F403
+from probeflow.processing.edge_detection import *  # noqa: F401,F403
 from probeflow.processing.mains_pickup import *    # noqa: F401,F403
 from probeflow.processing.inverse_fft import *     # noqa: F401,F403
 from probeflow.processing.analysis import *       # noqa: F401,F403

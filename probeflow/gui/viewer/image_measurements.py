@@ -247,6 +247,45 @@ class ImageMeasurementController:
         except Exception as exc:
             self._set_status(f"Could not add ROI statistics: {exc}")
 
+    def add_active_mask_stats_measurement(self) -> None:
+        """Add a statistics measurement restricted to the active mask."""
+        mask = self._active_mask_array()
+        arr = self._display_arr()
+        if mask is None:
+            self._set_status("No active mask. Create one in Advanced Edge Detection.")
+            return
+        if arr is None:
+            return
+        if mask.shape != arr.shape[:2]:
+            self._set_status("Active mask shape no longer matches the image.")
+            return
+        try:
+            entry, scale, unit, channel, source_label = self._source_info()
+            px_x_nm, px_y_nm = self._pixel_size_nm()
+            mask_obj = self._viewer._image_mask_set.active()
+            result = roi_statistics(
+                arr * scale,
+                measurement_id=self._table.next_measurement_id(),
+                source_label=source_label,
+                source_path=str(entry.path),
+                channel=channel,
+                mask=mask,
+                pixel_size_x=px_x_nm,
+                pixel_size_y=px_y_nm,
+                x_unit="nm",
+                y_unit="nm",
+                height_unit=unit or None,
+                notes=f"Mask statistics for {mask_obj.name if mask_obj else 'active mask'}",
+            )
+            self._record(result)
+        except Exception as exc:
+            self._set_status(f"Could not add mask statistics: {exc}")
+
+    def _active_mask_array(self):
+        """Boolean array of the viewer's active mask, or None."""
+        getter = getattr(self._viewer, "_active_mask_array", None)
+        return getter() if callable(getter) else None
+
     def add_selected_step_height_measurement(self) -> None:
         self.add_step_height_measurement_for_rois(self.selected_roi_ids())
 

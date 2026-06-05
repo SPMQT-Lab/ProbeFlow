@@ -27,6 +27,8 @@ GUI_TEST_MODULES = {
     "test_mains_pickup_gui.py",
     "test_roi_resize_handles_canvas.py",
     "test_worker_signals_lifetime.py",
+    "test_edge_detection_dialog.py",
+    "test_mask_manager_gui.py",
 }
 
 MIXED_QT_FIXTURE_MODULES = {
