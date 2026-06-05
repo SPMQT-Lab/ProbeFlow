@@ -231,6 +231,21 @@ class STMBackgroundDialog(QDialog):
         self._status_lbl.setWordWrap(True)
         root.addWidget(self._status_lbl)
 
+        # Action buttons sit directly under the controls (above the preview
+        # panes) so Preview/Apply stay reachable without scrolling past the
+        # large image + plot area.
+        buttons = QHBoxLayout()
+        self._background_btn = QPushButton("Preview background")
+        self._corrected_btn = QPushButton("Preview corrected image")
+        self._apply_btn = QPushButton("Apply")
+        close_btn = QPushButton("Close")
+        buttons.addWidget(self._background_btn)
+        buttons.addWidget(self._corrected_btn)
+        buttons.addStretch()
+        buttons.addWidget(self._apply_btn)
+        buttons.addWidget(close_btn)
+        root.addLayout(buttons)
+
         body = QHBoxLayout()
         self._preview_lbl = QLabel("Preview")
         self._preview_lbl.setAlignment(Qt.AlignCenter)
@@ -266,24 +281,11 @@ class STMBackgroundDialog(QDialog):
         body.addLayout(right_col, 1)
         root.addLayout(body, 1)
 
-        buttons = QHBoxLayout()
-        self._background_btn = QPushButton("Preview background")
-        self._corrected_btn = QPushButton("Preview corrected image")
-        self._apply_btn = QPushButton("Apply")
-        close_btn = QPushButton("Close")
-        buttons.addWidget(self._background_btn)
-        buttons.addWidget(self._corrected_btn)
-        buttons.addStretch()
-        buttons.addWidget(self._apply_btn)
-        buttons.addWidget(close_btn)
-        root.addLayout(buttons)
-
         self._background_btn.clicked.connect(lambda: self._preview("background"))
         self._corrected_btn.clicked.connect(lambda: self._preview("corrected"))
         self._apply_btn.clicked.connect(self._apply)
         close_btn.clicked.connect(self.close)
-        self._model_combo.currentTextChanged.connect(self._sync_controls)
-        self._model_combo.currentTextChanged.connect(lambda _: self._invalidate_preview())
+        self._model_combo.currentTextChanged.connect(lambda _: self._on_model_changed())
         self._fit_region_combo.currentIndexChanged.connect(lambda _: self._invalidate_preview())
         self._stat_combo.currentIndexChanged.connect(lambda _: self._invalidate_preview())
         self._stat_combo.currentIndexChanged.connect(lambda _: self._update_alignment_warning())
@@ -566,6 +568,15 @@ class STMBackgroundDialog(QDialog):
             self._warning_lbl.show()
         else:
             self._warning_lbl.hide()
+
+    def _on_model_changed(self) -> None:
+        # Switching the background model is a bigger change than tweaking one of
+        # its parameters, so refresh an existing preview automatically rather
+        # than just marking it stale.  (In-model tweaks still use the manual
+        # Preview buttons via ``_invalidate_preview``.)
+        self._sync_controls()
+        if self._last_result is not None:
+            self._preview(self._last_mode)
 
     def _invalidate_preview(self) -> None:
         if self._last_result is not None:
