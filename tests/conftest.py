@@ -89,6 +89,51 @@ def pytest_collection_modifyitems(config, items):
         item.add_marker(marker)
 
 
+@pytest.fixture(autouse=True)
+def _drain_qt_between_tests():
+    """Retire Qt background workers and deferred deletions after each test.
+
+    The GUI tests start real ``QThreadPool`` workers (e.g. ``ViewerLoader``) and
+    rely on ``deleteLater()`` for widget cleanup, but they never run a Qt event
+    loop, so neither finished-worker signals nor deferred deletions are flushed
+    at the test boundary. They then leak into the *next* test and are processed
+    at a nondeterministic moment — delivering a queued ``loaded`` signal to, or
+    running ``~QObject`` on, a half-torn-down dialog. That is the intermittent
+    offscreen-Qt SIGSEGV (it migrates between tests and passes on re-run).
+
+    Draining here makes each GUI test start from a clean slate: wait for the
+    global pool to finish (so no worker thread can still emit into a widget the
+    next test tears down), deliver the now-posted cross-thread signals to their
+    still-live receivers, then run the deferred deletions and settle.
+
+    Costs nothing when Qt was never imported (pure non-GUI sessions) or when no
+    ``QApplication`` exists yet.
+    """
+    yield
+
+    qtwidgets = sys.modules.get("PySide6.QtWidgets")
+    if qtwidgets is None:
+        return
+    app = qtwidgets.QApplication.instance()
+    if app is None:
+        return
+
+    from PySide6.QtCore import QEvent, QThreadPool
+
+    # 1. Let in-flight workers finish so their loaded()/failed() events are all
+    #    posted to the main thread before we flush. Returns immediately when the
+    #    pool is idle; the timeout is a safety bound that should never be hit.
+    QThreadPool.globalInstance().waitForDone(5000)
+    # 2. Deliver queued cross-thread signals to receivers that are still alive
+    #    (token-guarded slots drop stale content harmlessly).
+    app.processEvents()
+    # 3. Now actually destroy everything deleteLater()'d; Qt drops each object's
+    #    pending posted events as it runs the destructor.
+    app.sendPostedEvents(None, QEvent.DeferredDelete)
+    # 4. Settle anything the deletions themselves posted.
+    app.processEvents()
+
+
 @pytest.fixture
 def sample_dat_files():
     files = sorted(SAMPLE_DIR.glob("*.dat"))
