@@ -4,9 +4,8 @@ import numpy as np
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
-from probeflow.gui.typography import ui_font
+from probeflow.gui.typography import mono_font, ui_font
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QPushButton, QSlider, QVBoxLayout, QWidget,
 )
@@ -97,7 +96,7 @@ class PeriodicFilterDialog(FFTViewerDialog):
         info_lay.setContentsMargins(8, 6, 8, 4)
         info_lay.setSpacing(2)
         self._info_lbl = QLabel("")
-        self._info_lbl.setFont(QFont("Courier", 9))
+        self._info_lbl.setFont(mono_font(9))
         self._info_lbl.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         info_lay.addWidget(self._info_lbl)
         info_lay.addStretch(1)

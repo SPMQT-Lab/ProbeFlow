@@ -95,7 +95,11 @@ class FFTViewerReconstructMixin:
             "Remove selected: suppress the selected Fourier features and rebuild "
             "the corrected image. Keep selected: rebuild only the selected "
             "periodic component (everything else removed)."))
-        self._recon_mode_combo.currentIndexChanged.connect(self._update_reconstruct_status)
+        # Drop the combo's int index — _update_reconstruct_status treats its
+        # first positional arg as a reconstruction result, so passing the index
+        # straight through made it call res.imag_residual_norm on an int.
+        self._recon_mode_combo.currentIndexChanged.connect(
+            lambda _idx: self._update_reconstruct_status())
         self._recon_mode_combo.setMaximumWidth(140)
         mode_row.addWidget(self._recon_mode_combo)
         mode_row.addStretch(1)

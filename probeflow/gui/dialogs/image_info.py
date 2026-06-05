@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QDialog,
     QFormLayout,
@@ -18,6 +16,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+from probeflow.gui.typography import mono_font
 
 if TYPE_CHECKING:
     from probeflow.core.metadata import ScanMetadata
@@ -168,9 +168,7 @@ class ImageInfoDialog(QDialog):
         hist_lay.setContentsMargins(4, 4, 4, 4)
         hist_text = QPlainTextEdit()
         hist_text.setReadOnly(True)
-        mono_font = QFont("Menlo" if Path("/System/Library/Fonts/Menlo.ttc").exists() else "Courier")
-        mono_font.setPointSize(9)
-        hist_text.setFont(mono_font)
+        hist_text.setFont(mono_font(9))
         hist_text.setPlainText(processing_history_text or "(No processing history)")
         hist_lay.addWidget(hist_text)
         tabs.addTab(hist_widget, "Processing History")

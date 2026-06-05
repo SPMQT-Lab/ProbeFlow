@@ -8,7 +8,7 @@ from typing import Optional
 
 import numpy as np
 
-from probeflow.gui.typography import ui_font
+from probeflow.gui.typography import mono_font, ui_font
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
@@ -280,7 +280,7 @@ class LatticeGridPanel(QWidget):
         meas_lay = QVBoxLayout(meas_grp)
         meas_lay.setContentsMargins(6, 6, 6, 4)
         self._meas_lbl = QLabel("")
-        self._meas_lbl.setFont(QFont("Courier", 8))
+        self._meas_lbl.setFont(mono_font(8))
         self._meas_lbl.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         self._meas_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self._meas_lbl.setWordWrap(True)
@@ -393,7 +393,7 @@ class LatticeGridPanel(QWidget):
         meas_dist_lay = QVBoxLayout(meas_dist_grp)
         meas_dist_lay.setContentsMargins(6, 6, 6, 4)
         self._measured_lbl = QLabel("(tune grid above)")
-        self._measured_lbl.setFont(QFont("Courier", 8))
+        self._measured_lbl.setFont(mono_font(8))
         self._measured_lbl.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         self._measured_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
         meas_dist_lay.addWidget(self._measured_lbl)
@@ -405,7 +405,7 @@ class LatticeGridPanel(QWidget):
         corr_lay = QVBoxLayout(corr_grp)
         corr_lay.setContentsMargins(6, 6, 6, 4)
         self._correction_lbl = QLabel("(enter ideal lattice above)")
-        self._correction_lbl.setFont(QFont("Courier", 8))
+        self._correction_lbl.setFont(mono_font(8))
         self._correction_lbl.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         self._correction_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self._correction_lbl.setWordWrap(True)
