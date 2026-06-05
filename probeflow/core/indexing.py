@@ -54,6 +54,11 @@ class ProbeFlowItem:
     scan_range: Optional[tuple[float, float]] = None  # (width_m, height_m)
     bias: Optional[float] = None               # V
     setpoint: Optional[float] = None           # A
+    # Non-current feedback setpoint (e.g. constant-Δf AFM Δf in Hz); None for
+    # ordinary constant-current STM. See ScanMetadata.feedback_setpoint.
+    feedback_setpoint: Optional[float] = None
+    feedback_setpoint_unit: Optional[str] = None
+    feedback_setpoint_label: Optional[str] = None
     comment: Optional[str] = None
     acquisition_datetime: Optional[str] = None
     mtime_ns: Optional[int] = None
@@ -211,6 +216,9 @@ def _item_from_scan(
         scan_range=meta.scan_range,
         bias=meta.bias,
         setpoint=meta.setpoint,
+        feedback_setpoint=meta.feedback_setpoint,
+        feedback_setpoint_unit=meta.feedback_setpoint_unit,
+        feedback_setpoint_label=meta.feedback_setpoint_label,
         comment=meta.comment,
         acquisition_datetime=meta.acquisition_datetime,
         mtime_ns=mtime_ns,

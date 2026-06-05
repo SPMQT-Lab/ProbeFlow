@@ -34,7 +34,7 @@ _log = logging.getLogger(__name__)
 # Bump when the on-disk envelope or thumbnail params change shape.  Dataclass
 # field changes are detected automatically via the schema tag (see _schema_tag),
 # so this only needs bumping for structural changes the tag can't catch.
-_CACHE_VERSION = "2"
+_CACHE_VERSION = "3"
 
 # Soft cap on total cache size before least-recently-used entries are evicted.
 _DEFAULT_MAX_BYTES = 512 * 1024 * 1024  # 512 MiB
