@@ -12,6 +12,7 @@ import numpy as np
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
+    QAbstractSpinBox,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -56,6 +57,8 @@ class EdgeDetectionDialog(QDialog):
         *,
         theme: dict | None = None,
         pixel_size_nm: float | None = None,
+        pixel_size_x_nm: float | None = None,
+        pixel_size_y_nm: float | None = None,
         active_roi_mask: np.ndarray | None = None,
         source_channel: str | None = None,
         parent: QWidget | None = None,
@@ -68,6 +71,8 @@ class EdgeDetectionDialog(QDialog):
         self._image = np.asarray(image, dtype=np.float64).copy()
         self._theme = theme or {}
         self._pixel_size_nm = pixel_size_nm
+        self._pixel_size_x_nm = pixel_size_x_nm or pixel_size_nm
+        self._pixel_size_y_nm = pixel_size_y_nm or pixel_size_nm
         self._active_roi_mask = (
             None if active_roi_mask is None else np.asarray(active_roi_mask, dtype=bool)
         )
@@ -139,7 +144,20 @@ class EdgeDetectionDialog(QDialog):
         self._method_combo.currentIndexChanged.connect(self._stack.setCurrentIndex)
         self._method_combo.currentIndexChanged.connect(lambda _: self._schedule())
 
+        self._apply_control_sizing()
         self._recompute()
+
+    def _apply_control_sizing(self) -> None:
+        """Stop combo/label truncation and enlarge the tiny spin-box arrows."""
+        for combo in self.findChildren(QComboBox):
+            combo.setMinimumWidth(180)
+            combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+            # Widen the popup so item text (e.g. "Sobel"/"Scharr") is not clipped.
+            combo.view().setMinimumWidth(180)
+        for spin in self.findChildren(QAbstractSpinBox):
+            spin.setMinimumHeight(28)
+            spin.setMinimumWidth(120)
+            spin.setButtonSymbols(QAbstractSpinBox.UpDownArrows)
 
     # ── Panel construction ──────────────────────────────────────────────────
 
@@ -249,6 +267,13 @@ class EdgeDetectionDialog(QDialog):
         self._roi_min_size.setValue(20)
         self._roi_min_size.setSuffix(" px")
         roi_form.addRow("Min component size:", self._roi_min_size)
+        self._roi_fill = QCheckBox("Fill enclosed regions first")
+        self._roi_fill.setChecked(True)
+        self._roi_fill.setToolTip(
+            "Edge masks are thin boundaries; filling enclosed regions turns them "
+            "into solid area ROIs. Disable to convert the raw boundary pixels."
+        )
+        roi_form.addRow("", self._roi_fill)
         self._roi_simplify = QCheckBox("Simplify polylines")
         roi_form.addRow("", self._roi_simplify)
         self._roi_one_per = QCheckBox("One ROI per component")
@@ -340,6 +365,8 @@ class EdgeDetectionDialog(QDialog):
             threshold=float(self._grad_threshold.value()),
             roi_mask=roi,
             pixel_size_nm=self._pixel_size_nm,
+            pixel_size_x_nm=self._pixel_size_x_nm,
+            pixel_size_y_nm=self._pixel_size_y_nm,
             source_channel=self._source_channel,
         )
 
@@ -426,6 +453,12 @@ class EdgeDetectionDialog(QDialog):
         min_size = self._roi_min_size.value() if hasattr(self, "_roi_min_size") else 20
         simplify = self._roi_simplify.isChecked() if hasattr(self, "_roi_simplify") else False
         one_per = self._roi_one_per.isChecked() if hasattr(self, "_roi_one_per") else True
+        fill = self._roi_fill.isChecked() if hasattr(self, "_roi_fill") else True
+        if fill:
+            # Edge masks are thin boundaries; fill enclosed regions so they
+            # become solid area ROIs rather than skinny/broken outlines.
+            from probeflow.processing.mask_ops import fill_holes
+            mask = fill_holes(mask)
         rois = roi_from_mask(
             mask, min_size_px=int(min_size), simplify=bool(simplify),
             one_per_component=bool(one_per),
