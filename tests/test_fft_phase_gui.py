@@ -139,7 +139,11 @@ class TestPhaseView:
         assert np.array_equal(dlg._fft_mag, mag)   # magnitude data untouched
         # Reconstruct still applies in phase view.
         dlg._tab_widget.setCurrentIndex(dlg._reconstruct_tab_index)
-        dlg._on_add_selection("circle")
+        from probeflow.gui.dialogs.fft_selection import FourierSelection
+        ov = dlg._ensure_selection_overlay()
+        ov._sels.append(FourierSelection("ellipse", cx_q=1.5, cy_q=0.0, rx_q=0.5, ry_q=0.5))
+        ov._selected = 0
+        dlg._on_selection_changed()
         dlg._on_reconstruct_apply()
         assert captured.get("op") == "inverse_fft_filter"
         dlg.deleteLater()

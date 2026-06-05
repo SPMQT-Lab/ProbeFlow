@@ -12,20 +12,33 @@ callbacks, and the shared FFT-preview helpers ``_show_fft_preview`` /
 from __future__ import annotations
 
 import numpy as np
+from probeflow.core.resources import asset_path
 from probeflow.gui._tooltips import tip as _tip
 from probeflow.gui.typography import ui_font
+from PySide6.QtCore import Qt, QSize
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFileDialog, QFrame, QGroupBox, QHBoxLayout,
-    QLabel, QPushButton, QScrollArea, QSpinBox, QVBoxLayout, QWidget,
+    QLabel, QPushButton, QScrollArea, QSpinBox, QToolButton, QVBoxLayout, QWidget,
 )
+
+# Shared paint palette (mirrors the feature-finder MASK_COLORS).
+_PAINT_COLORS: dict[str, tuple[int, int, int]] = {
+    "Cyan":    (137, 220, 235),
+    "Red":     (243, 139, 168),
+    "Green":   (166, 227, 161),
+    "Yellow":  (249, 226, 175),
+    "Blue":    (137, 180, 250),
+    "Magenta": (203, 166, 247),
+}
 
 
 class FFTViewerReconstructMixin:
     """Select Fourier features, preview the inverse FFT, and apply/export."""
 
     def _build_reconstruct_tab(self) -> QWidget:
-        """Select Fourier features (circle/ellipse), preview the inverse FFT
-        result + residual, and apply/export."""
+        """Draw Fourier selections (ellipse / rectangle / paint), preview the
+        inverse FFT result + residual, and apply/export."""
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
@@ -41,9 +54,9 @@ class FFTViewerReconstructMixin:
         intro.setWordWrap(True)
         intro.setFont(ui_font(9))
         intro.setToolTip(_tip(
-            "Make FFT filtering auditable: drop circle/ellipse selections on "
-            "Fourier features, choose Remove or Keep, and preview the "
-            "reconstructed image and the residual before applying. Use it to "
+            "Make FFT filtering auditable: draw ellipse/rectangle/paint "
+            "selections on Fourier features, choose Remove or Keep, and preview "
+            "the reconstructed image and the residual before applying. Use it to "
             "confirm a periodic artefact is really gone (or to isolate one "
             "periodic component)."))
         lay.addWidget(intro)
@@ -52,31 +65,70 @@ class FFTViewerReconstructMixin:
         sgrp = QGroupBox("Fourier selections")
         sg = QVBoxLayout(sgrp)
         sg.setSpacing(4)
-        add_row = QHBoxLayout()
-        add_circle = QPushButton("Add circle")
-        add_circle.setToolTip(_tip(
-            "Add a circular selection. Drag its centre to move it onto a "
-            "Fourier feature and drag the square handle to resize. Its "
-            "conjugate partner (dashed) is added automatically."))
-        add_circle.clicked.connect(lambda: self._on_add_selection("circle"))
-        add_ellipse = QPushButton("Add ellipse")
-        add_ellipse.setToolTip(_tip(
-            "Add an elliptical selection with independent width/height handles "
-            "— for elongated or streaky Fourier features."))
-        add_ellipse.clicked.connect(lambda: self._on_add_selection("ellipse"))
+        # Checkable draw tools: pick one, then drag on the FFT to draw. Holding
+        # Shift draws a regular shape (circle / square). Click an active tool
+        # again to return to edit mode (move/resize existing selections).
+        tool_row = QHBoxLayout()
+        self._recon_tool_btns: dict[str, QToolButton] = {}
+        tool_specs = [
+            ("ellipse", "Ellipse", "ellipse",
+             "Draw an ellipse: drag a box on the FFT. Hold Shift for a circle. "
+             "Its conjugate partner (dashed) is added automatically."),
+            ("rect", "Rectangle", "rectangle",
+             "Draw a rectangle: drag a box on the FFT. Hold Shift for a square."),
+            ("paint", "Paint", "freehand",
+             "Freehand brush: drag to paint an irregular Fourier region. The "
+             "mirrored (conjugate) region is grabbed too."),
+        ]
+        for kind, label, icon, tip in tool_specs:
+            btn = QToolButton()
+            btn.setText(label)
+            btn.setCheckable(True)
+            btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+            ipath = asset_path(f"toolbar/{icon}.png")
+            if ipath.exists():
+                btn.setIcon(QIcon(str(ipath)))
+                btn.setIconSize(QSize(16, 16))
+            btn.setToolTip(_tip(tip))
+            btn.clicked.connect(lambda _checked=False, k=kind: self._on_tool_clicked(k))
+            self._recon_tool_btns[kind] = btn
+            tool_row.addWidget(btn)
+        tool_row.addStretch(1)
+        sg.addLayout(tool_row)
+
+        # Paint brush controls — only relevant while the Paint tool is active.
+        self._recon_paint_row = QWidget()
+        paint_lay = QHBoxLayout(self._recon_paint_row)
+        paint_lay.setContentsMargins(0, 0, 0, 0)
+        paint_lay.setSpacing(4)
+        paint_lay.addWidget(QLabel("Brush:"))
+        self._recon_brush_spin = QSpinBox()
+        self._recon_brush_spin.setRange(1, 100)
+        self._recon_brush_spin.setValue(8)
+        self._recon_brush_spin.setSuffix(" px")
+        self._recon_brush_spin.setToolTip(_tip("Paint brush radius, in FFT pixels."))
+        self._recon_brush_spin.setMaximumWidth(80)
+        self._recon_brush_spin.valueChanged.connect(self._on_brush_size_changed)
+        paint_lay.addWidget(self._recon_brush_spin)
+        paint_lay.addWidget(QLabel("Color:"))
+        self._recon_color_combo = QComboBox()
+        self._recon_color_combo.addItems(list(_PAINT_COLORS.keys()))
+        self._recon_color_combo.setToolTip(_tip("Paint overlay color."))
+        self._recon_color_combo.setMaximumWidth(110)
+        self._recon_color_combo.currentIndexChanged.connect(self._on_paint_color_changed)
+        paint_lay.addWidget(self._recon_color_combo)
+        paint_lay.addStretch(1)
+        self._recon_paint_row.setVisible(False)
+        sg.addWidget(self._recon_paint_row)
+
         del_btn = QPushButton("Delete selected")
         del_btn.setToolTip(_tip("Remove the currently-selected Fourier region."))
         del_btn.clicked.connect(self._on_delete_selection)
         clr_btn = QPushButton("Clear selections")
         clr_btn.setToolTip(_tip("Remove all Fourier selections."))
         clr_btn.clicked.connect(self._on_clear_selections)
-        # 2×2 button block at a compact width instead of full-width rows.
-        for b in (add_circle, add_ellipse, del_btn, clr_btn):
+        for b in (del_btn, clr_btn):
             b.setMaximumWidth(150)
-        add_row.addWidget(add_circle)
-        add_row.addWidget(add_ellipse)
-        add_row.addStretch(1)
-        sg.addLayout(add_row)
         del_row = QHBoxLayout()
         del_row.addWidget(del_btn)
         del_row.addWidget(clr_btn)
@@ -228,13 +280,33 @@ class FFTViewerReconstructMixin:
         self._canvas_fft.draw_idle()
         self._update_reconstruct_status()
 
-    def _on_add_selection(self, kind: str) -> None:
+    def _on_tool_clicked(self, kind: str) -> None:
         ov = self._ensure_selection_overlay()
         if ov is None:
+            self._recon_tool_btns[kind].setChecked(False)
             self._recon_status_lbl.setText("Load a scan first.")
             return
-        ov.add(kind)
-        self._on_selection_changed()
+        # Toggle: a second click on the active tool returns to edit mode.
+        active = None if ov.tool() == kind else kind
+        ov.set_tool(active)
+        for k, btn in self._recon_tool_btns.items():
+            btn.setChecked(k == active)
+        self._recon_paint_row.setVisible(active == "paint")
+        if active == "paint":
+            ov.set_brush_radius_px(self._recon_brush_spin.value())
+            ov.set_paint_color(_PAINT_COLORS[self._recon_color_combo.currentText()])
+        self._update_reconstruct_status()
+
+    def _on_brush_size_changed(self, value: int) -> None:
+        ov = self._fft_selection_overlay
+        if ov is not None:
+            ov.set_brush_radius_px(int(value))
+
+    def _on_paint_color_changed(self, _idx: int) -> None:
+        ov = self._fft_selection_overlay
+        if ov is not None:
+            ov.set_paint_color(_PAINT_COLORS[self._recon_color_combo.currentText()])
+            self._on_selection_changed()
 
     def _on_delete_selection(self) -> None:
         if self._fft_selection_overlay is not None:
@@ -254,11 +326,10 @@ class FFTViewerReconstructMixin:
         if ov is None or ov.count() == 0:
             return None
         from probeflow.processing.inverse_fft import (
-            FourierEllipse, fourier_ellipse_mask, inverse_fft_from_mask)
-        sels = [FourierEllipse(dx=s["dx"], dy=s["dy"], rx=s["rx"], ry=s["ry"])
-                for s in ov.to_fft_ellipses()]
-        mask = fourier_ellipse_mask(
-            array.shape, sels,
+            fourier_region_from_dict, fourier_region_mask, inverse_fft_from_mask)
+        regions = [fourier_region_from_dict(d) for d in ov.to_regions()]
+        mask = fourier_region_mask(
+            array.shape, regions,
             conjugate=self._recon_conj_cb.isChecked(),
             soft_px=float(self._recon_soft_spin.value()))
         return inverse_fft_from_mask(array, mask, mode=self._reconstruct_mode())
@@ -284,14 +355,11 @@ class FFTViewerReconstructMixin:
 
     def _reconstruct_op_params(self) -> dict:
         ov = self._fft_selection_overlay
-        sels = ov.to_fft_ellipses() if ov is not None else []
+        # to_regions() already returns JSON-safe dicts carrying the per-kind
+        # geometry (ellipse/rect in FFT px, paint as a pixel stamp list) plus
+        # q-space provenance.
         params = {
-            "selections": [
-                {"dx": s["dx"], "dy": s["dy"], "rx": s["rx"], "ry": s["ry"],
-                 "angle_deg": 0.0, "cx_q": s["cx_q"], "cy_q": s["cy_q"],
-                 "rx_q": s["rx_q"], "ry_q": s["ry_q"], "kind": s["kind"]}
-                for s in sels
-            ],
+            "selections": ov.to_regions() if ov is not None else [],
             "mode": self._reconstruct_mode(),
             "conjugate_symmetric": bool(self._recon_conj_cb.isChecked()),
             "soft_px": float(self._recon_soft_spin.value()),
@@ -364,8 +432,10 @@ class FFTViewerReconstructMixin:
         mode = "remove selected" if self._reconstruct_mode() == "remove_selected" else "keep selected"
         src = "ROI" if self._fft_source == "active_roi" else "whole image"
         if n == 0:
-            self._recon_status_lbl.setText(
-                f"FFT source: {src}. Add a circle or ellipse to begin.")
+            tool = ov.tool() if ov is not None else None
+            hint = ("Drag on the FFT to draw (Shift = regular shape)."
+                    if tool else "Pick Ellipse, Rectangle or Paint to begin.")
+            self._recon_status_lbl.setText(f"FFT source: {src}. {hint}")
             return
         conj = " + conjugates" if self._recon_conj_cb.isChecked() else ""
         txt = (f"FFT mask: {n} region{'s' if n != 1 else ''}{conj} · "
