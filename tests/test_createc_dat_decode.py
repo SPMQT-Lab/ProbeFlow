@@ -449,3 +449,38 @@ def test_createc_ambiguous_header_stays_unknown():
     assert meta["acquisition_mode"] == "unknown"
     assert meta["feedback_mode"] == "unknown"
     assert meta["confidence"] == "low"
+
+
+def test_truncated_zlib_payload_reports_corruption_not_unsupported(tmp_path):
+    """A DATA marker followed by a truncated zlib stream (e.g. a half-copied
+    network file) must report corruption/truncation, not an unsupported variant."""
+    dat = tmp_path / "truncated.dat"
+    header = b"[Paramco32]\nNum.X=2\nNum.Y=2\n"
+    full = zlib.compress(np.arange(1, 17, dtype="<f4").tobytes())
+    dat.write_bytes(header + b"DATA" + full[: len(full) // 2])  # cut the stream
+
+    with pytest.raises(ValueError, match="corrupt or truncated"):
+        read_createc_dat_report(dat, include_raw=False)
+
+
+def test_non_zlib_payload_reports_unsupported_variant(tmp_path):
+    """A DATA marker with no zlib header (0x78) following it is an unsupported
+    layout, and the message names the leading format token."""
+    dat = tmp_path / "uncompressed.dat"
+    header = b"[Paramco99]\nNum.X=2\nNum.Y=2\n"
+    dat.write_bytes(header + b"DATA" + b"\x00\x01\x02\x03 raw uncompressed bytes")
+
+    with pytest.raises(ValueError, match="unsupported Createc .dat variant"):
+        read_createc_dat_report(dat, include_raw=False)
+
+
+def test_trailing_bytes_after_zlib_stream_still_decode(tmp_path):
+    """Padding/trailing bytes after a complete zlib stream must not break decode
+    (zlib.decompress tolerates them); only genuine truncation should fail."""
+    dat = tmp_path / "trailing.dat"
+    header = b"[Paramco32]\nNum.X=2\nNum.Y=2\n"
+    comp = zlib.compress(np.arange(1, 17, dtype="<f4").tobytes())
+    dat.write_bytes(header + b"DATA" + comp + b"\x00\x00trailing")
+
+    report = read_createc_dat_report(dat, include_raw=False)
+    assert report.detected_channel_count == 4
