@@ -62,8 +62,9 @@ suite. What it does today:
   Results become reusable analysis objects: an overlay, a new image, an **active
   mask**, or ROI(s). The active-mask layer (Masks tab) supports morphological
   cleanup (remove small objects, fill holes, dilate/erode/open/close,
-  skeletonize), restricts statistics, excludes regions from a plane fit (via
-  mask→ROI), and is saved to a `<scan>.masks.json` sidecar.
+  skeletonize) and restricts statistics directly; convert it to ROI(s) to
+  exclude regions from a plane fit. Masks are saved to a `<scan>.masks.json`
+  sidecar.
 - **FFT tools** (the FFT viewer) — inspect the magnitude and radial profile with
   q in nm⁻¹; overlay a draggable reciprocal-lattice grid and apply an affine
   lattice correction; show Bragg-shell rings for a known structure; predict and
