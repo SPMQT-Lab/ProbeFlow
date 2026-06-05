@@ -20,6 +20,10 @@ class SxmFile:
     Ny:            int            = 512
     bias_mv:       Optional[float] = None
     current_pa:    Optional[float] = None
+    # Non-current feedback setpoint for AFM (e.g. Δf in Hz); None for STM.
+    feedback_setpoint:       Optional[float] = None
+    feedback_setpoint_unit:  Optional[str] = None
+    feedback_setpoint_label: Optional[str] = None
     scan_nm:       Optional[float] = None
     source_format: str            = "sxm"
     acquisition_label: Optional[str] = None
@@ -51,6 +55,9 @@ class SxmFile:
             Ny=Ny,
             bias_mv=item.bias * 1000 if item.bias is not None else None,
             current_pa=item.setpoint * 1e12 if item.setpoint is not None else None,
+            feedback_setpoint=item.feedback_setpoint,
+            feedback_setpoint_unit=item.feedback_setpoint_unit,
+            feedback_setpoint_label=item.feedback_setpoint_label,
             scan_nm=item.scan_range[0] * 1e9 if item.scan_range else None,
             source_format=fmt,
             acquisition_label=label,
@@ -126,9 +133,21 @@ def _card_meta_str(entry: SxmFile) -> str:
         f"{entry.scan_nm:.1f} nm" if entry.scan_nm is not None else "",
     ]))
     v_str = f"V: {entry.bias_mv:.0f} mV"    if entry.bias_mv    is not None else "V: ?"
-    i_str = f"I: {entry.current_pa:.0f} pA" if entry.current_pa is not None else "I: ?"
-    line2 = f"{v_str}  |  {i_str}"
+    line2 = f"{v_str}  |  {_card_feedback_str(entry)}"
     return "\n".join(filter(None, [line1, entry.acquisition_label, line2]))
+
+
+def _card_feedback_str(entry: SxmFile) -> str:
+    """Format the feedback setpoint for a card/header: current for STM, Δf for AFM."""
+    if entry.current_pa is not None:
+        return f"I: {entry.current_pa:.0f} pA"
+    if entry.feedback_setpoint is not None:
+        unit = f" {entry.feedback_setpoint_unit}" if entry.feedback_setpoint_unit else ""
+        label = entry.feedback_setpoint_label or "Setpoint"
+        # Compact Δf label for the card; keep the symbol if present.
+        short = "Δf" if (entry.feedback_setpoint_unit == "Hz") else label
+        return f"{short}: {entry.feedback_setpoint:.4g}{unit}"
+    return "I: ?"
 
 
 def browse_entry_key(entry) -> str:

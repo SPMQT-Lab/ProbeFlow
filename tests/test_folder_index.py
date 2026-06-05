@@ -78,6 +78,21 @@ class TestCreatecScans:
         assert len(item.channels) == 10
         assert item.metadata["experiment_metadata"]["acquisition_mode"] == "afm"
 
+    def test_qplus_afm_reports_df_feedback_not_current_setpoint(self):
+        # The constant-Δf AFM scan must not surface SetPoint as a tunnel current
+        # (the old 7e+12 pA bug); it carries a Δf feedback setpoint instead.
+        items = index_folder(TESTDATA)
+        item = next(it for it in items if it.path == _CREATEC_QPLUS_10CH)
+        assert item.setpoint is None
+        assert item.feedback_setpoint == pytest.approx(7.0)
+        assert item.feedback_setpoint_unit == "Hz"
+
+    def test_stm_fixture_has_current_but_no_feedback_setpoint(self):
+        items = index_folder(TESTDATA)
+        item = next(it for it in items if it.path == _CREATEC_STEP)
+        assert item.setpoint is not None
+        assert item.feedback_setpoint is None
+
 
 # ── Test B: Nanonis SXM fixture ───────────────────────────────────────────────
 

@@ -6,14 +6,13 @@ import sys
 
 from PySide6.QtWidgets import QFrame
 
-from probeflow.gui.models import SxmFile
+from probeflow.gui.models import SxmFile, _card_feedback_str
 
 
 def _card_compact_meta_str(entry: SxmFile) -> str:
-    """Compact V/I-only line for small thumbnail cards."""
+    """Compact V/I (or V/Δf for AFM) line for small thumbnail cards."""
     v_str = f"V: {entry.bias_mv:.0f} mV" if entry.bias_mv is not None else "V: ?"
-    i_str = f"I: {entry.current_pa:.0f} pA" if entry.current_pa is not None else "I: ?"
-    return f"{v_str}  |  {i_str}"
+    return f"{v_str}  |  {_card_feedback_str(entry)}"
 
 
 _CARD_SIZE_PRESETS = {

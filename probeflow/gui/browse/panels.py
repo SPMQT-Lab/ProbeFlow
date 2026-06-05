@@ -40,6 +40,17 @@ from probeflow.gui.workers import ChannelLoader, ChannelSignals
 
 from .helpers import _browse_attr, _sep
 
+
+def _setp_display(entry: SxmFile) -> str:
+    """Header-strip setpoint value: tunnel current for STM, Δf for AFM."""
+    if entry.current_pa is not None:
+        return f"{entry.current_pa:.1f} pA"
+    if entry.feedback_setpoint is not None:
+        unit = f" {entry.feedback_setpoint_unit}" if entry.feedback_setpoint_unit else ""
+        return f"{entry.feedback_setpoint:.4g}{unit}"
+    return "—"
+
+
 class BrowseToolPanel(QWidget):
     """Left-side control panel for browsing and live thumbnail appearance."""
     open_folder_requested      = Signal()
@@ -388,7 +399,7 @@ class BrowseInfoPanel(QWidget):
         self._qi["pixels"].setText(f"{entry.Nx} × {entry.Ny}")
         self._qi["size"].setText(f"{entry.scan_nm:.1f} nm" if entry.scan_nm is not None else "—")
         self._qi["bias"].setText(f"{entry.bias_mv:.0f} mV" if entry.bias_mv is not None else "—")
-        self._qi["setp"].setText(f"{entry.current_pa:.1f} pA" if entry.current_pa is not None else "—")
+        self._qi["setp"].setText(_setp_display(entry))
         self.load_channels(entry, colormap_key, processing=None)
         self._load_metadata(entry)
 
