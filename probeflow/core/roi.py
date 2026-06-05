@@ -630,6 +630,87 @@ def _shapely_to_roi(geom, *, name: str, coord_system: str = "pixel") -> "ROI":
     )
 
 
+def roi_from_mask(
+    mask: np.ndarray,
+    *,
+    min_size_px: int = 0,
+    simplify: bool = False,
+    simplify_tolerance: float = 1.0,
+    one_per_component: bool = True,
+    name_prefix: str = "mask",
+) -> list["ROI"]:
+    """Convert a boolean mask to polygon/multipolygon ROI(s).
+
+    Connected True regions are traced with ``skimage.measure`` and turned into
+    Shapely polygons (holes preserved), then handed to :func:`_shapely_to_roi`,
+    so no new geometry algebra is introduced.
+
+    Parameters
+    ----------
+    mask:
+        2-D boolean array (``(Ny, Nx)``, pixel space — matching :meth:`ROI.to_mask`).
+    min_size_px:
+        Drop connected components with fewer than this many True pixels.
+    simplify:
+        Douglas–Peucker-simplify each polygon (Shapely ``simplify``) with
+        *simplify_tolerance* (px).
+    one_per_component:
+        When True (default) return one ROI per connected component.  When
+        False, return a single multipolygon ROI unioning all components.
+
+    Returns
+    -------
+    list[ROI]
+        Empty if the mask has no qualifying components.
+    """
+    from skimage import measure as _measure
+    from shapely.geometry import Polygon as _Poly
+    from shapely.ops import unary_union as _unary_union
+
+    m = np.asarray(mask, dtype=bool)
+    if m.ndim != 2 or not m.any():
+        return []
+
+    labels = _measure.label(m, connectivity=2)
+    polygons = []
+    for region in _measure.regionprops(labels):
+        if region.area < max(0, int(min_size_px)):
+            continue
+        # Work in the full-image frame so coordinates need no offset back.
+        component = labels == region.label
+        contours = _measure.find_contours(component.astype(float), 0.5)
+        if not contours:
+            continue
+        # Longest contour is the exterior; the rest are holes.
+        contours.sort(key=len, reverse=True)
+        rings = [[[float(c), float(r)] for r, c in contour] for contour in contours]
+        exterior, holes = rings[0], rings[1:]
+        try:
+            poly = _Poly(exterior, holes)
+        except Exception:  # noqa: BLE001 — degenerate / collinear ring
+            continue
+        if not poly.is_valid:
+            poly = poly.buffer(0)
+        if simplify and not poly.is_empty:
+            poly = poly.simplify(float(simplify_tolerance), preserve_topology=True)
+        if poly.is_empty:
+            continue
+        polygons.append(poly)
+
+    if not polygons:
+        return []
+
+    if one_per_component:
+        return [
+            _shapely_to_roi(poly, name=f"{name_prefix}_{i + 1}")
+            for i, poly in enumerate(polygons)
+        ]
+    merged = _unary_union(polygons)
+    if merged.is_empty:
+        return []
+    return [_shapely_to_roi(merged, name=name_prefix)]
+
+
 def invert(roi: "ROI", image_shape: tuple[int, int]) -> "ROI":
     """Return a new ROI representing the complement of *roi* within *image_shape*.
 

@@ -35,6 +35,8 @@ _EXPORTS: dict[str, str] = {
     "invert_active_roi": "roi_ops",
     "invert_roi": "roi_ops",
     "load_roi_set": "roi_sidecar",
+    "load_mask_set": "mask_sidecar",
+    "save_mask_set": "mask_sidecar",
     "plot_roi_line_profile": "roi_analysis",
     "rename_roi": "roi_ops",
     "resolve_channel_unit": "channel_util",

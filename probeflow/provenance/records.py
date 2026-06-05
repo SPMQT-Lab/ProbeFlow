@@ -648,6 +648,11 @@ def _step_summary(step: ProvenanceStep) -> str:
         return f"Background: {p.get('model', 'linear')} ({p.get('line_statistic', 'median')})"
     if op == "smooth":
         return f"Gaussian blur/smoothing: sigma={p.get('sigma_px', 1.0)} px"
+    if op == "edge_detect":
+        method = str(p.get("method", "laplacian"))
+        if method in ("sobel", "scharr"):
+            return f"Edge detection: {method} gradient magnitude"
+        return f"Edge detection: {method} (sigma={p.get('sigma', 1.0)} px)"
     if op == "roi":
         nested = p.get("step") if isinstance(p, dict) else None
         if isinstance(nested, dict):

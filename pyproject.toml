@@ -16,6 +16,7 @@ dependencies = [
   "PySide6",
   "matplotlib",
   "shapely>=2.0",
+  "scikit-image>=0.22",
 ]
 
 [project.optional-dependencies]

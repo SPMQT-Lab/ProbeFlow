@@ -267,9 +267,12 @@ def edge_detect(
     method='laplacian' — discrete Laplacian (2nd derivative, no smoothing)
     method='log'       — Laplacian of Gaussian  (σ = sigma)
     method='dog'       — Difference of Gaussians (σ₁=sigma, σ₂=sigma2)
+    method='sobel'     — Sobel gradient magnitude  √(Gₓ² + G_y²)
+    method='scharr'    — Scharr gradient magnitude (rotationally more accurate)
 
-    Returns the filter response — positive = bright edges/peaks,
-    negative = dark edges/valleys.  Useful for atomic-resolution contrast
+    The Laplacian family returns a signed response — positive = bright
+    edges/peaks, negative = dark edges/valleys.  Sobel/Scharr return a
+    non-negative gradient magnitude.  Useful for atomic-resolution contrast
     enhancement and finding adsorption sites.
     """
     sigma = _nonnegative_finite(sigma, "sigma")
@@ -293,6 +296,14 @@ def edge_detect(
         g1 = gaussian_filter(a, sigma=max(sigma,  0.1), mode='reflect')
         g2 = gaussian_filter(a, sigma=max(sigma2, sigma + 0.1), mode='reflect')
         result = g1 - g2
+
+    elif method in ('sobel', 'scharr'):
+        from skimage import filters as _skf
+        gy_fn, gx_fn = (
+            (_skf.sobel_h, _skf.sobel_v) if method == 'sobel'
+            else (_skf.scharr_h, _skf.scharr_v)
+        )
+        result = np.hypot(gx_fn(a), gy_fn(a))
 
     else:
         raise ValueError(f"Unknown edge_detect method: {method!r}")

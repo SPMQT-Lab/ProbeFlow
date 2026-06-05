@@ -57,6 +57,7 @@ from probeflow.gui.viewer.image_viewer_display_mixin import ImageViewerDisplayMi
 from probeflow.gui.viewer.image_viewer_processing_export_mixin import (
     ImageViewerProcessingExportMixin,
 )
+from probeflow.gui.viewer.image_viewer_mask_mixin import ImageViewerMaskMixin
 from probeflow.gui.viewer.image_viewer_roi_mixin import ImageViewerRoiMixin
 from probeflow.gui.viewer.image_viewer_toolbar_mixin import ImageViewerToolbarMixin
 from probeflow.gui.viewer.image_viewer_tools_mixin import ImageViewerToolsMixin
@@ -69,6 +70,7 @@ from probeflow.gui.dialogs.stm_background import STMBackgroundDialog
 class ImageViewerDialog(
     ImageViewerBuildMixin,
     ImageViewerChromeMixin,
+    ImageViewerMaskMixin,
     ImageViewerRoiMixin,
     ImageViewerToolbarMixin,
     ImageViewerDisplayMixin,
@@ -264,6 +266,7 @@ class ImageViewerDialog(
             self._zoom_lbl.setPixmap(QPixmap())
         self._zoom_lbl.set_markers([])
         self._load_image_roi_set(entry)
+        self._load_image_mask_set(entry)
         if self._pending_initial_plane_idx is not None:
             target_ch = self._pending_initial_plane_idx
             self._pending_initial_plane_idx = None

@@ -14,6 +14,7 @@ from probeflow.gui.image_canvas import ImageCanvas
 from probeflow.gui.models import PLANE_NAMES
 from probeflow.gui.processing import ProcessingControlPanel
 from probeflow.gui.rendering import CMAP_NAMES, DEFAULT_CMAP_LABEL, STM_COLORMAPS
+from probeflow.gui.mask_manager import MaskManagerPanel
 from probeflow.gui.roi_manager_dock import ROIManagerPanel
 from probeflow.gui.styling import _sep
 from probeflow.gui.typography import ui_font
@@ -315,6 +316,10 @@ class ImageViewerBuildMixin:
             "roi", "ROI",
             "Create, edit and combine regions of interest.",
         )
+        _masks_tab, masks_lay = _sidebar_tab(
+            "masks", "Masks",
+            "Active mask layer: edge-detection output, cleanup, and conversion to ROIs.",
+        )
         _measurements_tab, measurements_lay = _sidebar_tab(
             "measurements", "Measure",
             "Distances, angles, ROI statistics, features and results.",
@@ -417,6 +422,8 @@ class ImageViewerBuildMixin:
             self._on_open_stm_background)
         self._processing_panel.simple_background_requested.connect(
             self._on_simple_background)
+        self._processing_panel.advanced_edge_requested.connect(
+            self._on_open_advanced_edge)
         self._processing_panel._align_combo.currentIndexChanged.connect(
             self._on_align_rows_changed)
         processing_lay.addWidget(self._processing_panel)
@@ -847,6 +854,8 @@ class ImageViewerBuildMixin:
 
         self._image_roi_set = None
         self._copy_roi_buffer = None  # ROI object held for Ctrl+V paste
+        self._image_mask_set = None   # active-mask layer (MaskSet); loaded per image
+        self._edge_detection_dialog = None
 
         self._measurement_panel = ImageMeasurementsPanel(parent=self)
         self._measurement_table = self._measurement_panel.table
@@ -912,6 +921,27 @@ class ImageViewerBuildMixin:
             parent=self,
         )
         self._roi_panel.setObjectName("imageViewerRoiManagerPanel")
+
+        self._mask_panel = MaskManagerPanel(
+            mask_set_getter=lambda: self._image_mask_set,
+            callbacks={
+                "on_mask_set_changed": self._on_image_mask_set_changed,
+                "convert_to_roi":      self._convert_mask_to_rois,
+                "add_mask_stats":      self._add_active_mask_stats,
+                "export_mask":         self._export_mask_to_file,
+            },
+            parent=self,
+        )
+        self._mask_panel.setObjectName("imageViewerMaskManagerPanel")
+
+        mask_hint = QLabel(
+            "Masks come from Advanced Edge Detection (Process tab). The active "
+            "mask (●) restricts statistics and can become ROI(s)."
+        )
+        mask_hint.setWordWrap(True)
+        mask_hint.setFont(ui_font(8))
+        masks_lay.addWidget(mask_hint)
+        masks_lay.addWidget(self._mask_panel, 1)
 
         # ROI manager and measurements now live in their sidebar tabs (built
         # above) rather than in separate floating docks.
