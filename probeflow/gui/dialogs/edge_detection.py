@@ -314,9 +314,14 @@ class EdgeDetectionDialog(QDialog):
         self._schedule()
 
     def _update_sigma_label(self) -> None:
-        if self._pixel_size_nm:
-            nm = self._canny_sigma.value() * self._pixel_size_nm
-            self._canny_sigma_lbl.setText(f"≈ {nm:.3g} nm")
+        dx, dy = self._pixel_size_x_nm, self._pixel_size_y_nm
+        sigma = self._canny_sigma.value()
+        if dx and dy and abs(dx - dy) > 1e-9:
+            # Anisotropic pixels: Canny smooths isotropically in *pixels*, so
+            # the physical extent differs per axis — show both, not one value.
+            self._canny_sigma_lbl.setText(f"≈ {sigma * dx:.3g}×{sigma * dy:.3g} nm")
+        elif dx:
+            self._canny_sigma_lbl.setText(f"≈ {sigma * dx:.3g} nm")
         else:
             self._canny_sigma_lbl.setText("")
 
@@ -347,6 +352,8 @@ class EdgeDetectionDialog(QDialog):
                 high=float(self._canny_high.value()),
                 roi_mask=roi,
                 pixel_size_nm=self._pixel_size_nm,
+                pixel_size_x_nm=self._pixel_size_x_nm,
+                pixel_size_y_nm=self._pixel_size_y_nm,
                 source_channel=self._source_channel,
             )
         roi = self._active_roi_mask if self._grad_roi.isChecked() else None

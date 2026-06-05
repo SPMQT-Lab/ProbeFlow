@@ -100,6 +100,8 @@ def canny_edges(
     roi_mask: np.ndarray | None = None,
     preset: str | None = None,
     pixel_size_nm: float | None = None,
+    pixel_size_x_nm: float | None = None,
+    pixel_size_y_nm: float | None = None,
     source_channel: str | None = None,
 ) -> EdgeDetectionResult:
     """Detect edges with the Canny algorithm (``skimage.feature.canny``).
@@ -107,7 +109,11 @@ def canny_edges(
     Parameters
     ----------
     sigma:
-        Gaussian smoothing width in pixels.
+        Gaussian smoothing width **in pixels**.  ``skimage.feature.canny`` only
+        accepts a scalar sigma, so the smoothing is isotropic *in pixel space*.
+        On anisotropic scans (``pixel_size_x_nm != pixel_size_y_nm``) it is
+        therefore not isotropic in physical space; the recorded ``sigma_x_nm`` /
+        ``sigma_y_nm`` express the per-axis physical extent for provenance.
     threshold_mode:
         ``"percentile"`` (default) interprets *low*/*high* as percentiles
         (0–100) of the gradient magnitude — robust across STM channels whose
@@ -120,6 +126,9 @@ def canny_edges(
     preset:
         Name in :data:`CANNY_PRESETS`; when given it overrides *sigma*/*low*/
         *high*.
+    pixel_size_x_nm, pixel_size_y_nm:
+        Optional physical pixel spacings, recorded for provenance only (the
+        smoothing remains pixel-space).  Fall back to *pixel_size_nm*.
     """
     from skimage.feature import canny as _canny
 
@@ -174,6 +183,13 @@ def canny_edges(
         "preset": preset,
         "source_channel": source_channel,
     }
+    # Per-axis physical extent of the (pixel-space) Gaussian, for provenance.
+    dx = pixel_size_x_nm or pixel_size_nm
+    dy = pixel_size_y_nm or pixel_size_nm
+    if dx:
+        params["sigma_x_nm"] = float(sigma) * float(dx)
+    if dy:
+        params["sigma_y_nm"] = float(sigma) * float(dy)
     if pixel_size_nm is not None:
         params["sigma_nm"] = float(sigma) * float(pixel_size_nm)
 
@@ -270,6 +286,9 @@ def gradient_filter(
     if roi is not None:
         chosen = np.where(roi, chosen, 0.0)
         magnitude = np.where(roi, magnitude, 0.0)
+        # Keep the returned orientation field ROI-bounded too, so downstream
+        # consumers never see out-of-ROI gradient directions.
+        orientation = np.where(roi, orientation, 0.0)
 
     if normalize and output != "orientation":
         peak = float(np.nanmax(np.abs(chosen))) if chosen.size else 0.0

@@ -74,6 +74,26 @@ class ImageViewerMaskMixin:
             self._zoom_lbl.clear_mask_overlay()
         else:
             self._zoom_lbl.set_mask_overlay(data)
+        self._warn_if_mask_channel_mismatch()
+
+    def _warn_if_mask_channel_mismatch(self) -> None:
+        """Non-blocking warning when the active mask was made on another channel.
+
+        The mask still applies (shape is the only hard requirement), but a
+        same-shape mask from a different channel/processing state is
+        semantically stale — surface that rather than applying it silently.
+        """
+        ms = getattr(self, "_image_mask_set", None)
+        mask = ms.active() if ms is not None else None
+        if mask is None or not hasattr(self, "_status_lbl"):
+            return
+        recorded = mask.parameters.get("source_channel")
+        current = self._edge_source_channel()
+        if recorded and current and recorded != current:
+            self._status_lbl.setText(
+                f"Note: active mask “{mask.name}” was made on channel "
+                f"“{recorded}”, now viewing “{current}”."
+            )
 
     # ── Advanced Edge Detection dialog ─────────────────────────────────────────
 

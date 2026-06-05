@@ -33,9 +33,11 @@ def test_active_mask_restricts_statistics():
     assert result.values["n_finite_pixels"] == 16 * 32
 
 
-def test_active_mask_excludes_region_from_plane_fit():
-    # A tilted plane plus a bright contaminated blob. Fitting with the blob
-    # excluded recovers a near-flat residual; including it skews the fit.
+def test_mask_to_roi_excludes_region_from_plane_fit():
+    # The active mask excludes regions from a plane fit *via the mask→ROI
+    # bridge* (subtract_background takes an ROI, not a mask). A tilted plane
+    # plus a bright contaminated blob: excluding the blob recovers a near-flat
+    # residual; including it skews the fit.
     yy, xx = np.mgrid[0:64, 0:64]
     plane = 0.1 * xx + 0.05 * yy
     img = plane.astype(np.float64).copy()

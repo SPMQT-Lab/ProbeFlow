@@ -86,6 +86,14 @@ class TestCanny:
         res = canny_edges(_step_image(), sigma=2.0, pixel_size_nm=0.05)
         assert res.parameters["sigma_nm"] == pytest.approx(0.1)
 
+    def test_anisotropic_records_per_axis_sigma_nm(self):
+        # Canny smooths in pixels (scalar sigma); the recorded physical extent
+        # is per-axis on anisotropic scans, and is not described as isotropic.
+        res = canny_edges(_step_image(), sigma=2.0,
+                          pixel_size_x_nm=0.05, pixel_size_y_nm=0.20)
+        assert res.parameters["sigma_x_nm"] == pytest.approx(0.1)
+        assert res.parameters["sigma_y_nm"] == pytest.approx(0.4)
+
 
 # ── Sobel / Scharr ─────────────────────────────────────────────────────────────
 
@@ -170,6 +178,16 @@ class TestGradient:
         gy = gradient_filter(ramp, output="y", normalize=False).display_image
         # y-slope is twice the x-slope, so |gy| median should exceed |gx|.
         assert np.median(np.abs(gy)) > np.median(np.abs(gx))
+
+    def test_roi_bounds_orientation_field(self):
+        # ROI restriction must also bound the returned orientation field, not
+        # just display/magnitude/edge_mask.
+        img = _step_image(edge_col=32)
+        roi = np.zeros_like(img, dtype=bool)
+        roi[:, :16] = True
+        res = gradient_filter(img, output="magnitude", roi_mask=roi)
+        assert res.gradient_orientation is not None
+        assert not np.any(res.gradient_orientation[:, 16:])
 
     def test_invalid_operator_and_output_raise(self):
         with pytest.raises(ValueError):
