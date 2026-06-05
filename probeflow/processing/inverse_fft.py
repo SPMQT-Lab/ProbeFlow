@@ -25,7 +25,7 @@ GUI-free (numpy only); import lazily from the FFT viewer / CLI.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 
@@ -80,7 +80,7 @@ class FourierStrokes:
     offsets from DC; ``radius`` is the shared brush radius in pixels.  The union
     of the stamped discs forms the region.
     """
-    stamps: tuple
+    stamps: tuple[tuple[float, float], ...]
     radius: float
 
 
@@ -180,7 +180,6 @@ def fourier_region_mask(
                     mask, _strokes_contribution(xx, yy, cx, cy, region, sign, soft_px))
             continue
         # Ellipse / rect: build the primary, then mirror it through DC.
-        from dataclasses import replace
         variants = [region]
         if conjugate:
             variants.append(replace(region, dx=-region.dx, dy=-region.dy))

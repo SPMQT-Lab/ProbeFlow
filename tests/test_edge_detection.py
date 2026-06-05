@@ -179,15 +179,37 @@ class TestGradient:
         # y-slope is twice the x-slope, so |gy| median should exceed |gx|.
         assert np.median(np.abs(gy)) > np.median(np.abs(gx))
 
-    def test_roi_bounds_orientation_field(self):
-        # ROI restriction must also bound the returned orientation field, not
-        # just display/magnitude/edge_mask.
+    def test_roi_bounds_orientation_field_with_nan_sentinel(self):
+        # ROI restriction bounds the returned orientation field, and uses NaN
+        # (not 0.0, a valid +x direction) outside the ROI.
         img = _step_image(edge_col=32)
         roi = np.zeros_like(img, dtype=bool)
         roi[:, :16] = True
         res = gradient_filter(img, output="magnitude", roi_mask=roi)
         assert res.gradient_orientation is not None
-        assert not np.any(res.gradient_orientation[:, 16:])
+        assert np.all(np.isnan(res.gradient_orientation[:, 16:]))
+        assert not np.any(res.gradient_magnitude[:, 16:])  # magnitude → 0 outside ROI
+
+    def test_nan_border_does_not_create_spurious_edges(self):
+        # Flat background with a distant bright block, so the global mean used
+        # to fill the NaN hole differs from the local (zero) surroundings and
+        # would step the rim. The 1-px contaminated band must be excluded.
+        img = np.zeros((40, 40), dtype=np.float64)
+        img[0:5, 0:5] = 100.0          # distant feature → nonzero global mean
+        img[18:22, 18:22] = np.nan     # hole in the flat (zero) region
+        res = gradient_filter(img, output="magnitude", normalize=False,
+                              threshold_to_mask=True, threshold=90)
+        # No edge pixels in the contaminated band around the hole.
+        assert not res.edge_mask[16:24, 16:24].any()
+        # Magnitude is nulled (not spuriously large) on the rim.
+        assert np.nanmax(res.gradient_magnitude[16:24, 16:24]) < 1e-9
+
+    def test_clean_image_unaffected_by_nan_guard(self):
+        # With no NaNs, behaviour is unchanged (full keep region).
+        res = gradient_filter(_step_image(edge_col=32), output="magnitude",
+                              threshold_to_mask=True, threshold=90)
+        assert res.edge_mask.any()
+        assert np.isfinite(res.gradient_orientation).all()
 
     def test_invalid_operator_and_output_raise(self):
         with pytest.raises(ValueError):

@@ -40,7 +40,11 @@ class EdgeDetectionResult:
     * ``display_image``       — array suitable for direct display (NaN-preserving).
     * ``edge_mask``           — boolean array suitable for the active-mask layer.
     * ``gradient_magnitude``  — continuous gradient response (Sobel/Scharr).
-    * ``gradient_orientation``— gradient direction in radians, ``arctan2(gy, gx)``.
+    * ``gradient_orientation``— gradient direction in radians, ``arctan2(gy, gx)``,
+      in **image coordinates** (the row axis y increases *downward*), so a
+      positive angle turns from +x toward the bottom of the image — not the
+      math/physical y-up convention.  NaN marks pixels with no valid gradient
+      (NaN-contaminated or outside the ROI).
     """
 
     method: str
@@ -237,13 +241,21 @@ def gradient_filter(
         When True, threshold the gradient *magnitude* (always, regardless of
         *output*) at the *threshold* percentile to produce ``edge_mask``.
     roi_mask:
-        Optional boolean mask; gradients outside it are zeroed and excluded
-        from any threshold mask.
+        Optional boolean mask; gradients outside it are excluded (magnitude → 0,
+        orientation → NaN) and dropped from any threshold mask.
     pixel_size_x_nm, pixel_size_y_nm:
         Physical pixel spacings.  When given, the column/row derivatives are
         scaled to physical units (∂z/∂x, ∂z/∂y) before forming the magnitude
         and orientation, so anisotropic pixels yield physically correct values.
         Falls back to *pixel_size_nm* (isotropic) and then to 1 px.
+
+    Notes
+    -----
+    Pixels whose 3×3 operator footprint touches a non-finite value are treated
+    as invalid (their gradient is a mean-fill artefact, not a real edge):
+    magnitude → 0, orientation → NaN, display → NaN, and they are excluded from
+    the threshold mask.  ``gradient_orientation`` is in image coordinates (row
+    axis points down); see :class:`EdgeDetectionResult`.
     """
     from skimage import filters as _skf
 
@@ -274,6 +286,28 @@ def gradient_filter(
     magnitude = np.hypot(gx, gy)
     orientation = np.arctan2(gy, gx)
 
+    # Mean-filling non-finite pixels (see ``_prepare``) creates a step at the
+    # hole rim, so every pixel whose 3×3 operator footprint touches a NaN has a
+    # spurious gradient.  Treat that 1-px band as invalid, not just the NaN
+    # pixels themselves.
+    if nan_mask.any():
+        from scipy.ndimage import binary_dilation
+        invalid = binary_dilation(nan_mask, structure=np.ones((3, 3), dtype=bool))
+    else:
+        invalid = nan_mask  # all-False, correct shape
+
+    # Pixels to keep: finite-and-clean, restricted to the ROI when given.
+    keep = ~invalid if roi is None else (~invalid & roi)
+
+    # Null the gradient outside ``keep`` *before* normalisation/thresholding so
+    # the spurious rim never sets the normalisation peak or the percentile cut.
+    # Magnitude/components use 0 (= no gradient); orientation uses NaN because
+    # 0.0 is a valid direction (+x) and would be mistaken for genuine data.
+    gx = np.where(keep, gx, 0.0)
+    gy = np.where(keep, gy, 0.0)
+    magnitude = np.where(keep, magnitude, 0.0)
+    orientation = np.where(keep, orientation, np.nan)
+
     if output == "magnitude":
         chosen = magnitude
     elif output == "x":
@@ -283,37 +317,24 @@ def gradient_filter(
     else:  # orientation
         chosen = orientation
 
-    if roi is not None:
-        chosen = np.where(roi, chosen, 0.0)
-        magnitude = np.where(roi, magnitude, 0.0)
-        # Keep the returned orientation field ROI-bounded too, so downstream
-        # consumers never see out-of-ROI gradient directions.
-        orientation = np.where(roi, orientation, 0.0)
-
     if normalize and output != "orientation":
         peak = float(np.nanmax(np.abs(chosen))) if chosen.size else 0.0
         if peak > 0:
             chosen = chosen / peak
 
     display = chosen.astype(np.float64, copy=True)
-    if nan_mask.any():
-        display[nan_mask] = np.nan
+    display[invalid] = np.nan
 
     edge_mask = None
     if threshold_to_mask:
-        ref = magnitude.copy()
-        if roi is not None:
-            ref = ref[roi]
+        ref = magnitude[keep]
         finite_ref = ref[np.isfinite(ref)] if ref.size else ref
         if finite_ref.size:
             cut = float(np.percentile(finite_ref, float(threshold)))
             # Require a strictly positive gradient: when the percentile cut is
             # 0 (flat or sparse-step images) ``>= cut`` would mark the entire
             # zero-gradient background as an edge.
-            edge_mask = (magnitude >= cut) & (magnitude > 0.0)
-            edge_mask &= ~nan_mask
-            if roi is not None:
-                edge_mask &= roi
+            edge_mask = (magnitude >= cut) & (magnitude > 0.0) & keep
         else:
             edge_mask = np.zeros(a.shape, dtype=bool)
 
