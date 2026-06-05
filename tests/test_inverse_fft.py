@@ -7,7 +7,11 @@ import pytest
 
 from probeflow.processing.inverse_fft import (
     FourierEllipse,
+    FourierRect,
+    FourierStrokes,
     fourier_ellipse_mask,
+    fourier_region_from_dict,
+    fourier_region_mask,
     inverse_fft_filter,
     inverse_fft_from_mask,
 )
@@ -57,6 +61,68 @@ class TestMask:
         m = fourier_ellipse_mask((N, N), [FourierEllipse(dx=0, dy=0, rx=10, ry=2)])
         assert m[CY, CX + 6] == 1.0           # wide along x
         assert m[CY + 6, CX] == 0.0           # narrow along y
+
+
+# ─── fourier_region_mask: rect / paint ───────────────────────────────────────
+
+class TestRegionMask:
+    def test_ellipse_wrapper_matches_region(self):
+        m_old = fourier_ellipse_mask((N, N), _sine_circle())
+        m_new = fourier_region_mask((N, N), _sine_circle())
+        assert np.array_equal(m_old, m_new)
+
+    def test_rect_covers_box_and_conjugate(self):
+        r = FourierRect(dx=KX, dy=0, half_w=4, half_h=2)
+        m = fourier_region_mask((N, N), [r])
+        assert m[CY, CX + KX] == 1.0
+        assert m[CY, CX - KX] == 1.0                 # conjugate
+        assert m[CY, CX] == 0.0                      # DC untouched
+        assert m[CY, CX + KX + 5] == 0.0            # outside the half-width (4)
+
+    def test_square_is_symmetric(self):
+        sq = FourierRect(dx=0, dy=0, half_w=5, half_h=5)
+        m = fourier_region_mask((N, N), [sq])
+        assert m[CY, CX + 5] == 1.0 and m[CY + 5, CX] == 1.0
+        assert m[CY, CX + 7] == 0.0 and m[CY + 7, CX] == 0.0
+
+    def test_strokes_cover_stamps_and_conjugate(self):
+        s = FourierStrokes(stamps=((KX, 0), (KX + 2, 0)), radius=3)
+        m = fourier_region_mask((N, N), [s])
+        assert m[CY, CX + KX] == 1.0
+        assert m[CY, CX - KX] == 1.0                 # conjugate stamp
+        assert m[CY + 20, CX] == 0.0                 # far away is untouched
+
+    def test_strokes_no_conjugate_when_disabled(self):
+        s = FourierStrokes(stamps=((KX, 0),), radius=3)
+        m = fourier_region_mask((N, N), [s], conjugate=False)
+        assert m[CY, CX + KX] == 1.0
+        assert m[CY, CX - KX] == 0.0
+
+    def test_soft_edge_graded_rect_and_strokes(self):
+        rect = fourier_region_mask((N, N), [FourierRect(0, 0, 5, 5)], soft_px=3.0)
+        strokes = fourier_region_mask((N, N), [FourierStrokes(((0, 0),), 5)], soft_px=3.0)
+        for m in (rect, strokes):
+            assert ((m > 0.0) & (m < 1.0)).any()
+
+    def test_region_from_dict_kinds(self):
+        assert isinstance(fourier_region_from_dict({"kind": "rect", "half_w": 2, "half_h": 3}),
+                          FourierRect)
+        assert isinstance(fourier_region_from_dict({"kind": "paint", "stamps": [[1, 2]], "radius": 2}),
+                          FourierStrokes)
+        # legacy dict without a kind reads as an ellipse
+        assert isinstance(fourier_region_from_dict({"dx": 1, "dy": 0, "rx": 2, "ry": 2}),
+                          FourierEllipse)
+
+    def test_mixed_regions_via_filter(self):
+        _b, _s, img = _scene()
+        regions = [
+            FourierEllipse(dx=KX, dy=0, rx=3, ry=3),
+            FourierRect(dx=20, dy=10, half_w=2, half_h=2),
+            FourierStrokes(stamps=((-15, -5),), radius=2),
+        ]
+        out = inverse_fft_filter(img, regions, mode="remove_selected")
+        assert out.shape == img.shape and np.isfinite(out).all()
+        assert _bin_power(out) < 1e-6 * _bin_power(img)   # the sine ellipse still removed
 
 
 # ─── inverse_fft_from_mask ───────────────────────────────────────────────────

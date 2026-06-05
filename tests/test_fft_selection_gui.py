@@ -45,46 +45,122 @@ def _dialog(qapp, captured=None, roi=False, new_image_fn=None):
     return dlg, img
 
 
+def _ev(ax, xq, yq, shift=False):
+    """A minimal stand-in for a matplotlib mouse event in the FFT axes."""
+    disp = ax.transData.transform((xq, yq))
+
+    class _E:
+        inaxes = ax
+        xdata = xq
+        ydata = yq
+        x = float(disp[0])
+        y = float(disp[1])
+        button = 1
+        guiEvent = None
+        key = "shift" if shift else None
+    return _E()
+
+
+def _draw(ov, ax, kind, p0, p1, shift=False):
+    """Drag a shape from corner ``p0`` to ``p1`` (q-space)."""
+    ov.set_tool(kind)
+    ov.on_press(_ev(ax, *p0))
+    ov.on_motion(_ev(ax, *p1, shift=shift))
+    ov.on_release(_ev(ax, *p1, shift=shift))
+    ov.set_tool(None)
+
+
+def _paint(ov, ax, pts):
+    ov.set_tool("paint")
+    ov.on_press(_ev(ax, *pts[0]))
+    for p in pts[1:]:
+        ov.on_motion(_ev(ax, *p))
+    ov.on_release(_ev(ax, *pts[-1]))
+    ov.set_tool(None)
+
+
+def _seed(dlg, kind="ellipse"):
+    """Add one selection without driving the canvas — for reconstruct-tab tests."""
+    from probeflow.gui.dialogs.fft_selection import FourierSelection
+    ov = dlg._ensure_selection_overlay()
+    ov._sels.append(FourierSelection(kind, cx_q=1.5, cy_q=0.0, rx_q=0.5, ry_q=0.5))
+    ov._selected = len(ov._sels) - 1
+    dlg._on_selection_changed()
+    return ov
+
+
 class TestSelectionOverlay:
-    def test_add_move_resize_delete(self, qapp):
+    def test_draw_move_resize_delete(self, qapp):
         dlg, _img = _dialog(qapp)
-        dlg._on_add_selection("circle")
-        ov = dlg._fft_selection_overlay
+        ov = dlg._ensure_selection_overlay()
+        _draw(ov, dlg._ax_fft, "ellipse", (1.0, 0.5), (2.0, 1.5))
         assert ov.count() == 1 and len(ov._artists) > 0
-        # to_fft_ellipses maps q→px; centre is off-DC, radius ≥ 1 px.
-        e = ov.to_fft_ellipses()[0]
-        assert e["dx"] > 0 and e["rx"] >= 1.0 and e["kind"] == "circle"
+        e = ov.to_regions()[0]
+        assert e["kind"] == "ellipse" and e["dx"] > 0 and e["rx"] >= 1.0
         # resize: enlarging rx_q grows the px radius
         ov._sels[0].rx_q *= 2
-        assert ov.to_fft_ellipses()[0]["rx"] > e["rx"]
+        assert ov.to_regions()[0]["rx"] > e["rx"]
         ov.delete_selected()
         assert ov.count() == 0
 
+    def test_tiny_click_is_discarded(self, qapp):
+        dlg, _ = _dialog(qapp)
+        ov = dlg._ensure_selection_overlay()
+        _draw(ov, dlg._ax_fft, "ellipse", (1.0, 0.5), (1.0, 0.5))
+        assert ov.count() == 0   # a click without a drag makes no selection
+
     def test_ellipse_independent_axes(self, qapp):
         dlg, _ = _dialog(qapp)
-        dlg._on_add_selection("ellipse")
-        ov = dlg._fft_selection_overlay
-        ov._sels[0].rx_q = 0.5
-        ov._sels[0].ry_q = 0.2
-        e = ov.to_fft_ellipses()[0]
-        assert e["rx"] != e["ry"]
+        ov = dlg._ensure_selection_overlay()
+        _draw(ov, dlg._ax_fft, "ellipse", (1.0, 0.2), (3.0, 0.6))
+        e = ov.to_regions()[0]
+        assert e["rx"] != e["ry"]   # free drag → unequal semi-axes
+
+    def test_shift_makes_regular(self, qapp):
+        dlg, _ = _dialog(qapp)
+        ov = dlg._ensure_selection_overlay()
+        _draw(ov, dlg._ax_fft, "ellipse", (1.0, 0.2), (3.0, 0.6), shift=True)
+        e = ov.to_regions()[0]
+        assert e["rx"] == pytest.approx(e["ry"])   # Shift → circle
+
+    def test_rectangle_kind_and_patches(self, qapp):
+        from matplotlib.patches import Rectangle
+        dlg, _ = _dialog(qapp)
+        ov = dlg._ensure_selection_overlay()
+        _draw(ov, dlg._ax_fft, "rect", (-2.0, -1.0), (-1.0, -0.2))
+        r = ov.to_regions()[0]
+        assert r["kind"] == "rect" and r["half_w"] >= 1.0 and r["half_h"] >= 1.0
+        # rectangle patch + its conjugate
+        assert sum(isinstance(a, Rectangle) for a in ov._artists) == 2
+
+    def test_paint_region(self, qapp):
+        from matplotlib.image import AxesImage
+        dlg, _ = _dialog(qapp)
+        ov = dlg._ensure_selection_overlay()
+        ov.set_brush_radius_px(6)
+        _paint(ov, dlg._ax_fft, [(0.5, -2.0), (1.0, -1.8), (1.5, -1.5), (2.0, -1.0)])
+        assert ov.count() == 1
+        p = ov.to_regions()[0]
+        assert p["kind"] == "paint" and len(p["stamps"]) >= 1 and p["radius"] > 0
+        # the painted overlay is drawn as an image
+        assert any(isinstance(a, AxesImage) for a in ov._artists)
 
     def test_conjugate_drawn(self, qapp):
         dlg, _ = _dialog(qapp)
-        dlg._on_add_selection("circle")
-        ov = dlg._fft_selection_overlay
-        # two ellipse patches per selection (feature + conjugate) + 3 handles
+        ov = dlg._ensure_selection_overlay()
+        _draw(ov, dlg._ax_fft, "ellipse", (1.0, 0.5), (2.0, 1.5))
+        # two ellipse patches per selection (feature + conjugate)
         from matplotlib.patches import Ellipse
-        n_ell = sum(isinstance(a, Ellipse) for a in ov._artists)
-        assert n_ell == 2
+        assert sum(isinstance(a, Ellipse) for a in ov._artists) == 2
 
     def test_clear(self, qapp):
         dlg, _ = _dialog(qapp)
-        dlg._on_add_selection("circle")
-        dlg._on_add_selection("ellipse")
-        assert dlg._fft_selection_overlay.count() == 2
+        ov = dlg._ensure_selection_overlay()
+        _draw(ov, dlg._ax_fft, "ellipse", (1.0, 0.5), (2.0, 1.5))
+        _draw(ov, dlg._ax_fft, "rect", (-2.0, -1.0), (-1.0, -0.2))
+        assert ov.count() == 2
         dlg._on_clear_selections()
-        assert dlg._fft_selection_overlay.count() == 0
+        assert ov.count() == 0
 
 
 class TestReconstructTab:
@@ -96,7 +172,7 @@ class TestReconstructTab:
 
     def test_preview_does_not_mutate_and_sets_active(self, qapp):
         dlg, img = _dialog(qapp)
-        dlg._on_add_selection("circle")
+        _seed(dlg)
         before = img.copy()
         dlg._on_reconstruct_preview()
         assert dlg._reconstruct_preview_active is True
@@ -107,7 +183,7 @@ class TestReconstructTab:
     def test_whole_image_apply_routes_op(self, qapp):
         captured: dict = {}
         dlg, _ = _dialog(qapp, captured=captured)
-        dlg._on_add_selection("circle")
+        _seed(dlg)
         dlg._recon_mode_combo.setCurrentIndex(1)        # Keep selected
         dlg._recon_soft_spin.setValue(2)
         dlg._on_reconstruct_apply()
@@ -132,7 +208,7 @@ class TestReconstructTab:
         # switch FFT source to the ROI
         dlg._fft_source = "active_roi"
         dlg._arr, dlg._scan_range_m = dlg._resolve_source_array()
-        dlg._on_add_selection("circle")
+        _seed(dlg)
         dlg._on_reconstruct_apply()
         assert "op" not in captured                     # no whole-image op routed
         assert "export" in dlg._recon_status_lbl.text().lower()
@@ -150,7 +226,7 @@ class TestReconstructTab:
         dlg._fft_source = "active_roi"
         dlg._arr, dlg._scan_range_m = dlg._resolve_source_array()
         dlg._recompute_fft()
-        dlg._on_add_selection("circle")
+        _seed(dlg)
         dlg._on_reconstruct_apply()
 
         assert "op" not in captured
@@ -162,7 +238,7 @@ class TestReconstructTab:
 
     def test_export_writes_file(self, qapp, monkeypatch, tmp_path):
         dlg, _ = _dialog(qapp)
-        dlg._on_add_selection("circle")
+        _seed(dlg)
         out = tmp_path / "result.csv"
         monkeypatch.setattr(
             "PySide6.QtWidgets.QFileDialog.getSaveFileName",

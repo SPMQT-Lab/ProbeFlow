@@ -565,18 +565,13 @@ def apply_processing_state(
         elif step.op == "inverse_fft_filter":
             # Selection geometry is stored in FFT-pixel offsets (exact for the
             # full image this op applies to); q-space values, if present, are
-            # provenance-only. Conjugate symmetry keeps the result real.
-            from probeflow.processing.inverse_fft import FourierEllipse
-            sels = [
-                FourierEllipse(
-                    dx=float(s.get("dx", 0.0)), dy=float(s.get("dy", 0.0)),
-                    rx=float(s.get("rx", 1.0)), ry=float(s.get("ry", 1.0)),
-                    angle_deg=float(s.get("angle_deg", 0.0)),
-                )
-                for s in p.get("selections", [])
-            ]
+            # provenance-only. Each selection carries a ``kind`` (ellipse / rect
+            # / paint); a missing kind reads as ellipse for legacy states.
+            # Conjugate symmetry keeps the result real.
+            from probeflow.processing.inverse_fft import fourier_region_from_dict
+            regions = [fourier_region_from_dict(s) for s in p.get("selections", [])]
             a = _proc.inverse_fft_filter(
-                a, sels,
+                a, regions,
                 mode=str(p.get("mode", "remove_selected")),
                 conjugate=bool(p.get("conjugate_symmetric", True)),
                 soft_px=float(p.get("soft_px", 0.0)),
