@@ -259,11 +259,13 @@ class ProcessingControlPanel(QWidget):
         self._highpass_combo.currentIndexChanged.connect(
             lambda i: self._highpass_sigma_w.setVisible(i != 0))
 
-        self._edge_combo = _combo_row("Edge:", ["None", "Laplacian", "LoG", "DoG"], L, 54)
+        self._edge_combo = _combo_row(
+            "Edge:", ["None", "Laplacian", "LoG", "DoG", "Sobel", "Scharr"], L, 54)
         self._edge_combo.setToolTip(
             "Edge / feature enhancement: Laplacian (2nd derivative), LoG "
-            "(Laplacian-of-Gaussian), or DoG (Difference-of-Gaussians). Sigma (px) "
-            "sets the feature scale."
+            "(Laplacian-of-Gaussian), DoG (Difference-of-Gaussians), or the "
+            "Sobel / Scharr gradient magnitude. Sigma (px) sets the LoG/DoG "
+            "feature scale. For mask/ROI output use Advanced Edge Detection."
         )
         self._edge_sigma_w, self._edge_sigma_sl, _ = _sub_slider(
             "sigma:", 1, 20, 1, "{v}px")
@@ -294,7 +296,7 @@ class ProcessingControlPanel(QWidget):
         if self._mode == "browse_quick":
             return {k: cfg[k] for k in self.QUICK_KEYS}
 
-        edge_map = {0: None, 1: "laplacian", 2: "log", 3: "dog"}
+        edge_map = {0: None, 1: "laplacian", 2: "log", 3: "dog", 4: "sobel", 5: "scharr"}
         smooth_i = self._smooth_combo.currentIndex()
         highpass_i = self._highpass_combo.currentIndex()
         edge_i = self._edge_combo.currentIndex()
@@ -359,7 +361,8 @@ class ProcessingControlPanel(QWidget):
 
         edge = state.get("edge_method")
         self._edge_combo.setCurrentIndex(
-            {None: 0, "laplacian": 1, "log": 2, "dog": 3}.get(edge, 0))
+            {None: 0, "laplacian": 1, "log": 2, "dog": 3,
+             "sobel": 4, "scharr": 5}.get(edge, 0))
         self._edge_sigma_sl.setValue(int(state.get("edge_sigma", 1)))
 
     def bad_line_method(self) -> str | None:

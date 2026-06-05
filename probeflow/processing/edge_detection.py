@@ -172,6 +172,7 @@ def canny_edges(
         "high": float(high),
         "roi_restricted": roi is not None,
         "preset": preset,
+        "source_channel": source_channel,
     }
     if pixel_size_nm is not None:
         params["sigma_nm"] = float(sigma) * float(pixel_size_nm)
@@ -201,6 +202,8 @@ def gradient_filter(
     threshold: float = 90.0,
     roi_mask: np.ndarray | None = None,
     pixel_size_nm: float | None = None,
+    pixel_size_x_nm: float | None = None,
+    pixel_size_y_nm: float | None = None,
     source_channel: str | None = None,
 ) -> EdgeDetectionResult:
     """Compute a Sobel or Scharr gradient response.
@@ -220,6 +223,11 @@ def gradient_filter(
     roi_mask:
         Optional boolean mask; gradients outside it are zeroed and excluded
         from any threshold mask.
+    pixel_size_x_nm, pixel_size_y_nm:
+        Physical pixel spacings.  When given, the column/row derivatives are
+        scaled to physical units (∂z/∂x, ∂z/∂y) before forming the magnitude
+        and orientation, so anisotropic pixels yield physically correct values.
+        Falls back to *pixel_size_nm* (isotropic) and then to 1 px.
     """
     from skimage import filters as _skf
 
@@ -237,6 +245,15 @@ def gradient_filter(
     else:
         gy = _skf.scharr_h(a)
         gx = _skf.scharr_v(a)
+
+    # Scale per-pixel derivatives to physical units so magnitude/orientation
+    # are correct on anisotropic pixels (∂z/∂x = Gₓ / dx, ∂z/∂y = G_y / dy).
+    dx = pixel_size_x_nm or pixel_size_nm
+    dy = pixel_size_y_nm or pixel_size_nm
+    if dx and dx > 0:
+        gx = gx / float(dx)
+    if dy and dy > 0:
+        gy = gy / float(dy)
 
     magnitude = np.hypot(gx, gy)
     orientation = np.arctan2(gy, gx)
@@ -271,7 +288,10 @@ def gradient_filter(
         finite_ref = ref[np.isfinite(ref)] if ref.size else ref
         if finite_ref.size:
             cut = float(np.percentile(finite_ref, float(threshold)))
-            edge_mask = magnitude >= cut
+            # Require a strictly positive gradient: when the percentile cut is
+            # 0 (flat or sparse-step images) ``>= cut`` would mark the entire
+            # zero-gradient background as an edge.
+            edge_mask = (magnitude >= cut) & (magnitude > 0.0)
             edge_mask &= ~nan_mask
             if roi is not None:
                 edge_mask &= roi
@@ -285,6 +305,9 @@ def gradient_filter(
         "threshold_to_mask": bool(threshold_to_mask),
         "threshold": float(threshold),
         "roi_restricted": roi is not None,
+        "source_channel": source_channel,
+        "pixel_size_x_nm": float(dx) if dx else None,
+        "pixel_size_y_nm": float(dy) if dy else None,
     }
 
     return EdgeDetectionResult(
@@ -295,5 +318,5 @@ def gradient_filter(
         gradient_magnitude=magnitude,
         gradient_orientation=orientation,
         parameters=params,
-        pixel_size_nm=pixel_size_nm,
+        pixel_size_nm=pixel_size_nm or (float(dx) if dx else None),
     )

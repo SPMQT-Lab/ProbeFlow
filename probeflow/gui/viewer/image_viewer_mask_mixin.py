@@ -85,15 +85,18 @@ class ImageViewerMaskMixin:
             self._status_lbl.setText("Advanced Edge Detection: no image loaded.")
             return
         roi_mask = area_roi_mask(self._active_image_roi(), arr.shape[:2])
-        px_x_m, _ = self._processing_pixel_sizes_m()
-        pixel_size_nm = px_x_m * 1e9 if px_x_m else None
+        px_x_m, px_y_m = self._processing_pixel_sizes_m()
+        px_x_nm = px_x_m * 1e9 if px_x_m else None
+        px_y_nm = px_y_m * 1e9 if px_y_m else None
 
         dlg = EdgeDetectionDialog(
             arr,
             theme=self._t,
-            pixel_size_nm=pixel_size_nm,
+            pixel_size_nm=px_x_nm,
+            pixel_size_x_nm=px_x_nm,
+            pixel_size_y_nm=px_y_nm,
             active_roi_mask=roi_mask,
-            source_channel=self._channel_name() if hasattr(self, "_channel_name") else None,
+            source_channel=self._edge_source_channel(),
             parent=self,
         )
         dlg.overlay_requested.connect(self._on_edge_overlay_requested)
@@ -118,13 +121,25 @@ class ImageViewerMaskMixin:
 
     def _on_edge_mask_created(self, image_mask) -> None:
         from probeflow.core.mask import MaskSet
+        entry = self._entries[self._idx]
         if self._image_mask_set is None:
-            entry = self._entries[self._idx]
             self._image_mask_set = MaskSet(image_id=str(entry.path))
+        # Record source context so a mask made from a processed channel is not
+        # mistaken for raw-data-derived later (it only matches by shape).
+        image_mask.parameters.setdefault("source_path", str(entry.path))
+        image_mask.parameters.setdefault("source_channel", self._edge_source_channel())
+        image_mask.parameters.setdefault("data_basis", "processed_image")
         self._image_mask_set.add(image_mask)
         self._image_mask_set.set_active(image_mask.id)
         self._on_image_mask_set_changed()
         self._status_lbl.setText(f"Created active mask “{image_mask.name}”.")
+
+    def _edge_source_channel(self) -> "str | None":
+        try:
+            _scale, _unit, axis_label = self._channel_unit()
+        except Exception:
+            return None
+        return axis_label or (self._ch_cb.currentText() if hasattr(self, "_ch_cb") else None)
 
     def _on_edge_rois_created(self, rois) -> None:
         if self._image_roi_set is None or not rois:

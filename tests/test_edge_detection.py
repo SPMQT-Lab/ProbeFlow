@@ -120,6 +120,43 @@ class TestGradient:
         assert res.edge_mask.dtype == bool
         assert res.edge_mask.any()
 
+    def test_flat_image_threshold_marks_no_edges(self):
+        # Regression: a zero percentile cutoff must not mark the flat
+        # zero-gradient background as an edge.
+        flat = np.zeros((32, 32), dtype=np.float64)
+        res = gradient_filter(flat, threshold_to_mask=True, threshold=90)
+        assert res.edge_mask is not None
+        assert not res.edge_mask.any()
+
+    def test_sparse_step_threshold_not_whole_image(self):
+        # A single step edge in a mostly-flat image: the cutoff percentile can
+        # be 0, but only the genuine edge pixels (a small fraction) qualify.
+        img = _step_image(n=64, edge_col=32)
+        res = gradient_filter(img, threshold_to_mask=True, threshold=90)
+        frac = res.edge_mask.mean()
+        assert 0.0 < frac < 0.5
+
+    def test_anisotropic_pixels_change_orientation(self):
+        # On a diagonal ramp, physical pixel anisotropy must rotate the
+        # gradient orientation relative to the isotropic (pixel-space) case.
+        yy, xx = np.mgrid[0:64, 0:64]
+        ramp = (xx + yy).astype(np.float64)
+        iso = gradient_filter(ramp, output="orientation")
+        aniso = gradient_filter(ramp, output="orientation",
+                                pixel_size_x_nm=1.0, pixel_size_y_nm=4.0)
+        mid = (slice(8, 56), slice(8, 56))
+        assert not np.allclose(iso.gradient_orientation[mid],
+                               aniso.gradient_orientation[mid])
+
+    def test_isotropic_scaling_matches_unscaled_orientation(self):
+        yy, xx = np.mgrid[0:64, 0:64]
+        ramp = (xx + 2 * yy).astype(np.float64)
+        a = gradient_filter(ramp, output="orientation")
+        b = gradient_filter(ramp, output="orientation",
+                            pixel_size_x_nm=2.0, pixel_size_y_nm=2.0)
+        mid = (slice(8, 56), slice(8, 56))
+        assert np.allclose(a.gradient_orientation[mid], b.gradient_orientation[mid])
+
     def test_nan_preserved_in_display(self):
         img = _step_image()
         img[5, 5] = np.nan
@@ -160,3 +197,19 @@ class TestEdgeDetectGradient:
     def test_unknown_method_still_raises(self):
         with pytest.raises(ValueError):
             edge_detect(_step_image(), method="bogus")
+
+    @pytest.mark.parametrize("method", ["sobel", "scharr"])
+    def test_replayable_through_gui_state(self, method):
+        # Connectivity: a Sobel/Scharr "Edge:" selection must survive the GUI →
+        # ProcessingState → replay chain (the "history-replayable" claim).
+        from probeflow.processing.gui_adapter import processing_state_from_gui
+        from probeflow.processing.state import apply_processing_state
+
+        state = processing_state_from_gui({"edge_method": method, "edge_sigma": 1})
+        ops = [step.op for step in state.steps]
+        assert "edge_detect" in ops
+        step = next(s for s in state.steps if s.op == "edge_detect")
+        assert step.params["method"] == method
+        out = apply_processing_state(_step_image(), state)
+        assert out.shape == (64, 64)
+        assert np.nanmax(out) > 0.0
