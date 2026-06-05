@@ -22,13 +22,23 @@ GUI_TEST_MODULES = {
     "test_thumbnail_cache_pixmap.py",
     "test_line_periodicity_plot.py",
     "test_angle_update_and_dock_restore.py",
+    "test_fft_phase_gui.py",
+    "test_fft_selection_gui.py",
+    "test_mains_pickup_gui.py",
+    "test_roi_resize_handles_canvas.py",
+    "test_worker_signals_lifetime.py",
 }
 
 MIXED_QT_FIXTURE_MODULES = {
     "test_feature_lattice.py",
     "test_pair_correlation.py",
+    "test_fft_viewer_utils.py",
+    "test_definitions_dialog.py",
+    "test_lattice_grid.py",
 }
 
+# Tests that construct a QApplication inline rather than via a ``qapp`` fixture,
+# so the fixturename-based gating in MIXED_QT_FIXTURE_MODULES cannot see them.
 MIXED_QT_TESTS = {
     ("test_lattice_grid.py", "test_export_png_creates_file"),
 }
