@@ -1039,3 +1039,32 @@ class TestApplyProcessingStateWithCalibration:
         )
         assert scan.planes[0].shape == (32, 24)
         np.testing.assert_allclose(scan.scan_range_m, (3e-9, 5e-9))
+
+
+def test_stm_background_active_roi_without_roi_set_degrades_to_whole_image():
+    """A constant-Δf/STM background step fit over an ROI must not crash a
+    thumbnail/preview render that has no roi_set: the unresolved ROI mask
+    degrades to a whole-image fit instead of raising in the kernel."""
+
+    rng = np.random.default_rng(0)
+    arr = rng.standard_normal((24, 24)).astype(np.float64) + np.linspace(0, 5, 24)
+
+    state = ProcessingState(
+        [
+            ProcessingStep(
+                "stm_background",
+                {
+                    "fit_region": "active_roi",
+                    "fit_roi_id": "be8e9cc6-84b2-4e4d-9990-24bdc4476258",
+                    "model": "linear",
+                    "line_statistic": "median",
+                },
+            )
+        ]
+    )
+
+    with pytest.warns(UserWarning, match="ROI fit mask ignored"):
+        out = apply_processing_state(arr, state, roi_set=None)
+
+    assert out.shape == arr.shape
+    assert np.isfinite(out).all()

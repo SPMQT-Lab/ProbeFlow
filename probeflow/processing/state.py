@@ -475,10 +475,18 @@ def apply_processing_state(
             )
         elif step.op == "stm_background":
             fit_mask = _resolve_mask_roi_param(p, "fit", a.shape, roi_set)
+            fit_region = str(p.get("fit_region", "whole_image"))
+            if fit_region == "active_roi" and fit_mask is None:
+                # The ROI mask could not be resolved (no roi_set, missing ROI,
+                # or non-area ROI) — _resolve_mask_roi_param already warned and
+                # returned None. Degrade to a whole-image fit instead of letting
+                # the kernel raise (active_roi mandates a mask), so thumbnail /
+                # preview renders without a roi_set don't crash.
+                fit_region = "whole_image"
             a = _proc.apply_stm_background(
                 a,
                 _proc.STMBackgroundParams(
-                    fit_region=str(p.get("fit_region", "whole_image")),
+                    fit_region=fit_region,
                     line_statistic=str(p.get("line_statistic", "median")),
                     model=str(p.get("model", "linear")),
                     linear_x_first=bool(p.get("linear_x_first", False)),

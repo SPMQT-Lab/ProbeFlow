@@ -30,6 +30,7 @@ _SIZE_MAP = {
 }
 
 _UI_FAMILY: str | None = None
+_MONO_FAMILY: str | None = None
 
 
 def ui_family() -> str:
@@ -45,6 +46,27 @@ def ui_family() -> str:
             family = ""
         _UI_FAMILY = family or "Helvetica"
     return _UI_FAMILY
+
+
+def mono_family() -> str:
+    """Return the platform fixed-width font family (Menlo on macOS), cached.
+
+    Asking Qt for the real system monospace family avoids the costly font-alias
+    lookup — and the "missing font family 'Courier'" warning — that an explicit
+    ``QFont("Courier", ...)`` triggers on macOS/Windows, where "Courier" is only
+    an alias rather than an installed family.
+    """
+    global _MONO_FAMILY
+    if _MONO_FAMILY is None:
+        family = ""
+        try:
+            from PySide6.QtGui import QFontDatabase
+
+            family = QFontDatabase.systemFont(QFontDatabase.FixedFont).family()
+        except Exception:
+            family = ""
+        _MONO_FAMILY = family or "Monospace"
+    return _MONO_FAMILY
 
 
 def scaled(pt: int) -> int:
@@ -64,4 +86,21 @@ def ui_font(pt: int, *, bold: bool = False, weight=None) -> "QFont":
     return f
 
 
-__all__ = ["ui_family", "scaled", "ui_font"]
+def mono_font(pt: int, *, bold: bool = False, weight=None) -> "QFont":
+    """Build a fixed-width font in the real platform monospace family.
+
+    The point size is preserved verbatim (not run through ``scaled``): these are
+    compact numeric readouts whose layout depends on the existing size — the fix
+    here is only the font *family*, to silence the "Courier" alias warning.
+    """
+    from PySide6.QtGui import QFont
+
+    f = QFont(mono_family(), pt)
+    if weight is not None:
+        f.setWeight(weight)
+    elif bold:
+        f.setBold(True)
+    return f
+
+
+__all__ = ["ui_family", "mono_family", "scaled", "ui_font", "mono_font"]

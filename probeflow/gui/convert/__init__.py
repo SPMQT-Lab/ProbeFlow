@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from probeflow.gui.typography import ui_font
+from probeflow.gui.typography import mono_font, ui_font
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QCursor, QFont
 from PySide6.QtWidgets import (
@@ -95,7 +95,7 @@ class ConvertPanel(QWidget):
 
         self.log_text = QTextEdit()
         self.log_text.setReadOnly(True)
-        self.log_text.setFont(QFont("Courier", 11))
+        self.log_text.setFont(mono_font(11))
         lay.addWidget(self.log_text, 1)
 
         if cfg.get("input_dir"):

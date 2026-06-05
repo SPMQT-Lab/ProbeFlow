@@ -40,6 +40,19 @@ def _set_view(dlg, text):
     dlg._fft_view_combo.setCurrentIndex(dlg._fft_view_combo.findText(text))
 
 
+class TestReconstructStatus:
+    def test_changing_reconstruct_mode_does_not_crash(self, qapp):
+        # currentIndexChanged emits the int index; _update_reconstruct_status
+        # treats its first positional arg as a reconstruction result, so the
+        # connection must not pass the index straight through (it used to call
+        # int.imag_residual_norm and raise AttributeError).
+        dlg = _dialog(qapp)
+        other = 1 - dlg._recon_mode_combo.currentIndex()
+        dlg._recon_mode_combo.setCurrentIndex(other)  # fires currentIndexChanged
+        assert dlg._recon_mode_combo.currentIndex() == other
+        dlg.deleteLater()
+
+
 class TestPhaseView:
     def test_default_is_magnitude(self, qapp):
         dlg = _dialog(qapp)

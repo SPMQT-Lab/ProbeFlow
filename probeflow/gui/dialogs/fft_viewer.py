@@ -5,7 +5,7 @@ import numpy as np
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
-from probeflow.gui.typography import ui_font
+from probeflow.gui.typography import mono_font, ui_font
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QFont
 from PySide6.QtWidgets import (
@@ -456,7 +456,7 @@ class FFTViewerDialog(
         cursor_title = QLabel("Cursor")
         cursor_title.setFont(ui_font(9, weight=QFont.Bold))
         self._cursor_readout_lbl = QLabel("Move over the FFT")
-        self._cursor_readout_lbl.setFont(QFont("Courier", 8))
+        self._cursor_readout_lbl.setFont(mono_font(8))
         self._cursor_readout_lbl.setWordWrap(True)
         side_lay.addWidget(cursor_title)
         side_lay.addWidget(self._cursor_readout_lbl)
@@ -507,7 +507,7 @@ class FFTViewerDialog(
 
         # Measurement summary — always visible at the top
         self._grid_measure_lbl = QLabel("No grid — click Draw Grid to start")
-        self._grid_measure_lbl.setFont(QFont("Courier", 9))
+        self._grid_measure_lbl.setFont(mono_font(9))
         self._grid_measure_lbl.setWordWrap(True)
         self._grid_measure_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
         grid_outer_lay.addWidget(self._grid_measure_lbl)
@@ -648,7 +648,7 @@ class FFTViewerDialog(
         ref_grid.setColumnStretch(1, 1)
         ref_grid.setColumnStretch(3, 1)
         self._bragg_radius_lbl = QLabel("Shells: —")
-        self._bragg_radius_lbl.setFont(QFont("Courier", 8))
+        self._bragg_radius_lbl.setFont(mono_font(8))
         self._bragg_radius_lbl.setWordWrap(True)
         self._bragg_radius_lbl.setMaximumHeight(34)
         self._bragg_radius_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
@@ -665,7 +665,7 @@ class FFTViewerDialog(
         self._fft_measured_lbl = QLabel(
             "Draw a grid and select a known structure to see the comparison."
         )
-        self._fft_measured_lbl.setFont(QFont("Courier", 8))
+        self._fft_measured_lbl.setFont(mono_font(8))
         self._fft_measured_lbl.setWordWrap(True)
         self._fft_measured_lbl.setMinimumHeight(32)
         self._fft_measured_lbl.setMaximumHeight(54)
@@ -728,7 +728,7 @@ class FFTViewerDialog(
         self._fft_fill_combo.addItems(["NaN", "Background", "Zero"])
 
         self._fft_correction_lbl = QLabel("Align a reciprocal grid to compute correction factors.")
-        self._fft_correction_lbl.setFont(QFont("Courier", 8))
+        self._fft_correction_lbl.setFont(mono_font(8))
         self._fft_correction_lbl.setWordWrap(True)
         self._fft_correction_lbl.setMinimumHeight(34)
         self._fft_correction_lbl.setMaximumHeight(60)
@@ -880,7 +880,7 @@ class FFTViewerDialog(
         info_lay.setContentsMargins(8, 6, 8, 4)
         info_lay.setSpacing(2)
         self._info_lbl = QLabel("")
-        self._info_lbl.setFont(QFont("Courier", 9))
+        self._info_lbl.setFont(mono_font(9))
         self._info_lbl.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         info_lay.addWidget(self._info_lbl)
         left_col.addWidget(info_frame)
