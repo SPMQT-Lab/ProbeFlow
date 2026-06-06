@@ -88,8 +88,22 @@ def _cmd_prepare_png(args) -> int:
                 raw_range = (w_m, h_m)
         except (TypeError, ValueError, IndexError, AttributeError):
             pass
+        # Resolve any roi / mask scope steps against persisted sidecars so
+        # scoped local filters in the state are not silently skipped here
+        # (review: mask-scope replay not connected through CLI).
+        roi_set = mask_set = None
+        try:
+            from probeflow.io.roi_sidecar import load_roi_set_sidecar
+            roi_set, _ = load_roi_set_sidecar(args.input, missing_ok=True)
+        except Exception:
+            roi_set = None
+        try:
+            from probeflow.io.mask_sidecar import load_mask_set_sidecar
+            mask_set, _ = load_mask_set_sidecar(args.input, missing_ok=True)
+        except Exception:
+            mask_set = None
         new_plane, new_range = apply_processing_state_with_calibration(
-            plane, state, scan_range_m=raw_range,
+            plane, state, roi_set, mask_set=mask_set, scan_range_m=raw_range,
         )
         scan.planes[args.plane] = new_plane
         if new_range is not None:

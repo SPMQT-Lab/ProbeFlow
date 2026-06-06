@@ -354,14 +354,29 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
         if op_name not in _ROI_ELIGIBLE_OPS:
             _warn_skipped_step("mask_filter_ops", f"unsupported op {op_name!r}")
             continue
-        if spec.get("mask_id") is None:
-            _warn_skipped_step("mask_filter_ops", "entry has no mask_id")
+        frozen_mask = spec.get("frozen_mask")
+        has_frozen = (
+            isinstance(frozen_mask, dict)
+            and frozen_mask.get("data") is not None
+            and frozen_mask.get("shape") is not None
+        )
+        if spec.get("mask_id") is None and not has_frozen:
+            _warn_skipped_step(
+                "mask_filter_ops", "entry has neither mask_id nor frozen_mask"
+            )
             continue
-        steps.append(ProcessingStep("mask", {
-            "mask_id": str(spec["mask_id"]),
+        params = {
             "scope_semantics": SCOPE_SEMANTICS_MASKED_PASTE,
             "step": {"op": op_name, "params": dict(spec.get("params", {}))},
-        }))
+        }
+        if spec.get("mask_id") is not None:
+            params["mask_id"] = str(spec["mask_id"])
+        if has_frozen:
+            params["frozen_mask"] = {
+                "data": str(frozen_mask["data"]),
+                "shape": [int(v) for v in frozen_mask["shape"]],
+            }
+        steps.append(ProcessingStep("mask", params))
 
     # Quantize bit-depth steps are deferred to the very end of the
     # pipeline (review image-proc #2, fixed 2026-05-28).  Running
@@ -539,6 +554,8 @@ def apply_processing_state_to_scan(
     proc_state: dict,
     *,
     plane_idx: int = 0,
+    roi_set=None,
+    mask_set=None,
 ) -> "Scan":
     """Apply GUI processing state to a Scan before export.
 
@@ -549,6 +566,10 @@ def apply_processing_state_to_scan(
     ``affine_lattice_correction`` with canvas expansion), ``scan.scan_range_m``
     is updated to match the new array shape so PNG scale bars, FFT k-axes,
     and feature pixel→nm conversions stay correct (review image-proc #4).
+
+    *roi_set* / *mask_set* resolve ``roi`` / ``mask`` scope steps; pass them
+    whenever the saved state may contain scoped local filters, or those steps
+    are skipped with a warning.
 
     Updates ``scan.planes[plane_idx]`` in place and returns *scan*.
     Display-only settings (grain overlay, colormap, clip percentiles) are ignored.
@@ -570,7 +591,8 @@ def apply_processing_state_to_scan(
     except (TypeError, ValueError, IndexError, AttributeError):
         pass
     a, new_range = apply_processing_state_with_calibration(
-        scan.planes[plane_idx], state, scan_range_m=raw_range,
+        scan.planes[plane_idx], state, roi_set,
+        mask_set=mask_set, scan_range_m=raw_range,
     )
 
     scan.planes[plane_idx] = a

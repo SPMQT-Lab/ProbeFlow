@@ -676,6 +676,8 @@ def _step_summary(step: ProvenanceStep) -> str:
                 summary += " — computed full-image, applied inside scope"
             if p.get("frozen_geometry") is not None:
                 summary += " [frozen geometry]"
+            elif p.get("frozen_mask") is not None:
+                summary += " [frozen mask]"
             return summary
         return f"{scope}-scoped processing"
     if op.startswith("export_"):

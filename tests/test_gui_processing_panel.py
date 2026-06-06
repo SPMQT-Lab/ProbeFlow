@@ -681,8 +681,18 @@ def test_viewer_apply_scopes_local_filter_to_active_area_roi(qapp, monkeypatch):
 
     dlg._on_apply_processing()
 
-    assert dlg._processing["processing_scope"] == "roi"
-    assert dlg._processing["processing_roi_id"] == roi.id
+    # New contract: ROI-scoped filters are committed durably with frozen
+    # geometry rather than written as a single global processing_scope/_roi_id.
+    assert "processing_scope" not in dlg._processing
+    assert "processing_roi_id" not in dlg._processing
+    committed = dlg._processing["roi_filter_ops"]
+    assert len(committed) == 1
+    assert committed[0]["op"] == "smooth"
+    assert committed[0]["roi_id"] == roi.id
+    assert committed[0]["frozen_geometry"]["kind"] == "rectangle"
+    # The live panel filter is cleared and the scope selector reset.
+    assert "smooth_sigma" not in dlg._processing
+    assert dlg._scope_cb.currentIndex() == 0
 
     dlg.close()
     dlg.deleteLater()
@@ -1599,7 +1609,7 @@ def test_viewer_refresh_display_array_passes_roi_set(qapp, monkeypatch):
     roi_set.add(roi)
     seen = {}
 
-    def fake_apply(arr, state, passed_roi_set, *, scan_range_m=None):
+    def fake_apply(arr, state, passed_roi_set, *, mask_set=None, scan_range_m=None):
         seen["roi_set"] = passed_roi_set
         return arr + 1.0, scan_range_m
 
@@ -1641,7 +1651,7 @@ def test_viewer_refresh_display_array_blocks_stale_roi_reference(qapp, monkeypat
 
     called = []
 
-    def fake_apply(arr, state, passed_roi_set, *, scan_range_m=None):
+    def fake_apply(arr, state, passed_roi_set, *, mask_set=None, scan_range_m=None):
         called.append(True)
         return arr + 1.0, scan_range_m
 
@@ -1683,7 +1693,7 @@ def test_viewer_refresh_display_array_blocks_export_after_processing_error(qapp,
         def setText(self, text):
             self.text = text
 
-    def fail_apply(arr, state, passed_roi_set, *, scan_range_m=None):
+    def fail_apply(arr, state, passed_roi_set, *, mask_set=None, scan_range_m=None):
         raise RuntimeError("bad processing setting")
 
     monkeypatch.setattr(_iv_mod, "apply_processing_state_with_calibration", fail_apply)

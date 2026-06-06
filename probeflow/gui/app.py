@@ -1195,9 +1195,25 @@ class ProbeFlowWindow(QMainWindow):
 
                 processing_state = processing_state_from_gui(saved_proc)
                 if processing_state.steps:
+                    # Resolve roi / mask scope steps against persisted sidecars
+                    # so scoped local filters replay here too (review:
+                    # mask-scope replay not connected through feature counting).
+                    roi_set = mask_set = None
+                    try:
+                        from probeflow.io.roi_sidecar import load_roi_set_sidecar
+                        roi_set, _ = load_roi_set_sidecar(entry.path, missing_ok=True)
+                    except Exception:
+                        roi_set = None
+                    try:
+                        from probeflow.io.mask_sidecar import load_mask_set_sidecar
+                        mask_set, _ = load_mask_set_sidecar(entry.path, missing_ok=True)
+                    except Exception:
+                        mask_set = None
                     arr, new_range = apply_processing_state_with_calibration(
                         arr,
                         processing_state,
+                        roi_set,
+                        mask_set=mask_set,
                         scan_range_m=analysis_range,
                     )
                     if new_range is not None:

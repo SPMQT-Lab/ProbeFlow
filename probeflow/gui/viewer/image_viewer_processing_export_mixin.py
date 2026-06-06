@@ -428,6 +428,10 @@ class ImageViewerProcessingExportMixin:
         for step in ps.steps:
             if step.op != "mask":
                 continue
+            # Frozen mask steps replay their own raster snapshot and never
+            # consult the live mask, so they cannot go stale.
+            if step.params.get("frozen_mask") is not None:
+                continue
             mask_id = step.params.get("mask_id")
             if mask_id is None:
                 continue

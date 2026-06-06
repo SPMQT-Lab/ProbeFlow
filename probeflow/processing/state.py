@@ -63,6 +63,24 @@ def apply_operation_with_optional_roi(
     return result
 
 
+def _mask_from_frozen(frozen: Any) -> "np.ndarray | None":
+    """Unpack a frozen mask-raster snapshot to a boolean array.
+
+    A committed mask-scoped filter stores ``{"data": <packed>, "shape": [Ny, Nx]}``
+    (the same compact encoding as :class:`probeflow.core.mask.ImageMask`) so it
+    replays independently of the live mask — parity with ROI ``frozen_geometry``.
+    Returns ``None`` when the snapshot is malformed.
+    """
+    if not isinstance(frozen, dict):
+        return None
+    try:
+        from probeflow.core.mask import _unpack_bool
+        shape = tuple(int(v) for v in frozen["shape"])
+        return _unpack_bool(str(frozen["data"]), shape)
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 def _roi_from_frozen_geometry(frozen: Any, roi_id: Any = None) -> "ROI | None":
     """Build a transient :class:`ROI` from a frozen-geometry snapshot.
 
@@ -153,6 +171,10 @@ def mask_references_from_state(state: "ProcessingState") -> list[dict[str, Any]]
     for step_index, step in enumerate(state.steps):
         params = step.params or {}
         if step.op == "mask" and params.get("mask_id") is not None:
+            # Frozen mask-raster steps carry their own snapshot and resolve
+            # without the live mask_set, so they are never "missing".
+            if params.get("frozen_mask") is not None:
+                continue
             refs.append({
                 "step_index": step_index,
                 "op": step.op,
@@ -762,35 +784,46 @@ def apply_processing_state(
                 continue
             if nested.op not in _ROI_ELIGIBLE_OPS:
                 continue
-            mask_id = p.get("mask_id")
-            if mask_id is None:
-                continue
-            if mask_set is None:
-                import warnings
-                warnings.warn(
-                    f"mask step references mask_id={mask_id!r} but no mask_set "
-                    "was passed to apply_processing_state — step skipped.",
-                    UserWarning,
-                    stacklevel=2,
-                )
-                continue
-            mask_ref = str(mask_id)
-            mask_obj = mask_set.get(mask_ref)
-            if mask_obj is None and hasattr(mask_set, "get_by_name"):
-                mask_obj = mask_set.get_by_name(mask_ref)
-            if mask_obj is None:
-                import warnings
-                warnings.warn(
-                    f"mask_id={mask_id!r} not found in mask_set — step skipped.",
-                    UserWarning,
-                    stacklevel=2,
-                )
-                continue
-            mask = np.asarray(mask_obj.data, dtype=bool)
+            frozen_mask = p.get("frozen_mask")
+            if frozen_mask is not None:
+                # Frozen snapshot: use the mask raster captured at commit time
+                # rather than resolving the live mask, so replacing a mask's
+                # data does not move this operation (parity with ROI
+                # frozen_geometry; review: mask still live).
+                mask = _mask_from_frozen(frozen_mask)
+                if mask is None:
+                    continue
+                mask = np.asarray(mask, dtype=bool)
+            else:
+                mask_id = p.get("mask_id")
+                if mask_id is None:
+                    continue
+                if mask_set is None:
+                    import warnings
+                    warnings.warn(
+                        f"mask step references mask_id={mask_id!r} but no mask_set "
+                        "was passed to apply_processing_state — step skipped.",
+                        UserWarning,
+                        stacklevel=2,
+                    )
+                    continue
+                mask_ref = str(mask_id)
+                mask_obj = mask_set.get(mask_ref)
+                if mask_obj is None and hasattr(mask_set, "get_by_name"):
+                    mask_obj = mask_set.get_by_name(mask_ref)
+                if mask_obj is None:
+                    import warnings
+                    warnings.warn(
+                        f"mask_id={mask_id!r} not found in mask_set — step skipped.",
+                        UserWarning,
+                        stacklevel=2,
+                    )
+                    continue
+                mask = np.asarray(mask_obj.data, dtype=bool)
             if mask.shape != a.shape:
                 import warnings
                 warnings.warn(
-                    f"mask_id={mask_id!r} shape {mask.shape} does not match "
+                    f"mask step mask shape {mask.shape} does not match "
                     f"image shape {a.shape} — step skipped.",
                     UserWarning,
                     stacklevel=2,

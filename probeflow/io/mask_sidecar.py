@@ -26,6 +26,29 @@ def default_mask_sidecar_path(scan_path: str | Path) -> Path:
     return path.parent / f"{path.stem}.masks.json"
 
 
+def mask_sidecar_candidates(scan_path: str | Path) -> tuple[Path, ...]:
+    """Return sidecars checked when a command needs persisted masks.
+
+    The canonical per-scan ``.masks.json`` is preferred, with provenance
+    sidecars (``.probeflow.json`` / ``.provenance.json``) as fallbacks so masks
+    embedded in an exported provenance record are automatically reloadable —
+    mirroring :func:`probeflow.io.roi_sidecar.roi_sidecar_candidates`.
+    """
+    path = Path(scan_path)
+    candidates = (
+        path.parent / f"{path.stem}.masks.json",
+        path.parent / f"{path.stem}.probeflow.json",
+        path.parent / f"{path.stem}.provenance.json",
+    )
+    seen: set[Path] = set()
+    out: list[Path] = []
+    for candidate in candidates:
+        if candidate not in seen:
+            seen.add(candidate)
+            out.append(candidate)
+    return tuple(out)
+
+
 def _mask_set_payload(data: dict[str, Any]) -> dict[str, Any] | None:
     """Extract a MaskSet dict from a sidecar payload."""
     if not isinstance(data, dict):
@@ -47,9 +70,17 @@ def load_mask_set_sidecar(
 
     Returns ``(mask_set, path_used)``.  If no sidecar exists and ``missing_ok``
     is true, ``mask_set`` is ``None`` and ``path_used`` is the canonical path.
+
+    When *sidecar* is not given, the canonical ``.masks.json`` is tried first,
+    then provenance sidecars (so masks embedded in an exported
+    ``.probeflow.json`` are automatically reloadable).
     """
     scan = Path(scan_path)
-    chosen = Path(sidecar) if sidecar is not None else default_mask_sidecar_path(scan)
+    if sidecar is not None:
+        chosen = Path(sidecar)
+    else:
+        candidates = mask_sidecar_candidates(scan)
+        chosen = next((p for p in candidates if p.exists()), candidates[0])
 
     if not chosen.exists():
         if missing_ok:
