@@ -216,6 +216,7 @@ def _apply_processing(
     processing: dict,
     roi_set=None,
     *,
+    mask_set=None,
     pixel_size_x_m: float | None = None,
     pixel_size_y_m: float | None = None,
 ) -> np.ndarray:
@@ -238,6 +239,7 @@ def _apply_processing(
         arr,
         processing_state_from_gui(processing or {}),
         roi_set=roi_set,
+        mask_set=mask_set,
         pixel_size_x_m=pixel_size_x_m,
         pixel_size_y_m=pixel_size_y_m,
     )

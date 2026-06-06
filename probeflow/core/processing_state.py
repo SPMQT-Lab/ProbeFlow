@@ -42,6 +42,7 @@ _SUPPORTED_OPS: frozenset[str] = frozenset({
     "set_zero_point",
     "set_zero_plane",
     "roi",
+    "mask",
     "flip_horizontal",
     "flip_vertical",
     "rotate_90_cw",

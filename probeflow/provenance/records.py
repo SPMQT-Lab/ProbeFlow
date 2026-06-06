@@ -284,6 +284,7 @@ class ExportRecord:
     warning: str | None = None
     warnings: tuple[str, ...] = ()
     rois: dict[str, Any] | None = None
+    masks: dict[str, Any] | None = None
     schema_version: int = SCHEMA_VERSION
     summary: str | None = None
 
@@ -303,6 +304,7 @@ class ExportRecord:
             "warning": self.warning,
             "warnings": warnings,
             "rois": _json_safe(self.rois),
+            "masks": _json_safe(self.masks),
             "summary": self.summary,
         }
 
@@ -320,6 +322,7 @@ class ExportRecord:
             warning=data.get("warning"),
             warnings=tuple(str(w) for w in data.get("warnings") or ()),
             rois=data.get("rois") if isinstance(data.get("rois"), dict) else None,
+            masks=data.get("masks") if isinstance(data.get("masks"), dict) else None,
             schema_version=int(data.get("schema_version") or SCHEMA_VERSION),
             summary=data.get("summary"),
         )
@@ -488,6 +491,7 @@ def build_export_record(
     warnings: list[str] | tuple[str, ...] | None = None,
     conversion: str | None = None,
     rois: dict[str, Any] | None = None,
+    masks: dict[str, Any] | None = None,
 ) -> ExportRecord:
     """Build the sidecar ExportRecord and append export/conversion steps."""
 
@@ -557,6 +561,7 @@ def build_export_record(
         warning=primary_warning,
         warnings=tuple(warning_list),
         rois=copy.deepcopy(rois) if rois is not None else None,
+        masks=copy.deepcopy(masks) if masks is not None else None,
         summary=summary,
     )
 
@@ -618,10 +623,13 @@ def _operation_name(op: str, params: dict[str, Any]) -> str:
         return "Set zero point"
     if op == "set_zero_plane":
         return "Set zero plane"
-    if op == "roi":
+    if op in ("roi", "mask"):
+        scope = "ROI" if op == "roi" else "Mask"
         nested = params.get("step") if isinstance(params, dict) else None
         nested_op = nested.get("op") if isinstance(nested, dict) else None
-        return f"ROI-scoped {_operation_name(str(nested_op), nested.get('params', {}))}" if nested_op else "ROI-scoped processing"
+        if nested_op:
+            return f"{scope}-scoped {_operation_name(str(nested_op), nested.get('params', {}))}"
+        return f"{scope}-scoped processing"
     if op.startswith("export_"):
         return f"Export: {op.removeprefix('export_').upper()}"
     return op.replace("_", " ").title()
@@ -653,15 +661,23 @@ def _step_summary(step: ProvenanceStep) -> str:
         if method in ("sobel", "scharr"):
             return f"Edge detection: {method} gradient magnitude"
         return f"Edge detection: {method} (sigma={p.get('sigma', 1.0)} px)"
-    if op == "roi":
+    if op in ("roi", "mask"):
+        scope = "ROI" if op == "roi" else "Mask"
         nested = p.get("step") if isinstance(p, dict) else None
         if isinstance(nested, dict):
             nested_op = str(nested.get("op") or "")
             nested_params = dict(nested.get("params") or {})
             nested_name = _operation_name(nested_op, nested_params)
-            roi_label = p.get("roi") or "ROI"
-            return f"ROI-scoped {nested_name} ({roi_label})"
-        return "ROI-scoped processing"
+            label = p.get("roi") or p.get("mask") or scope
+            summary = f"{scope}-scoped {nested_name} ({label})"
+            # Be explicit that the op is computed full-image then pasted inside
+            # the scope (so non-local ops are influenced by out-of-scope data).
+            if p.get("scope_semantics") == "full_image_compute_masked_paste":
+                summary += " — computed full-image, applied inside scope"
+            if p.get("frozen_geometry") is not None:
+                summary += " [frozen geometry]"
+            return summary
+        return f"{scope}-scoped processing"
     if op.startswith("export_"):
         fmt = op.removeprefix("export_").upper()
         display = p.get("display_settings") if isinstance(p, dict) else None

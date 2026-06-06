@@ -26,6 +26,7 @@ def save_viewer_png(
     processing_history=None,
     add_scalebar: bool = True,
     include_provenance: bool = True,
+    image_mask_set=None,
 ) -> str:
     """Write *arr* to *out_path* as a PNG with embedded provenance metadata.
 
@@ -67,6 +68,7 @@ def save_viewer_png(
                     export_kind="viewer_png",
                     output_path=out_path,
                     roi_set=image_roi_set,
+                    mask_set=image_mask_set,
                     processing_history=processing_history,
                 )
             except Exception as exc:
