@@ -1068,3 +1068,104 @@ def test_stm_background_active_roi_without_roi_set_degrades_to_whole_image():
 
     assert out.shape == arr.shape
     assert np.isfinite(out).all()
+
+
+# ── Durable + frozen ROI-scoped filters (P1) ──────────────────────────────────
+
+
+def _rect_frozen(x, y, w, h):
+    return {
+        "kind": "rectangle",
+        "geometry": {"x": x, "y": y, "width": w, "height": h},
+        "coord_system": "pixel",
+    }
+
+
+def test_two_roi_scoped_filters_coexist_via_durable_list():
+    """Two ROI-scoped blurs on different regions both apply (no overwrite)."""
+    rng = np.random.RandomState(0)
+    arr = rng.rand(20, 20)
+    gui = {"roi_filter_ops": [
+        {"op": "smooth", "params": {"sigma_px": 2.0}, "roi_id": "A",
+         "frozen_geometry": _rect_frozen(0, 0, 8, 8)},
+        {"op": "smooth", "params": {"sigma_px": 2.0}, "roi_id": "B",
+         "frozen_geometry": _rect_frozen(12, 12, 8, 8)},
+    ]}
+    state = processing_state_from_gui(gui)
+    assert _ops(state) == ["roi", "roi"]
+    out = apply_processing_state(arr, state)  # no roi_set: frozen geometry
+    assert not np.allclose(out[0:8, 0:8], arr[0:8, 0:8])      # A blurred
+    assert not np.allclose(out[12:20, 12:20], arr[12:20, 12:20])  # B blurred
+    assert np.allclose(out[9:11, 9:11], arr[9:11, 9:11])      # centre untouched
+
+
+def test_frozen_roi_filter_does_not_follow_live_roi_and_is_not_missing():
+    """Frozen-geometry steps ignore roi_set, so a moved/deleted ROI is fine."""
+    from probeflow.core.roi import ROI, ROISet
+    rng = np.random.RandomState(1)
+    arr = rng.rand(20, 20)
+    gui = {"roi_filter_ops": [
+        {"op": "smooth", "params": {"sigma_px": 2.0}, "roi_id": "A",
+         "frozen_geometry": _rect_frozen(0, 0, 8, 8)},
+    ]}
+    state = processing_state_from_gui(gui)
+    # Live ROI of the same id sits elsewhere; frozen geometry must win.
+    rs = ROISet(image_id="img")
+    rs.add(ROI(id="A", name="A", kind="rectangle",
+               geometry={"x": 12, "y": 12, "width": 8, "height": 8}))
+    out = apply_processing_state(arr, state, roi_set=rs)
+    assert not np.allclose(out[0:8, 0:8], arr[0:8, 0:8])          # frozen region
+    assert np.allclose(out[12:20, 12:20], arr[12:20, 12:20])      # live region untouched
+    # Frozen steps are self-resolving — never reported missing.
+    assert missing_roi_references(state, None) == []
+    assert missing_roi_references(state, ROISet(image_id="img")) == []
+
+
+def test_roi_scoped_step_carries_masked_paste_semantics_marker():
+    gui = {"roi_filter_ops": [
+        {"op": "smooth", "params": {"sigma_px": 1.0}, "roi_id": "A",
+         "frozen_geometry": _rect_frozen(0, 0, 4, 4)},
+    ]}
+    state = processing_state_from_gui(gui)
+    assert state.steps[0].params["scope_semantics"] == "full_image_compute_masked_paste"
+
+
+# ── Mask as a first-class processing scope (P2) ───────────────────────────────
+
+
+def test_mask_step_applies_filter_inside_mask_only():
+    from probeflow.core.mask import ImageMask, MaskSet
+    rng = np.random.RandomState(2)
+    arr = rng.rand(20, 20)
+    m = np.zeros((20, 20), bool)
+    m[2:6, 2:6] = True
+    img = ImageMask.new(m, name="mm")
+    ms = MaskSet(image_id="img")
+    ms.add(img)
+    gui = {"mask_filter_ops": [
+        {"op": "smooth", "params": {"sigma_px": 2.0}, "mask_id": img.id},
+    ]}
+    state = processing_state_from_gui(gui)
+    assert _ops(state) == ["mask"]
+    out = apply_processing_state(arr, state, mask_set=ms)
+    assert not np.allclose(out[2:6, 2:6], arr[2:6, 2:6])      # inside mask blurred
+    assert np.allclose(out[10:12, 10:12], arr[10:12, 10:12])  # outside untouched
+
+
+def test_mask_step_missing_when_no_mask_set():
+    from probeflow.core.mask import ImageMask, MaskSet
+    arr = np.zeros((10, 10))
+    img = ImageMask.new(np.ones((10, 10), bool), name="mm")
+    ms = MaskSet(image_id="img")
+    ms.add(img)
+    gui = {"mask_filter_ops": [
+        {"op": "smooth", "params": {"sigma_px": 1.0}, "mask_id": img.id},
+    ]}
+    state = processing_state_from_gui(gui)
+    miss = missing_roi_references(state, None, None)
+    assert miss and miss[0]["param"] == "mask_id"
+    assert missing_roi_references(state, None, ms) == []
+    # Skipped (no-op) with a warning when mask_set is absent at apply time.
+    with pytest.warns(UserWarning, match="no mask_set"):
+        out = apply_processing_state(arr, state, mask_set=None)
+    assert out.shape == arr.shape

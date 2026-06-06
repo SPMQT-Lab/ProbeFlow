@@ -21,7 +21,7 @@ from typing import Any
 
 import numpy as np
 
-from probeflow.core.roi import AREA_ROI_KINDS
+from probeflow.core.roi import AREA_ROI_KINDS, ROI
 # ProcessingState / ProcessingStep moved to probeflow.core.processing_state
 # (review arch-backend #14).  Re-exported here so the historical
 # ``from probeflow.processing.state import ProcessingState`` import path
@@ -62,6 +62,27 @@ def apply_operation_with_optional_roi(
     result[mask] = processed_full[mask]
     return result
 
+
+def _roi_from_frozen_geometry(frozen: Any, roi_id: Any = None) -> "ROI | None":
+    """Build a transient :class:`ROI` from a frozen-geometry snapshot.
+
+    A committed ROI-scoped filter stores ``{"kind", "geometry", "coord_system"}``
+    captured at apply time so it rasterises independently of the live ROI.
+    Returns ``None`` when the snapshot is malformed.
+    """
+    if not isinstance(frozen, dict):
+        return None
+    try:
+        return ROI(
+            id=str(roi_id) if roi_id is not None else "frozen",
+            name="frozen",
+            kind=str(frozen["kind"]),
+            geometry=dict(frozen["geometry"]),
+            coord_system=str(frozen.get("coord_system", "pixel")),
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
+
 # ── ROI reference validation ─────────────────────────────────────────────────
 
 def _roi_refs_from_expr(expr: Any, param_name: str) -> list[dict[str, Any]]:
@@ -89,6 +110,10 @@ def roi_references_from_state(state: "ProcessingState") -> list[dict[str, Any]]:
     for step_index, step in enumerate(state.steps):
         params = step.params or {}
         if step.op == "roi" and params.get("roi_id") is not None:
+            # Frozen-geometry roi steps carry their own snapshot and resolve
+            # without the live roi_set, so they are never "missing".
+            if params.get("frozen_geometry") is not None:
+                continue
             refs.append({
                 "step_index": step_index,
                 "op": step.op,
@@ -118,44 +143,71 @@ def roi_references_from_state(state: "ProcessingState") -> list[dict[str, Any]]:
     return refs
 
 
+def mask_references_from_state(state: "ProcessingState") -> list[dict[str, Any]]:
+    """Return mask ids/names referenced by ``mask`` steps in a processing state.
+
+    Twin of :func:`roi_references_from_state` for the mask scope (validated
+    against a :class:`probeflow.core.mask.MaskSet`).
+    """
+    refs: list[dict[str, Any]] = []
+    for step_index, step in enumerate(state.steps):
+        params = step.params or {}
+        if step.op == "mask" and params.get("mask_id") is not None:
+            refs.append({
+                "step_index": step_index,
+                "op": step.op,
+                "param": "mask_id",
+                "value": str(params["mask_id"]),
+            })
+    return refs
+
+
 def missing_roi_references(
     state: "ProcessingState",
     roi_set: "Any | None",
+    mask_set: "Any | None" = None,
 ) -> list[dict[str, Any]]:
-    """Return ROI references in *state* that are not present in *roi_set*.
+    """Return ROI/mask references in *state* not present in *roi_set*/*mask_set*.
 
     Lookup accepts both UUIDs and names because historical CLI/provenance paths
     allowed either.  This validator is deliberately non-mutating; callers decide
     whether a missing reference should warn, block rendering, or abort export.
+    ``mask`` step references are validated against *mask_set* (a missing
+    *mask_set* makes them all "missing", mirroring the ROI behaviour).
     """
-    refs = roi_references_from_state(state)
-    if not refs:
-        return []
-    if roi_set is None:
-        return refs
+    def _resolve(container, value) -> bool:
+        found = container.get(value)
+        if found is None and hasattr(container, "get_by_name"):
+            found = container.get_by_name(value)
+        return found is not None
 
     missing: list[dict[str, Any]] = []
-    for ref in refs:
-        value = str(ref["value"])
-        found = roi_set.get(value)
-        if found is None and hasattr(roi_set, "get_by_name"):
-            found = roi_set.get_by_name(value)
-        if found is None:
+
+    roi_refs = roi_references_from_state(state)
+    for ref in roi_refs:
+        if roi_set is None or not _resolve(roi_set, str(ref["value"])):
             missing.append(ref)
+
+    mask_refs = mask_references_from_state(state)
+    for ref in mask_refs:
+        if mask_set is None or not _resolve(mask_set, str(ref["value"])):
+            missing.append(ref)
+
     return missing
 
 
 def assert_roi_references_resolved(
     state: "ProcessingState",
     roi_set: "Any | None",
+    mask_set: "Any | None" = None,
 ) -> None:
-    """Raise ``ValueError`` if any ROI reference in *state* cannot be resolved.
+    """Raise ``ValueError`` if any ROI/mask reference in *state* is unresolved.
 
     Use this in export paths where silent substitution is not acceptable.
     Interactive display paths should use :func:`missing_roi_references` and
     show a warning instead.
     """
-    missing = missing_roi_references(state, roi_set)
+    missing = missing_roi_references(state, roi_set, mask_set)
     if missing:
         refs = ", ".join(
             f"{m['param']}={m['value']!r}" for m in missing[:3]
@@ -163,8 +215,8 @@ def assert_roi_references_resolved(
         if len(missing) > 3:
             refs += f", +{len(missing) - 3} more"
         raise ValueError(
-            f"Processing state references {len(missing)} ROI(s) that are not "
-            f"present in the current ROI set: {refs}. Export aborted."
+            f"Processing state references {len(missing)} scope(s) (ROI/mask) "
+            f"that are not present in the current sets: {refs}. Export aborted."
         )
 
 
@@ -361,6 +413,7 @@ def apply_processing_state(
     state: "ProcessingState",
     roi_set: "Any | None" = None,
     *,
+    mask_set: "Any | None" = None,
     pixel_size_x_m: float | None = None,
     pixel_size_y_m: float | None = None,
     operand_resolver=None,
@@ -377,7 +430,15 @@ def apply_processing_state(
     roi_set:
         Optional :class:`probeflow.core.roi.ROISet`.  ``roi`` steps reference
         ROIs by ``roi_id`` and resolve them from this set at execution time. If
-        the ID is not found, the step is skipped with a warning.
+        the ID is not found, the step is skipped with a warning.  A ``roi`` step
+        that carries a ``frozen_geometry`` payload rasterises that snapshot
+        directly and does not consult *roi_set*, so the operation no longer
+        follows later ROI moves/deletes.
+    mask_set:
+        Optional :class:`probeflow.core.mask.MaskSet`.  ``mask`` steps reference
+        masks by ``mask_id`` and resolve them from this set at execution time,
+        using the mask's boolean raster as the operation scope.  Skipped with a
+        warning when the id is missing or the mask shape no longer matches.
     pixel_size_x_m, pixel_size_y_m:
         Physical pixel size in metres for each axis.  When provided, these
         are forwarded to operations whose semantics depend on physical units
@@ -639,30 +700,39 @@ def apply_processing_state(
                 continue
             if nested.op not in _ROI_ELIGIBLE_OPS:
                 continue
-            roi_id = p.get("roi_id")
-            if roi_id is None:
-                continue
-            if roi_set is None:
-                import warnings
-                warnings.warn(
-                    f"roi step references roi_id={roi_id!r} but no roi_set "
-                    "was passed to apply_processing_state — step skipped.",
-                    UserWarning,
-                    stacklevel=2,
-                )
-                continue
-            roi_ref = str(roi_id)
-            roi_obj = roi_set.get(roi_ref)
-            if roi_obj is None and hasattr(roi_set, "get_by_name"):
-                roi_obj = roi_set.get_by_name(roi_ref)
-            if roi_obj is None:
-                import warnings
-                warnings.warn(
-                    f"roi_id={roi_id!r} not found in roi_set — step skipped.",
-                    UserWarning,
-                    stacklevel=2,
-                )
-                continue
+            frozen = p.get("frozen_geometry")
+            if frozen is not None:
+                # Frozen snapshot: rasterise the geometry captured at apply time
+                # rather than resolving the live ROI, so the operation does not
+                # follow later ROI moves/deletes (review: ROI live-geometry).
+                roi_obj = _roi_from_frozen_geometry(frozen, p.get("roi_id"))
+                if roi_obj is None:
+                    continue
+            else:
+                roi_id = p.get("roi_id")
+                if roi_id is None:
+                    continue
+                if roi_set is None:
+                    import warnings
+                    warnings.warn(
+                        f"roi step references roi_id={roi_id!r} but no roi_set "
+                        "was passed to apply_processing_state — step skipped.",
+                        UserWarning,
+                        stacklevel=2,
+                    )
+                    continue
+                roi_ref = str(roi_id)
+                roi_obj = roi_set.get(roi_ref)
+                if roi_obj is None and hasattr(roi_set, "get_by_name"):
+                    roi_obj = roi_set.get_by_name(roi_ref)
+                if roi_obj is None:
+                    import warnings
+                    warnings.warn(
+                        f"roi_id={roi_id!r} not found in roi_set — step skipped.",
+                        UserWarning,
+                        stacklevel=2,
+                    )
+                    continue
             mask = roi_obj.to_mask(a.shape)
             bounds = roi_obj.bounds(a.shape)
             if mask is None or bounds is None or not mask.any():
@@ -673,6 +743,68 @@ def apply_processing_state(
                     image,
                     ProcessingState(steps=[nested]),
                     roi_set,
+                    mask_set=mask_set,
+                    pixel_size_x_m=pixel_size_x_m,
+                    pixel_size_y_m=pixel_size_y_m,
+                    _depth=_depth + 1,
+                ),
+                mask,
+            )
+        elif step.op == "mask":
+            if _depth >= 2:
+                raise ValueError(
+                    "mask-in-mask nesting exceeded maximum depth of 2. "
+                    "Nested scope steps inside scope steps are not allowed."
+                )
+            try:
+                nested = ProcessingStep.from_dict(p.get("step", {}))
+            except (KeyError, TypeError, ValueError):
+                continue
+            if nested.op not in _ROI_ELIGIBLE_OPS:
+                continue
+            mask_id = p.get("mask_id")
+            if mask_id is None:
+                continue
+            if mask_set is None:
+                import warnings
+                warnings.warn(
+                    f"mask step references mask_id={mask_id!r} but no mask_set "
+                    "was passed to apply_processing_state — step skipped.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+                continue
+            mask_ref = str(mask_id)
+            mask_obj = mask_set.get(mask_ref)
+            if mask_obj is None and hasattr(mask_set, "get_by_name"):
+                mask_obj = mask_set.get_by_name(mask_ref)
+            if mask_obj is None:
+                import warnings
+                warnings.warn(
+                    f"mask_id={mask_id!r} not found in mask_set — step skipped.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+                continue
+            mask = np.asarray(mask_obj.data, dtype=bool)
+            if mask.shape != a.shape:
+                import warnings
+                warnings.warn(
+                    f"mask_id={mask_id!r} shape {mask.shape} does not match "
+                    f"image shape {a.shape} — step skipped.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+                continue
+            if not mask.any():
+                continue
+            a = apply_operation_with_optional_roi(
+                a,
+                lambda image, nested=nested: apply_processing_state(
+                    image,
+                    ProcessingState(steps=[nested]),
+                    roi_set,
+                    mask_set=mask_set,
                     pixel_size_x_m=pixel_size_x_m,
                     pixel_size_y_m=pixel_size_y_m,
                     _depth=_depth + 1,
@@ -796,6 +928,7 @@ def apply_processing_state_with_calibration(
     state: "ProcessingState",
     roi_set: "Any | None" = None,
     *,
+    mask_set: "Any | None" = None,
     scan_range_m: tuple[float, float] | None,
     operand_resolver=None,
 ) -> tuple[np.ndarray, tuple[float, float] | None]:
@@ -852,6 +985,7 @@ def apply_processing_state_with_calibration(
             a,
             ProcessingState(steps=[step]),
             roi_set=roi_set,
+            mask_set=mask_set,
             pixel_size_x_m=psx,
             pixel_size_y_m=psy,
             operand_resolver=operand_resolver,

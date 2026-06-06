@@ -68,6 +68,10 @@ _MINIMAL_PARAMS: dict[str, dict] = {
         "step": {"op": "smooth", "params": {"sigma_px": 1.0}},
         "roi_id": "test-roi-id",
     },
+    "mask": {
+        "step": {"op": "smooth", "params": {"sigma_px": 1.0}},
+        "mask_id": "test-mask-id",
+    },
     "flip_horizontal": {},
     "flip_vertical": {},
     "rotate_90_cw": {},

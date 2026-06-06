@@ -79,6 +79,7 @@ def build_processed_export_provenance(
     plane_idx: int,
     display_settings: dict,
     roi_set=None,
+    mask_set=None,
     processing_history: Optional[dict] = None,
 ):
     """Build a provenance record for a processed-image export.
@@ -102,6 +103,7 @@ def build_processed_export_provenance(
         export_kind=f"viewer_{suffix}",
         output_path=out_path,
         roi_set=roi_set,
+        mask_set=mask_set,
         processing_history=processing_history,
     )
 
@@ -112,6 +114,7 @@ def write_processed_export_sidecar(
     plane_idx: int,
     display_settings: dict,
     roi_set=None,
+    mask_set=None,
     processing_history: Optional[dict] = None,
     provenance=None,
 ) -> None:
@@ -125,7 +128,8 @@ def write_processed_export_sidecar(
     if prov is None:
         prov = build_processed_export_provenance(
             scan, out_path, plane_idx, display_settings,
-            roi_set=roi_set, processing_history=processing_history,
+            roi_set=roi_set, mask_set=mask_set,
+            processing_history=processing_history,
         )
     write_provenance_sidecars(
         out_path, prov, legacy=False, probeflow=True, export_format=suffix,
@@ -142,6 +146,7 @@ def save_processed_image(
     clip_high: float = 99.0,
     display_settings: Optional[dict] = None,
     roi_set=None,
+    mask_set=None,
     processing_history: Optional[dict] = None,
     include_provenance: bool = True,
     add_scalebar: bool = True,
@@ -161,7 +166,8 @@ def save_processed_image(
         if include_provenance and suffix != ".sxm" and display_settings is not None:
             provenance = build_processed_export_provenance(
                 scan, out_path, plane_idx, display_settings,
-                roi_set=roi_set, processing_history=processing_history,
+                roi_set=roi_set, mask_set=mask_set,
+                processing_history=processing_history,
             )
             if suffix != ".png":
                 check_provenance_sidecar_collisions(

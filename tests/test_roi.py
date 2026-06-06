@@ -131,6 +131,24 @@ def test_roi_masks_cover_expected_pixels_for_supported_shapes():
     assert int(out_of_bounds_point.sum()) == 0
 
 
+def test_physical_coord_roi_refuses_rasterise_and_transform():
+    """Physical ROIs are nominal: refuse pixel ops rather than mis-locating.
+
+    ``coord_system="physical"`` geometry is not converted through scan
+    calibration, so ``to_mask`` / ``transform`` raise instead of silently
+    rasterising physical numbers as pixels (P3 guard).
+    """
+    rect = rect_roi(x=10, y=20, w=5, h=8)
+    rect.coord_system = "physical"
+    with pytest.raises(ValueError, match="Physical ROI coordinates"):
+        rect.to_mask(SHAPE)
+    with pytest.raises(ValueError, match="Physical ROI coordinates"):
+        rect.transform("flip_horizontal", {}, SHAPE)
+    # translate is coord-system-agnostic arithmetic and stays allowed.
+    moved = translate(rect, 1.0, 1.0)
+    assert moved.coord_system == "physical"
+
+
 def test_roi_bounds_and_crop_contract():
     roi = rect_roi(x=10, y=20, w=5, h=8)
     arr = np.zeros(SHAPE)

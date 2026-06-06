@@ -12,6 +12,7 @@ from probeflow.gui.roi_context import active_area_roi_context
 from probeflow.gui.viewer import (
     export_line_profile,
     save_viewer_png,
+    transform_mask_set_for_display_op,
     transform_roi_set_for_display_op,
 )
 from probeflow.gui.viewer.processed_export import (
@@ -65,19 +66,88 @@ class ImageViewerProcessingExportMixin:
                 "arithmetic_ops",
                 "stm_background",
                 "plane_bg",
+                # Durable scope-filter lists must survive the panel-state rebuild
+                # so previously committed ROI/mask filters are not dropped.
+                "roi_filter_ops",
+                "mask_filter_ops",
             )
             if key in self._processing
         }
         self._processing = panel_state
         self._processing.update(preserve)
         if wants_filter_roi and active_area_roi_id is not None:
-            self._processing["processing_scope"] = "roi"
-            self._processing["processing_roi_id"] = active_area_roi_id
-        else:
-            self._processing.pop("processing_scope", None)
-            self._processing.pop("processing_roi_id", None)
+            # Commit the ROI-eligible filters as durable, frozen-geometry steps
+            # rather than overwriting a single global ROI scope: this lets two
+            # different ROI-scoped filters coexist and stops them following
+            # later ROI moves/deletes (review: ROI overwrite/retarget + live
+            # geometry).
+            self._commit_roi_scoped_filters(active_area_roi_id)
+        # The single global ROI scope is no longer written (kept readable for
+        # back-compat with previously saved states).
+        self._processing.pop("processing_scope", None)
+        self._processing.pop("processing_roi_id", None)
         self._clear_bad_line_preview()
         self._refresh_processing_display()
+
+    # Secondary GUI keys that only matter alongside a committed filter's
+    # trigger key; cleared on commit so the live panel does not re-emit them.
+    _ROI_FILTER_COMPANION_KEYS = (
+        "edge_sigma",
+        "edge_sigma2",
+        "fft_cutoff",
+        "fft_window",
+        "fft_soft_mode",
+        "fft_soft_cutoff",
+        "fft_soft_border_frac",
+    )
+
+    def _commit_roi_scoped_filters(self, area_roi_id: str) -> None:
+        """Bake the panel's ROI-eligible filters into durable, frozen steps.
+
+        Each committed entry snapshots the active area ROI's geometry so it
+        rasterises independently of the live ROI.  The committed filters are
+        then stripped from the live panel (and the panel widgets resynced) so a
+        later Apply neither re-commits them nor emits a duplicate global step.
+        """
+        from probeflow.processing.gui_adapter import (
+            ROI_ELIGIBLE_FILTER_TRIGGER_KEYS,
+            roi_eligible_filter_specs,
+        )
+
+        specs = roi_eligible_filter_specs(self._processing)
+        if not specs:
+            return
+        area_roi = (
+            self._image_roi_set.get(area_roi_id)
+            if self._image_roi_set is not None else None
+        )
+        if area_roi is None:
+            return
+        frozen = {
+            "kind": area_roi.kind,
+            "geometry": dict(area_roi.geometry),
+            "coord_system": area_roi.coord_system,
+        }
+        committed = list(self._processing.get("roi_filter_ops") or [])
+        for op_name, params in specs:
+            committed.append({
+                "op": op_name,
+                "params": params,
+                "roi_id": area_roi_id,
+                "frozen_geometry": frozen,
+            })
+        self._processing["roi_filter_ops"] = committed
+        for key in (*ROI_ELIGIBLE_FILTER_TRIGGER_KEYS, *self._ROI_FILTER_COMPANION_KEYS):
+            self._processing.pop(key, None)
+        # Resync the panel widgets so the just-committed sliders reset.
+        self._processing_panel.set_state(self._processing)
+        self._set_advanced_processing_state(self._processing)
+        # The filter is baked in; return the scope selector to whole-image.
+        self._scope_cb.setCurrentIndex(0)
+        self._roi_status_lbl.setText(
+            f"Committed {len(specs)} ROI-scoped filter(s) to "
+            f"'{area_roi.name}' (frozen geometry)."
+        )
 
     def _on_reset_processing(self):
         """Clear all processing for the current image and reload raw data."""
@@ -274,6 +344,7 @@ class ImageViewerProcessingExportMixin:
             ),
             add_scalebar=self._export_scalebar_enabled(),
             include_provenance=self._export_provenance_enabled(),
+            image_mask_set=getattr(self, "_image_mask_set", None),
         )
         if msg.startswith("Saved") and self._processing_history is not None:
             self._mark_history_export(out_path, export_parameters={"export_kind": "viewer_png"})
@@ -308,11 +379,17 @@ class ImageViewerProcessingExportMixin:
         if getattr(self, "_processing_error", ""):
             self._status_lbl.setText(f"Export blocked: {self._processing_error}")
             return False
+        mask_set = getattr(self, "_image_mask_set", None)
         try:
             ps = processing_state_from_gui(self._processing or {})
-            assert_roi_references_resolved(ps, self._image_roi_set)
+            # Validate both ROI and mask scope references; a mask step that
+            # points at a deleted mask must block export rather than silently
+            # exporting an unscoped or stale result (review: mask export safety).
+            assert_roi_references_resolved(ps, self._image_roi_set, mask_set)
         except ValueError as _roi_err:
             self._status_lbl.setText(f"Export blocked: {_roi_err}")
+            return False
+        if not self._assert_mask_scopes_current(ps):
             return False
         if (
             self._raw_arr is not None
@@ -325,10 +402,46 @@ class ImageViewerProcessingExportMixin:
                 psx, psy = self._processing_pixel_sizes_m()
                 apply_processing_state(
                     self._raw_arr, ps, self._image_roi_set,
+                    mask_set=mask_set,
                     pixel_size_x_m=psx, pixel_size_y_m=psy,
                 )
             except Exception as exc:
                 self._status_lbl.setText(f"Export blocked: Processing failed: {exc}")
+                return False
+        return True
+
+    def _assert_mask_scopes_current(self, ps) -> bool:
+        """Block export when a ``mask`` step's raster is stale (shape mismatch).
+
+        Masks are persistent rasters: after a same-shape display op (h/v flip,
+        180° rotate) an un-transformed mask would still match the array shape but
+        sit over the wrong pixels.  The transform path keeps overlay masks in
+        sync; here we additionally refuse export when a mask referenced by a
+        processing step no longer matches the array shape it will rasterise
+        against, rather than exporting a silently mislocated result.
+        """
+        mask_set = getattr(self, "_image_mask_set", None)
+        arr = self._current_export_array()
+        if mask_set is None or arr is None:
+            return True
+        target_shape = arr.shape[:2]
+        for step in ps.steps:
+            if step.op != "mask":
+                continue
+            mask_id = step.params.get("mask_id")
+            if mask_id is None:
+                continue
+            mask = mask_set.get(str(mask_id))
+            if mask is None and hasattr(mask_set, "get_by_name"):
+                mask = mask_set.get_by_name(str(mask_id))
+            if mask is None:
+                continue  # already caught by assert_roi_references_resolved
+            if mask.shape != target_shape:
+                self._status_lbl.setText(
+                    f"Export blocked: mask '{mask.name}' shape {mask.shape} no "
+                    f"longer matches the image {target_shape}; re-create or "
+                    "re-apply the mask before exporting."
+                )
                 return False
         return True
 
@@ -383,6 +496,7 @@ class ImageViewerProcessingExportMixin:
         try:
             _, new_range = apply_processing_state_with_calibration(
                 self._raw_arr, state, self._image_roi_set,
+                mask_set=getattr(self, "_image_mask_set", None),
                 scan_range_m=(float(raw_range[0]), float(raw_range[1])),
             )
         except Exception:
@@ -422,6 +536,7 @@ class ImageViewerProcessingExportMixin:
                 self._current_display_settings() if include_provenance else None
             ),
             roi_set=self._image_roi_set,
+            mask_set=getattr(self, "_image_mask_set", None),
             processing_history=(
                 self._processing_history.to_dict()
                 if self._processing_history is not None else None
@@ -466,6 +581,7 @@ class ImageViewerProcessingExportMixin:
                 self._current_display_settings() if include_provenance else None
             ),
             roi_set=self._image_roi_set,
+            mask_set=getattr(self, "_image_mask_set", None),
             processing_history=(
                 self._processing_history.to_dict()
                 if self._processing_history is not None else None
@@ -694,16 +810,31 @@ class ImageViewerProcessingExportMixin:
         op_name: str,
         params: dict | None = None,
     ) -> None:
+        status_fn = (
+            self._status_lbl.setText if hasattr(self, "_status_lbl") else None
+        )
+        array_shape = self._current_array_shape()
         transform_roi_set_for_display_op(
             self._image_roi_set,
             op_name,
             params,
-            self._current_array_shape(),
-            status_fn=(
-                self._status_lbl.setText if hasattr(self, "_status_lbl") else None
-            ),
+            array_shape,
+            status_fn=status_fn,
             roi_changed_fn=self._on_image_roi_set_changed,
         )
+        # Masks are rasters and must follow the same geometric op, or a
+        # same-shape flip/180°-rotate would leave them silently stale.
+        mask_set = getattr(self, "_image_mask_set", None)
+        mask_changed_fn = getattr(self, "_on_image_mask_set_changed", None)
+        if mask_set is not None and mask_changed_fn is not None:
+            transform_mask_set_for_display_op(
+                mask_set,
+                op_name,
+                params,
+                array_shape,
+                status_fn=status_fn,
+                mask_changed_fn=mask_changed_fn,
+            )
 
     def _on_export_line_profile_csv(self):
         prof = self._line_profile_panel.profile_data()

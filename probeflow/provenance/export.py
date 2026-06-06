@@ -79,6 +79,7 @@ class ExportProvenance:
     artifact_id:        str | None = None
     warnings:           tuple[str, ...] = ()
     rois:               dict[str, Any] | None = None
+    masks:              dict[str, Any] | None = None
     processing_history: dict[str, Any] | None = None
     export_record:      dict[str, Any] | None = None
     warning:            str | None = None
@@ -108,6 +109,7 @@ class ExportProvenance:
             "artifact_id":       self.artifact_id,
             "warnings":          list(self.warnings),
             "rois":              self.rois,
+            "masks":             self.masks,
             "processing_history": self.processing_history,
             "export_record":      self.export_record,
             "warning":            self.warning,
@@ -286,6 +288,7 @@ def build_scan_export_provenance(
     output_path=None,
     warnings: tuple[str, ...] | list[str] | None = None,
     roi_set=None,
+    mask_set=None,
     processing_history: ProcessingHistory | dict[str, Any] | None = None,
 ) -> ExportProvenance:
     """Shared provenance constructor for GUI, CLI, writers, and handoffs."""
@@ -351,6 +354,7 @@ def build_scan_export_provenance(
         warnings=tuple(warnings or ()),
         conversion=conversion,
         rois=roi_set.to_dict() if roi_set is not None else None,
+        masks=mask_set.to_dict() if mask_set is not None else None,
     )
     return ExportProvenance(
         source_file=prov.source_file,
@@ -373,6 +377,7 @@ def build_scan_export_provenance(
         artifact_id=artifact_id,
         warnings=tuple(warnings or ()),
         rois=roi_set.to_dict() if roi_set is not None else None,
+        masks=mask_set.to_dict() if mask_set is not None else None,
         processing_history=history.to_dict(),
         export_record=export_record.to_dict(),
         warning=export_record.warning,
@@ -519,6 +524,9 @@ def export_record_dict_from_provenance(
             if raw.get("rois") is not None and "rois" not in data:
                 data = _copy.deepcopy(data)
                 data["rois"] = raw["rois"]
+            if raw.get("masks") is not None and "masks" not in data:
+                data = _copy.deepcopy(data)
+                data["masks"] = raw["masks"]
         elif raw.get("processing_history"):
             history = ProcessingHistory.from_dict(raw["processing_history"])
             data = build_export_record(

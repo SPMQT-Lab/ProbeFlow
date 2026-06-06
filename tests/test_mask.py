@@ -101,6 +101,59 @@ class TestMaskSet:
         assert MaskSet.from_dict(d).active_mask_id is None
 
 
+# ── geometric transforms ─────────────────────────────────────────────────────────
+
+class TestMaskTransform:
+    def _corner_mask(self):
+        d = np.zeros((4, 6), dtype=bool)
+        d[0, 0] = True  # top-left
+        return ImageMask.new(d, name="corner")
+
+    def test_flip_horizontal_moves_pixels(self):
+        out = self._corner_mask().transform("flip_horizontal", {}, (4, 6))
+        assert out.data[0, 5] and not out.data[0, 0]
+
+    def test_flip_vertical_moves_pixels(self):
+        out = self._corner_mask().transform("flip_vertical", {}, (4, 6))
+        assert out.data[3, 0]
+
+    def test_rot180_moves_pixels(self):
+        out = self._corner_mask().transform("rotate_180", {}, (4, 6))
+        assert out.data[3, 5]
+
+    def test_rot90_cw_changes_shape(self):
+        out = self._corner_mask().transform("rotate_90_cw", {}, (4, 6))
+        assert out.data.shape == (6, 4)
+
+    def test_crop_slices_inclusive(self):
+        out = self._corner_mask().transform("crop", {"x0": 0, "y0": 0, "x1": 1, "y1": 1}, (4, 6))
+        assert out.data.shape == (2, 2)
+        assert out.data[0, 0]
+
+    def test_rotate_arbitrary_invalidates(self):
+        assert self._corner_mask().transform("rotate_arbitrary", {}, (4, 6)) is None
+
+    def test_unknown_op_raises(self):
+        with pytest.raises(ValueError, match="unknown operation"):
+            self._corner_mask().transform("warp", {}, (4, 6))
+
+    def test_identity_fields_preserved(self):
+        m = self._corner_mask()
+        out = m.transform("flip_horizontal", {}, (4, 6))
+        assert out.id == m.id and out.name == m.name and out.method == m.method
+
+    def test_transform_all_returns_invalidated_and_applies(self):
+        m = self._corner_mask()
+        ms = MaskSet(image_id="img")
+        ms.add(m)
+        ms.set_active(m.id)
+        assert ms.transform_all("flip_horizontal", {}, (4, 6)) == []
+        assert ms.masks[0].data[0, 5]
+        assert ms.transform_all("rotate_arbitrary", {}, (4, 6)) == [m.id]
+        # invalidated masks are kept in place; caller decides removal
+        assert len(ms.masks) == 1
+
+
 # ── mask → ROI ──────────────────────────────────────────────────────────────────
 
 class TestRoiFromMask:

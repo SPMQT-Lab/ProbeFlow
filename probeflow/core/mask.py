@@ -23,6 +23,8 @@ from typing import Any
 
 import numpy as np
 
+from probeflow.core import op_vocab
+
 
 # ── Compact boolean-array (de)serialisation ─────────────────────────────────────
 
@@ -121,6 +123,68 @@ class ImageMask:
         """Number of True pixels."""
         return int(self.data.sum())
 
+    # ── Geometric transformation ────────────────────────────────────────────────
+
+    def transform(
+        self,
+        operation: str,
+        params: dict[str, Any],
+        image_shape: tuple[int, int],
+    ) -> "ImageMask | None":
+        """Return a copy of this mask transformed for *operation*, or ``None``.
+
+        Structural twin of :meth:`probeflow.core.roi.ROI.transform`, but masks
+        are rasters so the boolean array itself is transformed with the same
+        numpy primitives the image uses (``np.fliplr`` / ``np.flipud`` /
+        ``np.rot90``), keeping the mask pixel-aligned with the transformed
+        image.
+
+        Returns ``None`` (invalidate) for ``rotate_arbitrary`` and any other
+        resampling / shape-changing op (scale, shear, affine): a boolean mask
+        cannot be resampled without interpolation, and silently keeping a
+        same-shape mask after such an op is exactly the staleness this guards
+        against.  ``crop`` slices the array.  Identity fields (id/name/method/
+        parameters) are preserved.
+        """
+        op = op_vocab.to_short(operation)
+        data = self.data
+
+        if op == "flip_horizontal":
+            new_data = np.fliplr(data)
+        elif op == "flip_vertical":
+            new_data = np.flipud(data)
+        elif op == "rot90_cw":
+            new_data = np.rot90(data, k=3)
+        elif op == "rot180":
+            new_data = np.rot90(data, k=2)
+        elif op == "rot270_cw":
+            new_data = np.rot90(data, k=1)
+        elif op == "crop":
+            try:
+                x0 = int(params["x0"]); y0 = int(params["y0"])
+                x1 = int(params["x1"]); y1 = int(params["y1"])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"crop requires integer x0/y0/x1/y1 params, got {params!r}"
+                ) from exc
+            # Inclusive bounds, matching ROI._transform_crop.
+            sub = data[y0:y1 + 1, x0:x1 + 1]
+            if sub.size == 0 or not sub.any():
+                return None
+            new_data = sub
+        elif op == "rotate_arbitrary":
+            return None
+        else:
+            raise ValueError(f"ImageMask.transform: unknown operation {operation!r}")
+
+        return ImageMask(
+            id=self.id,
+            name=self.name,
+            data=np.ascontiguousarray(new_data, dtype=bool),
+            method=self.method,
+            parameters=dict(self.parameters),
+        )
+
     # ── Serialisation ─────────────────────────────────────────────────────────
 
     def to_dict(self) -> dict[str, Any]:
@@ -197,6 +261,32 @@ class MaskSet:
         if mask is None:
             raise ValueError(f"Mask {mask_id!r} not in this MaskSet")
         mask.data = np.asarray(data, dtype=bool)
+
+    # ── Geometric transformation ────────────────────────────────────────────────
+
+    def transform_all(
+        self,
+        operation: str,
+        params: dict[str, Any],
+        image_shape: tuple[int, int],
+    ) -> list[str]:
+        """Apply *operation* to every mask; return list of invalidated mask IDs.
+
+        Structural twin of :meth:`probeflow.core.roi.ROISet.transform_all`.
+        Invalidated masks are NOT removed from this set — that policy decision
+        belongs to the caller (typically the viewer's display-op handler).
+        """
+        invalidated: list[str] = []
+        new_masks: list[ImageMask] = []
+        for mask in self.masks:
+            transformed = mask.transform(operation, params, image_shape)
+            if transformed is None:
+                invalidated.append(mask.id)
+                new_masks.append(mask)   # keep for now; caller decides
+            else:
+                new_masks.append(transformed)
+        self.masks = new_masks
+        return invalidated
 
     # ── Serialisation ─────────────────────────────────────────────────────────
 

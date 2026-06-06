@@ -146,6 +146,65 @@ def test_step_summary_roi_branch(tmp_path):
     assert "{'op'" not in summary
 
 
+def test_step_summary_mask_branch_and_scope_semantics():
+    from probeflow.provenance.records import ProcessingHistory, SourceRecord
+
+    history = ProcessingHistory(
+        SourceRecord(
+            source_filename="scan.dat",
+            source_path="/data/scan.dat",
+            source_file_type="Createc .dat",
+            channel="FT",
+            loader_name="Createc .dat reader",
+            loader_version="1.0",
+        )
+    )
+    history.append_step(
+        operation_id="mask",
+        operation_name="Mask-scoped Gaussian blur/smoothing",
+        parameters={
+            "step": {"op": "smooth", "params": {"sigma_px": 1.5}},
+            "mask": "edges",
+            "scope_semantics": "full_image_compute_masked_paste",
+        },
+    )
+    summary = history.short_summary()
+    assert "Mask-scoped" in summary
+    assert "edges" in summary
+    assert "computed full-image, applied inside scope" in summary
+
+
+def test_build_export_record_round_trips_masks(tmp_path):
+    from probeflow.core.mask import ImageMask, MaskSet
+    from probeflow.provenance.records import ProcessingHistory, SourceRecord, build_export_record
+
+    history = ProcessingHistory(
+        SourceRecord(
+            source_filename="scan.dat",
+            source_path="/data/scan.dat",
+            source_file_type="Createc .dat",
+            channel="FT",
+            loader_name="reader",
+            loader_version="1.0",
+        )
+    )
+    ms = MaskSet(image_id="img")
+    ms.add(ImageMask.new(np.ones((4, 4), bool), name="m1"))
+
+    record = build_export_record(
+        history,
+        export_path=tmp_path / "out.png",
+        export_format="png",
+        masks=ms.to_dict(),
+    )
+    assert record.masks is not None
+    data = json.loads(record.to_json(default=str))
+    assert data["masks"]["image_id"] == "img"
+    # Round-trips back through from_dict.
+    from probeflow.provenance.records import ExportRecord
+    assert ExportRecord.from_dict(data).masks["image_id"] == "img"
+
+
 def test_png_export_writes_probeflow_sidecar_with_history(tmp_path):
     from probeflow.io.writers.png import write_png
 

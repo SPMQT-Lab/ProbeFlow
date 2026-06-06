@@ -158,8 +158,27 @@ class ROI:
 
     # ── Rasterisation ─────────────────────────────────────────────────────────
 
+    def _require_pixel_coords(self, action: str) -> None:
+        """Guard pixel-only operations against not-yet-supported physical ROIs.
+
+        ``coord_system="physical"`` is currently *nominal*: ``geometry`` is
+        documented as pixel-space and :meth:`to_mask` / the geometric transforms
+        do not convert physical coordinates through scan calibration.  Rather
+        than silently rasterise physical (e.g. nm) numbers as pixels — placing a
+        filter or mask in the wrong location — refuse with a clear error until
+        real calibration lands.
+        """
+        if self.coord_system != "pixel":
+            raise ValueError(
+                f"Cannot {action} ROI {self.name!r}: coord_system="
+                f"{self.coord_system!r}. Physical ROI coordinates require scan "
+                "calibration and are not yet supported; convert to pixel space "
+                "first."
+            )
+
     def to_mask(self, shape: tuple[int, int]) -> np.ndarray:
         """Return a boolean array of *shape* (Ny, Nx) with True inside this ROI."""
+        self._require_pixel_coords("rasterise")
         Ny, Nx = shape
         g = self.geometry
 
@@ -297,7 +316,11 @@ class ROI:
             (inclusive bounds of the crop region in the original image).
         rotate_arbitrary
             Always returns None.
+
+        Raises ``ValueError`` for physical-coordinate ROIs (see
+        :meth:`_require_pixel_coords`).
         """
+        self._require_pixel_coords("transform")
         operation = to_short(operation)
 
         if operation == "rotate_arbitrary":
@@ -829,7 +852,13 @@ def combine(
 
 
 def translate(roi: "ROI", dx: float, dy: float) -> "ROI":
-    """Return a copy of *roi* with all coordinates shifted by (dx, dy) pixels."""
+    """Return a copy of *roi* with all coordinates shifted by (dx, dy) pixels.
+
+    Coordinate shifts are coord-system-agnostic arithmetic, so physical ROIs are
+    allowed here; they are instead refused at rasterisation time
+    (:meth:`ROI.to_mask`) and at geometric display transforms
+    (:meth:`ROI.transform`).
+    """
     g = roi.geometry
     k = roi.kind
     if k == "rectangle":

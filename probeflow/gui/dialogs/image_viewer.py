@@ -346,7 +346,10 @@ class ImageViewerDialog(
                 self._processing_roi_error = ""
                 self._processing_error = ""
                 state = processing_state_from_gui(self._processing or {})
-                missing = missing_roi_references(state, self._image_roi_set)
+                missing = missing_roi_references(
+                    state, self._image_roi_set,
+                    getattr(self, "_image_mask_set", None),
+                )
                 if missing:
                     refs = ", ".join(
                         f"{m['param']}={m['value']}" for m in missing[:3]
@@ -374,6 +377,7 @@ class ImageViewerDialog(
                     self._display_arr, self._display_scan_range_m = (
                         apply_processing_state_with_calibration(
                             self._raw_arr, state, self._image_roi_set,
+                            mask_set=getattr(self, "_image_mask_set", None),
                             scan_range_m=raw_range,
                         )
                     )

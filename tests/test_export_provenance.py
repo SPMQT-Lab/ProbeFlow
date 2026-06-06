@@ -175,6 +175,23 @@ def test_scan_export_provenance_contract(tmp_path):
     assert built["processing_state_hash"] == processing_state_hash(ps.to_dict())
 
 
+def test_build_scan_export_provenance_embeds_masks(tmp_path):
+    from probeflow.core.mask import ImageMask, MaskSet
+
+    scan = _make_scan()
+    ms = MaskSet(image_id="img")
+    ms.add(ImageMask.new(np.ones((8, 8), bool), name="m1"))
+    built = build_scan_export_provenance(
+        scan,
+        channel_index=0,
+        export_kind="viewer_png",
+        output_path=tmp_path / "out.png",
+        mask_set=ms,
+    ).to_dict()
+    assert built["masks"]["image_id"] == "img"
+    assert built["export_record"]["masks"]["image_id"] == "img"
+
+
 def test_provenance_warning_hash_and_png_display_contract():
     state_a = {"steps": [{"op": "plane_bg", "params": {"order": 1, "fit_rect": (1, 2, 3, 4)}}]}
     state_b = {"steps": [{"params": {"fit_rect": (1, 2, 3, 4), "order": 1}, "op": "plane_bg"}]}

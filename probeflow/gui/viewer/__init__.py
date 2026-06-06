@@ -51,6 +51,7 @@ _EXPORTS: dict[str, str] = {
     "show_roi_fft": "roi_analysis",
     "show_roi_histogram": "roi_analysis",
     "transform_roi_set_for_display_op": "geometric_ops",
+    "transform_mask_set_for_display_op": "geometric_ops",
 }
 
 __all__ = list(_EXPORTS)

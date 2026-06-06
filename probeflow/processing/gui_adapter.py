@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 import warnings
 
 from probeflow.core.op_vocab import SIMPLE_GEOMETRIC_OPS
+from probeflow.core.processing_state import _ROI_ELIGIBLE_OPS
 
 if TYPE_CHECKING:
     from probeflow.core.scan_model import Scan
@@ -41,7 +42,15 @@ NUMERIC_PROC_KEYS: tuple[str, ...] = (
     "roi_id",
     "geometric_ops",
     "arithmetic_ops",
+    "roi_filter_ops",
+    "mask_filter_ops",
 )
+
+# Marker recorded on scope (roi/mask) steps so provenance is honest that the
+# operation is computed on the whole image and only pasted back inside the
+# scope — i.e. out-of-scope structure influences scope-edge pixels for
+# non-local ops (Gaussian/FFT/edge).  See ``apply_operation_with_optional_roi``.
+SCOPE_SEMANTICS_MASKED_PASTE = "full_image_compute_masked_paste"
 
 # Value-filter ops routed through the FFT viewer's generic apply channel
 # (apply_correction_fn → ``geometric_ops``).  Their params are already in
@@ -52,6 +61,54 @@ _FILTER_OPS_PASSTHROUGH: frozenset[str] = frozenset({
     "mains_pickup_suppression",
     "inverse_fft_filter",
 })
+
+
+# GUI panel keys that drive ROI-eligible local filters, paired with the keys
+# the durable-commit path must clear so a committed filter does not also emit a
+# global step on the next Apply.
+ROI_ELIGIBLE_FILTER_TRIGGER_KEYS: tuple[str, ...] = (
+    "smooth_sigma",
+    "highpass_sigma",
+    "edge_method",
+    "fft_mode",
+    "fft_soft_border",
+)
+
+
+def roi_eligible_filter_specs(gui_state: dict) -> list[tuple[str, dict]]:
+    """Return canonical ``(op, params)`` for ROI-eligible local filters.
+
+    Single source of truth for the GUI-key → canonical-op mapping of the
+    filters that may be scoped to an ROI/mask (smooth, high-pass, edge, Fourier,
+    soft-border).  Used both by the durable-commit path in the viewer and to
+    keep that path in lock-step with :func:`processing_state_from_gui` (which
+    builds the same ops inline for the whole-image path).
+    """
+    s = gui_state
+    specs: list[tuple[str, dict]] = []
+    if s.get("smooth_sigma"):
+        specs.append(("smooth", {"sigma_px": float(s["smooth_sigma"])}))
+    if s.get("highpass_sigma"):
+        specs.append(("gaussian_high_pass", {"sigma_px": float(s["highpass_sigma"])}))
+    if s.get("edge_method"):
+        specs.append(("edge_detect", {
+            "method": str(s["edge_method"]),
+            "sigma": float(s.get("edge_sigma", 1.0)),
+            "sigma2": float(s.get("edge_sigma2", 2.0)),
+        }))
+    if s.get("fft_mode") is not None:
+        specs.append(("fourier_filter", {
+            "mode": str(s["fft_mode"]),
+            "cutoff": float(s.get("fft_cutoff", 0.10)),
+            "window": str(s.get("fft_window", "hanning")),
+        }))
+    if s.get("fft_soft_border"):
+        specs.append(("fft_soft_border", {
+            "mode": str(s.get("fft_soft_mode", "low_pass")),
+            "cutoff": float(s.get("fft_soft_cutoff", 0.10)),
+            "border_frac": float(s.get("fft_soft_border_frac", 0.12)),
+        }))
+    return specs
 
 
 def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
@@ -93,7 +150,10 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
     def _append_step(step: ProcessingStep):
         nonlocal skipped_roi_scope_warning
         if step.op in roi_eligible and roi_scope:
-            params = {"step": {"op": step.op, "params": dict(step.params)}}
+            params = {
+                "step": {"op": step.op, "params": dict(step.params)},
+                "scope_semantics": SCOPE_SEMANTICS_MASKED_PASTE,
+            }
             if roi_id is not None:
                 params["roi_id"] = roi_id
             else:
@@ -255,6 +315,53 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
             if invalid_points:
                 detail += f"; ignored {invalid_points} invalid point(s)"
             _warn_skipped_step("set_zero_plane", detail)
+
+    # Durable ROI-scoped local filters (review: ROI overwrite/retarget).
+    # Each committed entry froze the ROI geometry at apply time, so multiple
+    # ROI-scoped filters coexist and do not follow later ROI moves/deletes.
+    for spec in gui_state.get("roi_filter_ops") or []:
+        if not isinstance(spec, dict):
+            continue
+        op_name = str(spec.get("op", ""))
+        if op_name not in _ROI_ELIGIBLE_OPS:
+            _warn_skipped_step("roi_filter_ops", f"unsupported op {op_name!r}")
+            continue
+        params: dict = {
+            "step": {"op": op_name, "params": dict(spec.get("params", {}))},
+            "scope_semantics": SCOPE_SEMANTICS_MASKED_PASTE,
+        }
+        if spec.get("roi_id") is not None:
+            params["roi_id"] = str(spec["roi_id"])
+        frozen = spec.get("frozen_geometry")
+        if isinstance(frozen, dict):
+            params["frozen_geometry"] = {
+                "kind": str(frozen.get("kind", "")),
+                "geometry": dict(frozen.get("geometry", {})),
+                "coord_system": str(frozen.get("coord_system", "pixel")),
+            }
+        elif spec.get("roi_id") is None:
+            _warn_skipped_step(
+                "roi_filter_ops", "entry has neither roi_id nor frozen_geometry"
+            )
+            continue
+        steps.append(ProcessingStep("roi", params))
+
+    # Durable mask-scoped local filters (mask as a first-class processing scope).
+    for spec in gui_state.get("mask_filter_ops") or []:
+        if not isinstance(spec, dict):
+            continue
+        op_name = str(spec.get("op", ""))
+        if op_name not in _ROI_ELIGIBLE_OPS:
+            _warn_skipped_step("mask_filter_ops", f"unsupported op {op_name!r}")
+            continue
+        if spec.get("mask_id") is None:
+            _warn_skipped_step("mask_filter_ops", "entry has no mask_id")
+            continue
+        steps.append(ProcessingStep("mask", {
+            "mask_id": str(spec["mask_id"]),
+            "scope_semantics": SCOPE_SEMANTICS_MASKED_PASTE,
+            "step": {"op": op_name, "params": dict(spec.get("params", {}))},
+        }))
 
     # Quantize bit-depth steps are deferred to the very end of the
     # pipeline (review image-proc #2, fixed 2026-05-28).  Running
