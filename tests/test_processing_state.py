@@ -1152,6 +1152,30 @@ def test_mask_step_applies_filter_inside_mask_only():
     assert np.allclose(out[10:12, 10:12], arr[10:12, 10:12])  # outside untouched
 
 
+def test_frozen_mask_step_ignores_live_mask_and_is_not_missing():
+    """Frozen mask-raster steps replay independently of the live mask (parity
+    with frozen ROI geometry): replacing the mask's data does not move the op."""
+    from probeflow.core.mask import ImageMask, MaskSet, _pack_bool
+    rng = np.random.RandomState(3)
+    arr = rng.rand(16, 16)
+    m = np.zeros((16, 16), bool)
+    m[2:6, 2:6] = True
+    gui = {"mask_filter_ops": [
+        {"op": "smooth", "params": {"sigma_px": 2.0}, "mask_id": "M",
+         "frozen_mask": {"data": _pack_bool(m), "shape": [16, 16]}},
+    ]}
+    state = processing_state_from_gui(gui)
+    assert "frozen_mask" in state.steps[0].params
+    # Live mask of the same id is empty/elsewhere; frozen snapshot must win.
+    ms = MaskSet(image_id="img")
+    ms.add(ImageMask(id="M", name="M", data=np.zeros((16, 16), bool)))
+    out = apply_processing_state(arr, state, mask_set=ms)
+    assert not np.allclose(out[2:6, 2:6], arr[2:6, 2:6])       # frozen region
+    assert np.allclose(out[10:12, 10:12], arr[10:12, 10:12])   # outside untouched
+    # Self-resolving — never reported missing, even with no mask_set.
+    assert missing_roi_references(state, None, None) == []
+
+
 def test_mask_step_missing_when_no_mask_set():
     from probeflow.core.mask import ImageMask, MaskSet
     arr = np.zeros((10, 10))
