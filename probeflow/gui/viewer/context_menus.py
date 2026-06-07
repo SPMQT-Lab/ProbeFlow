@@ -34,6 +34,14 @@ def build_blank_image_context_menu(viewer) -> QMenu:
     act_clear = menu.addAction("Clear ROIs and overlays")
     act_clear.triggered.connect(viewer._clear_all_image_marks)
 
+    # Quick-selection actions (only when a selection is active).
+    if getattr(viewer, "_has_quick_selection", None) and viewer._has_quick_selection():
+        menu.addSeparator()
+        act_promote = menu.addAction("Promote selection to ROI")
+        act_promote.triggered.connect(viewer._promote_selection_to_roi)
+        act_drop = menu.addAction("Clear selection")
+        act_drop.triggered.connect(viewer._clear_quick_selection)
+
     menu.addSeparator()
 
     act_save = menu.addAction("Save PNG copy...")

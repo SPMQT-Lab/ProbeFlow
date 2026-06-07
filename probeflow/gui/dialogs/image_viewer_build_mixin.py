@@ -471,24 +471,28 @@ class ImageViewerBuildMixin:
         sel_col = QVBoxLayout()
         sel_col.setSpacing(3)
         sel_col.setContentsMargins(0, 0, 0, 0)
-        _sel_hdr = QLabel("ROI filters")
+        _sel_hdr = QLabel("Filter scope")
         _sel_hdr.setFont(ui_font(7, weight=QFont.Bold))
         _sel_hdr.setAlignment(Qt.AlignCenter)
         sel_col.addWidget(_sel_hdr)
-        self._scope_cb = QComboBox()
-        self._scope_cb.addItems(["Whole image", "ROI filters only"])
-        self._scope_cb.setFont(ui_font(8))
-        self._scope_cb.setToolTip(
-            "ROI filters only: smooth/high-pass/edge/FFT apply inside the "
-            "active area ROI; background and scan-line corrections remain whole-image.")
-        sel_col.addWidget(self._scope_cb)
+        # The old Whole-image / ROI dropdown is retired: scope is auto-resolved
+        # (quick selection → region; "Set as ROI filter scope" → that ROI; else
+        # whole image).  This hint replaces it.
+        _sel_hint = QLabel("Draw a region to\nprocess inside it")
+        _sel_hint.setFont(ui_font(8))
+        _sel_hint.setAlignment(Qt.AlignCenter)
+        _sel_hint.setToolTip(
+            "Smooth/high-pass/edge/FFT apply inside the active quick selection "
+            "(or the ROI set as filter scope); background and scan-line "
+            "corrections remain whole-image.")
+        sel_col.addWidget(_sel_hint)
         sel_col.addStretch()
 
         zs_row.addLayout(zero_col, 1)
         zs_row.addLayout(sel_col, 1)
         processing_lay.addLayout(zs_row)
 
-        self._roi_status_lbl = QLabel("ROI filter scope: whole image")
+        self._roi_status_lbl = QLabel("Processing scope: whole image")
         self._roi_status_lbl.setFont(ui_font(8))
         self._roi_status_lbl.setWordWrap(True)
         processing_lay.addWidget(self._roi_status_lbl)
@@ -744,6 +748,8 @@ class ImageViewerBuildMixin:
         self._zoom_lbl.pixel_hovered.connect(self._on_pixel_hovered)
         self._zoom_lbl.object_hovered.connect(self._on_canvas_object_hovered)
         self._zoom_lbl.roi_created.connect(self._on_canvas_roi_created)
+        self._zoom_lbl.selection_drawn.connect(self._on_canvas_selection_drawn)
+        self._zoom_lbl.selection_cleared.connect(self._on_canvas_selection_cleared)
         self._zoom_lbl.roi_move_requested.connect(self._on_canvas_roi_move)
         self._zoom_lbl.roi_geometry_preview.connect(self._on_roi_geometry_preview)
         self._zoom_lbl.roi_geometry_changed.connect(self._on_roi_geometry_changed)
@@ -855,6 +861,7 @@ class ImageViewerBuildMixin:
         self._image_roi_set = None
         self._copy_roi_buffer = None  # ROI object held for Ctrl+V paste
         self._image_mask_set = None   # active-mask layer (MaskSet); loaded per image
+        self._roi_filter_scope_id = None  # ROI explicitly set as filter scope
         self._edge_detection_dialog = None
 
         self._measurement_panel = ImageMeasurementsPanel(parent=self)

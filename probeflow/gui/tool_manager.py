@@ -9,20 +9,20 @@ _TOOL_HINTS: dict[str, str] = {
         "Right-click for actions; Ctrl+scroll to zoom."
     ),
     "rectangle": (
-        "Rectangle ROI: drag to draw an area. "
-        "Release to finish. Esc cancels."
+        "Rectangle selection: drag to select a region to process. "
+        "Apply runs inside it. Right-click → Promote to ROI to keep it. Esc clears."
     ),
     "ellipse": (
-        "Ellipse ROI: drag to draw the bounding box. "
-        "Release to finish. Esc cancels."
+        "Ellipse selection: drag the bounding box to select a region to process. "
+        "Right-click → Promote to ROI to keep it. Esc clears."
     ),
     "polygon": (
-        "Polygon ROI: click vertices. "
-        "Double-click or press Enter to close. Esc cancels."
+        "Polygon selection: click vertices; double-click or Enter to close. "
+        "Apply runs inside it. Right-click → Promote to ROI to keep it. Esc clears."
     ),
     "freehand": (
-        "Freehand ROI: drag around an area. "
-        "Release to finish. Esc cancels."
+        "Freehand selection: drag around a region to process. "
+        "Right-click → Promote to ROI to keep it. Esc clears."
     ),
     "line": (
         "Line ROI: drag to draw a profile line. "
