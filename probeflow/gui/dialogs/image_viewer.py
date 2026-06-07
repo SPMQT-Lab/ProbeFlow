@@ -59,6 +59,7 @@ from probeflow.gui.viewer.image_viewer_processing_export_mixin import (
 )
 from probeflow.gui.viewer.image_viewer_mask_mixin import ImageViewerMaskMixin
 from probeflow.gui.viewer.image_viewer_roi_mixin import ImageViewerRoiMixin
+from probeflow.gui.viewer.image_viewer_selection_mixin import ImageViewerSelectionMixin
 from probeflow.gui.viewer.image_viewer_toolbar_mixin import ImageViewerToolbarMixin
 from probeflow.gui.viewer.image_viewer_tools_mixin import ImageViewerToolsMixin
 
@@ -72,6 +73,7 @@ class ImageViewerDialog(
     ImageViewerChromeMixin,
     ImageViewerMaskMixin,
     ImageViewerRoiMixin,
+    ImageViewerSelectionMixin,
     ImageViewerToolbarMixin,
     ImageViewerDisplayMixin,
     ImageViewerToolsMixin,
@@ -265,6 +267,10 @@ class ImageViewerDialog(
             self._zoom_lbl.setText("Loading…")
             self._zoom_lbl.setPixmap(QPixmap())
         self._zoom_lbl.set_markers([])
+        # Quick selections are per-image and ephemeral — drop on navigation.
+        if hasattr(self, "_clear_quick_selection"):
+            self._clear_quick_selection()
+        self._roi_filter_scope_id = None
         self._load_image_roi_set(entry)
         self._load_image_mask_set(entry)
         if self._pending_initial_plane_idx is not None:

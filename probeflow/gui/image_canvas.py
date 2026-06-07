@@ -23,13 +23,13 @@ from probeflow.gui.typography import ui_font
 from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import (
     QBrush, QColor, QFont, QImage, QKeySequence, QPainter, QPainterPath, QPen,
-    QPixmap, QTransform,
+    QPixmap, QPolygonF, QTransform,
 )
 from PySide6.QtWidgets import (
     QFrame, QGraphicsEllipseItem, QGraphicsItem, QGraphicsItemGroup,
     QGraphicsLineItem, QGraphicsPathItem, QGraphicsPixmapItem,
-    QGraphicsRectItem, QGraphicsScene, QGraphicsTextItem, QGraphicsView,
-    QScrollArea, QToolTip,
+    QGraphicsPolygonItem, QGraphicsRectItem, QGraphicsScene, QGraphicsTextItem,
+    QGraphicsView, QScrollArea, QToolTip,
 )
 
 from probeflow.gui.roi_items import (
@@ -41,6 +41,9 @@ from probeflow.gui.roi_items import (
 # ── Preview-item styling ──────────────────────────────────────────────────────
 
 _PEN_PREVIEW   = QPen(QColor("#fab387"), 1.5, Qt.DashLine)
+# Persistent quick-selection marquee — distinct from the transient draw preview
+# and deliberately label-free (the absence of a name is the ROI-vs-selection cue).
+_PEN_SELECTION = QPen(QColor("#FFD700"), 1.5, Qt.DashLine)
 _BRUSH_PREVIEW = QBrush(QColor(250, 179, 135, 40))
 _PEN_VERTEX    = QPen(QColor("#fab387"), 1.0)
 _BRUSH_VERTEX  = QBrush(QColor("#fab387"))
@@ -62,6 +65,10 @@ class ImageCanvas(QGraphicsView):
     roi_created               = Signal(object)        # new ROI object
     roi_move_requested        = Signal(str, int, int) # (roi_id, dx, dy)
     tool_changed              = Signal(str)
+
+    # Quick-selection (ImageJ-style ephemeral region, not a managed ROI)
+    selection_drawn           = Signal(str, object)   # (kind, geometry dict)
+    selection_cleared         = Signal()
     roi_context_menu_requested = Signal(str, object)  # (roi_id, global_pos)
 
     # Generic ROI resize-handle drag signals (rectangle/ellipse/line)
@@ -188,6 +195,11 @@ class ImageCanvas(QGraphicsView):
 
         self._selection_tool: str = "pan"
 
+        # Quick selection: a single ephemeral region ({"kind", "geometry"}),
+        # rendered as an unlabeled dashed marquee and never added to the ROISet.
+        self._selection: dict | None = None
+        self._selection_item: QGraphicsItem | None = None
+
         self._image_roi_set = None
         self._roi_items: dict[str, QGraphicsItemGroup] = {}
         # ── PySide6 QVariant lifetime invariant ──────────────────────────────
@@ -262,6 +274,7 @@ class ImageCanvas(QGraphicsView):
         self._rebuild_zero_marker_items()
         self._rebuild_feature_point_items()
         self._rebuild_roi_items()
+        self._rebuild_selection_item()
         self._apply_zoom()
 
     def _apply_zoom(self) -> None:
@@ -839,13 +852,101 @@ class ImageCanvas(QGraphicsView):
         self.tool_changed.emit("pan")
         self.roi_created.emit(roi)
 
+    # ── Quick selection (ephemeral region) ─────────────────────────────────────
+
+    def _finish_area(self, kind: str, geometry: dict) -> None:
+        """Complete an area-tool drag as a quick selection (the default).
+
+        Area tools (rectangle/ellipse/polygon/freehand) produce an ephemeral
+        selection rather than a managed ROI; the user promotes it explicitly if
+        they want a named, provenance-tracked ROI.
+        """
+        self._finish_selection(kind, geometry)
+
+    def _finish_selection(self, kind: str, geometry: dict) -> None:
+        self._cancel_drawing()
+        self._tool = "pan"
+        self._selection_tool = "pan"
+        self._last_hover_message = None
+        self.setCursor(Qt.ArrowCursor)
+        self.set_selection(kind, geometry)
+        self.tool_changed.emit("pan")
+        self.selection_drawn.emit(kind, dict(geometry))
+
+    def set_selection(self, kind: str, geometry: dict) -> None:
+        """Install (or replace) the single quick selection and render its marquee."""
+        self._selection = {"kind": str(kind), "geometry": dict(geometry)}
+        self._rebuild_selection_item()
+
+    def clear_selection(self, *, emit: bool = True) -> None:
+        """Remove the quick selection and its marquee."""
+        had = self._selection is not None
+        self._remove_selection_item()
+        self._selection = None
+        if had and emit:
+            self.selection_cleared.emit()
+
+    def selection(self) -> dict | None:
+        """Return a copy of the current quick selection, or ``None``."""
+        if self._selection is None:
+            return None
+        return {"kind": self._selection["kind"],
+                "geometry": dict(self._selection["geometry"])}
+
+    def _remove_selection_item(self) -> None:
+        if self._selection_item is not None:
+            scene = self.scene()
+            if scene is not None:
+                try:
+                    scene.removeItem(self._selection_item)
+                except (RuntimeError, ValueError):
+                    pass
+            self._selection_item = None
+
+    def _rebuild_selection_item(self) -> None:
+        """(Re)create the dashed marquee item from ``self._selection`` data.
+
+        Deliberately renders no name label — the absence of a name is the
+        at-a-glance cue that this is a quick selection, not a managed ROI.
+        """
+        self._remove_selection_item()
+        if self._selection is None:
+            return
+        scene = self.scene()
+        if scene is None:
+            return
+        kind = self._selection["kind"]
+        g = self._selection["geometry"]
+        item: QGraphicsItem | None = None
+        try:
+            if kind == "rectangle":
+                item = QGraphicsRectItem(QRectF(
+                    float(g["x"]), float(g["y"]),
+                    float(g["width"]), float(g["height"])))
+            elif kind == "ellipse":
+                cx, cy = float(g["cx"]), float(g["cy"])
+                rx, ry = float(g["rx"]), float(g["ry"])
+                item = QGraphicsEllipseItem(QRectF(cx - rx, cy - ry, 2 * rx, 2 * ry))
+            elif kind in ("polygon", "freehand"):
+                poly = QPolygonF([QPointF(float(v[0]), float(v[1]))
+                                  for v in g.get("vertices", [])])
+                item = QGraphicsPolygonItem(poly)
+        except (KeyError, TypeError, ValueError):
+            item = None
+        if item is None:
+            return
+        item.setPen(_PEN_SELECTION)
+        item.setZValue(60)
+        scene.addItem(item)
+        self._selection_item = item
+
     def _finish_polygon(self) -> None:
         pts = self._draw_pts[:]
         self._clear_preview()
         self._draw_pts.clear()
         if len(pts) >= 3:
             vertices = [[p.x(), p.y()] for p in pts]
-            self._finish_roi("polygon", {"vertices": vertices})
+            self._finish_area("polygon", {"vertices": vertices})
         else:
             # Too few points — cancel silently
             self._tool = "pan"
@@ -1277,8 +1378,8 @@ class ImageCanvas(QGraphicsView):
             h = abs(p2.y() - p1.y())
             self._draw_start = None
             if w >= 2 and h >= 2:
-                self._finish_roi("rectangle", {"x": float(x), "y": float(y),
-                                               "width": float(w), "height": float(h)})
+                self._finish_area("rectangle", {"x": float(x), "y": float(y),
+                                                "width": float(w), "height": float(h)})
             else:
                 self._cancel_drawing()
             event.accept()
@@ -1292,8 +1393,8 @@ class ImageCanvas(QGraphicsView):
             ry = abs(p2.y() - p1.y()) / 2.0
             self._draw_start = None
             if rx >= 1 and ry >= 1:
-                self._finish_roi("ellipse", {"cx": float(cx), "cy": float(cy),
-                                             "rx": float(rx), "ry": float(ry)})
+                self._finish_area("ellipse", {"cx": float(cx), "cy": float(cy),
+                                              "rx": float(rx), "ry": float(ry)})
             else:
                 self._cancel_drawing()
             event.accept()
@@ -1321,7 +1422,7 @@ class ImageCanvas(QGraphicsView):
             self._clear_preview()
             if len(pts) >= 3:
                 vertices = [[p.x(), p.y()] for p in pts]
-                self._finish_roi("freehand", {"vertices": vertices})
+                self._finish_area("freehand", {"vertices": vertices})
             else:
                 self._tool = "pan"
                 self._selection_tool = "pan"
@@ -1348,6 +1449,11 @@ class ImageCanvas(QGraphicsView):
         if k == Qt.Key_Escape and (self._tool != "pan" or self._draw_pts or
                                     self._draw_start is not None):
             self.cancel_drawing()
+            event.accept()
+            return
+        # Escape with nothing being drawn clears a committed quick selection.
+        if k == Qt.Key_Escape and self._selection is not None:
+            self.clear_selection()
             event.accept()
             return
         if k in (Qt.Key_Return, Qt.Key_Enter) and self._tool == "polygon" and self._draw_pts:

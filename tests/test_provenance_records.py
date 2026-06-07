@@ -174,6 +174,36 @@ def test_step_summary_mask_branch_and_scope_semantics():
     assert "computed full-image, applied inside scope" in summary
 
 
+def test_step_summary_region_scope_reads_as_region_not_roi():
+    from probeflow.provenance.records import ProcessingHistory, SourceRecord
+
+    history = ProcessingHistory(
+        SourceRecord(
+            source_filename="scan.dat",
+            source_path="/data/scan.dat",
+            source_file_type="Createc .dat",
+            channel="FT",
+            loader_name="reader",
+            loader_version="1.0",
+        )
+    )
+    history.append_step(
+        operation_id="roi",
+        operation_name="Region-scoped Gaussian blur/smoothing",
+        parameters={
+            "step": {"op": "smooth", "params": {"sigma_px": 1.5}},
+            "scope_kind": "region",
+            "scope_semantics": "full_image_compute_masked_paste",
+            "frozen_geometry": {"kind": "rectangle",
+                                "geometry": {"x": 0, "y": 0, "width": 4, "height": 4}},
+        },
+    )
+    summary = history.short_summary()
+    assert "Region-scoped" in summary
+    assert "ROI-scoped" not in summary
+    assert "frozen geometry" in summary
+
+
 def test_build_export_record_round_trips_masks(tmp_path):
     from probeflow.core.mask import ImageMask, MaskSet
     from probeflow.provenance.records import ProcessingHistory, SourceRecord, build_export_record

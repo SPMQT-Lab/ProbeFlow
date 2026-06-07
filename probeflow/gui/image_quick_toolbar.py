@@ -67,6 +67,12 @@ _ROI_ACTION_BUTTONS: list[tuple[str, str, str, str]] = [
         "mask_selection",
     ),
     ("invert_selection", "Invert", "Invert the current area ROI or mask.", "invert_selection"),
+    (
+        "promote_selection",
+        "→ ROI",
+        "Promote the current quick selection to a managed, named ROI.",
+        "promote_selection",
+    ),
     ("stm_background", "STM bg", "Subtract an STM background plane.", "stm_background"),
     ("open_fft", "FFT", "Open the FFT viewer for the current image.", "open_fft"),
 ]

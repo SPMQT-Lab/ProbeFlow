@@ -650,11 +650,12 @@ def test_viewer_apply_keeps_whole_image_scope_with_active_area_roi(qapp, monkeyp
     roi_set.set_active(roi.id)
     dlg._image_roi_set = roi_set
     dlg._processing_panel.set_state({"smooth_sigma": 1.0})
-    dlg._scope_cb.setCurrentIndex(0)
 
     dlg._on_apply_processing()
 
+    # No quick selection and no ROI set as filter scope → whole-image filter.
     assert dlg._processing["smooth_sigma"] == 1.0
+    assert not dlg._processing.get("roi_filter_ops")
     assert "processing_scope" not in dlg._processing
     assert "processing_roi_id" not in dlg._processing
 
@@ -662,7 +663,7 @@ def test_viewer_apply_keeps_whole_image_scope_with_active_area_roi(qapp, monkeyp
     dlg.deleteLater()
 
 
-def test_viewer_apply_scopes_local_filter_to_active_area_roi(qapp, monkeypatch):
+def test_viewer_apply_scopes_local_filter_to_roi_filter_scope(qapp, monkeypatch):
     from probeflow.core.roi import ROI, ROISet
     from probeflow.gui import ImageViewerDialog, SxmFile, THEMES
 
@@ -677,28 +678,80 @@ def test_viewer_apply_scopes_local_filter_to_active_area_roi(qapp, monkeypatch):
     roi_set.set_active(roi.id)
     dlg._image_roi_set = roi_set
     dlg._processing_panel.set_state({"smooth_sigma": 1.0})
-    dlg._scope_cb.setCurrentIndex(1)
+    # Opt in to ROI scoping (the retired dropdown's replacement).
+    dlg._roi_filter_scope_id = roi.id
 
     dlg._on_apply_processing()
 
-    # New contract: ROI-scoped filters are committed durably with frozen
-    # geometry rather than written as a single global processing_scope/_roi_id.
+    # ROI-scoped filters are committed durably with frozen geometry, not as a
+    # single global processing_scope/_roi_id.
     assert "processing_scope" not in dlg._processing
     assert "processing_roi_id" not in dlg._processing
     committed = dlg._processing["roi_filter_ops"]
     assert len(committed) == 1
     assert committed[0]["op"] == "smooth"
     assert committed[0]["roi_id"] == roi.id
+    assert committed[0].get("scope_kind") in (None, "roi")
     assert committed[0]["frozen_geometry"]["kind"] == "rectangle"
-    # The live panel filter is cleared and the scope selector reset.
     assert "smooth_sigma" not in dlg._processing
-    assert dlg._scope_cb.currentIndex() == 0
 
     dlg.close()
     dlg.deleteLater()
 
 
-def test_viewer_apply_rejects_local_filter_for_active_non_area_roi(qapp, monkeypatch):
+def test_viewer_apply_scopes_filter_to_quick_selection_as_region(qapp, monkeypatch):
+    from probeflow.gui import ImageViewerDialog, SxmFile, THEMES
+
+    monkeypatch.setattr(ImageViewerDialog, "_load_current", lambda self: None)
+    monkeypatch.setattr(ImageViewerDialog, "_refresh_processing_display", lambda self: None)
+
+    entry = SxmFile(path=Path("/tmp/example.sxm"), stem="example", Nx=8, Ny=8)
+    dlg = ImageViewerDialog(entry, [entry], "gray", THEMES["dark"])
+    dlg._processing_panel.set_state({"smooth_sigma": 1.0})
+    # A drawn quick selection (not a managed ROI).
+    dlg._zoom_lbl.set_selection("rectangle",
+                                {"x": 1.0, "y": 1.0, "width": 4.0, "height": 4.0})
+
+    dlg._on_apply_processing()
+
+    committed = dlg._processing["roi_filter_ops"]
+    assert len(committed) == 1
+    assert committed[0]["scope_kind"] == "region"
+    assert "roi_id" not in committed[0]
+    assert committed[0]["frozen_geometry"]["kind"] == "rectangle"
+    # No ROI was created.
+    assert dlg._image_roi_set is None or not dlg._image_roi_set.rois
+    # Selection persists for further filtering (ImageJ-style).
+    assert dlg._active_quick_selection() is not None
+
+    dlg.close()
+    dlg.deleteLater()
+
+
+def test_viewer_promote_selection_creates_roi_and_clears_marquee(qapp, monkeypatch):
+    from probeflow.core.roi import ROISet
+    from probeflow.gui import ImageViewerDialog, SxmFile, THEMES
+
+    monkeypatch.setattr(ImageViewerDialog, "_load_current", lambda self: None)
+    monkeypatch.setattr(ImageViewerDialog, "_refresh_processing_display", lambda self: None)
+
+    entry = SxmFile(path=Path("/tmp/example.sxm"), stem="example", Nx=8, Ny=8)
+    dlg = ImageViewerDialog(entry, [entry], "gray", THEMES["dark"])
+    dlg._image_roi_set = ROISet(image_id="img1")
+    dlg._zoom_lbl.set_selection("rectangle",
+                                {"x": 1.0, "y": 1.0, "width": 4.0, "height": 4.0})
+
+    dlg._promote_selection_to_roi()
+
+    assert len(dlg._image_roi_set.rois) == 1
+    assert dlg._image_roi_set.rois[0].kind == "rectangle"
+    assert dlg._active_quick_selection() is None  # marquee consumed
+
+    dlg.close()
+    dlg.deleteLater()
+
+
+def test_viewer_apply_rejects_local_filter_for_non_area_roi_scope(qapp, monkeypatch):
     from probeflow.core.roi import ROI, ROISet
     from probeflow.gui import ImageViewerDialog, SxmFile, THEMES
 
@@ -713,12 +766,12 @@ def test_viewer_apply_rejects_local_filter_for_active_non_area_roi(qapp, monkeyp
     roi_set.set_active(roi.id)
     dlg._image_roi_set = roi_set
     dlg._processing_panel.set_state({"smooth_sigma": 1.0})
-    dlg._scope_cb.setCurrentIndex(1)
+    dlg._roi_filter_scope_id = roi.id
 
     dlg._on_apply_processing()
 
-    assert "not valid for area processing" in dlg._status_lbl.text()
-    assert "processing_scope" not in dlg._processing
+    assert "not an area ROI" in dlg._status_lbl.text()
+    assert not dlg._processing.get("roi_filter_ops")
 
     dlg.close()
     dlg.deleteLater()

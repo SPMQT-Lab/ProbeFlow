@@ -624,7 +624,10 @@ def _operation_name(op: str, params: dict[str, Any]) -> str:
     if op == "set_zero_plane":
         return "Set zero plane"
     if op in ("roi", "mask"):
-        scope = "ROI" if op == "roi" else "Mask"
+        if op == "roi" and isinstance(params, dict) and params.get("scope_kind") == "region":
+            scope = "Region"
+        else:
+            scope = "ROI" if op == "roi" else "Mask"
         nested = params.get("step") if isinstance(params, dict) else None
         nested_op = nested.get("op") if isinstance(nested, dict) else None
         if nested_op:
@@ -662,13 +665,14 @@ def _step_summary(step: ProvenanceStep) -> str:
             return f"Edge detection: {method} gradient magnitude"
         return f"Edge detection: {method} (sigma={p.get('sigma', 1.0)} px)"
     if op in ("roi", "mask"):
-        scope = "ROI" if op == "roi" else "Mask"
+        is_region = op == "roi" and p.get("scope_kind") == "region"
+        scope = "Region" if is_region else ("ROI" if op == "roi" else "Mask")
         nested = p.get("step") if isinstance(p, dict) else None
         if isinstance(nested, dict):
             nested_op = str(nested.get("op") or "")
             nested_params = dict(nested.get("params") or {})
             nested_name = _operation_name(nested_op, nested_params)
-            label = p.get("roi") or p.get("mask") or scope
+            label = p.get("roi") or p.get("mask") or ("region" if is_region else scope)
             summary = f"{scope}-scoped {nested_name} ({label})"
             # Be explicit that the op is computed full-image then pasted inside
             # the scope (so non-local ops are influenced by out-of-scope data).

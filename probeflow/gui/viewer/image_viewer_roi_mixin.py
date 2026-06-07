@@ -211,8 +211,10 @@ class ImageViewerRoiMixin:
         invert_active_roi(
             self._image_roi_set, self._current_array_shape(), self._on_image_roi_set_changed,
         )
-        if had_area and hasattr(self, "_scope_cb"):
-            self._scope_cb.setCurrentText("ROI filters only")
+        if had_area:
+            active_id = self._active_image_roi().id if self._active_image_roi() else None
+            if active_id is not None:
+                self._roi_filter_scope_id = active_id
             if hasattr(self, "_status_lbl"):
                 self._status_lbl.setText(
                     "ROI inverted. Filters will apply inside the inverted area."
@@ -374,9 +376,11 @@ class ImageViewerRoiMixin:
         if roi is None or roi.kind not in AREA_ROI_KINDS:
             return
         self._image_roi_set.set_active(roi_id)
-        self._scope_cb.setCurrentText("ROI filters only")
+        self._roi_filter_scope_id = roi_id
         self._show_sidebar_tab("processing")
         self._on_image_roi_set_changed()
+        if hasattr(self, "_roi_status_lbl"):
+            self._roi_status_lbl.setText(f"Processing scope: ROI '{roi.name}'")
         if hasattr(self, "_status_lbl"):
             self._status_lbl.setText(
                 f"ROI filter scope set to '{roi.name}'. Local filters will apply inside this ROI."

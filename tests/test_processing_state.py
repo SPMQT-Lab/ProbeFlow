@@ -1130,6 +1130,26 @@ def test_roi_scoped_step_carries_masked_paste_semantics_marker():
     assert state.steps[0].params["scope_semantics"] == "full_image_compute_masked_paste"
 
 
+def test_anonymous_region_filter_applies_without_roi_and_is_not_missing():
+    """A quick-selection 'region' filter: frozen geometry, no roi_id, never
+    consults a ROISet, and is tagged scope_kind=region for honest provenance."""
+    rng = np.random.RandomState(7)
+    arr = rng.rand(20, 20)
+    gui = {"roi_filter_ops": [
+        {"op": "smooth", "params": {"sigma_px": 2.0}, "scope_kind": "region",
+         "frozen_geometry": _rect_frozen(0, 0, 8, 8)},
+    ]}
+    state = processing_state_from_gui(gui)
+    step = state.steps[0]
+    assert step.op == "roi"
+    assert step.params["scope_kind"] == "region"
+    assert "roi_id" not in step.params
+    out = apply_processing_state(arr, state)  # no roi_set / mask_set
+    assert not np.allclose(out[0:8, 0:8], arr[0:8, 0:8])
+    assert np.allclose(out[12:14, 12:14], arr[12:14, 12:14])
+    assert missing_roi_references(state, None, None) == []
+
+
 # ── Mask as a first-class processing scope (P2) ───────────────────────────────
 
 

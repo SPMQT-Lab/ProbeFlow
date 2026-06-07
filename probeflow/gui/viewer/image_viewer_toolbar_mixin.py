@@ -208,6 +208,7 @@ class ImageViewerToolbarMixin:
             "line_profile":      self._image_measurements.add_current_line_profile_measurement,
             "mask_selection":    self._on_mask_selection,
             "invert_selection":  self._invert_active_image_roi,
+            "promote_selection": self._promote_selection_to_roi,
         }
         handler = dispatch.get(key)
         if handler is not None:
@@ -225,8 +226,12 @@ class ImageViewerToolbarMixin:
                     "Select an area ROI first to use mask-based processing."
                 )
             return
-        self._scope_cb.setCurrentText("ROI filters only")
+        self._roi_filter_scope_id = roi_ctx.roi_id
         self._show_sidebar_tab("processing")
+        if hasattr(self, "_roi_status_lbl"):
+            self._roi_status_lbl.setText(
+                f"Processing scope: ROI '{roi_ctx.roi.name}'"
+            )
         if hasattr(self, "_status_lbl"):
             self._status_lbl.setText(
                 f"ROI filter scope set to '{roi_ctx.roi.name}'. "

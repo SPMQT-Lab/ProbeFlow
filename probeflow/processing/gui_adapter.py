@@ -332,6 +332,12 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
         }
         if spec.get("roi_id") is not None:
             params["roi_id"] = str(spec["roi_id"])
+        # scope_kind distinguishes a named/managed ROI ("roi", default) from an
+        # anonymous quick-selection region ("region") so provenance reads
+        # honestly; replay is identical (both are frozen masked-paste steps).
+        scope_kind = str(spec.get("scope_kind") or "roi")
+        if scope_kind != "roi":
+            params["scope_kind"] = scope_kind
         frozen = spec.get("frozen_geometry")
         if isinstance(frozen, dict):
             params["frozen_geometry"] = {

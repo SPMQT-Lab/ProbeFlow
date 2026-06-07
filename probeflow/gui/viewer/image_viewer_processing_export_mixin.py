@@ -32,24 +32,24 @@ class ImageViewerProcessingExportMixin:
     def _on_apply_processing(self):
         panel_state = self._processing_panel.state()
         panel_state.update(self._advanced_processing_state())
-        has_roi_aware_local_filter = self._processing_has_roi_aware_local_filter(panel_state)
-        active_roi = self._active_image_roi()
-        active_area_roi_id = active_area_roi_context(self._image_roi_set).roi_id
-        wants_filter_roi = self._scope_cb.currentIndex() == 1
-        if (
-            wants_filter_roi
-            and active_roi is not None
-            and active_area_roi_id is None
-            and has_roi_aware_local_filter
-        ):
-            self._status_lbl.setText(
-                f"Active {active_roi.kind} ROI is not valid for area processing; "
-                "select an area ROI or delete/deselect it before applying local filters."
-            )
-            return
-        if wants_filter_roi:
-            if active_area_roi_id is None:
-                self._status_lbl.setText("Select an active area ROI before using ROI filters.")
+        has_local_filter = self._processing_has_roi_aware_local_filter(panel_state)
+
+        # Auto-scope: a quick selection wins; otherwise a named ROI explicitly
+        # chosen as the filter scope; otherwise whole image.  The old
+        # whole-image / ROI dropdown is retired.
+        selection = self._active_quick_selection()
+        roi_scope_id = None
+        if selection is None:
+            roi_scope_id = self._active_roi_filter_scope_id()
+            if (
+                roi_scope_id is not None
+                and has_local_filter
+                and active_area_roi_context(self._image_roi_set).roi_id != roi_scope_id
+            ):
+                self._status_lbl.setText(
+                    "The ROI chosen as filter scope is not an area ROI; pick an "
+                    "area ROI or clear the scope (Esc) to process the whole image."
+                )
                 return
         # Snapshot for undo before any mutation. Validation has passed; this
         # apply is going to change the state.
@@ -67,7 +67,7 @@ class ImageViewerProcessingExportMixin:
                 "stm_background",
                 "plane_bg",
                 # Durable scope-filter lists must survive the panel-state rebuild
-                # so previously committed ROI/mask filters are not dropped.
+                # so previously committed ROI/region/mask filters are not dropped.
                 "roi_filter_ops",
                 "mask_filter_ops",
             )
@@ -75,19 +75,28 @@ class ImageViewerProcessingExportMixin:
         }
         self._processing = panel_state
         self._processing.update(preserve)
-        if wants_filter_roi and active_area_roi_id is not None:
-            # Commit the ROI-eligible filters as durable, frozen-geometry steps
-            # rather than overwriting a single global ROI scope: this lets two
-            # different ROI-scoped filters coexist and stops them following
-            # later ROI moves/deletes (review: ROI overwrite/retarget + live
-            # geometry).
-            self._commit_roi_scoped_filters(active_area_roi_id)
+        if selection is not None:
+            # Anonymous, frozen region step (quick selection → not a managed ROI).
+            self._commit_region_scoped_filters(selection)
+        elif roi_scope_id is not None:
+            # Named ROI scope: durable, frozen-geometry steps.
+            self._commit_roi_scoped_filters(roi_scope_id)
         # The single global ROI scope is no longer written (kept readable for
         # back-compat with previously saved states).
         self._processing.pop("processing_scope", None)
         self._processing.pop("processing_roi_id", None)
         self._clear_bad_line_preview()
         self._refresh_processing_display()
+
+    def _active_roi_filter_scope_id(self) -> "str | None":
+        """Return the ROI id explicitly set as filter scope, if it still exists."""
+        rid = getattr(self, "_roi_filter_scope_id", None)
+        if rid is None or self._image_roi_set is None:
+            return None
+        if self._image_roi_set.get(rid) is None:
+            self._roi_filter_scope_id = None
+            return None
+        return rid
 
     # Secondary GUI keys that only matter alongside a committed filter's
     # trigger key; cleared on commit so the live panel does not re-emit them.
@@ -109,10 +118,7 @@ class ImageViewerProcessingExportMixin:
         then stripped from the live panel (and the panel widgets resynced) so a
         later Apply neither re-commits them nor emits a duplicate global step.
         """
-        from probeflow.processing.gui_adapter import (
-            ROI_ELIGIBLE_FILTER_TRIGGER_KEYS,
-            roi_eligible_filter_specs,
-        )
+        from probeflow.processing.gui_adapter import roi_eligible_filter_specs
 
         specs = roi_eligible_filter_specs(self._processing)
         if not specs:
@@ -137,17 +143,52 @@ class ImageViewerProcessingExportMixin:
                 "frozen_geometry": frozen,
             })
         self._processing["roi_filter_ops"] = committed
-        for key in (*ROI_ELIGIBLE_FILTER_TRIGGER_KEYS, *self._ROI_FILTER_COMPANION_KEYS):
-            self._processing.pop(key, None)
-        # Resync the panel widgets so the just-committed sliders reset.
-        self._processing_panel.set_state(self._processing)
-        self._set_advanced_processing_state(self._processing)
-        # The filter is baked in; return the scope selector to whole-image.
-        self._scope_cb.setCurrentIndex(0)
+        self._strip_committed_filter_keys()
         self._roi_status_lbl.setText(
             f"Committed {len(specs)} ROI-scoped filter(s) to "
             f"'{area_roi.name}' (frozen geometry)."
         )
+
+    def _commit_region_scoped_filters(self, selection: dict) -> None:
+        """Bake the panel's eligible filters into an anonymous frozen region step.
+
+        The quick selection's geometry is frozen into each step (``scope_kind=
+        "region"``, no ``roi_id``) so the region processes reproducibly without
+        ever becoming a managed ROI.  The selection itself persists (ImageJ-style)
+        so further filters can be applied to the same region.
+        """
+        from probeflow.processing.gui_adapter import roi_eligible_filter_specs
+
+        specs = roi_eligible_filter_specs(self._processing)
+        if not specs:
+            return
+        frozen = {
+            "kind": str(selection["kind"]),
+            "geometry": dict(selection["geometry"]),
+            "coord_system": "pixel",
+        }
+        committed = list(self._processing.get("roi_filter_ops") or [])
+        for op_name, params in specs:
+            committed.append({
+                "op": op_name,
+                "params": params,
+                "scope_kind": "region",
+                "frozen_geometry": frozen,
+            })
+        self._processing["roi_filter_ops"] = committed
+        self._strip_committed_filter_keys()
+        self._roi_status_lbl.setText(
+            f"Committed {len(specs)} region filter(s) (frozen selection)."
+        )
+
+    def _strip_committed_filter_keys(self) -> None:
+        """Remove just-committed panel filters and resync the panel widgets."""
+        from probeflow.processing.gui_adapter import ROI_ELIGIBLE_FILTER_TRIGGER_KEYS
+
+        for key in (*ROI_ELIGIBLE_FILTER_TRIGGER_KEYS, *self._ROI_FILTER_COMPANION_KEYS):
+            self._processing.pop(key, None)
+        self._processing_panel.set_state(self._processing)
+        self._set_advanced_processing_state(self._processing)
 
     def _on_reset_processing(self):
         """Clear all processing for the current image and reload raw data."""
@@ -166,8 +207,9 @@ class ImageViewerProcessingExportMixin:
             self._set_zero_plane_btn.setChecked(False)
         self._zero_ctrl.clear()
         self._set_selection_tool("none")
-        self._scope_cb.setCurrentIndex(0)
-        self._roi_status_lbl.setText("ROI filter scope: whole image")
+        self._clear_quick_selection()
+        self._roi_filter_scope_id = None
+        self._roi_status_lbl.setText("Processing scope: whole image")
         self._refresh_zero_markers()
         self._status_lbl.setText("Reset: showing original on-disk data.")
         self._refresh_processing_display()
@@ -839,6 +881,10 @@ class ImageViewerProcessingExportMixin:
                 status_fn=status_fn,
                 mask_changed_fn=mask_changed_fn,
             )
+        # The quick selection is geometry too — transform it (or drop it if the
+        # op invalidates it) so the marquee never sits over the wrong pixels.
+        if hasattr(self, "_transform_quick_selection_for_display_op"):
+            self._transform_quick_selection_for_display_op(op_name, params)
 
     def _on_export_line_profile_csv(self):
         prof = self._line_profile_panel.profile_data()
