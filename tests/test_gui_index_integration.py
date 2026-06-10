@@ -116,9 +116,11 @@ class TestGuiWorkers:
         assert emitted[0][0] == "scan:scan.dat"
         assert emitted[0][2] is token
 
-    def test_thumbnail_loader_suppresses_emit_when_render_fails(
+    def test_thumbnail_loader_emits_null_image_when_render_fails(
         self, qapp, monkeypatch, caplog
     ):
+        """A failed render emits a null QImage so the card can show a
+        failure placeholder instead of silently never updating."""
         import probeflow.gui.workers as worker_mod
 
         caplog.set_level(logging.WARNING, logger=worker_mod.__name__)
@@ -140,7 +142,9 @@ class TestGuiWorkers:
         loader.signals.loaded.connect(lambda *args: emitted.append(args))
         loader.run()
 
-        assert emitted == []
+        assert len(emitted) == 1
+        assert emitted[0][0] == "scan:broken.dat"
+        assert emitted[0][1].isNull()
         assert "ThumbnailLoader: failed to load broken.dat (bad scan)" in caplog.text
         assert "Traceback" not in caplog.text
 
@@ -246,7 +250,7 @@ class TestGuiWorkers:
         assert viewer_arr_emitted[0][1] == "viewer-arr-token"
         assert viewer_file_emitted[0][1] == "viewer-file-token"
 
-    def test_spec_thumbnail_loader_emits_only_when_render_succeeds(
+    def test_spec_thumbnail_loader_emits_image_or_null_placeholder(
         self, qapp, monkeypatch
     ):
         from PIL import Image
@@ -274,7 +278,9 @@ class TestGuiWorkers:
         emitted.clear()
         loader.run()
 
-        assert emitted == []
+        # Failure emits a null QImage placeholder rather than nothing.
+        assert len(emitted) == 1
+        assert emitted[0][1].isNull()
 
     def test_spec_thumbnail_loader_logs_render_failure_without_traceback(
         self, qapp, monkeypatch, caplog
@@ -294,7 +300,9 @@ class TestGuiWorkers:
         loader.signals.loaded.connect(lambda *args: emitted.append(args))
         loader.run()
 
-        assert emitted == []
+        # Failure emits a null QImage placeholder rather than nothing.
+        assert len(emitted) == 1
+        assert emitted[0][1].isNull()
         assert "SpecThumbnailLoader: failed to render bad.VERT (bad spectrum)" in caplog.text
         assert "Traceback" not in caplog.text
 

@@ -262,12 +262,14 @@ class ImageArithmeticDialog(QDialog):
             return
 
         self._operation_combo.blockSignals(True)
-        self._operation_combo.clear()
-        for label, value in operations:
-            self._operation_combo.addItem(label, value)
-        index = next((i for i, (_, value) in enumerate(operations) if value == current), 0)
-        self._operation_combo.setCurrentIndex(index)
-        self._operation_combo.blockSignals(False)
+        try:
+            self._operation_combo.clear()
+            for label, value in operations:
+                self._operation_combo.addItem(label, value)
+            index = next((i for i, (_, value) in enumerate(operations) if value == current), 0)
+            self._operation_combo.setCurrentIndex(index)
+        finally:
+            self._operation_combo.blockSignals(False)
 
     def _refresh_ui(self) -> None:
         self._refresh_operation_choices()
@@ -398,14 +400,16 @@ class ImageArithmeticDialog(QDialog):
         desired = [(str(name), idx) for idx, name in enumerate(names)]
         if existing != desired:
             self._plane_combo.blockSignals(True)
-            self._plane_combo.clear()
-            for label, idx in desired:
-                self._plane_combo.addItem(label, idx)
-            if names:
-                self._plane_combo.setCurrentIndex(
-                    max(0, min(self._pending_plane_idx, len(names) - 1))
-                )
-            self._plane_combo.blockSignals(False)
+            try:
+                self._plane_combo.clear()
+                for label, idx in desired:
+                    self._plane_combo.addItem(label, idx)
+                if names:
+                    self._plane_combo.setCurrentIndex(
+                        max(0, min(self._pending_plane_idx, len(names) - 1))
+                    )
+            finally:
+                self._plane_combo.blockSignals(False)
         self._pending_plane_idx = self._plane_combo.currentIndex()
 
         plane = self._selected_source_plane()

@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 
 from PySide6.QtCore import Slot
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import QMenu
 
 from probeflow.gui.viewer import export_histogram
@@ -248,14 +248,15 @@ class ImageViewerDisplayMixin:
         self._hist_panel.clear(self._t)
         self._load_current(reset_zoom=True)
 
-    @Slot(QPixmap, object)
-    def _on_loaded(self, pixmap: QPixmap, token):
+    @Slot(QImage, object)
+    def _on_loaded(self, image: QImage, token):
+        # ViewerLoader emits QImage (QPixmap is GUI-thread-only); convert here.
         if token is not self._token:
             return
         self._zoom_lbl.setText("")
         reset_zoom = self._reset_zoom_on_next_pixmap
         self._reset_zoom_on_next_pixmap = False
-        self._zoom_lbl.set_source(pixmap, reset_zoom=reset_zoom)
+        self._zoom_lbl.set_source(QPixmap.fromImage(image), reset_zoom=reset_zoom)
         self._zoom_lbl.set_raw_array(self._display_arr)
         self._refresh_zero_markers()
         self._refresh_scale_bar()

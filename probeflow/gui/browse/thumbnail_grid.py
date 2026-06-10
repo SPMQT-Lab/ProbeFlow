@@ -7,7 +7,7 @@ from typing import Optional, Union
 
 from probeflow.gui.typography import ui_font
 from PySide6.QtCore import Qt, QThreadPool, QTimer, Signal, Slot
-from PySide6.QtGui import QCursor, QPixmap
+from PySide6.QtGui import QCursor, QImage, QPixmap
 from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget
 
 from probeflow.core.scan_loader import load_scan as _default_load_scan
@@ -568,22 +568,34 @@ class ThumbnailGrid(QWidget):
             self._cards.pop(key, None)
 
     # ── Slots ──────────────────────────────────────────────────────────────────
-    @Slot(str, QPixmap, object)
-    def _on_thumb(self, key: str, pixmap: QPixmap, token):
+    # Workers emit QImage (QPixmap is GUI-thread-only); convert here.
+    @Slot(str, QImage, object)
+    def _on_thumb(self, key: str, image: QImage, token):
         if token is not self._load_token:
             return
         card = self._cards.get(key)
-        if card:
-            card.set_pixmap(pixmap)
+        if card is None:
+            return
+        if image is None or image.isNull():
+            # Render failed — show a visible placeholder instead of silently
+            # leaving the card blank/stale.
+            img_lbl = getattr(card, "img_lbl", None)
+            if img_lbl is not None:
+                img_lbl.setText("render\nfailed")
+            return
+        card.set_pixmap(QPixmap.fromImage(image))
 
     @Slot(str, list, object)
-    def _on_folder_thumbs(self, folder_key: str, pixmaps: list, token):
+    def _on_folder_thumbs(self, folder_key: str, images: list, token):
         if token is not self._load_token:
             return
         key = f"folder:{folder_key}"
         card = self._cards.get(key)
         if isinstance(card, FolderCard):
-            card.set_thumbnails(pixmaps)
+            card.set_thumbnails([
+                None if img is None or img.isNull() else QPixmap.fromImage(img)
+                for img in images
+            ])
 
     def _on_card_click(self, entry, ctrl: bool):
         # Folders are not selectable — selecting one would have no effect on
@@ -634,7 +646,9 @@ class ThumbnailGrid(QWidget):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if self._entries:
-            QTimer.singleShot(60, self._relayout)
+            # Receiver-aware overload — cancelled if this widget is deleted
+            # before the timer fires.
+            QTimer.singleShot(60, self, self._relayout)
             self._schedule_visible_thumbnail_refresh(delay_ms=80)
 
     def _relayout(self):

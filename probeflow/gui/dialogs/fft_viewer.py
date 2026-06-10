@@ -1188,7 +1188,9 @@ class FFTViewerDialog(
         self._sync_tab_width()
         if not getattr(self, "_initial_fit_done", False):
             self._initial_fit_done = True
-            QTimer.singleShot(0, self._zoom_fit)
+            # Receiver-aware overload: the timer is cancelled if this dialog's
+            # C++ object is deleted before it fires (same below).
+            QTimer.singleShot(0, self, self._zoom_fit)
 
     def _on_focus_fft_toggled(self, checked: bool) -> None:
         self._focus_fft_active = bool(checked)
@@ -1210,7 +1212,7 @@ class FFTViewerDialog(
         act = getattr(self, "_focus_fft_act", None)
         if act is not None and act.isChecked() != checked:
             act.setChecked(checked)
-        QTimer.singleShot(0, self._adapt_zoom_to_canvas)
+        QTimer.singleShot(0, self, self._adapt_zoom_to_canvas)
 
     def _on_show_tools_toggled(self, checked: bool) -> None:
         side = getattr(self, "_side_panel", None)
@@ -1223,7 +1225,7 @@ class FFTViewerDialog(
         act = getattr(self, "_show_tools_act", None)
         if act is not None and act.isChecked() != checked:
             act.setChecked(checked)
-        QTimer.singleShot(0, self._adapt_zoom_to_canvas)
+        QTimer.singleShot(0, self, self._adapt_zoom_to_canvas)
 
     def _set_status_text(self, text: str) -> None:
         self._status_lbl.setText(text)

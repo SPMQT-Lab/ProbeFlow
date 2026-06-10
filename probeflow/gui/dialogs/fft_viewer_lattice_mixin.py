@@ -491,9 +491,13 @@ class FFTViewerLatticeMixin:
                 self._fft_source = "whole_image"
                 if hasattr(self, "_fft_source_combo"):
                     self._fft_source_combo.blockSignals(True)
-                    self._fft_source_combo.setCurrentIndex(0)
-                    self._fft_source_combo.model().item(1).setEnabled(False)
-                    self._fft_source_combo.blockSignals(False)
+                    try:
+                        self._fft_source_combo.setCurrentIndex(0)
+                        item = self._fft_source_combo.model().item(1)
+                        if item is not None:
+                            item.setEnabled(False)
+                    finally:
+                        self._fft_source_combo.blockSignals(False)
                 self._arr, self._scan_range_m = self._resolve_source_array()
                 self._recompute_fft()
                 self._redraw()

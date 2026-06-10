@@ -122,14 +122,16 @@ class ROIManagerPanel(QWidget):
 
     def refresh(self, roi_set) -> None:
         self._list.blockSignals(True)
-        self._list.clear()
-        if roi_set is not None:
-            for roi in roi_set.rois:
-                prefix = _KIND_PREFIX.get(roi.kind, "? ")
-                item = QListWidgetItem(prefix + roi.name)
-                item.setData(Qt.UserRole, roi.id)
-                self._list.addItem(item)
-        self._list.blockSignals(False)
+        try:
+            self._list.clear()
+            if roi_set is not None:
+                for roi in roi_set.rois:
+                    prefix = _KIND_PREFIX.get(roi.kind, "? ")
+                    item = QListWidgetItem(prefix + roi.name)
+                    item.setData(Qt.UserRole, roi.id)
+                    self._list.addItem(item)
+        finally:
+            self._list.blockSignals(False)
         self._on_item_selection_changed()
 
     # ── selection helpers ─────────────────────────────────────────────────────

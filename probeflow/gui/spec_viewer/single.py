@@ -522,17 +522,21 @@ class SpecViewerDialog(QDialog):
             self._channel_check_widgets.append(cb)
 
         self._signal_cb.blockSignals(True)
-        self._signal_cb.clear()
-        self._signal_cb.addItems([ch for ch in order if ch in spec.channels])
-        first_signal = next((ch for ch in spec.default_channels if ch in spec.channels), None)
-        if first_signal is not None:
-            self._signal_cb.setCurrentText(first_signal)
-        self._signal_cb.blockSignals(False)
+        try:
+            self._signal_cb.clear()
+            self._signal_cb.addItems([ch for ch in order if ch in spec.channels])
+            first_signal = next((ch for ch in spec.default_channels if ch in spec.channels), None)
+            if first_signal is not None:
+                self._signal_cb.setCurrentText(first_signal)
+        finally:
+            self._signal_cb.blockSignals(False)
 
         self._norm_channel_cb.blockSignals(True)
-        self._norm_channel_cb.clear()
-        self._norm_channel_cb.addItems([ch for ch in order if ch in spec.channels])
-        self._norm_channel_cb.blockSignals(False)
+        try:
+            self._norm_channel_cb.clear()
+            self._norm_channel_cb.addItems([ch for ch in order if ch in spec.channels])
+        finally:
+            self._norm_channel_cb.blockSignals(False)
 
         sweep = spec.metadata.get("sweep_type", "").replace("_", " ")
         n_pts = spec.metadata.get("n_points", 0)
