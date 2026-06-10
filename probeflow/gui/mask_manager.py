@@ -104,15 +104,17 @@ class MaskManagerPanel(QWidget):
 
     def refresh(self, mask_set) -> None:
         self._list.blockSignals(True)
-        self._list.clear()
-        if mask_set is not None:
-            for mask in mask_set.masks:
-                active = mask.id == mask_set.active_mask_id
-                label = ("● " if active else "○ ") + f"{mask.name}  ({mask.count()} px)"
-                item = QListWidgetItem(label)
-                item.setData(Qt.UserRole, mask.id)
-                self._list.addItem(item)
-        self._list.blockSignals(False)
+        try:
+            self._list.clear()
+            if mask_set is not None:
+                for mask in mask_set.masks:
+                    active = mask.id == mask_set.active_mask_id
+                    label = ("● " if active else "○ ") + f"{mask.name}  ({mask.count()} px)"
+                    item = QListWidgetItem(label)
+                    item.setData(Qt.UserRole, mask.id)
+                    self._list.addItem(item)
+        finally:
+            self._list.blockSignals(False)
         self._sync_buttons()
 
     # ── selection helpers ──────────────────────────────────────────────────────

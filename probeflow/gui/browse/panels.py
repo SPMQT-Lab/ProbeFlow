@@ -6,7 +6,7 @@ import json
 
 from probeflow.gui.typography import ui_font
 from PySide6.QtCore import Qt, QThreadPool, Signal, Slot
-from PySide6.QtGui import QColor, QCursor, QFont, QPixmap
+from PySide6.QtGui import QColor, QCursor, QFont, QImage, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QButtonGroup,
@@ -454,10 +454,19 @@ class BrowseInfoPanel(QWidget):
     def load_channels(self, entry: SxmFile, colormap_key: str,
                        processing: dict = None):
         self._ch_token = object()
-        Signals = _browse_attr("ChannelSignals", ChannelSignals)
-        sigs = Signals()
-        sigs.loaded.connect(self._on_ch_loaded)
-        self._ch_sigs = sigs
+        # One signals object for the panel's lifetime. Re-creating it per call
+        # left the previous instance solely owned by still-running ChannelLoader
+        # runnables; QThreadPool auto-deletes those on the worker thread, which
+        # C++-destroys the signals QObject (and its cross-thread connections)
+        # off the main thread — the SIGSEGV class documented on _PooledWorker.
+        # Stale deliveries are filtered by the token check in _on_ch_loaded.
+        sigs = getattr(self, "_ch_sigs", None)
+        if sigs is None:
+            Signals = _browse_attr("ChannelSignals", ChannelSignals)
+            sigs = Signals()
+            sigs.setParent(self)
+            sigs.loaded.connect(self._on_ch_loaded)
+            self._ch_sigs = sigs
         planes = []
         try:
             scan = _browse_attr("load_scan", _default_load_scan)(entry.path)
@@ -481,13 +490,18 @@ class BrowseInfoPanel(QWidget):
     # Back-compat alias used internally
     _load_channels = load_channels
 
-    @Slot(int, QPixmap, object)
-    def _on_ch_loaded(self, idx: int, pixmap: QPixmap, token):
+    @Slot(int, QImage, object)
+    def _on_ch_loaded(self, idx: int, image: QImage, token):
+        # Workers emit QImage (QPixmap is GUI-thread-only); convert here.
         if token is not self._ch_token:
             return
         if idx >= len(self._ch_img_lbls):
             return
         lbl = self._ch_img_lbls[idx]
+        if image is None or image.isNull():
+            lbl.setText("render failed")
+            return
+        pixmap = QPixmap.fromImage(image)
         lbl.setPixmap(pixmap.scaled(lbl.width(), lbl.height(),
                                     Qt.KeepAspectRatio, Qt.SmoothTransformation))
 

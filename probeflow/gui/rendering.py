@@ -400,6 +400,7 @@ def render_spec_thumbnail(
         img = img.resize(size, Image.LANCZOS)
         return img
     except Exception:
+        _log.warning("render_spec_thumbnail failed for %s", vert_path, exc_info=True)
         return None
 
 
@@ -465,11 +466,26 @@ def _fit_image_to_box(img: Image.Image, size: tuple[int, int]) -> Image.Image:
     return img.resize((new_w, new_h), Image.LANCZOS)
 
 
-# ── PIL → QPixmap ─────────────────────────────────────────────────────────────
-def pil_to_pixmap(img: Image.Image):
-    from PySide6.QtGui import QImage, QPixmap
+# ── PIL → QImage / QPixmap ────────────────────────────────────────────────────
+def pil_to_qimage(img: Image.Image):
+    """Convert a PIL image to a self-contained QImage.
+
+    Safe to call from worker threads: QImage is the thread-safe paint device.
+    The ``.copy()`` detaches the result from the temporary ``data`` buffer the
+    QImage constructor merely references.
+    """
+    from PySide6.QtGui import QImage
 
     img  = img.convert("RGB")
     data = img.tobytes("raw", "RGB")
     qimg = QImage(data, img.width, img.height, img.width * 3, QImage.Format_RGB888)
-    return QPixmap.fromImage(qimg)
+    return qimg.copy()
+
+
+def pil_to_pixmap(img: Image.Image):
+    """Convert a PIL image to a QPixmap. Main (GUI) thread only — QPixmap may
+    not be created on worker threads; use :func:`pil_to_qimage` there and
+    convert in the receiving slot."""
+    from PySide6.QtGui import QPixmap
+
+    return QPixmap.fromImage(pil_to_qimage(img))

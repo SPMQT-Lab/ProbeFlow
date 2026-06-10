@@ -19,7 +19,7 @@ GUI_TEST_MODULES = {
     "test_roi_click_selection_canvas.py",
     "test_viewer_region_levels.py",
     "test_viewer_region_contrast_integration.py",
-    "test_thumbnail_cache_pixmap.py",
+    "test_thumbnail_cache_image.py",
     "test_line_periodicity_plot.py",
     "test_angle_update_and_dock_restore.py",
     "test_fft_phase_gui.py",

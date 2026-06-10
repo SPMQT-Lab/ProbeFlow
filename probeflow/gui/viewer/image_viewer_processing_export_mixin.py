@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import copy
+import logging
 from pathlib import Path
+
+_log = logging.getLogger(__name__)
 
 from PySide6.QtWidgets import QFileDialog
 
@@ -691,7 +694,8 @@ class ImageViewerProcessingExportMixin:
                 "\n".join(display_lines(record.processing_history))
             )
         except Exception:
-            pass
+            _log.warning("Could not build export provenance record; history "
+                         "panel not updated", exc_info=True)
 
     def _on_send_to_features(self):
         self._deferred.action = "features"
@@ -925,7 +929,8 @@ class ImageViewerProcessingExportMixin:
                 lambda _obj=None, _dlg=dlg: self._untrack_modeless_child(_dlg)
             )
         except Exception:
-            pass
+            _log.warning("Could not connect destroyed() for modeless child "
+                         "tracking", exc_info=True)
 
     def _untrack_modeless_child(self, dlg) -> None:
         children = getattr(self, "_modeless_children", None)

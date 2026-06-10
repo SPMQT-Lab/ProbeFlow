@@ -6,9 +6,12 @@ GUI refactor (now re-exported via ``probeflow.gui.compat``).
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Optional
 
 import numpy as np
+
+_log = logging.getLogger(__name__)
 
 import os as _os
 _os.environ.setdefault("QT_API", "pyside6")
@@ -282,8 +285,12 @@ class ImageViewerDialog(
         self._set_scan_channel_choices_from_names(data.plane_names, data.plane_units)
         clamped = max(0, min(target_ch, max(data.n_planes - 1, 0)))
         self._ch_cb.blockSignals(True)
-        self._ch_cb.setCurrentIndex(clamped)
-        self._ch_cb.blockSignals(False)
+        try:
+            self._ch_cb.setCurrentIndex(clamped)
+        finally:
+            # An exception here must not leave the combo permanently muted —
+            # that turns every later channel change into a silent no-op.
+            self._ch_cb.blockSignals(False)
         self._raw_arr          = data.raw_arr
         self._scan_header      = data.scan_header
         self._scan_range_m     = data.scan_range_m
@@ -311,7 +318,8 @@ class ImageViewerDialog(
                 processing_state_from_gui(self._processing or {}),
             )
         except Exception:
-            pass
+            _log.warning("Could not append current processing state to history "
+                         "panel; panel may lag the actual pipeline", exc_info=True)
         self._processing_history = history
         self._sync_history_panel()
 
@@ -379,18 +387,19 @@ class ImageViewerDialog(
                 #       keeping the scale bar / FFT k-axes consistent with the
                 #       displayed array shape (review image-proc #4).
                 raw_range = getattr(self, "_scan_range_m", None)
-                try:
-                    self._display_arr, self._display_scan_range_m = (
-                        apply_processing_state_with_calibration(
-                            self._raw_arr, state, self._image_roi_set,
-                            mask_set=getattr(self, "_image_mask_set", None),
-                            scan_range_m=raw_range,
-                        )
+                self._display_arr, self._display_scan_range_m = (
+                    apply_processing_state_with_calibration(
+                        self._raw_arr, state, self._image_roi_set,
+                        mask_set=getattr(self, "_image_mask_set", None),
+                        scan_range_m=raw_range,
                     )
-                except Exception:
-                    raise
+                )
             except Exception as exc:
-                self._processing_error = f"Processing failed: {exc}"
+                # The viewer falls back to the raw image; without a loud
+                # message the failed step reads as "nothing happened".
+                _log.warning("Processing pipeline failed; displaying raw image",
+                             exc_info=True)
+                self._processing_error = f"⚠ Processing failed — showing raw image: {exc}"
                 if hasattr(self, "_status_lbl"):
                     self._status_lbl.setText(self._processing_error)
                 self._display_arr = self._raw_arr
@@ -543,10 +552,12 @@ class ImageViewerDialog(
         if [self._ch_cb.itemText(i) for i in range(self._ch_cb.count())] == names:
             return
         self._ch_cb.blockSignals(True)
-        self._ch_cb.clear()
-        self._ch_cb.addItems(names)
-        self._ch_cb.setCurrentIndex(max(0, min(current, len(names) - 1)))
-        self._ch_cb.blockSignals(False)
+        try:
+            self._ch_cb.clear()
+            self._ch_cb.addItems(names)
+            self._ch_cb.setCurrentIndex(max(0, min(current, len(names) - 1)))
+        finally:
+            self._ch_cb.blockSignals(False)
 
     def _update_histogram(self):
         arr = self._display_arr

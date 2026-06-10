@@ -8,10 +8,14 @@ and consumed by downstream statistics / background exclusion.
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 
 from probeflow.gui.roi_context import area_roi_mask
 from probeflow.gui.viewer import load_mask_set, save_mask_set
+
+_log = logging.getLogger(__name__)
 
 
 class ImageViewerMaskMixin:
@@ -43,7 +47,8 @@ class ImageViewerMaskMixin:
             try:
                 self._refresh_measurements()
             except Exception:
-                pass
+                _log.warning("Measurement refresh after mask change failed; "
+                             "readout may show stale statistics", exc_info=True)
 
     # ── Active mask access (consumed by stats / background) ────────────────────
 

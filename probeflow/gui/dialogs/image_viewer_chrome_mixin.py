@@ -9,7 +9,11 @@ class MRO).
 
 from __future__ import annotations
 
+import logging
+
 from probeflow.gui.config import GITHUB_URL, load_config, save_config
+
+_log = logging.getLogger(__name__)
 from probeflow.gui.desktop_layout import (
     apply_screen_fraction_geometry,
     b64_to_qbytearray,
@@ -522,7 +526,8 @@ class ImageViewerChromeMixin:
             try:
                 self._viewer_main.restoreState(b64_to_qbytearray(state))
             except Exception:
-                pass
+                _log.warning("Could not restore saved viewer layout; using "
+                             "defaults", exc_info=True)
 
         sizes = layout.get("splitter_sizes")
         if sizes and len(sizes) == self._viewer_splitter.count():

@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 
 from PySide6.QtWidgets import QDialog
+
+_log = logging.getLogger(__name__)
 
 from probeflow.gui.dialogs.fft_viewer import FFTViewerDialog
 from probeflow.gui.dialogs.periodic_filter import PeriodicFilterDialog
@@ -339,7 +343,8 @@ class ImageViewerToolsMixin:
             from probeflow.core.metadata import read_scan_metadata
             metadata = read_scan_metadata(entry.path)
         except Exception:
-            pass
+            _log.warning("Could not read scan metadata; Image Info opens "
+                         "without it", exc_info=True)
 
         # Build processing history text
         history = getattr(self, "_processing_history", None)

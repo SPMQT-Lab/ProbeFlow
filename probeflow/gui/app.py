@@ -8,9 +8,12 @@ from here for backward compatibility.
 
 from __future__ import annotations
 
+import logging
 import sys
 from pathlib import Path
 from typing import Optional
+
+_log = logging.getLogger(__name__)
 
 import numpy as np
 
@@ -681,7 +684,8 @@ class ProbeFlowWindow(QMainWindow):
             try:
                 self.restoreState(b64_to_qbytearray(state))
             except Exception:
-                pass
+                _log.warning("Could not restore saved window layout; using "
+                             "defaults", exc_info=True)
 
         main_sizes = layout.get("splitter_sizes")
         if (not version_mismatch
@@ -1443,7 +1447,8 @@ class ProbeFlowWindow(QMainWindow):
                     # Also update the Browse thumbnail so it shows the processed view.
                     self._grid.set_entry_processing(str(last_entry.path), state)
                 except Exception:
-                    pass
+                    _log.warning("Could not save viewer processing state for "
+                                 "reopen / Browse thumbnail", exc_info=True)
             # Handle "Send to …" actions that were NOT already handled immediately
             # (e.g. user closed the viewer without clicking Send after setting action).
             if not spec and d._deferred.is_pending():
@@ -1471,7 +1476,8 @@ class ProbeFlowWindow(QMainWindow):
                 lambda _obj=None, _dlg=dlg: self._untrack_open_viewer(_dlg)
             )
         except Exception:
-            pass
+            _log.warning("Could not connect destroyed() for viewer tracking",
+                         exc_info=True)
 
     def _untrack_open_viewer(self, dlg) -> None:
         viewers = getattr(self, "_open_viewers", None)
@@ -1657,10 +1663,41 @@ class ProbeFlowWindow(QMainWindow):
             args += ["--browse", str(cur)]
 
         subprocess.Popen(args)
+        # quit() bypasses closeEvent, so drain workers explicitly before the
+        # event loop (and then the interpreter) tears down under them.
+        self._drain_worker_pools()
         QApplication.instance().quit()
 
     # ── Close ──────────────────────────────────────────────────────────────────
+    def _drain_worker_pools(self, timeout_ms: int = 5000) -> None:
+        """Drop queued work and wait for in-flight workers before teardown.
+
+        Without this, QApplication / interpreter teardown races still-running
+        pool workers (thumbnail renders, conversions, feature previews) whose
+        signals objects are parented to the QApplication — observed as
+        sporadic crashes on quit. A bounded wait keeps a stuck worker from
+        turning quit into a hang.
+        """
+        pools = [QThreadPool.globalInstance(),
+                 getattr(self, "_features_preview_pool", None)]
+        fc = getattr(self, "_fc_window", None)
+        if fc is not None:
+            pools.append(getattr(fc, "_preview_pool", None))
+        for pool in pools:
+            if pool is None:
+                continue
+            try:
+                pool.clear()
+                if not pool.waitForDone(timeout_ms):
+                    _log.warning(
+                        "Worker pool did not finish within %d ms at shutdown",
+                        timeout_ms,
+                    )
+            except Exception:
+                _log.warning("Worker pool drain failed", exc_info=True)
+
     def closeEvent(self, event):
+        self._drain_worker_pools()
         cfg = load_config()
         cfg.update({
             "theme_name":    self._theme_name,

@@ -386,15 +386,19 @@ class SpecOverlayDialog(QDialog):
             first_order = loaded[0][1].channel_order or list(loaded[0][1].channels.keys())
             ordered = [ch for ch in first_order if ch in common]
         self._channel_cb.blockSignals(True)
-        self._channel_cb.clear()
-        self._channel_cb.addItems(ordered)
-        if "I" in ordered:
-            self._channel_cb.setCurrentText("I")
-        self._channel_cb.blockSignals(False)
+        try:
+            self._channel_cb.clear()
+            self._channel_cb.addItems(ordered)
+            if "I" in ordered:
+                self._channel_cb.setCurrentText("I")
+        finally:
+            self._channel_cb.blockSignals(False)
         self._norm_channel_cb.blockSignals(True)
-        self._norm_channel_cb.clear()
-        self._norm_channel_cb.addItems(ordered)
-        self._norm_channel_cb.blockSignals(False)
+        try:
+            self._norm_channel_cb.clear()
+            self._norm_channel_cb.addItems(ordered)
+        finally:
+            self._norm_channel_cb.blockSignals(False)
         self._refresh_formula()
         self._redraw()
 

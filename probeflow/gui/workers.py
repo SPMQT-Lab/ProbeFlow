@@ -12,7 +12,7 @@ _log = logging.getLogger(__name__)
 
 import numpy as np
 from PySide6.QtCore import QObject, QRunnable, Signal
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QApplication
 
 from probeflow.gui.models import SxmFile, VertFile, browse_entry_key
@@ -21,7 +21,7 @@ from probeflow.core.scan_loader import SUPPORTED_SUFFIXES as _SCAN_SUFFIXES
 from probeflow.gui.rendering import (
     THUMBNAIL_CHANNEL_DEFAULT,
     load_thumbnail_plane,
-    pil_to_pixmap,
+    pil_to_qimage,
     render_scan_image,
     render_spec_thumbnail,
 )
@@ -37,19 +37,19 @@ def _file_identity(path) -> tuple[Optional[int], Optional[int]]:
         return None, None
 
 
-def _cached_thumbnail_pixmap(key: Optional[str]) -> Optional[QPixmap]:
+def _cached_thumbnail_image(key: Optional[str]) -> Optional[QImage]:
     from probeflow.core import browse_cache
 
     data = browse_cache.get_thumbnail(key)
     if data is None:
         return None
-    pm = QPixmap()
+    img = QImage()
     # Let Qt auto-detect the format from the PNG header. Passing an explicit
     # positional format (b"PNG") trips PySide6's loadFromData overload
     # resolution on some versions ("wrong argument values"), which made every
     # cache hit fall back to a full re-render.
-    if pm.loadFromData(data):
-        return pm
+    if img.loadFromData(data):
+        return img
     return None
 
 
@@ -107,8 +107,11 @@ class _PooledWorker(QRunnable):
 
 
 # ── Worker: thumbnail ─────────────────────────────────────────────────────────
+# All worker signals carry QImage, never QPixmap: QPixmap may only be created
+# or copied on the GUI thread, so workers emit the thread-safe QImage and the
+# main-thread receiver slot converts via QPixmap.fromImage().
 class ThumbnailSignals(QObject):
-    loaded = Signal(str, QPixmap, object)  # stem, pixmap, token
+    loaded = Signal(str, QImage, object)  # stem, image, token
 
 
 class ThumbnailLoader(_PooledWorker):
@@ -137,7 +140,7 @@ class ThumbnailLoader(_PooledWorker):
             cl=self.clip_low, chh=self.clip_high, w=self.w, h=self.h,
             proc=self.processing or None,
         )
-        cached = _cached_thumbnail_pixmap(key)
+        cached = _cached_thumbnail_image(key)
         if cached is not None:
             self.signals.loaded.emit(browse_entry_key(self.entry), cached, self.token)
             return
@@ -156,12 +159,16 @@ class ThumbnailLoader(_PooledWorker):
         )
         if img is not None:
             browse_cache.put_thumbnail(key, _png_bytes(img))
-            self.signals.loaded.emit(browse_entry_key(self.entry), pil_to_pixmap(img), self.token)
+            self.signals.loaded.emit(browse_entry_key(self.entry), pil_to_qimage(img), self.token)
+        else:
+            # Emit a null QImage so the card can show a failure placeholder
+            # instead of silently never updating.
+            self.signals.loaded.emit(browse_entry_key(self.entry), QImage(), self.token)
 
 
 # ── Worker: folder preview thumbnails ─────────────────────────────────────────
 class FolderThumbnailSignals(QObject):
-    loaded = Signal(str, list, object)  # folder_key, list[QPixmap | None], token
+    loaded = Signal(str, list, object)  # folder_key, list[QImage | None], token
 
 
 class FolderThumbnailLoader(_PooledWorker):
@@ -185,11 +192,11 @@ class FolderThumbnailLoader(_PooledWorker):
     def work(self):
         from probeflow.core import browse_cache
 
-        pixmaps: list = []
+        images: list = []
         for path in self.sample_paths:
             if path.suffix.lower() not in _SCAN_SUFFIXES:
                 _log.debug("FolderThumbnailLoader: skipping unsupported file %s", path)
-                pixmaps.append(None)
+                images.append(None)
                 continue
             mtime_ns, size = _file_identity(path)
             key = browse_cache.thumbnail_key(
@@ -197,9 +204,9 @@ class FolderThumbnailLoader(_PooledWorker):
                 kind="folder", cm=self.colormap, ch=self.thumbnail_channel,
                 cl=self.clip_low, chh=self.clip_high, w=self.w, h=self.h,
             )
-            cached = _cached_thumbnail_pixmap(key)
+            cached = _cached_thumbnail_image(key)
             if cached is not None:
-                pixmaps.append(cached)
+                images.append(cached)
                 continue
             try:
                 arr, _names = load_thumbnail_plane(path, self.thumbnail_channel)
@@ -215,8 +222,8 @@ class FolderThumbnailLoader(_PooledWorker):
             )
             if img is not None:
                 browse_cache.put_thumbnail(key, _png_bytes(img))
-            pixmaps.append(pil_to_pixmap(img) if img is not None else None)
-        self.signals.loaded.emit(self.folder_key, pixmaps, self.token)
+            images.append(pil_to_qimage(img) if img is not None else None)
+        self.signals.loaded.emit(self.folder_key, images, self.token)
 
 
 # ── Worker: spec thumbnail ────────────────────────────────────────────────────
@@ -237,12 +244,16 @@ class SpecThumbnailLoader(_PooledWorker):
             _log_preview_failure("SpecThumbnailLoader", "render", self.entry.path, exc)
             img = None
         if img is not None:
-            self.signals.loaded.emit(browse_entry_key(self.entry), pil_to_pixmap(img), self.token)
+            self.signals.loaded.emit(browse_entry_key(self.entry), pil_to_qimage(img), self.token)
+        else:
+            # Null QImage → card shows a failure placeholder instead of
+            # silently never updating.
+            self.signals.loaded.emit(browse_entry_key(self.entry), QImage(), self.token)
 
 
 # ── Worker: channel thumbnails ────────────────────────────────────────────────
 class ChannelSignals(QObject):
-    loaded = Signal(int, QPixmap, object)
+    loaded = Signal(int, QImage, object)
 
 
 class ChannelLoader(QRunnable):
@@ -277,12 +288,16 @@ class ChannelLoader(QRunnable):
             processing=self.processing or None,
         )
         if img is not None:
-            self.signals.loaded.emit(self.idx, pil_to_pixmap(img), self.token)
+            self.signals.loaded.emit(self.idx, pil_to_qimage(img), self.token)
+        else:
+            # Null QImage → receiver shows a failure placeholder rather than
+            # leaving the previous channel's preview silently in place.
+            self.signals.loaded.emit(self.idx, QImage(), self.token)
 
 
 # ── Worker: full-size viewer image ────────────────────────────────────────────
 class ViewerSignals(QObject):
-    loaded = Signal(QPixmap, object)
+    loaded = Signal(QImage, object)
     failed = Signal(str, object)
 
 
@@ -325,7 +340,7 @@ class ViewerLoader(_PooledWorker):
                 region_levels=self.region_levels,
             )
             if img is not None:
-                self.signals.loaded.emit(pil_to_pixmap(img), self.token)
+                self.signals.loaded.emit(pil_to_qimage(img), self.token)
             else:
                 self.signals.failed.emit("Image render returned no data.", self.token)
         except Exception as exc:
