@@ -106,6 +106,8 @@ class FolderEntry:
     n_scans: int = 0
     n_specs: int = 0
     sample_scan_paths: tuple[Path, ...] = field(default_factory=tuple)
+    # The indexing peek stopped at its file budget — counts are lower bounds.
+    counts_capped: bool = False
 
     @property
     def stem(self) -> str:
@@ -118,6 +120,7 @@ class FolderEntry:
             n_scans=sub.n_scans,
             n_specs=sub.n_specs,
             sample_scan_paths=tuple(sub.sample_scan_paths),
+            counts_capped=bool(getattr(sub, "counts_capped", False)),
         )
 
 

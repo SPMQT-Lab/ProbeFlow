@@ -306,6 +306,7 @@ class SubfolderEntry:
     n_scans: int                          # scan files found within peek depth
     n_specs: int                          # spectroscopy files found within peek depth
     sample_scan_paths: tuple[Path, ...]   # up to 3 paths for preview thumbnails
+    counts_capped: bool = False           # peek budget hit — counts are lower bounds
 
 
 @dataclass(frozen=True)
@@ -322,18 +323,26 @@ def _peek_subfolder(
     *,
     max_samples: int = 3,
     peek_depth: int = 2,
+    max_files: int = 400,
 ) -> SubfolderEntry:
     """Briefly scan *folder* (BFS, capped by peek_depth) for counts and samples.
 
-    Bounded so users get a meaningful preview even for nested experiment trees,
-    without paying for a full recursive walk.
+    Bounded two ways so users get a meaningful preview even for nested
+    experiment trees: by depth, and by a *file budget* (``max_files``).  Each
+    recognised-suffix file costs a content sniff — an ~8 KB read — so without
+    the budget, peeking the parent of a tree whose subfolders hold thousands
+    of scans transfers megabytes per folder card on a network drive.  When the
+    budget runs out the walk stops and ``counts_capped`` marks the counts as
+    lower bounds (the grid shows "N+").
     """
     n_scans = 0
     n_specs = 0
+    files_examined = 0
+    capped = False
     samples: list[Path] = []
     queue: list[tuple[Path, int]] = [(folder, 0)]
 
-    while queue:
+    while queue and not capped:
         current, depth = queue.pop(0)
         try:
             # os.scandir serves is_file()/is_dir() from the single directory
@@ -351,6 +360,10 @@ def _peek_subfolder(
             except OSError:
                 continue
             if is_file:
+                if files_examined >= max_files:
+                    capped = True
+                    break
+                files_examined += 1
                 p = Path(e.path)
                 ft = sniff_file_type(p)
                 if ft in (FileType.CREATEC_IMAGE, FileType.NANONIS_IMAGE):
@@ -368,6 +381,7 @@ def _peek_subfolder(
         n_scans=n_scans,
         n_specs=n_specs,
         sample_scan_paths=tuple(samples),
+        counts_capped=capped,
     )
 
 

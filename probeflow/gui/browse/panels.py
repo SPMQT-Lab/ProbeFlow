@@ -26,7 +26,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from probeflow.core.scan_loader import load_scan as _default_load_scan
 from probeflow.gui.models import PLANE_NAMES, SxmFile, VertFile
 from probeflow.gui.rendering import (
     CMAP_KEY,
@@ -36,7 +35,7 @@ from probeflow.gui.rendering import (
     THUMBNAIL_CHANNEL_DEFAULT,
     THUMBNAIL_CHANNEL_OPTIONS,
 )
-from probeflow.gui.workers import ChannelLoader, ChannelSignals
+from probeflow.gui.workers import ChannelPreviewLoader
 
 from .helpers import _browse_attr, _sep
 
@@ -400,8 +399,9 @@ class BrowseInfoPanel(QWidget):
         self._qi["size"].setText(f"{entry.scan_nm:.1f} nm" if entry.scan_nm is not None else "—")
         self._qi["bias"].setText(f"{entry.bias_mv:.0f} mV" if entry.bias_mv is not None else "—")
         self._qi["setp"].setText(_setp_display(entry))
+        # One worker load serves both the channel previews and the metadata
+        # table (meta_ready → _populate_metadata_rows).
         self.load_channels(entry, colormap_key, processing=None)
-        self._load_metadata(entry)
 
     def show_vert_entry(self, entry: VertFile):
         self.name_lbl.setText(entry.stem)
@@ -439,6 +439,9 @@ class BrowseInfoPanel(QWidget):
 
     def clear(self):
         self.name_lbl.setText("No scan selected")
+        # Invalidate any in-flight preview load so late results don't
+        # repopulate a panel the user just cleared.
+        self._ch_token = object()
         for v in self._qi.values():
             v.setText("—")
         for lbl in self._ch_img_lbls:
@@ -453,42 +456,50 @@ class BrowseInfoPanel(QWidget):
     # ── Public ─────────────────────────────────────────────────────────────────
     def load_channels(self, entry: SxmFile, colormap_key: str,
                        processing: dict = None):
+        """Kick off the off-thread preview + header load for *entry*.
+
+        The scan is read exactly once, on a pool worker (previously this did a
+        synchronous full ``load_scan`` here for the previews and a second one
+        in the metadata loader — two full file transfers on the GUI thread per
+        card click, the main network-drive freeze).  ``meta_ready`` populates
+        the slot layout and metadata table; ``loaded`` fills in each preview.
+        Stale deliveries are filtered by the token check in each slot.
+        """
         self._ch_token = object()
-        # One signals object for the panel's lifetime. Re-creating it per call
-        # left the previous instance solely owned by still-running ChannelLoader
-        # runnables; QThreadPool auto-deletes those on the worker thread, which
-        # C++-destroys the signals QObject (and its cross-thread connections)
-        # off the main thread — the SIGSEGV class documented on _PooledWorker.
-        # Stale deliveries are filtered by the token check in _on_ch_loaded.
-        sigs = getattr(self, "_ch_sigs", None)
-        if sigs is None:
-            Signals = _browse_attr("ChannelSignals", ChannelSignals)
-            sigs = Signals()
-            sigs.setParent(self)
-            sigs.loaded.connect(self._on_ch_loaded)
-            self._ch_sigs = sigs
-        planes = []
-        try:
-            scan = _browse_attr("load_scan", _default_load_scan)(entry.path)
-            plane_names = list(scan.plane_names)
-            n_planes = scan.n_planes
-            planes = list(getattr(scan, "planes", []) or [])
-        except Exception:
-            plane_names = list(PLANE_NAMES)
-            n_planes = len(plane_names)
-        self._set_channel_preview_slots(plane_names)
-        for i in range(n_planes):
-            arr = planes[i] if i < len(planes) else None
-            Loader = _browse_attr("ChannelLoader", ChannelLoader)
-            loader = Loader(entry, i, colormap_key,
-                                   self._ch_token, 124, 98, sigs,
-                                   self._clip_low, self._clip_high,
-                                   processing=processing,
-                                   arr=arr)
-            self._pool.start(loader)
+        self._ch_entry = entry
+        for lbl in self._ch_img_lbls:
+            lbl.clear()
+            lbl.setText("…")
+        Loader = _browse_attr("ChannelPreviewLoader", ChannelPreviewLoader)
+        loader = Loader(entry, colormap_key, self._ch_token, 124, 98,
+                        self._clip_low, self._clip_high,
+                        processing=processing)
+        loader.signals.meta_ready.connect(self._on_ch_meta)
+        loader.signals.loaded.connect(self._on_ch_loaded)
+        loader.signals.failed.connect(self._on_ch_failed)
+        self._pool.start(loader)
 
     # Back-compat alias used internally
     _load_channels = load_channels
+
+    @Slot(list, dict, object)
+    def _on_ch_meta(self, names: list, header: dict, token) -> None:
+        if token is not self._ch_token:
+            return
+        self._set_channel_preview_slots(list(names))
+        entry = getattr(self, "_ch_entry", None)
+        if entry is not None:
+            self._populate_metadata_rows(entry, dict(header))
+
+    @Slot(str, object)
+    def _on_ch_failed(self, message: str, token) -> None:
+        if token is not self._ch_token:
+            return
+        for lbl in self._ch_img_lbls:
+            lbl.clear()
+            lbl.setText("load failed")
+        self._meta_rows = []
+        self._filter_meta()
 
     @Slot(int, QImage, object)
     def _on_ch_loaded(self, idx: int, image: QImage, token):
@@ -540,11 +551,13 @@ class BrowseInfoPanel(QWidget):
             self._ch_img_lbls.append(img_lbl)
             self._ch_name_lbls.append(nm_lbl)
 
-    def _load_metadata(self, entry: SxmFile):
-        try:
-            hdr = _browse_attr("load_scan", _default_load_scan)(entry.path).header
-        except Exception:
-            hdr = {}
+    def _populate_metadata_rows(self, entry: SxmFile, hdr: dict) -> None:
+        """Fill the metadata table from an already-loaded header dict.
+
+        The header arrives via ``ChannelPreviewLoader.meta_ready`` so the file
+        is read once, off the GUI thread (this used to be a second synchronous
+        full ``load_scan`` per card click).
+        """
         priority = [
             "REC_DATE", "REC_TIME", "SCAN_PIXELS", "SCAN_RANGE",
             "SCAN_OFFSET", "SCAN_ANGLE", "SCAN_DIR", "BIAS",

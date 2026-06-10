@@ -98,22 +98,34 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(marker)
         return
 
-    # Qt works here: run each GUI test in its own forked subprocess. Offscreen
-    # Qt is a single process-wide QApplication with a global QThreadPool and a
-    # PySide wrapper cache keyed by C++ pointer address; objects leaked by one
-    # test get their address (and stale Python wrapper) reused by a later test,
-    # which surfaces as an intermittent SIGSEGV or a bogus AttributeError on a
-    # recycled wrapper. A fresh address space per test removes the reuse entirely
-    # and contains any residual crash to a single reported test instead of
-    # aborting the whole run. Requires pytest-forked; without it the marker is a
-    # harmless no-op and the tests run in-process (the prior behaviour).
-    if config.pluginmanager.hasplugin("forked"):
-        for item in gui_items:
-            item.add_marker(pytest.mark.forked)
+    # NOTE on process isolation: a previous design forked each GUI test via
+    # pytest-forked to defeat PySide wrapper-cache recycling (a stale Python
+    # wrapper at a reused C++ address surfaces as an intermittent SIGSEGV or a
+    # bogus AttributeError, e.g. "'QGraphicsItemGroup' object has no attribute
+    # 'connect'" inside QMenu.addAction). The marker was silently inactive — it
+    # gated on hasplugin("forked") but the plugin registers as "pytest_forked"
+    # — and actually enabling it showed pytest-forked (archived, last release
+    # 2023) no longer cooperates with modern pytest teardown bookkeeping:
+    # every non-forked test following a forked one errors with "previous item
+    # was not torn down properly". The mechanism is therefore removed; the
+    # recycling window is instead closed in-process by _drain_qt_between_tests,
+    # which garbage-collects leaked widgets at the test boundary so their C++
+    # objects are destroyed deterministically (and visibly to Shiboken) rather
+    # than at a random GC point mid-way through a later test.
+
+
+def _is_gui_test(node) -> bool:
+    """Whether *node* belongs to the modules that create real Qt widgets."""
+    module_name = Path(str(getattr(node, "path", getattr(node, "fspath", "")))).name
+    return (
+        module_name in GUI_TEST_MODULES
+        or module_name in MIXED_QT_FIXTURE_MODULES
+        or (module_name, node.name) in MIXED_QT_TESTS
+    )
 
 
 @pytest.fixture(autouse=True)
-def _drain_qt_between_tests():
+def _drain_qt_between_tests(request):
     """Retire Qt background workers and deferred deletions after each test.
 
     The GUI tests start real ``QThreadPool`` workers (e.g. ``ViewerLoader``) and
@@ -141,6 +153,8 @@ def _drain_qt_between_tests():
     if app is None:
         return
 
+    import gc
+
     from PySide6.QtCore import QEvent, QThreadPool
 
     # 1. Let in-flight workers finish so their loaded()/failed() events are all
@@ -150,10 +164,21 @@ def _drain_qt_between_tests():
     # 2. Deliver queued cross-thread signals to receivers that are still alive
     #    (token-guarded slots drop stale content harmlessly).
     app.processEvents()
-    # 3. Now actually destroy everything deleteLater()'d; Qt drops each object's
+    # 3. Collect leaked Python-owned Qt objects (parentless dialogs/canvases a
+    #    test created and dropped without deleteLater). Without this they are
+    #    destroyed at a nondeterministic GC point inside a *later* test, and
+    #    their recycled C++ addresses resurrect stale Shiboken wrappers — the
+    #    intermittent "'QGraphicsItemGroup' object has no attribute 'connect'"
+    #    class of failure. Collecting here makes the destruction deterministic
+    #    and visible to Shiboken at the test boundary. A full collect costs
+    #    ~100 ms with this suite's heaps, so only GUI tests — the ones that
+    #    actually leak widgets — pay it.
+    if _is_gui_test(request.node):
+        gc.collect()
+    # 4. Now actually destroy everything deleteLater()'d; Qt drops each object's
     #    pending posted events as it runs the destructor.
     app.sendPostedEvents(None, QEvent.DeferredDelete)
-    # 4. Settle anything the deletions themselves posted.
+    # 5. Settle anything the deletions themselves posted.
     app.processEvents()
 
 

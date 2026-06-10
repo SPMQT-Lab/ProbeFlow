@@ -10,7 +10,6 @@ from PySide6.QtCore import Qt, QThreadPool, QTimer, Signal, Slot
 from PySide6.QtGui import QCursor, QImage, QPixmap
 from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget
 
-from probeflow.core.scan_loader import load_scan as _default_load_scan
 from probeflow.gui.models import FolderEntry, SxmFile, VertFile, browse_entry_key
 from probeflow.gui.rendering import (
     DEFAULT_CMAP_KEY,
@@ -18,11 +17,24 @@ from probeflow.gui.rendering import (
     THUMBNAIL_CHANNEL_OPTIONS,
     resolve_thumbnail_plane_index,
 )
-from probeflow.gui.workers import FolderThumbnailLoader, SpecThumbnailLoader, ThumbnailLoader
+from probeflow.gui.workers import (
+    FolderIndexLoader,
+    FolderThumbnailLoader,
+    SpecThumbnailLoader,
+    ThumbnailLoader,
+)
 
 from .breadcrumbs import _BreadcrumbBar
 from .cards import FolderCard, ScanCard, SpecCard, _BrowseCard
 from .helpers import _browse_attr, _CARD_SIZE_PRESETS, _is_deleted_qt_runtime_error
+
+# Thumbnail renders share QThreadPool.globalInstance() with interactive loads
+# (ViewerLoader, ChannelPreviewLoader, _ScanLoadWorker). Queue them below the
+# default priority (0) so opening a viewer never waits behind a screenful of
+# queued thumbnail reads on a slow network folder. Already-running thumbnail
+# workers still finish, but everything queued yields.
+_THUMBNAIL_PRIORITY = -1
+
 
 # ── ThumbnailGrid ─────────────────────────────────────────────────────────────
 class ThumbnailGrid(QWidget):
@@ -108,11 +120,15 @@ class ThumbnailGrid(QWidget):
         self._thumbnail_clip: tuple[float, float]              = (1.0, 99.0)
         self._thumbnail_channel: str                           = THUMBNAIL_CHANNEL_DEFAULT
         self._load_token                                       = object()
+        self._nav_token                                        = object()
         self._current_cols: int                                = 1
         self._filter_mode: str                                 = "all"
         self._thumbnail_size_name: str                         = "large"
         self._thumbnail_pending: dict[str, Union[SxmFile, VertFile, FolderEntry]] = {}
         self._background_thumbnail_batch_size: int             = 2
+        # Timer-sliced card construction state (see _build_card_batch).
+        self._card_build_queue: list                           = []
+        self._next_grid_index: int                             = 0
 
         self._visible_thumb_timer = QTimer(self)
         self._visible_thumb_timer.setSingleShot(True)
@@ -170,15 +186,39 @@ class ThumbnailGrid(QWidget):
             self._navigate(self._current_dir)
 
     def _navigate(self, path: Path):
-        """Index *path* shallowly and rebuild the grid + breadcrumb."""
-        from probeflow.core.indexing import index_folder_shallow
+        """Index *path* shallowly off-thread, then rebuild the grid.
+
+        The breadcrumb and path strip update immediately (navigation intent);
+        the current grid stays interactive until the index arrives.  Cold
+        network folders previously froze the GUI here for the whole index.
+        """
+        path = Path(path)
+        self._current_dir = path
+        if self._root is None:
+            self._root = path
+        self._breadcrumb.set_state(
+            self._root, self._current_dir,
+            can_go_back=bool(self._history),
+        )
+        self._refresh_btn.setEnabled(False)  # re-enabled when the index lands
+        self._path_lbl.setText(f"Indexing {path.name}…")
+        self._nav_token = object()
+        loader = FolderIndexLoader(path, self._nav_token)
+        loader.signals.indexed.connect(self._on_folder_indexed)
+        loader.signals.failed.connect(self._on_folder_index_failed)
+        # Default (interactive) priority — must not queue behind thumbnails.
+        self._pool.start(loader)
+
+    @Slot(object, object, object)
+    def _on_folder_indexed(self, path, index, token):
+        if token is not getattr(self, "_nav_token", None):
+            return
         from probeflow.gui.models import (
             FolderEntry as _FE,
             _scan_items_to_sxm,
             _spec_items_to_vert,
         )
 
-        index = index_folder_shallow(path, include_errors=True)
         scan_items   = [it for it in index.files if it.item_type == "scan"]
         spec_items   = [it for it in index.files if it.item_type == "spectrum"]
         sxm_entries  = _scan_items_to_sxm(scan_items)
@@ -190,16 +230,16 @@ class ThumbnailGrid(QWidget):
         file_entries = sorted(sxm_entries + vert_entries, key=lambda e: e.stem)
         entries: list[Union[SxmFile, VertFile, FolderEntry]] = list(folder_entries) + list(file_entries)
 
-        self._current_dir = path
-        if self._root is None:
-            self._root = path
-        self._breadcrumb.set_state(
-            self._root, self._current_dir,
-            can_go_back=bool(self._history),
-        )
         self._refresh_btn.setEnabled(True)
         self._render_entries(entries)
         self.folder_changed.emit(path)
+
+    @Slot(object, str, object)
+    def _on_folder_index_failed(self, path, message, token):
+        if token is not getattr(self, "_nav_token", None):
+            return
+        self._refresh_btn.setEnabled(True)
+        self._path_lbl.setText(f"Could not open {Path(path).name}: {message}")
 
     def load(self, entries: list, folder_path: str = ""):
         """Legacy entry point: render a flat list of entries (no navigation).
@@ -238,12 +278,19 @@ class ThumbnailGrid(QWidget):
                 f"({', '.join(parts) if parts else '0 items'})"
             )
 
-        # clear grid
+        # clear grid (gridded widgets), then any filtered-out cards that were
+        # never re-added to the layout — those are parentless and would
+        # otherwise linger until garbage collection.
         while self._grid.count():
             item = self._grid.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
+        for card in self._cards.values():
+            if card.parent() is None:
+                card.deleteLater()
         self._cards = {}
+        self._card_build_queue = []
+        self._next_grid_index = 0
 
         if not entries:
             self._empty_lbl = QLabel("No scans, spectra, or subfolders here")
@@ -252,9 +299,30 @@ class ThumbnailGrid(QWidget):
             self._grid.addWidget(self._empty_lbl, 0, 0)
             return
 
-        cols = self._calc_cols()
-        self._current_cols = cols
-        for entry in entries:
+        self._current_cols = self._calc_cols()
+        # Build the first batch synchronously so the folder appears instantly,
+        # then drain the rest in zero-delay timer slices: constructing ~1000
+        # card widgets in one loop froze the GUI for seconds, independent of
+        # disk speed. The token ties the slices to this navigation.
+        self._card_build_queue = list(entries)
+        self._build_card_batch(self._load_token)
+
+        # Queue all thumbnails now; scheduling skips entries whose cards are
+        # not built yet and picks them up on later refresh ticks.
+        self._prepare_thumbnail_queue(entries)
+
+    # How many cards to construct per slice. ~120 keeps each slice well under
+    # a frame budget on typical hardware while finishing 1000 entries in <10
+    # event-loop turns.
+    _CARD_BUILD_BATCH = 120
+
+    def _build_card_batch(self, token) -> None:
+        if token is not self._load_token or not self._card_build_queue:
+            return
+        batch = self._card_build_queue[: self._CARD_BUILD_BATCH]
+        del self._card_build_queue[: self._CARD_BUILD_BATCH]
+        cols = self._current_cols
+        for entry in batch:
             key = self._key_for(entry)
             if isinstance(entry, FolderEntry):
                 card = FolderCard(entry, self._t)
@@ -269,11 +337,21 @@ class ThumbnailGrid(QWidget):
             if self._thumbnail_size_name == "small":
                 card.set_compact_mode(True)
             self._cards[key] = card
-
-        # Populate the grid honouring the current filter.
-        self._relayout_filtered()
-
-        self._prepare_thumbnail_queue(entries)
+            # Append in entry order honouring the current filter; a filter or
+            # column change mid-build triggers _relayout_filtered, which
+            # re-places built cards and resets _next_grid_index.
+            if self._is_entry_visible(entry):
+                row, col = divmod(self._next_grid_index, cols)
+                self._grid.addWidget(card, row, col, Qt.AlignTop | Qt.AlignLeft)
+                card.setVisible(True)
+                self._next_grid_index += 1
+            else:
+                card.setVisible(False)
+        if self._card_build_queue:
+            QTimer.singleShot(
+                0, self, lambda tok=token: self._build_card_batch(tok)
+            )
+            self._schedule_visible_thumbnail_refresh(delay_ms=0)
 
     @staticmethod
     def _key_for(entry) -> str:
@@ -375,9 +453,15 @@ class ThumbnailGrid(QWidget):
         return keys
 
     def _start_thumbnail_for_key(self, key: str) -> bool:
-        entry = self._thumbnail_pending.pop(key, None)
+        entry = self._thumbnail_pending.get(key)
         if entry is None:
             return False
+        # Card not constructed yet (timer-sliced build still draining): keep
+        # the entry pending so the result has somewhere to land; a later
+        # refresh tick retries.
+        if key not in self._cards:
+            return False
+        self._thumbnail_pending.pop(key, None)
         token = self._load_token
         if isinstance(entry, FolderEntry):
             Loader = _browse_attr("FolderThumbnailLoader", FolderThumbnailLoader)
@@ -391,18 +475,18 @@ class ThumbnailGrid(QWidget):
                 thumbnail_channel=self._thumbnail_channel,
             )
             loader.signals.loaded.connect(self._on_folder_thumbs)
-            self._pool.start(loader)
+            self._pool.start(loader, _THUMBNAIL_PRIORITY)
             return True
         if isinstance(entry, VertFile):
             Loader = _browse_attr("SpecThumbnailLoader", SpecThumbnailLoader)
             loader = Loader(entry, token, SpecCard.IMG_W, SpecCard.IMG_H)
             loader.signals.loaded.connect(self._on_thumb)
-            self._pool.start(loader)
+            self._pool.start(loader, _THUMBNAIL_PRIORITY)
             return True
         if isinstance(entry, SxmFile):
             loader = self._make_thumbnail_loader(entry, token)
             loader.signals.loaded.connect(self._on_thumb)
-            self._pool.start(loader)
+            self._pool.start(loader, _THUMBNAIL_PRIORITY)
             return True
         return False
 
@@ -507,13 +591,17 @@ class ThumbnailGrid(QWidget):
                     self._thumbnail_pending.pop(self._key_for(entry), None)
                     loader = self._make_thumbnail_loader(entry, token)
                     loader.signals.loaded.connect(self._on_thumb)
-                    self._pool.start(loader)
+                    self._pool.start(loader, _THUMBNAIL_PRIORITY)
                 break
 
     def thumbnail_plane_index_for_entry(self, entry: SxmFile) -> int:
+        # Header-only metadata read: this runs on the GUI thread when a viewer
+        # is opened, and a full load_scan here meant transferring the entire
+        # file (then the viewer transferred it again) before the window showed.
         try:
-            scan = _browse_attr("load_scan", _default_load_scan)(entry.path)
-            return resolve_thumbnail_plane_index(scan.plane_names, self._thumbnail_channel)
+            from probeflow.core.metadata import read_scan_metadata
+            names = read_scan_metadata(entry.path).plane_names
+            return resolve_thumbnail_plane_index(list(names), self._thumbnail_channel)
         except Exception:
             return 0
 
@@ -709,6 +797,9 @@ class ThumbnailGrid(QWidget):
             self._grid.addWidget(card, row, col, Qt.AlignTop | Qt.AlignLeft)
             card.setVisible(True)
             i += 1
+        # Keep incremental (timer-sliced) card placement appending after the
+        # cards this full pass just laid out.
+        self._next_grid_index = i
 
     def set_thumbnail_size(self, name: str) -> None:
         """Switch all cards to a size preset ("large" or "small")."""

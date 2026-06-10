@@ -195,11 +195,14 @@ class FolderCard(_BrowseCard):
     THUMB_H    = 56
 
     def __init__(self, entry: FolderEntry, t: dict, parent=None):
+        # A "+" marks counts that hit the indexing peek's file budget — they
+        # are lower bounds, not exact totals (big network trees).
+        plus = "+" if getattr(entry, "counts_capped", False) else ""
         meta_parts = []
         if entry.n_scans:
-            meta_parts.append(f"{entry.n_scans} scan{'s' if entry.n_scans != 1 else ''}")
+            meta_parts.append(f"{entry.n_scans}{plus} scan{'s' if entry.n_scans != 1 else ''}")
         if entry.n_specs:
-            meta_parts.append(f"{entry.n_specs} spec{'s' if entry.n_specs != 1 else ''}")
+            meta_parts.append(f"{entry.n_specs}{plus} spec{'s' if entry.n_specs != 1 else ''}")
         meta = "  |  ".join(meta_parts) if meta_parts else "(empty)"
         super().__init__(entry, t, meta, parent=parent)
 
