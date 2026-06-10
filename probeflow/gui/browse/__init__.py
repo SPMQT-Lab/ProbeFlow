@@ -5,6 +5,7 @@ from __future__ import annotations
 from probeflow.core.scan_loader import load_scan
 from probeflow.gui.workers import (
     ChannelLoader,
+    ChannelPreviewLoader,
     ChannelSignals,
     FolderThumbnailLoader,
     SpecThumbnailLoader,

@@ -107,7 +107,15 @@ def pytest_collection_modifyitems(config, items):
     # and contains any residual crash to a single reported test instead of
     # aborting the whole run. Requires pytest-forked; without it the marker is a
     # harmless no-op and the tests run in-process (the prior behaviour).
-    if config.pluginmanager.hasplugin("forked"):
+    #
+    # pytest-forked registers its plugin under the name "pytest_forked" — the
+    # bare "forked" check matched nothing, which silently disabled this whole
+    # mechanism (seen as the recycled-wrapper AttributeError on CI py3.12).
+    # fork() is unsafe under macOS AppKit, so keep in-process behaviour there.
+    if sys.platform != "darwin" and (
+        config.pluginmanager.hasplugin("pytest_forked")
+        or config.pluginmanager.hasplugin("forked")
+    ):
         for item in gui_items:
             item.add_marker(pytest.mark.forked)
 

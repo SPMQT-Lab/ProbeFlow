@@ -102,3 +102,28 @@ def test_empty_folder(tmp_path):
     idx = index_folder_shallow(tmp_path)
     assert idx.files == []
     assert idx.subfolders == []
+
+
+def test_peek_file_budget_caps_counts(tmp_path):
+    """_peek_subfolder stops at its file budget and marks counts as capped.
+
+    Each recognised-suffix file costs an ~8 KB content sniff; without the
+    budget, peeking the parent of a big network tree reads every file.
+    """
+    import shutil
+
+    from probeflow.core.indexing import _peek_subfolder
+
+    src = next(TESTDATA.glob("*.sxm"), None) or next(TESTDATA.glob("*.dat"))
+    sub = tmp_path / "experiment"
+    sub.mkdir()
+    for i in range(10):
+        shutil.copy(src, sub / f"scan_{i:02d}{src.suffix}")
+
+    capped = _peek_subfolder(sub, max_files=4)
+    assert capped.counts_capped is True
+    assert capped.n_scans <= 4
+
+    uncapped = _peek_subfolder(sub, max_files=400)
+    assert uncapped.counts_capped is False
+    assert uncapped.n_scans == 10

@@ -251,6 +251,67 @@ class SpecThumbnailLoader(_PooledWorker):
             self.signals.loaded.emit(browse_entry_key(self.entry), QImage(), self.token)
 
 
+# ── Worker: browse channel previews + header (single off-thread load) ─────────
+class ChannelPreviewSignals(QObject):
+    meta_ready = Signal(list, dict, object)   # plane_names, header, token
+    loaded     = Signal(int, QImage, object)  # plane idx, image, token
+    failed     = Signal(str, object)          # message, token
+
+
+class ChannelPreviewLoader(_PooledWorker):
+    """Load a scan once off the GUI thread and render its channel previews.
+
+    Replaces the browse info panel's synchronous double load — one full
+    ``load_scan`` for the channel thumbnails plus a second one just for the
+    header metadata table — which froze the GUI for two full file transfers
+    per card click on a network drive.  Emits ``meta_ready`` (plane names +
+    header) first so the panel can build its preview slots and metadata table,
+    then one ``loaded`` per plane.
+    """
+
+    def __init__(self, entry: SxmFile, colormap: str, token, w: int, h: int,
+                 clip_low: float = 1.0, clip_high: float = 99.0,
+                 processing: dict = None):
+        super().__init__(ChannelPreviewSignals())
+        self.entry      = entry
+        self.colormap   = colormap
+        self.token      = token
+        self.w          = w
+        self.h          = h
+        self.clip_low   = clip_low
+        self.clip_high  = clip_high
+        self.processing = processing or {}
+
+    def work(self):
+        from probeflow.core.scan_loader import load_scan
+
+        try:
+            scan = load_scan(self.entry.path)
+        except Exception as exc:
+            _log_preview_failure("ChannelPreviewLoader", "load", self.entry.path, exc)
+            self.signals.failed.emit(str(exc), self.token)
+            return
+        names = list(scan.plane_names or []) or [
+            f"Channel {i}" for i in range(scan.n_planes)
+        ]
+        header = dict(getattr(scan, "header", {}) or {})
+        self.signals.meta_ready.emit(names, header, self.token)
+        for i in range(scan.n_planes):
+            img = render_scan_image(
+                arr=scan.planes[i],
+                colormap=self.colormap,
+                clip_low=self.clip_low,
+                clip_high=self.clip_high,
+                size=(self.w, self.h),
+                processing=self.processing or None,
+            )
+            self.signals.loaded.emit(
+                i,
+                pil_to_qimage(img) if img is not None else QImage(),
+                self.token,
+            )
+
+
 # ── Worker: channel thumbnails ────────────────────────────────────────────────
 class ChannelSignals(QObject):
     loaded = Signal(int, QImage, object)
@@ -345,6 +406,38 @@ class ViewerLoader(_PooledWorker):
                 self.signals.failed.emit("Image render returned no data.", self.token)
         except Exception as exc:
             self.signals.failed.emit(f"Image render failed: {exc}", self.token)
+
+
+# ── Worker: shallow folder index ──────────────────────────────────────────────
+class FolderIndexSignals(QObject):
+    indexed = Signal(object, object, object)  # path, ShallowFolderIndex, token
+    failed  = Signal(object, str, object)     # path, message, token
+
+
+class FolderIndexLoader(_PooledWorker):
+    """Run ``index_folder_shallow`` off the GUI thread.
+
+    A cold visit to a large folder on a network drive takes seconds even with
+    the indexing layer's internal parallelism; doing it synchronously in
+    ``ThumbnailGrid._navigate`` froze the whole UI for that long.  Stale
+    results (the user navigated again) are dropped via the token.
+    """
+
+    def __init__(self, path, token) -> None:
+        super().__init__(FolderIndexSignals())
+        self.path = Path(path)
+        self.token = token
+
+    def work(self):
+        from probeflow.core.indexing import index_folder_shallow
+
+        try:
+            index = index_folder_shallow(self.path, include_errors=True)
+        except Exception as exc:
+            _log.warning("FolderIndexLoader: failed to index %s (%s)", self.path, exc)
+            self.signals.failed.emit(self.path, str(exc), self.token)
+            return
+        self.signals.indexed.emit(self.path, index, self.token)
 
 
 # ── Worker: conversion ────────────────────────────────────────────────────────

@@ -406,7 +406,7 @@ def test_thumbnail_grid_prioritizes_visible_cards_before_background(qapp, monkey
 
     started = []
 
-    def start(loader):
+    def start(loader, priority=0):
         started.append(loader.entry.path.name)
 
     grid = ThumbnailGrid(THEMES["dark"])
@@ -448,7 +448,7 @@ def test_thumbnail_grid_background_waits_when_pool_is_busy(qapp, monkeypatch):
         def __init__(self):
             self.started = []
 
-        def start(self, loader):
+        def start(self, loader, priority=0):
             self.started.append(loader)
 
         def activeThreadCount(self):
