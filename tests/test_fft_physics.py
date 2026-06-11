@@ -380,3 +380,83 @@ class TestFftClusterRegressions:
         assert max(rms_x, rms_y) / max(min(rms_x, rms_y), 1e-12) < 5.0, (
             f"Isotropic cutoff broken: rms_x={rms_x}, rms_y={rms_y}"
         )
+
+
+class TestWindowEnvelopeCompensation:
+    """2026-06-12 FFT review: fourier_filter windowed the data before the
+    transform but never divided the window back out, so the filtered image
+    carried the window envelope — with the GUI-default Hann, the output was
+    vignetted toward the mean at the borders (edge std 0.03 vs centre 0.77
+    on unit-variance noise). The pre-existing near-identity tests used
+    cutoff exactly 1.0/0.0, which early-return before any windowing and
+    could not see it."""
+
+    def test_near_identity_low_pass_is_spatially_flat(self):
+        rng = np.random.default_rng(0)
+        img = rng.normal(size=(64, 64)) + 5.0
+        out = fourier_filter(img, mode="low_pass", cutoff=0.99, window="hanning")
+        centre = float(np.std(out[24:40, 24:40]))
+        edge = float(np.std(out[:8, :8]))
+        assert edge > 0.5 * centre, (
+            f"window envelope baked into output: edge std {edge:.3f} vs "
+            f"centre {centre:.3f}"
+        )
+
+    def test_high_pass_response_uniform_across_image(self):
+        """A uniform-amplitude high-frequency stripe must keep roughly the
+        same amplitude at the border as in the middle after a high-pass."""
+        yy, xx = np.mgrid[:96, :96]
+        img = np.sin(2 * np.pi * 0.3 * xx)
+        out = fourier_filter(img, mode="high_pass", cutoff=0.2, window="hanning")
+        centre_amp = float(np.std(out[40:56, 40:56]))
+        edge_amp = float(np.std(out[4:12, 40:56]))
+        assert edge_amp > 0.5 * centre_amp
+
+    def test_window_none_behaviour_unchanged(self):
+        """No window → no compensation: pin equality with the raw masked
+        transform so the compensation cannot leak into the 'none' path."""
+        rng = np.random.default_rng(1)
+        img = rng.normal(size=(32, 32))
+        out = fourier_filter(img, mode="low_pass", cutoff=0.5, window="none")
+        mean = img.mean()
+        F = np.fft.fftshift(np.fft.fft2(img - mean))
+        qx = np.fft.fftshift(np.fft.fftfreq(32))
+        Qx, Qy = np.meshgrid(qx, qx)
+        mask = (np.sqrt(Qx**2 + Qy**2) / 0.5 <= 0.5).astype(float)
+        expected = np.fft.ifft2(np.fft.ifftshift(F * mask)).real + mean
+        np.testing.assert_allclose(out, expected, atol=1e-12)
+
+
+class TestSoftBorderOddSizes:
+    def test_dc_preserved_on_odd_sized_image(self):
+        """The radial mask must sit on the fftshift DC bin for odd sizes —
+        the old index-arithmetic centre was half a pixel off, so a tiny
+        low-pass could miss DC entirely and shift the image mean."""
+        rng = np.random.default_rng(2)
+        img = rng.normal(size=(63, 65)) + 7.0
+        out = fft_soft_border(img, mode="low_pass", cutoff=0.02,
+                              border_frac=0.1)
+        assert abs(float(np.nanmean(out)) - 7.0) < 0.05
+
+    def test_even_size_results_unchanged_by_mask_rewrite(self):
+        """For even sizes the fftfreq mask is identical to the old index
+        arithmetic — pin a checksum so the rewrite is provably a no-op."""
+        rng = np.random.default_rng(3)
+        img = rng.normal(size=(64, 64))
+        out = fft_soft_border(img, mode="low_pass", cutoff=0.4, border_frac=0.12)
+        # Old-mask reference computed inline.
+        a = img.astype(np.float64).copy()
+        mean = a.mean()
+        n = 64
+        edge = max(1, int(round(0.12 * n)))
+        ramp = 0.5 * (1.0 - np.cos(np.linspace(0.0, np.pi, edge)))
+        w = np.ones(n); w[:edge] = ramp; w[-edge:] = ramp[::-1]
+        win2d = np.outer(w, w)
+        F = np.fft.fftshift(np.fft.fft2((a - mean) * win2d))
+        cyx = n / 2.0
+        r1 = (np.arange(n) - cyx) / cyx
+        Xr, Yr = np.meshgrid(r1, r1)
+        mask = (np.sqrt(Xr**2 + Yr**2) <= 0.4).astype(float)
+        ref = np.fft.ifft2(np.fft.ifftshift(F * mask)).real
+        ref = ref / np.where(win2d > 1e-6, win2d, 1.0) + mean
+        np.testing.assert_allclose(out, ref, atol=1e-12)
