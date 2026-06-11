@@ -128,3 +128,121 @@ def test_sobel_without_threshold_has_no_mask(qapp):
     dlg._recompute()
     assert dlg._result.edge_mask is None
     dlg.deleteLater()
+
+
+# ── Mask alignment seams (2026-06-11 review: mask-from-edge-detection) ────────
+
+def test_mask_created_is_aligned_and_roi_restricted(qapp):
+    """The emitted mask must have the input array's exact shape and contain
+    edges only inside the ROI restriction — the doc's 'mask output shifted
+    relative to displayed image' / 'masks align with the displayed region'
+    checks."""
+    import numpy as np
+
+    roi = np.zeros((N, N), dtype=bool)
+    roi[:, : N // 2 + 4] = True  # includes the step edge at N//2
+
+    dlg = _dialog(qapp, active_roi_mask=roi)
+    captured = []
+    dlg.mask_created.connect(captured.append)
+    dlg._emit_mask()
+
+    assert len(captured) == 1
+    mask = captured[0]
+    assert mask.shape == (N, N), "mask raster shape differs from input array"
+    assert mask.data.any(), "step edge inside the ROI was not detected"
+    assert not (mask.data & ~roi).any(), "mask leaked outside the ROI"
+    dlg.deleteLater()
+
+
+def _mask_host(tmp_path):
+    """Minimal viewer stand-in for the mask-mixin handlers."""
+    import numpy as np
+    from types import SimpleNamespace
+
+    from probeflow.gui.viewer.image_viewer_mask_mixin import ImageViewerMaskMixin
+
+    class Host(ImageViewerMaskMixin):
+        def __init__(self):
+            self._entries = [SimpleNamespace(path=tmp_path / "scan_0001.sxm",
+                                             stem="scan_0001")]
+            self._idx = 0
+            self._image_mask_set = None
+            self._display_arr = np.zeros((16, 16))
+            self._raw_arr = None
+            self.overlays: list = []
+            self.cleared = 0
+            self._zoom_lbl = SimpleNamespace(
+                set_mask_overlay=lambda data, **kw: self.overlays.append(data),
+                clear_mask_overlay=lambda: setattr(
+                    self, "cleared", self.cleared + 1),
+            )
+            self.statuses: list[str] = []
+            self._status_lbl = SimpleNamespace(setText=self.statuses.append)
+
+        def _channel_unit(self):
+            return 1.0, "m", "Z forward"
+
+    return Host()
+
+
+def test_edge_mask_handler_stamps_context_activates_and_persists(qapp, tmp_path):
+    import numpy as np
+
+    from probeflow.core.mask import ImageMask
+
+    host = _mask_host(tmp_path)
+    raster = np.zeros((16, 16), dtype=bool)
+    raster[4:8, 4:8] = True
+
+    host._on_edge_mask_created(ImageMask.new(raster, name="edges"))
+
+    ms = host._image_mask_set
+    assert ms is not None and len(ms.masks) == 1
+    mask = ms.masks[0]
+    assert ms.active() is mask
+    # Source context recorded so a processed-channel mask is not mistaken
+    # for raw-data-derived later.
+    assert mask.parameters["source_channel"] == "Z forward"
+    assert mask.parameters["data_basis"] == "processed_image"
+    assert mask.parameters["source_path"].endswith("scan_0001.sxm")
+    # Persisted to the sidecar and shown as the overlay.
+    assert (tmp_path / "scan_0001.masks.json").exists()
+    assert len(host.overlays) == 1
+
+
+def test_active_mask_array_guards_shape_mismatch(qapp, tmp_path):
+    """A mask whose raster no longer matches the displayed array (e.g. after
+    a shape-changing step) must read as None — never applied misaligned."""
+    import numpy as np
+
+    from probeflow.core.mask import ImageMask, MaskSet
+
+    host = _mask_host(tmp_path)
+    host._image_mask_set = MaskSet(image_id="img")
+    mask = ImageMask.new(np.ones((16, 16), dtype=bool), name="m")
+    host._image_mask_set.add(mask)
+    host._image_mask_set.set_active(mask.id)
+
+    assert host._active_mask_array() is not None
+    host._display_arr = np.zeros((32, 32))  # shape-changing step happened
+    assert host._active_mask_array() is None
+    host._refresh_mask_overlay()
+    assert host.cleared >= 1, "stale-shape mask left visible as overlay"
+
+
+def test_channel_mismatch_warning_is_surfaced(qapp, tmp_path):
+    import numpy as np
+
+    from probeflow.core.mask import ImageMask, MaskSet
+
+    host = _mask_host(tmp_path)
+    host._image_mask_set = MaskSet(image_id="img")
+    mask = ImageMask.new(np.ones((16, 16), dtype=bool), name="m",
+                         parameters={"source_channel": "Current forward"})
+    host._image_mask_set.add(mask)
+    host._image_mask_set.set_active(mask.id)
+
+    host._refresh_mask_overlay()
+
+    assert any("was made on channel" in s for s in host.statuses)

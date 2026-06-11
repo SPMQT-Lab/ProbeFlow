@@ -23,7 +23,11 @@ class ImageViewerMaskMixin:
 
     def _load_image_mask_set(self, entry) -> None:
         """Load masks from the ``<stem>.masks.json`` sidecar, else an empty set."""
-        self._image_mask_set, _err = load_mask_set(entry.path)
+        self._image_mask_set, err = load_mask_set(entry.path)
+        if err and hasattr(self, "_status_lbl"):
+            # Mirror of the ROI loader: a corrupt sidecar must be surfaced,
+            # not read as "no masks".
+            self._status_lbl.setText(err)
         self._refresh_mask_overlay()
         if hasattr(self, "_mask_panel"):
             self._mask_panel.refresh(self._image_mask_set)
