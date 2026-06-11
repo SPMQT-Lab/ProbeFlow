@@ -22,9 +22,13 @@ class ImageViewerDisplayMixin:
 
     def _on_set_zero_pick(self, frac_x: float, frac_y: float):
         """Handle image clicks while manual zero-plane mode is active."""
+        # The user is clicking on the *displayed* array; the controller maps
+        # the click fraction into that frame and stamps the geometric-op
+        # count so replay anchors the plane on the clicked features.
+        arr = self._display_arr if self._display_arr is not None else self._raw_arr
         rerender, msg = self._zero_ctrl.on_canvas_pick(
             frac_x, frac_y,
-            self._raw_arr,
+            arr,
             self._processing,
             self._set_zero_plane_btn.isChecked(),
         )
@@ -36,7 +40,8 @@ class ImageViewerDisplayMixin:
             self._refresh_processing_display()
 
     def _refresh_zero_markers(self):
-        self._zero_ctrl.refresh_markers(self._raw_arr, self._processing)
+        arr = self._display_arr if self._display_arr is not None else self._raw_arr
+        self._zero_ctrl.refresh_markers(arr, self._processing)
 
     def _on_clear_set_zero(self):
         if self._set_zero_plane_btn.isChecked():

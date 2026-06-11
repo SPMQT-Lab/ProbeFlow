@@ -63,6 +63,7 @@ class ImageViewerProcessingExportMixin:
                 "set_zero_xy",
                 "set_zero_plane_points",
                 "set_zero_patch",
+                "set_zero_after_geometric_ops",
                 "periodic_notches",
                 "periodic_notch_radius",
                 "geometric_ops",

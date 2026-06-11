@@ -283,11 +283,52 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
                 "scale_y": scale_y,
             }))
 
+    # ── Positioned steps (frame-stamped) ──────────────────────────────────────
+    # Steps whose pixel geometry was captured in the *display* frame carry an
+    # ``after_geometric_ops`` count recorded at commit/pick time; they are
+    # interleaved into the geometric_ops sequence at that position so the
+    # coordinates are interpreted in the frame they were captured in
+    # (review: scope-replay ordering). Entries without a stamp (legacy
+    # saves) keep their historical positions so old provenance replays
+    # byte-identically.
+    scope_steps: list[tuple[int, ProcessingStep]] = []
+
+    def _scope_position(spec: dict) -> int:
+        try:
+            return max(0, int(spec.get("after_geometric_ops", 0) or 0))
+        except (TypeError, ValueError):
+            return 0
+
+    def _flush_scope_steps(up_to: int) -> None:
+        """Emit (in commit order) every positioned step due at or before *up_to*."""
+        remaining: list[tuple[int, ProcessingStep]] = []
+        for position, step in scope_steps:
+            if position <= up_to:
+                steps.append(step)
+            else:
+                remaining.append((position, step))
+        scope_steps[:] = remaining
+
+    # Set-zero anchors are picked on the displayed image; the controller
+    # stamps the geometric-op count at pick time (2026-06-12 workflow
+    # review: unstamped picks made after a flip/rotation anchored the zero
+    # plane at the mirrored/wrong feature). Stamp 0 / missing keeps the
+    # legacy position here, before every other step.
+    zero_position = _scope_position(
+        {"after_geometric_ops": gui_state.get("set_zero_after_geometric_ops", 0)}
+    )
+
+    def _emit_zero_step(step: ProcessingStep) -> None:
+        if zero_position > 0:
+            scope_steps.append((zero_position, step))
+        else:
+            _append_step(step)
+
     set_zero = gui_state.get("set_zero_xy")
     if set_zero is not None:
         try:
             x_px, y_px = int(set_zero[0]), int(set_zero[1])
-            _append_step(ProcessingStep("set_zero_point", {
+            _emit_zero_step(ProcessingStep("set_zero_point", {
                 "x_px":  x_px,
                 "y_px":  y_px,
                 "patch": int(gui_state.get("set_zero_patch", 1)),
@@ -306,7 +347,7 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
                 invalid_points += 1
                 continue
         if len(points) >= 3:
-            _append_step(ProcessingStep("set_zero_plane", {
+            _emit_zero_step(ProcessingStep("set_zero_plane", {
                 "points_px": points[:3],
                 "patch": int(gui_state.get("set_zero_patch", 1)),
             }))
@@ -319,32 +360,6 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
     # Durable ROI-scoped local filters (review: ROI overwrite/retarget).
     # Each committed entry froze the ROI geometry at apply time, so multiple
     # ROI-scoped filters coexist and do not follow later ROI moves/deletes.
-    #
-    # Frozen geometry/rasters are captured in the *display* frame at commit
-    # time — i.e. after every geometric op that existed in the history at
-    # that moment. ``after_geometric_ops`` records that count so the scope
-    # step replays at the same point in the pipeline; without it, a region
-    # committed after a flip replayed before the flip and the filter landed
-    # at the mirrored location (review: scope-replay ordering). Entries
-    # without the key (legacy saves) keep their historical position before
-    # all geometric ops, so old provenance replays byte-identically.
-    scope_steps: list[tuple[int, ProcessingStep]] = []
-
-    def _scope_position(spec: dict) -> int:
-        try:
-            return max(0, int(spec.get("after_geometric_ops", 0) or 0))
-        except (TypeError, ValueError):
-            return 0
-
-    def _flush_scope_steps(up_to: int) -> None:
-        """Emit (in commit order) every scope step due at or before *up_to*."""
-        remaining: list[tuple[int, ProcessingStep]] = []
-        for position, step in scope_steps:
-            if position <= up_to:
-                steps.append(step)
-            else:
-                remaining.append((position, step))
-        scope_steps[:] = remaining
 
     for spec in gui_state.get("roi_filter_ops") or []:
         if not isinstance(spec, dict):

@@ -61,20 +61,30 @@ class SetZeroPlaneController:
         self,
         frac_x: float,
         frac_y: float,
-        raw_arr: np.ndarray | None,
+        display_arr: np.ndarray | None,
         processing: dict,
         mode_btn_checked: bool,
     ) -> tuple[bool, str]:
         """Handle an image click while zero-plane mode is active.
 
+        ``display_arr`` is the array the user is actually clicking on (the
+        displayed, possibly processed one): the click fraction is converted
+        to pixel coordinates in *that* frame, and the completed pick set is
+        stamped with the current geometric-op count so replay applies the
+        zero plane in the same frame (2026-06-12 workflow review: mapping
+        fractions onto the raw shape anchored the plane at the mirrored /
+        wrong feature once a flip or rotation was in the pipeline, while the
+        markers — drawn from the same fractions — still showed the clicked
+        spots).
+
         Returns ``(trigger_rerender, status_message)``.  When
         ``trigger_rerender`` is ``True`` the caller should call
         ``_refresh_processing_display()`` and un-toggle the mode button.
         """
-        if raw_arr is None:
+        if display_arr is None:
             return False, ""
 
-        Ny, Nx = raw_arr.shape
+        Ny, Nx = display_arr.shape
         x_px = max(0, min(int(round(frac_x * (Nx - 1))), Nx - 1))
         y_px = max(0, min(int(round(frac_y * (Ny - 1))), Ny - 1))
 
@@ -84,7 +94,7 @@ class SetZeroPlaneController:
         self._markers_hidden = False
         self._points_px.append((x_px, y_px))
         n = len(self._points_px)
-        self.refresh_markers(raw_arr, processing)
+        self.refresh_markers(display_arr, processing)
 
         if n < 3:
             return False, (
@@ -94,18 +104,26 @@ class SetZeroPlaneController:
 
         processing["set_zero_plane_points"] = self._points_px[:3]
         processing["set_zero_patch"] = 1
+        # Frame stamp: replay re-inserts the set-zero step after this many
+        # geometric ops, the frame the pixel coordinates were picked in.
+        processing["set_zero_after_geometric_ops"] = len(
+            processing.get("geometric_ops") or ())
         processing.pop("set_zero_xy", None)
         return True, "Zero plane set from 3 reference points."
 
     # ── Marker refresh ────────────────────────────────────────────────────────
 
-    def refresh_markers(self, raw_arr: np.ndarray | None, processing: dict) -> None:
-        """Push the current pick state into the canvas as zero markers."""
-        if raw_arr is None or self._markers_hidden:
+    def refresh_markers(self, display_arr: np.ndarray | None, processing: dict) -> None:
+        """Push the current pick state into the canvas as zero markers.
+
+        Fractions are computed against the displayed array's shape — the
+        frame the points were picked in.
+        """
+        if display_arr is None or self._markers_hidden:
             self._zoom_lbl.set_zero_markers([])
             return
 
-        Ny, Nx = raw_arr.shape
+        Ny, Nx = display_arr.shape
         denom_x = max(1, Nx - 1)
         denom_y = max(1, Ny - 1)
 
