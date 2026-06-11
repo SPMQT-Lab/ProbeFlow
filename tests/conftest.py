@@ -32,6 +32,7 @@ GUI_TEST_MODULES = {
     "test_browse_worker_seams.py",
     "test_quick_selection_lifecycle.py",
     "test_scale_shear_geometry.py",
+    "test_canvas_item_lifetime.py",
 }
 
 MIXED_QT_FIXTURE_MODULES = {
@@ -183,6 +184,21 @@ def _drain_qt_between_tests(request):
     app.sendPostedEvents(None, QEvent.DeferredDelete)
     # 5. Settle anything the deletions themselves posted.
     app.processEvents()
+    # 6. Collect once more AFTER the deferred deletions. Step 4 destroys C++
+    #    objects whose Python wrappers were not garbage at step 3 (e.g. a
+    #    deleteLater()'d dialog still referenced somewhere): Shiboken
+    #    invalidates those QObject wrappers, but their __dict__ — often
+    #    holding QGraphicsItem wrappers, which are NOT QObjects and never
+    #    get invalidated — survives until the wrapper is Python-collected.
+    #    Without this collect that happens at a nondeterministic point inside
+    #    a LATER test, leaving dangling item bindings in Shiboken's pointer
+    #    cache exactly while that test allocates new Qt objects onto recycled
+    #    addresses — the intermittent "'QGraphicsItemGroup' object has no
+    #    attribute 'connect'/'triggered'" failures in test_gui_processing_panel.
+    if _is_gui_test(request.node):
+        gc.collect()
+        app.sendPostedEvents(None, QEvent.DeferredDelete)
+        app.processEvents()
 
 
 @pytest.fixture

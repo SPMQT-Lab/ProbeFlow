@@ -48,6 +48,35 @@ _BRUSH_PREVIEW = QBrush(QColor(250, 179, 135, 40))
 _PEN_VERTEX    = QPen(QColor("#fab387"), 1.0)
 _BRUSH_VERTEX  = QBrush(QColor("#fab387"))
 
+
+# Every ImageCanvas attribute that references scene-owned QGraphicsItems.
+# Released by the canvas's destroyed hook (see ImageCanvas.__init__) so item
+# wrappers never outlive their C++ items — QGraphicsItem is not a QObject,
+# so Shiboken cannot invalidate these wrappers itself.
+_SCENE_ITEM_ATTRS: tuple[str, ...] = (
+    "_pixmap_item",
+    "_text_overlay_item",
+    "_mask_overlay_item",
+    "_selection_item",
+    "_preview_item",
+    "_roi_group",
+    "_marker_items",
+    "_zero_marker_items",
+    "_feature_point_items",
+    "_roi_items",
+    "_preview_vertices",
+)
+
+
+def _release_scene_item_refs(instance_dict: dict) -> None:
+    """Drop all QGraphicsItem references held in a canvas's attribute dict."""
+    for name in _SCENE_ITEM_ATTRS:
+        value = instance_dict.get(name)
+        if isinstance(value, (dict, list)):
+            value.clear()
+        elif value is not None:
+            instance_dict[name] = None
+
 _DRAWING_TOOLS = frozenset({"rectangle", "ellipse", "polygon", "freehand", "line", "point", "angle"})
 
 
@@ -247,6 +276,22 @@ class ImageCanvas(QGraphicsView):
         # When False, every ROI overlay item is hidden so the underlying
         # (possibly per-region composited) image can be inspected cleanly.
         self._rois_visible: bool = True
+
+        # QGraphicsItems are not QObjects: when the scene (a child of this
+        # view) is destroyed C++-side, Shiboken never invalidates their
+        # Python wrappers. A wrapper that outlives its C++ item keeps a
+        # dangling pointer binding in Shiboken's cache, and a later C++
+        # allocation reusing that address resurrects the stale wrapper as
+        # the wrong type — observed as the intermittent
+        # "'QGraphicsItemGroup' object has no attribute 'connect'" inside
+        # QMenu.addAction in the test suite. QObject.destroyed fires before
+        # children are deleted, so dropping every item reference here lets
+        # the item wrappers deallocate (unregistering their bindings) while
+        # the C++ items are still alive. The closure captures the attribute
+        # dict, not self, so it cannot keep this view alive.
+        instance_dict = self.__dict__
+        self.destroyed.connect(
+            lambda *_: _release_scene_item_refs(instance_dict))
 
     # ── public image API ─────────────────────────────────────────────────────
 
