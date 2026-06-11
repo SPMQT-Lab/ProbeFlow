@@ -159,7 +159,18 @@ def fourier_filter(
 
     F_filtered = F * mask
     F_filtered = np.fft.ifftshift(F_filtered)
-    result = np.fft.ifft2(F_filtered).real + mean_val
+    filtered = np.fft.ifft2(F_filtered).real
+    # The data window must be divided back out after the inverse transform,
+    # or its envelope stays baked into the filtered image: with the default
+    # Hann the output was vignetted to the mean at the borders (edge std
+    # 0.03 vs centre 0.77 on unit-variance noise — 2026-06-12 FFT review).
+    # fft_soft_border has always compensated its taper; same here, with the
+    # gain capped at 20× so near-zero edge weights cannot amplify residual
+    # spectral leakage into spikes (the interior, where the window is ≫0.05,
+    # is compensated exactly).
+    if window_canonical != "none":
+        filtered = filtered / np.maximum(win2d, 0.05)
+    result = filtered + mean_val
     result[nan_mask] = np.nan
     return result
 
@@ -375,9 +386,12 @@ def fft_soft_border(
     tapered = centered * win2d
 
     F = np.fft.fftshift(np.fft.fft2(tapered))
-    cy, cx = Ny / 2.0, Nx / 2.0
-    yr = (np.arange(Ny) - cy) / max(cy, 1e-9)
-    xr = (np.arange(Nx) - cx) / max(cx, 1e-9)
+    # Radial mask in cycles/pixel scaled so cutoff=1.0 is Nyquist — the same
+    # convention (and the same DC bin) as fourier_filter. The previous
+    # index-arithmetic version ((arange - N/2.0) / (N/2.0)) is identical for
+    # even sizes but sat half a pixel off the fftshift DC bin for odd ones.
+    xr = np.fft.fftshift(np.fft.fftfreq(Nx)) / 0.5
+    yr = np.fft.fftshift(np.fft.fftfreq(Ny)) / 0.5
     Xr, Yr = np.meshgrid(xr, yr)
     R = np.sqrt(Xr ** 2 + Yr ** 2)
     if mode == "low_pass":
