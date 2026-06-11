@@ -352,6 +352,16 @@ def _summarise_numeric_table(
     path: Path,
     data_text: str,
 ) -> tuple[int, int, float | None, float | None]:
+    """Stream row/column counts and the bias range without keeping arrays.
+
+    Validates every row as strictly as the full :func:`_parse_numeric_table`
+    (token count consistent with the first row, every token a float). The
+    previous implementation used the lenient ``np.fromstring(sep=...)``,
+    which silently stops at the first unparsable token — a corrupt or
+    truncated table summarised as healthy here while the full parse raised,
+    so browse metadata (and the metadata cache) disagreed with what the
+    viewer could actually load (2026-06-12 parser review).
+    """
     n_rows = 0
     col_count: int | None = None
     bias_min: float | None = None
@@ -361,20 +371,22 @@ def _summarise_numeric_table(
         stripped = line.strip()
         if not stripped:
             continue
-        try:
-            values = np.fromstring(
-                stripped.replace(",", ".").replace("\t", " "),
-                sep=" ",
-                dtype=np.float64,
-            )
-        except ValueError as exc:
-            raise ValueError(f"{path.name}: failed to parse data row - {exc}") from exc
-        if values.size == 0:
-            continue
+        parts = stripped.replace(",", ".").split()
         if col_count is None:
-            col_count = int(values.size)
-        if values.size > 1:
-            bias = float(values[1])
+            col_count = len(parts)
+        elif len(parts) != col_count:
+            raise ValueError(
+                f"{path.name}: data row {n_rows} has {len(parts)} column(s), "
+                f"expected {col_count}"
+            )
+        try:
+            values = [float(part) for part in parts]
+        except ValueError as exc:
+            raise ValueError(
+                f"{path.name}: failed to parse data row {n_rows} - {exc}"
+            ) from exc
+        if len(values) > 1:
+            bias = values[1]
             bias_min = bias if bias_min is None else min(bias_min, bias)
             bias_max = bias if bias_max is None else max(bias_max, bias)
         n_rows += 1

@@ -131,7 +131,12 @@ class TestCreatecVertReport:
 
         assert report.raw_table_shape == (2, 4)
 
-    def test_metadata_fast_path_tolerates_ragged_rows(self, tmp_path):
+    def test_metadata_fast_path_rejects_ragged_rows_like_the_full_parse(
+            self, tmp_path):
+        """A ragged table fails the full parse (np.loadtxt), so the metadata
+        fast path must reject it too — the old lenient summary reported such
+        files as healthy in browse (and the metadata cache) while the viewer
+        could not load them (2026-06-12 parser review)."""
         text = _createc_vert_text(
             n_rows=2,
             channel_code=0b1,
@@ -139,10 +144,10 @@ class TestCreatecVertReport:
         )
         f = _write_createc_vert(tmp_path, "ragged_summary.VERT", text)
 
-        report = read_createc_vert_report(f, include_arrays=False)
-
-        assert report.raw_table_shape == (2, 4)
-        assert report.bias_min_mv == pytest.approx(-50.1)
+        with pytest.raises(ValueError, match="column"):
+            read_createc_vert_report(f, include_arrays=False)
+        with pytest.raises(ValueError):
+            read_createc_vert_report(f, include_arrays=True)
 
     def test_comma_decimal_data_rows_are_accepted(self, tmp_path):
         text = _createc_vert_text(

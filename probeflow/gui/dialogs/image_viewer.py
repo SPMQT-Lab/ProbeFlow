@@ -305,6 +305,18 @@ class ImageViewerDialog(
         self._scan_plane_units = data.plane_units
         self._source_processing_history = data.processing_history
         self._rebuild_processing_history()
+        # Readers degrade gracefully on partial/odd files (e.g. a scan still
+        # being written yields only its complete planes) and record why on
+        # the Scan; without this the user just sees missing channels with no
+        # explanation (2026-06-12 parser review).
+        if data.scan_warnings and hasattr(self, "_status_lbl"):
+            extra = (
+                f" (+{len(data.scan_warnings) - 1} more)"
+                if len(data.scan_warnings) > 1 else ""
+            )
+            self._status_lbl.setText(
+                f"Loaded with warnings: {data.scan_warnings[0]}{extra}"
+            )
 
     def _rebuild_processing_history(self) -> None:
         if self._source_processing_history is None:

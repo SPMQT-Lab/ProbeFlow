@@ -113,8 +113,10 @@ def read_nanonis_spec(path: Union[str, Path]) -> SpecData:
     try:
         arr = np.loadtxt(StringIO(clean), dtype=np.float64, delimiter="\t")
         if arr.ndim == 1:
-            # Either a single row or a single column — reshape as one row.
-            arr = arr.reshape(1, -1)
+            # loadtxt collapses both a single row and a single column to 1-D;
+            # the column-header length disambiguates (a one-column file with
+            # N rows must become (N, 1), not one N-wide row).
+            arr = arr.reshape(-1, 1) if len(columns) == 1 else arr.reshape(1, -1)
     except ValueError as exc:
         raise ValueError(
             f"{path.name}: failed to parse data block — {exc}"
