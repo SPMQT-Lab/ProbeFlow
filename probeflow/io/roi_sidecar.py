@@ -85,33 +85,56 @@ def load_roi_set_sidecar(
     ``.rois.json`` path.
     """
     scan = Path(scan_path)
-    if sidecar is None:
-        candidates = roi_sidecar_candidates(scan)
-        chosen = next((p for p in candidates if p.exists()), candidates[0])
-    else:
+    if sidecar is not None:
         chosen = Path(sidecar)
+        if not chosen.exists():
+            if missing_ok:
+                return None, chosen
+            raise FileNotFoundError(f"No ROI sidecar found at {chosen}")
+        try:
+            data = json.loads(chosen.read_text(encoding="utf-8"))
+        except Exception as exc:
+            raise ValueError(f"Could not read ROI sidecar {chosen}: {exc}") from exc
+        payload = _roi_set_payload(data)
+        if payload is None:
+            raise ValueError(f"Sidecar {chosen} contains no ROISet data")
+        return _deserialise_roi_payload(payload, chosen), chosen
 
-    if not chosen.exists():
-        if missing_ok:
-            return None, chosen
-        tried = ", ".join(str(p) for p in roi_sidecar_candidates(scan))
-        raise FileNotFoundError(
-            f"No ROI/provenance sidecar found for {scan} (tried {tried})"
-        )
+    # Candidate search: the first existing candidate *with a usable payload*
+    # wins. A candidate that exists but holds no ROI data — typically a
+    # processing-only provenance export with ``"rois": null`` — is not an
+    # error; it simply serves a different purpose, and a later candidate (or
+    # missing_ok) may still provide the ROIs. Corrupt/unparseable files DO
+    # raise: silently substituting a stale fallback for a damaged canonical
+    # sidecar would hide data loss.
+    candidates = roi_sidecar_candidates(scan)
+    for candidate in candidates:
+        if not candidate.exists():
+            continue
+        try:
+            data = json.loads(candidate.read_text(encoding="utf-8"))
+        except Exception as exc:
+            raise ValueError(
+                f"Could not read ROI sidecar {candidate}: {exc}"
+            ) from exc
+        payload = _roi_set_payload(data)
+        if payload is None:
+            continue
+        return _deserialise_roi_payload(payload, candidate), candidate
 
+    if missing_ok:
+        return None, candidates[0]
+    tried = ", ".join(str(p) for p in candidates)
+    raise FileNotFoundError(
+        f"No ROI/provenance sidecar found for {scan} (tried {tried})"
+    )
+
+
+def _deserialise_roi_payload(payload: dict[str, Any], source: Path) -> ROISet:
     try:
-        data = json.loads(chosen.read_text(encoding="utf-8"))
+        return ROISet.from_dict(payload)
     except Exception as exc:
-        raise ValueError(f"Could not read ROI sidecar {chosen}: {exc}") from exc
-
-    payload = _roi_set_payload(data)
-    if payload is None:
-        raise ValueError(f"Sidecar {chosen} contains no ROISet data")
-
-    try:
-        return ROISet.from_dict(payload), chosen
-    except Exception as exc:
-        raise ValueError(f"Could not deserialise ROIs from {chosen}: {exc}") from exc
+        raise ValueError(f"Could not deserialise ROIs from {source}: {exc}") from exc
 
 
 def save_roi_set_sidecar(

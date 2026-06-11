@@ -78,28 +78,52 @@ def load_mask_set_sidecar(
     scan = Path(scan_path)
     if sidecar is not None:
         chosen = Path(sidecar)
-    else:
-        candidates = mask_sidecar_candidates(scan)
-        chosen = next((p for p in candidates if p.exists()), candidates[0])
+        if not chosen.exists():
+            if missing_ok:
+                return None, chosen
+            raise FileNotFoundError(f"No mask sidecar found at {chosen}")
+        try:
+            data = json.loads(chosen.read_text(encoding="utf-8"))
+        except Exception as exc:
+            raise ValueError(f"Could not read mask sidecar {chosen}: {exc}") from exc
+        payload = _mask_set_payload(data)
+        if payload is None:
+            raise ValueError(f"Sidecar {chosen} contains no MaskSet data")
+        return _deserialise_mask_payload(payload, chosen), chosen
 
-    if not chosen.exists():
-        if missing_ok:
-            return None, chosen
-        raise FileNotFoundError(f"No mask sidecar found for {scan} (tried {chosen})")
+    # Candidate search: the first existing candidate *with a usable payload*
+    # wins — a provenance export with ``"masks": null`` is not an error, a
+    # later candidate (or missing_ok) may still provide the masks. Corrupt
+    # files DO raise rather than silently falling back to stale data.
+    # Mirrors :func:`probeflow.io.roi_sidecar.load_roi_set_sidecar`.
+    candidates = mask_sidecar_candidates(scan)
+    for candidate in candidates:
+        if not candidate.exists():
+            continue
+        try:
+            data = json.loads(candidate.read_text(encoding="utf-8"))
+        except Exception as exc:
+            raise ValueError(
+                f"Could not read mask sidecar {candidate}: {exc}"
+            ) from exc
+        payload = _mask_set_payload(data)
+        if payload is None:
+            continue
+        return _deserialise_mask_payload(payload, candidate), candidate
 
+    if missing_ok:
+        return None, candidates[0]
+    tried = ", ".join(str(p) for p in candidates)
+    raise FileNotFoundError(
+        f"No mask/provenance sidecar found for {scan} (tried {tried})"
+    )
+
+
+def _deserialise_mask_payload(payload: dict[str, Any], source: Path) -> MaskSet:
     try:
-        data = json.loads(chosen.read_text(encoding="utf-8"))
+        return MaskSet.from_dict(payload)
     except Exception as exc:
-        raise ValueError(f"Could not read mask sidecar {chosen}: {exc}") from exc
-
-    payload = _mask_set_payload(data)
-    if payload is None:
-        raise ValueError(f"Sidecar {chosen} contains no MaskSet data")
-
-    try:
-        return MaskSet.from_dict(payload), chosen
-    except Exception as exc:
-        raise ValueError(f"Could not deserialise masks from {chosen}: {exc}") from exc
+        raise ValueError(f"Could not deserialise masks from {source}: {exc}") from exc
 
 
 def save_mask_set_sidecar(
