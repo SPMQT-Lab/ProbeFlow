@@ -144,6 +144,11 @@ class ImageViewerProcessingExportMixin:
                 "params": params,
                 "roi_id": area_roi_id,
                 "frozen_geometry": frozen,
+                # The geometry above is in the *current display* frame — after
+                # every geometric op applied so far. Recording the count lets
+                # replay re-insert this step at the same pipeline position
+                # (review: scope-replay ordering).
+                "after_geometric_ops": len(self._processing.get("geometric_ops") or []),
             })
         self._processing["roi_filter_ops"] = committed
         self._strip_committed_filter_keys()
@@ -177,6 +182,9 @@ class ImageViewerProcessingExportMixin:
                 "params": params,
                 "scope_kind": "region",
                 "frozen_geometry": frozen,
+                # Selection coordinates are in the *current display* frame;
+                # see _commit_roi_scoped_filters.
+                "after_geometric_ops": len(self._processing.get("geometric_ops") or []),
             })
         self._processing["roi_filter_ops"] = committed
         self._strip_committed_filter_keys()

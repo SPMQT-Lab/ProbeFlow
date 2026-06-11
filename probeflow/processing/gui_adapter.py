@@ -319,6 +319,33 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
     # Durable ROI-scoped local filters (review: ROI overwrite/retarget).
     # Each committed entry froze the ROI geometry at apply time, so multiple
     # ROI-scoped filters coexist and do not follow later ROI moves/deletes.
+    #
+    # Frozen geometry/rasters are captured in the *display* frame at commit
+    # time — i.e. after every geometric op that existed in the history at
+    # that moment. ``after_geometric_ops`` records that count so the scope
+    # step replays at the same point in the pipeline; without it, a region
+    # committed after a flip replayed before the flip and the filter landed
+    # at the mirrored location (review: scope-replay ordering). Entries
+    # without the key (legacy saves) keep their historical position before
+    # all geometric ops, so old provenance replays byte-identically.
+    scope_steps: list[tuple[int, ProcessingStep]] = []
+
+    def _scope_position(spec: dict) -> int:
+        try:
+            return max(0, int(spec.get("after_geometric_ops", 0) or 0))
+        except (TypeError, ValueError):
+            return 0
+
+    def _flush_scope_steps(up_to: int) -> None:
+        """Emit (in commit order) every scope step due at or before *up_to*."""
+        remaining: list[tuple[int, ProcessingStep]] = []
+        for position, step in scope_steps:
+            if position <= up_to:
+                steps.append(step)
+            else:
+                remaining.append((position, step))
+        scope_steps[:] = remaining
+
     for spec in gui_state.get("roi_filter_ops") or []:
         if not isinstance(spec, dict):
             continue
@@ -350,7 +377,7 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
                 "roi_filter_ops", "entry has neither roi_id nor frozen_geometry"
             )
             continue
-        steps.append(ProcessingStep("roi", params))
+        scope_steps.append((_scope_position(spec), ProcessingStep("roi", params)))
 
     # Durable mask-scoped local filters (mask as a first-class processing scope).
     for spec in gui_state.get("mask_filter_ops") or []:
@@ -382,7 +409,55 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
                 "data": str(frozen_mask["data"]),
                 "shape": [int(v) for v in frozen_mask["shape"]],
             }
-        steps.append(ProcessingStep("mask", params))
+        scope_steps.append((_scope_position(spec), ProcessingStep("mask", params)))
+
+    # Arithmetic ops: scoped entries that froze their geometry replay at
+    # their commit position via the scope-step interleave (parity with
+    # roi_filter_ops — the step must not retarget when the live ROI later
+    # moves, and must replay in the frame it was committed in). Whole-image
+    # entries and legacy live-ROI entries (roi_id only) keep the historical
+    # position after geometric_ops, where live resolution against the
+    # forward-transformed ROI set is self-consistent.
+    flat_arithmetic_steps: list[ProcessingStep] = []
+    for op_spec in gui_state.get("arithmetic_ops") or []:
+        try:
+            if isinstance(op_spec, dict) and op_spec.get("op") == "roi":
+                roi_params = dict(op_spec.get("params", {}))
+                nested = dict(roi_params.get("step", {}))
+                if nested.get("op") != "arithmetic":
+                    continue
+                params = dict(nested.get("params", {}))
+                scope_spec = roi_params
+            else:
+                params = dict(op_spec.get("params", {}))
+                scope_spec = op_spec if isinstance(op_spec, dict) else {}
+            roi_id_for_step = scope_spec.get("roi_id")
+            frozen = scope_spec.get("frozen_geometry")
+        except (AttributeError, TypeError, ValueError) as exc:
+            _warn_skipped_step("arithmetic", str(exc) or "invalid arithmetic spec")
+            continue
+
+        if roi_id_for_step is None and not isinstance(frozen, dict):
+            flat_arithmetic_steps.append(ProcessingStep("arithmetic", params))
+            continue
+        scoped: dict = {"step": {"op": "arithmetic", "params": dict(params)}}
+        if roi_id_for_step is not None:
+            scoped["roi_id"] = str(roi_id_for_step)
+        if isinstance(frozen, dict):
+            scoped["frozen_geometry"] = {
+                "kind": str(frozen.get("kind", "")),
+                "geometry": dict(frozen.get("geometry", {})),
+                "coord_system": str(frozen.get("coord_system", "pixel")),
+            }
+            scoped["scope_semantics"] = SCOPE_SEMANTICS_MASKED_PASTE
+            scope_steps.append(
+                (_scope_position(scope_spec), ProcessingStep("roi", scoped))
+            )
+        else:
+            flat_arithmetic_steps.append(ProcessingStep("roi", scoped))
+
+    # Scope steps committed before any geometric op (and all legacy entries).
+    _flush_scope_steps(0)
 
     # Quantize bit-depth steps are deferred to the very end of the
     # pipeline (review image-proc #2, fixed 2026-05-28).  Running
@@ -394,7 +469,14 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
     # them after arithmetic_ops below.
     deferred_quantize_specs: list[dict] = []
 
-    for op_spec in gui_state.get("geometric_ops") or []:
+    # ``op_index`` counts entries of the *input* geometric_ops list (1-based),
+    # matching what the commit path saw when it recorded after_geometric_ops;
+    # flushing at the top of iteration N emits scope steps committed after the
+    # first N-1 entries, regardless of whether any entry was skipped or (for
+    # quantize) deferred — both are frame-preserving, so positional counting
+    # stays correct.
+    for op_index, op_spec in enumerate(gui_state.get("geometric_ops") or [], start=1):
+        _flush_scope_steps(op_index - 1)
         if op_spec is None:
             continue
         try:
@@ -515,30 +597,15 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
         else:
             _warn_skipped_step("geometric_ops", f"unhandled op {op_name!r}")
 
-    for op_spec in gui_state.get("arithmetic_ops") or []:
-        try:
-            if isinstance(op_spec, dict) and op_spec.get("op") == "roi":
-                roi_params = dict(op_spec.get("params", {}))
-                nested = dict(roi_params.get("step", {}))
-                if nested.get("op") != "arithmetic":
-                    continue
-                params = dict(nested.get("params", {}))
-                roi_id_for_step = roi_params.get("roi_id")
-            else:
-                params = dict(op_spec.get("params", {}))
-                roi_id_for_step = op_spec.get("roi_id")
-        except (AttributeError, TypeError, ValueError) as exc:
-            _warn_skipped_step("arithmetic", str(exc) or "invalid arithmetic spec")
-            continue
+    # Scope steps committed at/after the last geometric op (or recorded with a
+    # position beyond the surviving list — e.g. a partially restored state):
+    # emit them after all geometric ops rather than dropping them.
+    _flush_scope_steps(len(gui_state.get("geometric_ops") or []))
+    if scope_steps:
+        _flush_scope_steps(max(position for position, _step in scope_steps))
 
-        step = ProcessingStep("arithmetic", params)
-        if roi_id_for_step is None:
-            steps.append(step)
-        else:
-            steps.append(ProcessingStep("roi", {
-                "roi_id": str(roi_id_for_step),
-                "step": {"op": "arithmetic", "params": dict(params)},
-            }))
+    # Whole-image and legacy live-ROI arithmetic, parsed above.
+    steps.extend(flat_arithmetic_steps)
 
     # Emit deferred quantize_bit_depth steps last, so any arithmetic
     # offset applied above lands BEFORE quantization and the saved
