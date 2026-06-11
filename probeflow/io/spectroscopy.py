@@ -299,7 +299,7 @@ def _metadata_from_vert_report(
         "filename": report.path.name,
         "bias_mv": float(bias_mv) if bias_mv is not None else None,
         "setpoint_a": setpoint_a,
-        "spec_freq_hz": _f(find_hdr(hdr, "SpecFreq", "1000"), 1000.0),
+        "spec_freq_hz": _spec_freq_hz(hdr),
         "gain_pre_exp": float(_f(find_hdr(hdr, "GainPre 10^", "9"), 9.0)),
         "fb_log": hdr.get("FBLog", "0").strip() == "1",
         "sweep_type": "time_trace" if is_time_trace else "bias_sweep",
@@ -339,6 +339,21 @@ def _metadata_from_vert_report(
 
 
 def _createc_setpoint_a(hdr: dict[str, str]) -> float | None:
+    """Return the tunnel-current setpoint in amps, or None.
+
+    These header keys only describe a tunnel current when the Z feedback
+    actually runs on the current channel. For constant-Δf qPlus AFM the loop
+    runs off the PLL frequency-shift channel and ``SetPoint`` is a Δf in
+    hertz — reading it as amps fed an absurd "current" into setpoint
+    normalization (``y / 3.2 A`` instead of ``y / 100 pA``), silently
+    rescaling displayed spectra by ~10 orders of magnitude. Same bug class
+    as the scan-metadata fix; the gate is shared so the two paths cannot
+    drift apart again.
+    """
+    from probeflow.core.metadata import _createc_feedback_is_current
+
+    if not _createc_feedback_is_current(hdr):
+        return None
     for key in ("Current[A]", "SetPoint"):
         value = _f(find_hdr(hdr, key, None))
         if value is not None and value > 0:
@@ -347,6 +362,25 @@ def _createc_setpoint_a(hdr: dict[str, str]) -> float | None:
     if fb_log_pA is not None and fb_log_pA > 0:
         return float(fb_log_pA) * 1e-12
     return None
+
+
+def _spec_freq_hz(hdr: dict[str, str]) -> float:
+    """Return the sampling frequency for the time axis, sanitised.
+
+    A missing ``SpecFreq`` has always defaulted to 1000 Hz; an explicit zero,
+    negative, or non-finite value would otherwise turn the time axis into
+    inf/garbage (``x = idx / spec_freq``), so it is treated the same way —
+    loudly.
+    """
+    freq = _f(find_hdr(hdr, "SpecFreq", "1000"), 1000.0)
+    if not np.isfinite(freq) or freq <= 0:
+        log.warning(
+            "SpecFreq=%r is not a positive frequency; using the 1000 Hz "
+            "default for the time axis",
+            freq,
+        )
+        return 1000.0
+    return float(freq)
 
 
 def _scaled_channels_from_vert_report(
