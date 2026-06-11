@@ -166,3 +166,86 @@ class TestWriterLoaderFormatContract:
         assert roi_set.rois[0].name == "embedded"
         assert mask_set.masks[0].name == "embedded"
         assert mask_set.masks[0].count() == 16
+
+
+# ── GUI wrapper: corrupt sidecars must be visible, not read as "empty" ─────────
+
+class TestGuiWrapperErrorSurface:
+    def test_corrupt_roi_sidecar_returns_error_message(self, scan):
+        from probeflow.gui.viewer.roi_sidecar import load_roi_set
+
+        (scan.parent / f"{scan.stem}.rois.json").write_text(
+            "{broken", encoding="utf-8")
+        roi_set, err = load_roi_set(scan)
+        assert roi_set.rois == []
+        assert err is not None and "Could not load ROI sidecar" in err
+
+    def test_corrupt_mask_sidecar_returns_error_message(self, scan):
+        from probeflow.gui.viewer.mask_sidecar import load_mask_set
+
+        (scan.parent / f"{scan.stem}.masks.json").write_text(
+            "[1,", encoding="utf-8")
+        mask_set, err = load_mask_set(scan)
+        assert mask_set.masks == []
+        assert err is not None and "Could not load mask sidecar" in err
+
+    def test_missing_sidecar_is_not_an_error(self, scan):
+        from probeflow.gui.viewer.mask_sidecar import load_mask_set
+        from probeflow.gui.viewer.roi_sidecar import load_roi_set
+
+        roi_set, roi_err = load_roi_set(scan)
+        mask_set, mask_err = load_mask_set(scan)
+        assert roi_err is None and mask_err is None
+        assert roi_set.rois == [] and mask_set.masks == []
+
+    def test_valid_sidecar_loads_without_error(self, scan):
+        from probeflow.gui.viewer.roi_sidecar import load_roi_set
+
+        _write(scan.parent / f"{scan.stem}.rois.json",
+               _roi_set("kept").to_dict())
+        roi_set, err = load_roi_set(scan)
+        assert err is None
+        assert roi_set.rois[0].name == "kept"
+
+    def test_viewer_loaders_surface_corrupt_sidecar_on_status(self, scan):
+        """The mixin load paths must show the error, not silently present an
+        empty set the user might overwrite on the next save."""
+        from types import SimpleNamespace
+
+        from probeflow.gui.viewer.image_viewer_mask_mixin import (
+            ImageViewerMaskMixin,
+        )
+        from probeflow.gui.viewer.image_viewer_roi_mixin import (
+            ImageViewerRoiMixin,
+        )
+
+        (scan.parent / f"{scan.stem}.rois.json").write_text(
+            "{broken", encoding="utf-8")
+        (scan.parent / f"{scan.stem}.masks.json").write_text(
+            "[1,", encoding="utf-8")
+        entry = SimpleNamespace(path=scan, stem=scan.stem)
+
+        class Host(ImageViewerRoiMixin, ImageViewerMaskMixin):
+            def __init__(self):
+                self.statuses: list[str] = []
+                self._status_lbl = SimpleNamespace(setText=self.statuses.append)
+                self._zoom_lbl = SimpleNamespace(
+                    set_roi_set=lambda *_: None,
+                    set_mask_overlay=lambda *a, **k: None,
+                    clear_mask_overlay=lambda: None,
+                )
+                self._display_arr = None
+                self._raw_arr = None
+
+            def _sync_viewer_menu_actions(self):
+                pass
+
+            def _channel_unit(self):
+                return 1.0, "m", "Z"
+
+        host = Host()
+        host._load_image_roi_set(entry)
+        host._load_image_mask_set(entry)
+
+        assert any("ROI sidecar" in s for s in host.statuses)
+        assert any("mask sidecar" in s for s in host.statuses)

@@ -11,8 +11,10 @@ from pathlib import Path
 def load_mask_set(image_path: Path | str):
     """Load a MaskSet from the sidecar next to *image_path*, or return an empty one.
 
-    Never raises — file errors are swallowed and an empty MaskSet is returned
-    so callers do not need to handle the missing-file case.
+    Returns ``(mask_set, error_message)``. Never raises — a missing sidecar
+    is normal (empty set, ``None``), but a *corrupt* one returns the error
+    string so the caller can tell the user their saved masks did not load
+    (review: a damaged sidecar was completely invisible at viewer open).
     """
     from probeflow.core.mask import MaskSet
     from probeflow.io.mask_sidecar import load_mask_set_sidecar
@@ -20,8 +22,9 @@ def load_mask_set(image_path: Path | str):
     image_path = Path(image_path)
     try:
         loaded, _sidecar = load_mask_set_sidecar(image_path, missing_ok=True)
-    except Exception:
-        return MaskSet(image_id=str(image_path)), None
+    except Exception as exc:
+        return (MaskSet(image_id=str(image_path)),
+                f"Could not load mask sidecar: {exc}")
 
     return (loaded or MaskSet(image_id=str(image_path))), None
 

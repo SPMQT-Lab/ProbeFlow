@@ -557,3 +557,36 @@ class TestExportValidationHonesty:
         assert state.steps[1].params.get("frozen_geometry") is None
         out = apply_processing_state(_noise(), state, roi_set)
         assert float(out[4:10, 4:10].mean()) > 50.0
+
+
+class TestScanReplayEndToEnd:
+    def test_positioned_scope_state_replays_through_scan_export_path(self):
+        """A saved GUI dict carrying after_geometric_ops replays correctly
+        through apply_processing_state_to_scan — the function the CLI and
+        export paths use — landing the committed filter where it was drawn
+        on the flipped display."""
+        from types import SimpleNamespace
+
+        from probeflow.processing.gui_adapter import apply_processing_state_to_scan
+
+        arr = _noise()
+        w = arr.shape[1]
+        scan = SimpleNamespace(
+            planes=[arr.copy()],
+            scan_range_m=(50e-9, 40e-9),
+            processing_state=None,
+        )
+        scan.record_processing_state = lambda state: setattr(
+            scan, "processing_state", state)
+
+        gui = {
+            "geometric_ops": [{"op": "flip_horizontal"}],
+            "roi_filter_ops": [_region_smooth_spec(2, 2, 16, 16,
+                                                   after_geometric_ops=1)],
+        }
+        apply_processing_state_to_scan(scan, gui, plane_idx=0)
+
+        out = scan.planes[0]
+        assert _std(out, 4, 16, 4, 16) < SMOOTHED, "filter not where drawn"
+        assert _std(out, w - 16, w - 4, 4, 16) > UNTOUCHED, "filter mirrored"
+        assert scan.processing_state is not None

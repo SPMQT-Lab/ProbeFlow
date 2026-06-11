@@ -47,7 +47,12 @@ class ImageViewerRoiMixin:
 
     def _load_image_roi_set(self, entry: "SxmFile") -> None:
         """Load ROIs from <stem>.rois.json sidecar if it exists, else create empty set."""
-        self._image_roi_set, _err = load_roi_set(entry.path)
+        self._image_roi_set, err = load_roi_set(entry.path)
+        if err and hasattr(self, "_status_lbl"):
+            # A corrupt sidecar must not be silent: the user would otherwise
+            # see "no ROIs" and possibly overwrite the damaged file on the
+            # next save without ever knowing their ROIs were there.
+            self._status_lbl.setText(err)
         self._zoom_lbl.set_roi_set(self._image_roi_set)
         if hasattr(self, "_roi_panel"):
             self._roi_panel.refresh(self._image_roi_set)
