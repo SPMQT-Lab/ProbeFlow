@@ -624,6 +624,7 @@ class ProbeFlowWindow(QMainWindow):
         help_menu.addAction(about_action)
 
         self._sync_menu_actions()
+        self._install_quit_drain()
 
     def _apply_default_splitter_sizes(self) -> None:
         center_default = max(
@@ -1669,6 +1670,20 @@ class ProbeFlowWindow(QMainWindow):
         QApplication.instance().quit()
 
     # ── Close ──────────────────────────────────────────────────────────────────
+    def _install_quit_drain(self) -> None:
+        """Drain worker pools at application quit, whichever window quits it.
+
+        ``closeEvent`` only covers quitting via this main window — but with
+        ``quitOnLastWindowClosed``, closing a modeless viewer left open after
+        the main window closed quits the app with no drain, racing teardown
+        against in-flight pool renders the viewer started in the meantime
+        (the same crash class the closeEvent drain was added for). Qt drops
+        the connection automatically if this window is destroyed first.
+        """
+        app = QApplication.instance()
+        if app is not None:
+            app.aboutToQuit.connect(self._drain_worker_pools)
+
     def _drain_worker_pools(self, timeout_ms: int = 5000) -> None:
         """Drop queued work and wait for in-flight workers before teardown.
 
