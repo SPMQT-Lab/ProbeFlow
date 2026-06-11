@@ -246,3 +246,59 @@ class TestCustomStreaksAndWidthViz:
         assert len(set(seen[:3])) == 3, "Auto must change the range each click"
         assert seen[3] == seen[0], "cycle must wrap back to the full range"
         dlg.deleteLater()
+
+
+class TestStreakPairIndependenceFromMains:
+    """2026-06-12 feedback: streak pairs were only drawn (and draggable) when
+    'Show mains-pickup overlay' was on, and harmonics could not be 0 — so
+    using a custom pair forced at least one mains notch in. The two signals
+    are physically distinct and fully independent now."""
+
+    def test_pairs_visible_without_mains_overlay(self, qapp):
+        from matplotlib.lines import Line2D
+
+        dlg = _dialog(qapp)
+        dlg._mains_overlay_cb.setChecked(False)
+        dlg._tab_widget.setCurrentIndex(dlg._mains_tab_index)
+        dlg._on_mains_add_streak()
+
+        assert dlg._mains_streaks_cb.isChecked(), "add must enable visibility"
+        lines = [a for a in dlg._mains_artists if isinstance(a, Line2D)]
+        assert lines, "custom pair invisible without the mains overlay"
+        assert all(a.get_color() == "#89dceb" for a in lines), (
+            "mains lines drawn despite the overlay being off"
+        )
+        dlg.deleteLater()
+
+    def test_hidden_pairs_do_not_capture_clicks(self, qapp):
+        from types import SimpleNamespace
+
+        dlg = _dialog(qapp)
+        dlg._tab_widget.setCurrentIndex(dlg._mains_tab_index)
+        dlg._on_mains_add_streak()
+        q0 = dlg._mains_custom_streaks()[0]
+        dlg._mains_streaks_cb.setChecked(False)
+
+        press = SimpleNamespace(inaxes=dlg._ax_fft, button=1, xdata=q0, ydata=0.0)
+        assert dlg._mains_handle_press(press) is False, (
+            "invisible streak line stole a pan click"
+        )
+        assert not [a for a in dlg._mains_artists], "hidden pairs still drawn"
+        dlg.deleteLater()
+
+    def test_harmonics_zero_disables_mains_and_applies_pairs_alone(self, qapp):
+        captured: dict = {}
+        dlg = _dialog(qapp, captured=captured)  # scan speed known
+        dlg._tab_widget.setCurrentIndex(dlg._mains_tab_index)
+        dlg._mains_auto_cb.setChecked(False)
+        dlg._mains_harm_spin.setValue(0)
+
+        assert dlg._mains_predictions() == []
+        assert "disabled" in dlg._mains_status_lbl.text().lower()
+
+        dlg._on_mains_add_streak()
+        dlg._on_mains_apply()
+        assert captured["op"] == "mains_pickup_suppression"
+        assert captured["params"]["harmonics"] == 0
+        assert captured["params"]["extra_streaks_px"]
+        dlg.deleteLater()

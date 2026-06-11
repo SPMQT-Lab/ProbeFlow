@@ -98,11 +98,14 @@ class FFTViewerMainsMixin:
         self._mains_speed_spin.setMaximumWidth(_WIDE_FIELD_W)
 
         self._mains_harm_spin = QSpinBox()
-        self._mains_harm_spin.setRange(1, 20)
+        self._mains_harm_spin.setRange(0, 20)
         self._mains_harm_spin.setValue(3)
         self._mains_harm_spin.setEnabled(False)
         self._mains_harm_spin.setToolTip(_tip(
-            "Manual number of mains harmonics to mark when Auto is off."))
+            "Manual number of mains harmonics to mark when Auto is off. "
+            "0 disables mains notches entirely — custom streak pairs then "
+            "apply alone, even with a known scan speed (mains pickup and "
+            "scan-parameter streaks are physically distinct signals)."))
         self._mains_harm_spin.valueChanged.connect(self._on_mains_changed)
         self._mains_harm_spin.setMaximumWidth(_FIELD_W)
 
@@ -177,6 +180,17 @@ class FFTViewerMainsMixin:
 
         # ── custom streak pairs (pickup at non-mains frequencies) ───────────────
         custom_row = QHBoxLayout()
+        # Streak pairs are physically independent of mains pickup (scan-
+        # parameter noise vs electrical noise), so their visibility has its
+        # own toggle — previously they were only drawn when "Show mains-pickup
+        # overlay" was on, which forced at least one mains harmonic into the
+        # picture just to see a custom pair.
+        self._mains_streaks_cb = QCheckBox("Show streak pairs")
+        self._mains_streaks_cb.setChecked(False)
+        self._mains_streaks_cb.setToolTip(_tip(
+            "Show the custom ±q streak pairs on the FFT, independent of the "
+            "mains-pickup overlay. Auto-enabled when a pair is added."))
+        self._mains_streaks_cb.toggled.connect(self._on_mains_changed)
         self._mains_add_streak_btn = QPushButton("Add streak pair")
         self._mains_add_streak_btn.setToolTip(_tip(
             "Add a symmetric ±q pair of notch lines for a vertical streak "
@@ -190,6 +204,7 @@ class FFTViewerMainsMixin:
         self._mains_remove_streak_btn.clicked.connect(self._on_mains_remove_streak)
         for b in (self._mains_add_streak_btn, self._mains_remove_streak_btn):
             b.setMaximumWidth(130)
+        custom_row.addWidget(self._mains_streaks_cb)
         custom_row.addWidget(self._mains_add_streak_btn)
         custom_row.addWidget(self._mains_remove_streak_btn)
         custom_row.addStretch(1)
@@ -303,9 +318,16 @@ class FFTViewerMainsMixin:
         Rebuilt on every FFT redraw (the axes are cleared by ``ax.cla()``).
         """
         self._mains_artists = []
-        if not getattr(self, "_mains_overlay_cb", None):
+        if self._qx is None or self._qy is None:
             return
-        if not self._mains_overlay_cb.isChecked() or self._qx is None or self._qy is None:
+        # Independent visibility gates: mains predictions and custom streak
+        # pairs are physically different signals (electrical pickup vs
+        # scan-parameter noise) — neither toggle requires the other.
+        overlay_cb = getattr(self, "_mains_overlay_cb", None)
+        streaks_cb = getattr(self, "_mains_streaks_cb", None)
+        show_mains = overlay_cb is not None and overlay_cb.isChecked()
+        show_streaks = streaks_cb is not None and streaks_cb.isChecked()
+        if not (show_mains or show_streaks):
             return
         min_q = self._mains_min_q_nm_inv()
         half_w = float(self._mains_radius_spin.value()) * self._mains_q_per_px()
@@ -339,12 +361,14 @@ class FFTViewerMainsMixin:
                             )
                             self._mains_artists.append(band)
 
-        for p in self._mains_predictions():
-            _draw_pair(p["q_nm_inv"], "#f9e2af", "--")
+        if show_mains:
+            for p in self._mains_predictions():
+                _draw_pair(p["q_nm_inv"], "#f9e2af", "--")
         # User streak pairs: solid cyan so they read as hand-placed, not
         # predicted; draggable on the FFT while the Mains tab is active.
-        for q in self._mains_custom_streaks():
-            _draw_pair(q, "#89dceb", "-")
+        if show_streaks:
+            for q in self._mains_custom_streaks():
+                _draw_pair(q, "#89dceb", "-")
 
     def _on_mains_changed(self) -> None:
         """Fast path: refresh the overlay + status when a control changes."""
@@ -373,6 +397,10 @@ class FFTViewerMainsMixin:
             self._mains_status_lbl.setText(
                 "Scan speed unavailable; enter nm/s to show the mains overlay."
                 + custom_note)
+            return
+        if self._mains_harmonics() == 0:
+            self._mains_status_lbl.setText(
+                "Mains notches disabled (harmonics = 0)." + custom_note)
             return
         preds = self._mains_predictions()
         if not preds:
@@ -419,6 +447,10 @@ class FFTViewerMainsMixin:
         q_new = q_max * (0.35 + 0.12 * (n % 5))
         self._mains_custom_streaks().append(q_new)
         self._mains_remove_streak_btn.setEnabled(True)
+        # Adding a pair means the user wants to see it — switch its own
+        # visibility on without touching the mains overlay.
+        if not self._mains_streaks_cb.isChecked():
+            self._mains_streaks_cb.setChecked(True)  # triggers _on_mains_changed
         self._on_mains_changed()
         self._mains_status_lbl.setText(
             f"Streak pair added at ±{q_new:.2f} nm⁻¹ — drag either line onto "
@@ -440,6 +472,9 @@ class FFTViewerMainsMixin:
     def _mains_handle_press(self, event) -> bool:
         """Begin dragging the custom streak pair nearest the click, if close."""
         self._mains_drag_idx = getattr(self, "_mains_drag_idx", None)
+        streaks_cb = getattr(self, "_mains_streaks_cb", None)
+        if streaks_cb is None or not streaks_cb.isChecked():
+            return False  # invisible lines must not capture pan clicks
         if (not self._mains_tab_active() or event.inaxes is not self._ax_fft
                 or event.button != 1 or not self._mains_custom_streaks()):
             return False

@@ -397,3 +397,42 @@ class TestExtraStreaksAndFill:
             extra_streaks_px=[37], notch_fill="background", snap_window_px=0,
         )
         np.testing.assert_allclose(replayed, direct, atol=1e-15)
+
+
+class TestHarmonicsZeroDisablesMains:
+    """harmonics=0 must mean "no mains notches" — previously it was clamped
+    to 1, silently forcing the fundamental in. Mains pickup (electrical) and
+    custom streaks (scan-parameter noise) are physically distinct; applying
+    one must not require the other."""
+
+    def test_predict_returns_empty_for_zero_harmonics(self):
+        from probeflow.processing.mains_pickup import predict_mains_fft_positions
+
+        assert predict_mains_fft_positions(160, 10e-9, 2e-8, harmonics=0) == []
+        assert len(predict_mains_fft_positions(160, 10e-9, 2e-8, harmonics=1)) == 1
+
+    def test_custom_streak_applies_alone_despite_known_speed(self):
+        """With a scan speed present and harmonics=0, only the user's streak
+        is notched — the mains fundamental column is left untouched."""
+        import numpy as np
+        from probeflow.processing.mains_pickup import mains_pickup_suppression
+
+        N, W = 160, 10e-9
+        yy, xx = np.mgrid[:N, :N]
+        # Mains-like stripe at bin 25 (50 Hz at v=2e-8) + custom stripe at 60.
+        img = (5e-11 * np.sin(2 * np.pi * 25 * xx / N)
+               + 5e-11 * np.sin(2 * np.pi * 60 * xx / N))
+
+        def col_mag(arr, k):
+            F = np.fft.fftshift(np.fft.fft2(arr - arr.mean()))
+            return float(np.abs(F[:, N // 2 + k]).mean())
+
+        out = mains_pickup_suppression(
+            img, scan_speed_m_per_s=2e-8, scan_range_m=(W, W),
+            harmonics=0, notch_shape="streak",
+            extra_streaks_px=[60], snap_window_px=0,
+        )
+        assert col_mag(out, 60) < 0.05 * col_mag(img, 60), "custom streak kept"
+        assert col_mag(out, 25) > 0.9 * col_mag(img, 25), (
+            "harmonics=0 still notched the mains fundamental"
+        )

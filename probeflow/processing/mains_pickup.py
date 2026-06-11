@@ -135,7 +135,11 @@ def predict_mains_fft_positions(
 
     ``dx``/``dy`` are integer pixel offsets from the fftshift-centred DC, ready
     for :func:`probeflow.processing.filters.periodic_notch_filter`.  Returns an
-    empty list when the scan speed is unknown/non-positive.
+    empty list when the scan speed is unknown/non-positive, or when
+    ``harmonics`` is explicitly 0 — "no mains notches", so user-placed streak
+    pairs can be applied alone even though a scan speed is known (mains
+    pickup and e.g. tip-speed-related streaks are physically distinct
+    signals; one must not force the other).
     """
     if not scan_speed_m_per_s or scan_speed_m_per_s <= 0:
         return []
@@ -157,7 +161,11 @@ def predict_mains_fft_positions(
     if harmonics is None:
         max_harmonic = int(math.ceil(max_fft_offset / harmonic_index)) + 1
     else:
-        max_harmonic = int(max(1, harmonics))
+        max_harmonic = int(harmonics)
+        if max_harmonic <= 0:
+            # Explicit 0 = mains notching disabled (previously clamped to 1,
+            # which silently forced the fundamental in).
+            return []
 
     out: list[dict] = []
     seen_indices: set[int] = set()
