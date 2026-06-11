@@ -31,6 +31,11 @@ class ViewerScanData:
     source_format: str
     n_planes: int
     processing_history: Optional["ProcessingHistory"] = field(default=None)
+    # Reader warnings (e.g. "payload contains 1 complete plane(s) but the
+    # header indicates 4 — file may have been incompletely written"). The
+    # readers degrade gracefully on partial files and record why; the viewer
+    # must surface this or the user just sees missing channels.
+    scan_warnings: list[str] = field(default_factory=list)
 
 
 def load_scan_for_viewer(path: Path, channel_idx: int) -> ViewerScanData:
@@ -67,6 +72,7 @@ def load_scan_for_viewer(path: Path, channel_idx: int) -> ViewerScanData:
             source_format=scan.source_format,
             n_planes=scan.n_planes,
             processing_history=history,
+            scan_warnings=[str(w) for w in (getattr(scan, "warnings", ()) or ())],
         )
     except Exception:
         return ViewerScanData(
