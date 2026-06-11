@@ -149,14 +149,21 @@ class ThumbnailLoader(_PooledWorker):
         except Exception as exc:
             _log_preview_failure("ThumbnailLoader", "load", self.entry.path, exc)
             arr = None
-        img = render_scan_image(
-            arr=arr,
-            colormap=self.colormap,
-            clip_low=self.clip_low,
-            clip_high=self.clip_high,
-            size=(self.w, self.h),
-            processing=self.processing or None,
-        )
+        # The render must be guarded too: an exception escaping work() is
+        # swallowed by QThreadPool with no emit, leaving the card on its
+        # loading placeholder forever.
+        try:
+            img = render_scan_image(
+                arr=arr,
+                colormap=self.colormap,
+                clip_low=self.clip_low,
+                clip_high=self.clip_high,
+                size=(self.w, self.h),
+                processing=self.processing or None,
+            )
+        except Exception as exc:
+            _log_preview_failure("ThumbnailLoader", "render", self.entry.path, exc)
+            img = None
         if img is not None:
             browse_cache.put_thumbnail(key, _png_bytes(img))
             self.signals.loaded.emit(browse_entry_key(self.entry), pil_to_qimage(img), self.token)
@@ -213,13 +220,19 @@ class FolderThumbnailLoader(_PooledWorker):
             except Exception as exc:
                 _log_preview_failure("FolderThumbnailLoader", "load", path, exc)
                 arr = None
-            img = render_scan_image(
-                arr=arr,
-                colormap=self.colormap,
-                clip_low=self.clip_low,
-                clip_high=self.clip_high,
-                size=(self.w, self.h),
-            )
+            # Guard the render per sample path: one bad file must yield a
+            # None slot, not kill the worker before the list is emitted.
+            try:
+                img = render_scan_image(
+                    arr=arr,
+                    colormap=self.colormap,
+                    clip_low=self.clip_low,
+                    clip_high=self.clip_high,
+                    size=(self.w, self.h),
+                )
+            except Exception as exc:
+                _log_preview_failure("FolderThumbnailLoader", "render", path, exc)
+                img = None
             if img is not None:
                 browse_cache.put_thumbnail(key, _png_bytes(img))
             images.append(pil_to_qimage(img) if img is not None else None)
@@ -297,19 +310,27 @@ class ChannelPreviewLoader(_PooledWorker):
         header = dict(getattr(scan, "header", {}) or {})
         self.signals.meta_ready.emit(names, header, self.token)
         for i in range(scan.n_planes):
-            img = render_scan_image(
-                arr=scan.planes[i],
-                colormap=self.colormap,
-                clip_low=self.clip_low,
-                clip_high=self.clip_high,
-                size=(self.w, self.h),
-                processing=self.processing or None,
-            )
-            self.signals.loaded.emit(
-                i,
-                pil_to_qimage(img) if img is not None else QImage(),
-                self.token,
-            )
+            # Guard each plane independently: one unusual plane must emit a
+            # null preview for its slot, not kill the worker mid-stream and
+            # leave the remaining slots on their placeholders with no
+            # failed signal.
+            try:
+                img = render_scan_image(
+                    arr=scan.planes[i],
+                    colormap=self.colormap,
+                    clip_low=self.clip_low,
+                    clip_high=self.clip_high,
+                    size=(self.w, self.h),
+                    processing=self.processing or None,
+                )
+                qimg = pil_to_qimage(img) if img is not None else QImage()
+            except Exception as exc:
+                _log_preview_failure(
+                    "ChannelPreviewLoader", f"render plane {i} of",
+                    self.entry.path, exc,
+                )
+                qimg = QImage()
+            self.signals.loaded.emit(i, qimg, self.token)
 
 
 # ── Worker: channel thumbnails ────────────────────────────────────────────────
@@ -338,16 +359,22 @@ class ChannelLoader(QRunnable):
         self.arr        = arr
 
     def run(self):
-        img = render_scan_image(
-            scan_path=None if self.arr is not None else self.entry.path,
-            arr=self.arr,
-            plane_idx=self.idx,
-            colormap=self.colormap,
-            clip_low=self.clip_low,
-            clip_high=self.clip_high,
-            size=(self.w, self.h),
-            processing=self.processing or None,
-        )
+        # Same guard as the pooled loaders: a render exception must produce
+        # a null-image emit, not escape run() with no signal at all.
+        try:
+            img = render_scan_image(
+                scan_path=None if self.arr is not None else self.entry.path,
+                arr=self.arr,
+                plane_idx=self.idx,
+                colormap=self.colormap,
+                clip_low=self.clip_low,
+                clip_high=self.clip_high,
+                size=(self.w, self.h),
+                processing=self.processing or None,
+            )
+        except Exception as exc:
+            _log_preview_failure("ChannelLoader", "render", self.entry.path, exc)
+            img = None
         if img is not None:
             self.signals.loaded.emit(self.idx, pil_to_qimage(img), self.token)
         else:

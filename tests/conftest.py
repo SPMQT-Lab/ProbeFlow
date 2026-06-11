@@ -29,6 +29,7 @@ GUI_TEST_MODULES = {
     "test_worker_signals_lifetime.py",
     "test_edge_detection_dialog.py",
     "test_mask_manager_gui.py",
+    "test_browse_worker_seams.py",
 }
 
 MIXED_QT_FIXTURE_MODULES = {

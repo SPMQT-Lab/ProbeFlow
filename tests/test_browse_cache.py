@@ -165,3 +165,46 @@ def test_end_to_end_sm4_browse_pipeline(cache_dir, monkeypatch):
     browse_cache.put_thumbnail(key, _png_bytes(img))
     data = browse_cache.get_thumbnail(key)
     assert data is not None and data[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_transient_read_failure_is_not_cached(cache_dir, monkeypatch):
+    """A transient metadata-read failure (network hiccup, file locked by the
+    acquisition software) must not be pinned in the cache: the key is
+    (path, mtime, size), so a cached error item would mark the file broken
+    on every revisit and refresh until its mtime changes (2026-06-11 review,
+    metadata/cache pass)."""
+    import shutil as _shutil
+
+    import probeflow.core.indexing as indexing
+
+    data_dir = cache_dir.parent / "data"
+    data_dir.mkdir()
+    src = next(TESTDATA.glob("*.sxm"), None) or next(TESTDATA.glob("*.dat"))
+    _shutil.copy(src, data_dir / src.name)
+
+    calls = {"n": 0}
+    real = indexing._item_from_scan
+
+    def flaky(path, ft, source_format, mtime_ns, size_bytes):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise OSError("transient network failure")
+        return real(path, ft, source_format, mtime_ns, size_bytes)
+
+    monkeypatch.setattr(indexing, "_item_from_scan", flaky)
+
+    idx1 = index_folder_shallow(data_dir, include_errors=True)
+    assert len(idx1.files) == 1
+    assert idx1.files[0].load_error is not None  # the failure was reported
+
+    # Same mtime/size — the next visit must retry the read, not replay the
+    # cached failure.
+    idx2 = index_folder_shallow(data_dir, include_errors=True)
+    assert idx2.files[0].load_error is None, (
+        "transient read failure was cached and replayed on revisit"
+    )
+
+    # The now-healthy item IS cached: a third pass must not re-read.
+    idx3 = index_folder_shallow(data_dir, include_errors=True)
+    assert calls["n"] == 2
+    assert idx3.files[0].load_error is None

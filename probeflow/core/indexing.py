@@ -448,7 +448,14 @@ def index_folder_shallow(
             return None
         source_format, item_type = _FORMAT_MAP[ft]
         item = _build_item(p, ft, source_format, item_type, stat=(mtime_ns, size_bytes))
-        browse_cache.put_metadata(p, mtime_ns, size_bytes, item)
+        # Never cache a failed read: the cache key is (path, mtime, size), so
+        # a *transient* failure (network hiccup, file briefly locked by the
+        # acquisition software) would otherwise pin this file as broken on
+        # every revisit and refresh until its mtime changes. Healthy items
+        # and the None for unrecognised files are stable properties of the
+        # content and stay cached.
+        if item.load_error is None:
+            browse_cache.put_metadata(p, mtime_ns, size_bytes, item)
         return _filter_indexed(item, include_errors)
 
     n_workers = min(32, max(1, len(file_entries) + len(subdir_paths)))
