@@ -206,7 +206,10 @@ class STMBackgroundDialog(QDialog):
         self._jump_spin.setSuffix(f" {self._unit_label}")
         self._jump_spin.setEnabled(False)
         self._jump_spin.setToolTip(
-            "Detect abrupt row-to-row changes in the median/mean height profile. "
+            "Detect abrupt row-to-row changes in the median/mean height profile "
+            "— tip changes between scan lines, not lateral steps within a row "
+            "(a terrace edge crossing the image is invisible to the row profile; "
+            "use the step-tolerant simple background or facet level for those). "
             f"Threshold in {self._unit_label} — the same unit shown on the plot. "
             "Detected jumps are removed before fitting the smooth background, "
             "then added back to the fitted background before subtraction."

@@ -67,10 +67,13 @@ class TestMainsTab:
         dlg.deleteLater()
 
     def test_overlay_toggles_artists(self, qapp):
+        from matplotlib.lines import Line2D
+
         dlg = _dialog(qapp)
         assert dlg._mains_artists == []
         dlg._mains_overlay_cb.setChecked(True)
-        assert len(dlg._mains_artists) == 6        # 3 harmonics × 2 conjugates
+        lines = [a for a in dlg._mains_artists if isinstance(a, Line2D)]
+        assert len(lines) == 6                     # 3 harmonics × 2 conjugates
         dlg._mains_overlay_cb.setChecked(False)
         assert dlg._mains_artists == []
         dlg.deleteLater()
@@ -82,9 +85,12 @@ class TestMainsTab:
         dlg._mains_min_q_spin.setValue(3.0)
         dlg._mains_overlay_cb.setChecked(True)
 
-        assert len(dlg._mains_artists) == 4
+        from matplotlib.lines import Line2D
+
+        lines = [a for a in dlg._mains_artists if isinstance(a, Line2D)]
+        assert len(lines) == 4
         gap = np.sqrt(3.0 ** 2 - 2.5 ** 2)
-        for art in dlg._mains_artists:
+        for art in lines:
             y0, y1 = art.get_ydata()
             assert max(abs(float(y0)), abs(float(y1))) >= gap
             assert not (float(y0) < 0.0 < float(y1))
@@ -146,4 +152,97 @@ class TestMainsTab:
             tt = w.toolTip()
             assert tt, "control must have a tooltip"
             assert max(len(line) for line in tt.split("\n")) <= 52
+        dlg.deleteLater()
+
+
+class TestCustomStreaksAndWidthViz:
+    def test_overlay_includes_width_bands_that_track_radius(self, qapp):
+        """Each overlay line carries a translucent band of half-width =
+        notch radius; changing the radius rebuilds the overlay (the control
+        previously had no visible effect)."""
+        from matplotlib.collections import PolyCollection
+
+        dlg = _dialog(qapp)
+        dlg._mains_overlay_cb.setChecked(True)
+        dlg._on_mains_changed()
+        bands = [a for a in dlg._mains_artists if isinstance(a, PolyCollection)]
+        assert bands, "no width bands drawn for the mains overlay"
+
+        n_before = len(dlg._mains_artists)
+        dlg._mains_radius_spin.setValue(8)   # triggers _on_mains_changed
+        assert len(dlg._mains_artists) == n_before, "overlay not rebuilt"
+        wide = [a for a in dlg._mains_artists if isinstance(a, PolyCollection)]
+        assert wide, "bands vanished after radius change"
+        dlg.deleteLater()
+
+    def test_add_drag_and_remove_custom_pair(self, qapp):
+        from types import SimpleNamespace
+
+        dlg = _dialog(qapp)
+        dlg._tab_widget.setCurrentIndex(dlg._mains_tab_index)
+        dlg._on_mains_add_streak()
+        assert len(dlg._mains_custom_streaks()) == 1
+        q0 = dlg._mains_custom_streaks()[0]
+        assert dlg._mains_remove_streak_btn.isEnabled()
+
+        # Drag: press near the line, move to a new q, release.
+        press = SimpleNamespace(inaxes=dlg._ax_fft, button=1, xdata=q0, ydata=0.0)
+        assert dlg._mains_handle_press(press) is True
+        move = SimpleNamespace(inaxes=dlg._ax_fft, button=1, xdata=q0 + 1.0, ydata=0.0)
+        assert dlg._mains_handle_motion(move) is True
+        assert dlg._mains_custom_streaks()[0] == pytest.approx(q0 + 1.0)
+        assert dlg._mains_handle_release(SimpleNamespace()) is True
+
+        # A press far from any line must not start a drag (panning wins).
+        far = SimpleNamespace(inaxes=dlg._ax_fft, button=1,
+                              xdata=q0 + 5.0, ydata=0.0)
+        assert dlg._mains_handle_press(far) is False
+
+        dlg._on_mains_remove_streak()
+        assert dlg._mains_custom_streaks() == []
+        assert not dlg._mains_remove_streak_btn.isEnabled()
+        dlg.deleteLater()
+
+    def test_params_carry_custom_streaks_and_fill(self, qapp):
+        captured: dict = {}
+        dlg = _dialog(qapp, captured=captured)
+        dlg._tab_widget.setCurrentIndex(dlg._mains_tab_index)
+        dlg._on_mains_add_streak()
+        dlg._mains_fill_cb.setChecked(True)
+
+        params = dlg._mains_op_params()
+        assert params["extra_streaks_px"], "custom pair missing from params"
+        assert all(isinstance(v, int) and v > 0 for v in params["extra_streaks_px"])
+        assert params["notch_fill"] == "background"
+
+        dlg._on_mains_apply()
+        assert captured["op"] == "mains_pickup_suppression"
+        assert captured["params"]["extra_streaks_px"] == params["extra_streaks_px"]
+        dlg.deleteLater()
+
+    def test_custom_pair_enables_preview_and_apply_without_scan_speed(self, qapp):
+        captured: dict = {}
+        dlg = _dialog(qapp, scan_speed=None, captured=captured)
+        dlg._mains_speed_spin.setValue(0.0)
+        dlg._tab_widget.setCurrentIndex(dlg._mains_tab_index)
+
+        dlg._on_mains_apply()
+        assert not captured, "apply must be blocked with no speed and no pairs"
+
+        dlg._on_mains_add_streak()
+        dlg._on_mains_apply()
+        assert captured["op"] == "mains_pickup_suppression"
+        assert captured["params"]["scan_speed_m_per_s"] is None
+        assert captured["params"]["extra_streaks_px"]
+        dlg.deleteLater()
+
+    def test_fft_auto_contrast_cycles_presets(self, qapp):
+        dlg = _dialog(qapp)
+        seen = []
+        for _ in range(4):
+            dlg._reset_intensity()
+            state = dlg._fft_drs._state
+            seen.append((state.low_pct, state.high_pct))
+        assert len(set(seen[:3])) == 3, "Auto must change the range each click"
+        assert seen[3] == seen[0], "cycle must wrap back to the full range"
         dlg.deleteLater()

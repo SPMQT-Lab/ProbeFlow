@@ -163,6 +163,10 @@ class FFTViewerDialog(
         self._mains_artists: list = []
         self._mains_preview_active = False
         self._mains_fast_axis = "x"
+        # User-placed streak pairs (positive |q| in nm⁻¹) and drag state.
+        self._mains_custom_q: list = []
+        self._mains_drag_idx = None
+        self._mains_tab_index = None
         # Inverse FFT / Fourier reconstruction (Reconstruct tab).
         self._fft_selection_overlay = None
         self._reconstruct_tab_index = -1
@@ -798,7 +802,8 @@ class FFTViewerDialog(
 
         # Append the Mains tab last so existing tab indices (e.g. _grid_tab_index)
         # are unaffected.
-        self._tab_widget.addTab(self._build_mains_tab(), "⚡ Mains")
+        self._mains_tab_index = self._tab_widget.addTab(
+            self._build_mains_tab(), "⚡ Mains")
         self._reconstruct_tab_index = self._tab_widget.addTab(
             self._build_reconstruct_tab(), "Inverse FFT")
 
@@ -1408,6 +1413,9 @@ class FFTViewerDialog(
                 and event.button == 1 and self._fft_selection_overlay is not None):
             if self._fft_selection_overlay.on_press(event):
                 return
+        # On the Mains tab, grabbing a custom streak line beats panning.
+        if self._mains_handle_press(event):
+            return
         if (
             event.inaxes is self._ax_fft
             and event.button == 1
@@ -1422,10 +1430,13 @@ class FFTViewerDialog(
 
     def _on_release(self, event):
         self._pan_anchor = None
+        self._mains_handle_release(event)
         if self._fft_selection_overlay is not None:
             self._fft_selection_overlay.on_release(event)
 
     def _on_motion(self, event):
+        if self._mains_handle_motion(event):
+            return
         if (self._fft_selection_overlay is not None
                 and self._fft_selection_overlay.is_dragging()):
             self._fft_selection_overlay.on_motion(event)
@@ -1624,10 +1635,26 @@ class FFTViewerDialog(
             return
         self._fft_drs.set_manual(lo_phys, hi_phys)
 
+    # Auto-contrast presets for the (log-scaled) FFT display. A single
+    # idempotent reset to 0–100 % meant repeated Auto clicks visibly did
+    # nothing; cycling through progressively tighter percentile windows
+    # gives each click an effect and returns to the full range.
+    _FFT_AUTO_PRESETS = (
+        (0.0, 100.0, "full range"),
+        (1.0, 99.5, "1–99.5 %"),
+        (5.0, 98.0, "5–98 %"),
+    )
+
     def _reset_intensity(self) -> None:
         if not self._fft_histogram_is_adjustable():
             return
-        self._fft_drs.reset(0.0, 100.0)
+        idx = (getattr(self, "_fft_auto_idx", -1) + 1) % len(self._FFT_AUTO_PRESETS)
+        self._fft_auto_idx = idx
+        lo, hi, label = self._FFT_AUTO_PRESETS[idx]
+        self._fft_drs.reset(lo, hi)
+        status = getattr(self, "_mains_status_lbl", None)
+        if self._mains_tab_active() and status is not None:
+            status.setText(f"FFT auto contrast: {label}.")
 
     def _update_info_panel(self):
         Ny, Nx = self._arr.shape
