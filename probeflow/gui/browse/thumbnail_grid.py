@@ -127,7 +127,15 @@ class ThumbnailGrid(QWidget):
         self._thumbnail_pending: dict[str, Union[SxmFile, VertFile, FolderEntry]] = {}
         self._background_thumbnail_batch_size: int             = 2
         # Timer-sliced card construction state (see _build_card_batch).
+        # The build has its own generation token: _load_token is replaced by
+        # appearance changes (_rerender_scan_thumbnails) to drop in-flight
+        # thumbnail renders, and reusing it for the build cancelled the
+        # remaining slices — the tail cards of a large folder were never
+        # constructed. _card_build_token is reset only when the grid
+        # re-renders (navigation / refresh / load), the one case where the
+        # queued slices really are stale.
         self._card_build_queue: list                           = []
+        self._card_build_token                                 = object()
         self._next_grid_index: int                             = 0
 
         self._visible_thumb_timer = QTimer(self)
@@ -143,6 +151,12 @@ class ThumbnailGrid(QWidget):
         self._root:        Optional[Path] = None
         self._current_dir: Optional[Path] = None
         self._history:     list[Path]     = []  # back stack of previous dirs
+        # The folder whose entries the grid is actually showing. _current_dir
+        # is optimistic (set at navigation intent, before the off-thread index
+        # lands); when an index fails the two diverge and _current_dir is
+        # restored from this so refresh / history / card events stay
+        # consistent with what is on screen.
+        self._rendered_dir: Optional[Path] = None
 
         # empty-state placeholder
         self._empty_lbl = QLabel("Open a folder to browse scans and spectra")
@@ -231,6 +245,7 @@ class ThumbnailGrid(QWidget):
         entries: list[Union[SxmFile, VertFile, FolderEntry]] = list(folder_entries) + list(file_entries)
 
         self._refresh_btn.setEnabled(True)
+        self._rendered_dir = Path(path)
         self._render_entries(entries)
         self.folder_changed.emit(path)
 
@@ -240,6 +255,29 @@ class ThumbnailGrid(QWidget):
             return
         self._refresh_btn.setEnabled(True)
         self._path_lbl.setText(f"Could not open {Path(path).name}: {message}")
+        # The grid still shows the previously rendered folder, but
+        # _current_dir was optimistically set to the failed path: refresh()
+        # would retarget the failed folder and the next navigation would push
+        # it onto the Back history. Restore the displayed folder as current
+        # (only within the same root — a failed set_root has nothing
+        # consistent to restore to).
+        rendered = self._rendered_dir
+        if (
+            rendered is not None
+            and rendered != self._current_dir
+            and self._root is not None
+            and rendered.is_relative_to(self._root)
+        ):
+            self._current_dir = rendered
+            # Drop the history entry the failed navigation pushed (it is the
+            # folder we just restored as current), so Back returns to where
+            # the user actually was before that.
+            if self._history and self._history[-1] == rendered:
+                self._history.pop()
+            self._breadcrumb.set_state(
+                self._root, self._current_dir,
+                can_go_back=bool(self._history),
+            )
 
     def load(self, entries: list, folder_path: str = ""):
         """Legacy entry point: render a flat list of entries (no navigation).
@@ -252,15 +290,21 @@ class ThumbnailGrid(QWidget):
             p = Path(folder_path)
             self._root = p
             self._current_dir = p
+            self._rendered_dir = p
             self._history = []
             self._breadcrumb.set_state(p, p, can_go_back=False)
         self._render_entries(entries)
 
     def _render_entries(self, entries: list):
         self._entries    = entries
+        had_selection    = bool(self._selected)
         self._selected   = set()
         self._primary    = None
         self._load_token = object()
+        # Re-rendering drops the selection; announce it so selection-driven
+        # UI (hints, menus) resets instead of going stale.
+        if had_selection:
+            self.selection_changed.emit(0)
 
         n_folders = sum(1 for e in entries if isinstance(e, FolderEntry))
         n_sxm     = sum(1 for e in entries if isinstance(e, SxmFile))
@@ -303,9 +347,12 @@ class ThumbnailGrid(QWidget):
         # Build the first batch synchronously so the folder appears instantly,
         # then drain the rest in zero-delay timer slices: constructing ~1000
         # card widgets in one loop froze the GUI for seconds, independent of
-        # disk speed. The token ties the slices to this navigation.
+        # disk speed. The build token ties the slices to this render; it is
+        # deliberately not _load_token, which appearance changes replace
+        # mid-build (see __init__).
         self._card_build_queue = list(entries)
-        self._build_card_batch(self._load_token)
+        self._card_build_token = object()
+        self._build_card_batch(self._card_build_token)
 
         # Queue all thumbnails now; scheduling skips entries whose cards are
         # not built yet and picks them up on later refresh ticks.
@@ -317,7 +364,7 @@ class ThumbnailGrid(QWidget):
     _CARD_BUILD_BATCH = 120
 
     def _build_card_batch(self, token) -> None:
-        if token is not self._load_token or not self._card_build_queue:
+        if token is not self._card_build_token or not self._card_build_queue:
             return
         batch = self._card_build_queue[: self._CARD_BUILD_BATCH]
         del self._card_build_queue[: self._CARD_BUILD_BATCH]
@@ -527,18 +574,18 @@ class ThumbnailGrid(QWidget):
         self._schedule_background_thumbnail_batch()
 
     def _rerender_scan_thumbnails(self) -> int:
+        # Replacing _load_token drops in-flight renders that still carry the
+        # old appearance. The card build (own token) is unaffected.
         self._load_token = object()
-        entries: list[Union[SxmFile, FolderEntry]] = []
-        for entry in self._entries:
-            if isinstance(entry, SxmFile):
-                if self._key_for(entry) not in self._cards:
-                    continue
-                entries.append(entry)
-            elif isinstance(entry, FolderEntry) and entry.sample_scan_paths:
-                key = self._key_for(entry)
-                if key not in self._cards:
-                    continue
-                entries.append(entry)
+        # Include entries whose cards are not built yet (timer-sliced build
+        # still draining): _start_thumbnail_for_key keeps them pending until
+        # their card exists, so they render with the new appearance once
+        # built. Excluding them here left tail cards permanently blank.
+        entries: list[Union[SxmFile, FolderEntry]] = [
+            entry for entry in self._entries
+            if isinstance(entry, SxmFile)
+            or (isinstance(entry, FolderEntry) and entry.sample_scan_paths)
+        ]
         self._prepare_thumbnail_queue(entries)
         return sum(1 for entry in entries if isinstance(entry, SxmFile))
 

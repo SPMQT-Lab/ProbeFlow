@@ -256,18 +256,30 @@ class TestProcessingStateIntegration:
         assert result.dtype == np.float64
         assert result.shape[0] > square_arr.shape[0]
 
-    def test_rotate_arbitrary_warns_when_roi_present(self, square_arr):
-        state = ProcessingState(steps=[
-            ProcessingStep("roi", {
-                "roi_id": "roi-1",
-                "step": {"op": "smooth", "params": {"sigma_px": 1.0}},
-            }),
-            ProcessingStep("rotate_arbitrary", {"angle_degrees": 30.0}),
-        ])
+    def test_rotate_arbitrary_warns_for_live_roi_after_rotation(self, square_arr):
+        """A live-resolving roi step AFTER the rotation is frame-ambiguous and
+        warns; one before it replays on the un-rotated array and does not
+        (frozen-geometry steps never warn — they carry their own frame)."""
+        live_roi = ProcessingStep("roi", {
+            "roi_id": "roi-1",
+            "step": {"op": "smooth", "params": {"sigma_px": 1.0}},
+        })
+        rotate = ProcessingStep("rotate_arbitrary", {"angle_degrees": 30.0})
+
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
-            apply_processing_state(square_arr, state)
+            apply_processing_state(
+                square_arr, ProcessingState(steps=[rotate, live_roi]))
         assert any("rotate_arbitrary" in str(warning.message) for warning in w)
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            apply_processing_state(
+                square_arr, ProcessingState(steps=[live_roi, rotate]))
+        assert not any(
+            "rotate_arbitrary changes the pixel frame" in str(warning.message)
+            for warning in w
+        )
 
     def test_serialisation_round_trip(self):
         state = ProcessingState(steps=[

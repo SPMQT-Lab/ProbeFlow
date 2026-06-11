@@ -164,6 +164,26 @@ def canny_edges(
     if nan_mask.all() or not canny_mask.any():
         edge = np.zeros(a.shape, dtype=bool)
     else:
+        if use_quantiles and not canny_mask.all():
+            # skimage computes quantile thresholds over the WHOLE gradient-
+            # magnitude array even when a mask is given, so the near-zero
+            # gradient outside the ROI/valid region dilutes the percentile
+            # cut and systematically over-detects edges inside the region
+            # (review: outside-region pixels must not enter threshold
+            # statistics). Compute the percentiles over the restricted
+            # region ourselves — mirroring skimage's smoothed ndi.sobel
+            # magnitude — and hand skimage absolute thresholds instead.
+            from scipy import ndimage as _ndi
+
+            smoothed = _ndi.gaussian_filter(a, max(sigma, 1e-3))
+            mag = np.hypot(
+                _ndi.sobel(smoothed, axis=0), _ndi.sobel(smoothed, axis=1)
+            )
+            vals = mag[canny_mask]
+            low_t, high_t = (
+                float(v) for v in np.percentile(vals, [float(low), float(high)])
+            )
+            use_quantiles = False
         edge = _canny(
             a,
             sigma=max(sigma, 1e-3),
@@ -273,6 +293,14 @@ def gradient_filter(
     else:
         gy = _skf.scharr_h(a)
         gx = _skf.scharr_v(a)
+    # skimage's normalised Sobel/Scharr kernels respond with 2.0 on a
+    # unit-slope ramp (their [-1, 0, 1] difference spans two pixels with no
+    # /2), so halve the responses to get the true central-difference
+    # derivative per pixel; only then does the physical scaling below yield
+    # real ∂z/∂x, ∂z/∂y. Relative outputs (normalised display, percentile
+    # thresholds, orientation) are unaffected.
+    gx = gx * 0.5
+    gy = gy * 0.5
 
     # Scale per-pixel derivatives to physical units so magnitude/orientation
     # are correct on anisotropic pixels (∂z/∂x = Gₓ / dx, ∂z/∂y = G_y / dy).
@@ -331,10 +359,22 @@ def gradient_filter(
         finite_ref = ref[np.isfinite(ref)] if ref.size else ref
         if finite_ref.size:
             cut = float(np.percentile(finite_ref, float(threshold)))
-            # Require a strictly positive gradient: when the percentile cut is
-            # 0 (flat or sparse-step images) ``>= cut`` would mark the entire
-            # zero-gradient background as an edge.
-            edge_mask = (magnitude >= cut) & (magnitude > 0.0) & keep
+            # Require a meaningfully positive gradient: when the percentile
+            # cut is ~0 (flat or sparse-step images) ``>= cut`` would mark the
+            # entire zero-gradient background as an edge. Exact ``> 0.0`` is
+            # not enough — the Sobel/Scharr kernels leave a float-cancellation
+            # residue of O(eps·|data|) on constant non-zero images (~2e-16 for
+            # a flat 3.7), which made the whole image an edge mask. The floor
+            # scales with the data magnitude and the pixel-size division
+            # applied to the gradients; 1e3·eps margin is still ~10 orders of
+            # magnitude below any representable real gradient.
+            data_scale = float(np.max(np.abs(a))) if a.size else 0.0
+            grad_scale = max(
+                1.0 / float(dx) if dx and dx > 0 else 1.0,
+                1.0 / float(dy) if dy and dy > 0 else 1.0,
+            )
+            tiny = data_scale * grad_scale * np.finfo(np.float64).eps * 1e3
+            edge_mask = (magnitude >= cut) & (magnitude > tiny) & keep
         else:
             edge_mask = np.zeros(a.shape, dtype=bool)
 

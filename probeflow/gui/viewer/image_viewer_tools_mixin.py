@@ -191,6 +191,24 @@ class ImageViewerToolsMixin:
                 )
                 return
             op_spec["roi_id"] = active_area_roi_id
+            area_roi = (
+                self._image_roi_set.get(active_area_roi_id)
+                if self._image_roi_set is not None else None
+            )
+            if area_roi is not None:
+                # Freeze geometry + pipeline position at commit time, at
+                # parity with ROI-scoped filters: the step must not retarget
+                # when the live ROI later moves, and must replay in the
+                # display frame it was committed in (the adapter interleaves
+                # it at this position; review: scope-replay ordering).
+                op_spec["frozen_geometry"] = {
+                    "kind": area_roi.kind,
+                    "geometry": dict(area_roi.geometry),
+                    "coord_system": area_roi.coord_system,
+                }
+                op_spec["after_geometric_ops"] = len(
+                    self._processing.get("geometric_ops") or []
+                )
 
         self._push_proc_undo_snapshot()
         ops = list(self._processing.get("arithmetic_ops") or [])

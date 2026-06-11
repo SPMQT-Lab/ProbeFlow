@@ -86,12 +86,17 @@ def _roi_from_frozen_geometry(frozen: Any, roi_id: Any = None) -> "ROI | None":
 
     A committed ROI-scoped filter stores ``{"kind", "geometry", "coord_system"}``
     captured at apply time so it rasterises independently of the live ROI.
-    Returns ``None`` when the snapshot is malformed.
+    Returns ``None`` when the snapshot is malformed: unparsable, a non-area
+    kind (scope filters only freeze area geometry; ``ROI.to_mask`` silently
+    rasterises unknown kinds to an all-False mask), or geometry that cannot
+    rasterise at all. Both the apply path and export validation route through
+    this helper, so "skipped at replay" and "blocked at export" stay in
+    agreement.
     """
     if not isinstance(frozen, dict):
         return None
     try:
-        return ROI(
+        roi = ROI(
             id=str(roi_id) if roi_id is not None else "frozen",
             name="frozen",
             kind=str(frozen["kind"]),
@@ -100,6 +105,16 @@ def _roi_from_frozen_geometry(frozen: Any, roi_id: Any = None) -> "ROI | None":
         )
     except (KeyError, TypeError, ValueError):
         return None
+    if roi.kind not in AREA_ROI_KINDS:
+        return None
+    try:
+        # Probe rasterisation on a tiny shape: surfaces missing/invalid
+        # geometry keys (e.g. a rectangle without "width") here rather than
+        # as an uncaught exception mid-pipeline.
+        roi.to_mask((4, 4))
+    except Exception:
+        return None
+    return roi
 
 # ── ROI reference validation ─────────────────────────────────────────────────
 
@@ -215,6 +230,33 @@ def missing_roi_references(
         if mask_set is None or not _resolve(mask_set, str(ref["value"])):
             missing.append(ref)
 
+    # Frozen snapshots resolve without the live sets, but only if the
+    # snapshot itself can be rebuilt. A malformed snapshot is silently
+    # skipped at apply time, so it must be reported here or an export
+    # would silently omit the committed filter (review: export blocking).
+    for step_index, step in enumerate(state.steps):
+        params = step.params or {}
+        if step.op == "roi":
+            frozen = params.get("frozen_geometry")
+            if frozen is not None and _roi_from_frozen_geometry(
+                frozen, params.get("roi_id")
+            ) is None:
+                missing.append({
+                    "step_index": step_index,
+                    "op": step.op,
+                    "param": "frozen_geometry",
+                    "value": "<malformed snapshot>",
+                })
+        elif step.op == "mask":
+            frozen = params.get("frozen_mask")
+            if frozen is not None and _mask_from_frozen(frozen) is None:
+                missing.append({
+                    "step_index": step_index,
+                    "op": step.op,
+                    "param": "frozen_mask",
+                    "value": "<malformed snapshot>",
+                })
+
     return missing
 
 
@@ -238,7 +280,8 @@ def assert_roi_references_resolved(
             refs += f", +{len(missing) - 3} more"
         raise ValueError(
             f"Processing state references {len(missing)} scope(s) (ROI/mask) "
-            f"that are not present in the current sets: {refs}. Export aborted."
+            f"that cannot be resolved (missing from the current sets, or a "
+            f"corrupt frozen snapshot): {refs}. Export aborted."
         )
 
 
@@ -513,7 +556,7 @@ def apply_processing_state(
     # _SUPPORTED_OPS op dispatches here AND through the calibrated wrapper), and
     # there is no duplicated op-classification to drift (the calibrated path
     # detects shape changes empirically, not by an op-name set).
-    for step in state.steps:
+    for step_index, step in enumerate(state.steps):
         p = step.params
         if step.op == "remove_bad_lines":
             a = _proc.remove_bad_lines(
@@ -729,6 +772,13 @@ def apply_processing_state(
                 # follow later ROI moves/deletes (review: ROI live-geometry).
                 roi_obj = _roi_from_frozen_geometry(frozen, p.get("roi_id"))
                 if roi_obj is None:
+                    import warnings
+                    warnings.warn(
+                        "roi step has a malformed frozen_geometry snapshot — "
+                        "step skipped.",
+                        UserWarning,
+                        stacklevel=2,
+                    )
                     continue
             else:
                 roi_id = p.get("roi_id")
@@ -768,6 +818,7 @@ def apply_processing_state(
                     mask_set=mask_set,
                     pixel_size_x_m=pixel_size_x_m,
                     pixel_size_y_m=pixel_size_y_m,
+                    operand_resolver=operand_resolver,
                     _depth=_depth + 1,
                 ),
                 mask,
@@ -792,6 +843,13 @@ def apply_processing_state(
                 # frozen_geometry; review: mask still live).
                 mask = _mask_from_frozen(frozen_mask)
                 if mask is None:
+                    import warnings
+                    warnings.warn(
+                        "mask step has a malformed frozen_mask snapshot — "
+                        "step skipped.",
+                        UserWarning,
+                        stacklevel=2,
+                    )
                     continue
                 mask = np.asarray(mask, dtype=bool)
             else:
@@ -840,6 +898,7 @@ def apply_processing_state(
                     mask_set=mask_set,
                     pixel_size_x_m=pixel_size_x_m,
                     pixel_size_y_m=pixel_size_y_m,
+                    operand_resolver=operand_resolver,
                     _depth=_depth + 1,
                 ),
                 mask,
@@ -848,12 +907,24 @@ def apply_processing_state(
             fn = getattr(_proc, step.op)
             a = fn(a)
         elif step.op == "rotate_arbitrary":
-            roi_steps = [s for s in state.steps if s.op == "roi"]
-            if roi_steps:
+            # Frozen-geometry roi steps are positionally interleaved and carry
+            # the frame they were committed in, so they are fine on either
+            # side of the rotation. A *live*-resolving roi step after the
+            # rotation is the genuinely ambiguous case: its geometry frame is
+            # whatever the live ROI set holds, which generally does not match
+            # the rotated/expanded canvas. (An earlier version of this warning
+            # claimed ROI steps "have been skipped" — they never were.)
+            live_roi_after = sum(
+                1 for later in state.steps[step_index + 1:]
+                if later.op == "roi"
+                and (later.params or {}).get("frozen_geometry") is None
+            )
+            if live_roi_after:
                 import warnings
                 warnings.warn(
-                    "rotate_arbitrary invalidates existing ROI geometry. "
-                    "ROI steps in the processing state have been skipped.",
+                    f"rotate_arbitrary changes the pixel frame: {live_roi_after} "
+                    "subsequent roi step(s) resolve live ROI geometry, which "
+                    "does not match the rotated canvas and may be mislocated.",
                     UserWarning,
                     stacklevel=2,
                 )
