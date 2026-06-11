@@ -33,6 +33,7 @@ GUI_TEST_MODULES = {
     "test_quick_selection_lifecycle.py",
     "test_scale_shear_geometry.py",
     "test_canvas_item_lifetime.py",
+    "test_workflow_replay.py",
 }
 
 MIXED_QT_FIXTURE_MODULES = {

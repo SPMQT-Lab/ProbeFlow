@@ -590,3 +590,43 @@ class TestScanReplayEndToEnd:
         assert _std(out, 4, 16, 4, 16) < SMOOTHED, "filter not where drawn"
         assert _std(out, w - 16, w - 4, 4, 16) > UNTOUCHED, "filter mirrored"
         assert scan.processing_state is not None
+
+
+class TestSetZeroPositioning:
+    def test_stamped_zero_plane_replays_after_the_flip(self):
+        """A zero plane picked on the flipped display (stamped position 1)
+        must replay after the flip, anchoring the clicked coordinates."""
+        gui = {
+            "set_zero_plane_points": [(2, 2), (30, 4), (10, 28)],
+            "set_zero_patch": 1,
+            "set_zero_after_geometric_ops": 1,
+            "geometric_ops": [{"op": "flip_horizontal"}],
+        }
+        state = processing_state_from_gui(gui)
+        assert [s.op for s in state.steps] == ["flip_horizontal", "set_zero_plane"]
+
+        arr = _noise()
+        out = apply_processing_state(arr, state)
+        # patch=1 means a 3x3 sampling window: the plane passes exactly
+        # through the patch means, so those (not the single pixels) are 0.
+        for x, y in gui["set_zero_plane_points"]:
+            patch = out[y - 1:y + 2, x - 1:x + 2]
+            assert float(np.mean(patch)) == pytest.approx(0.0, abs=1e-12)
+
+    def test_legacy_unstamped_zero_keeps_historical_order(self):
+        gui = {
+            "set_zero_plane_points": [(2, 2), (30, 4), (10, 28)],
+            "set_zero_patch": 1,
+            "geometric_ops": [{"op": "flip_horizontal"}],
+        }
+        state = processing_state_from_gui(gui)
+        assert [s.op for s in state.steps] == ["set_zero_plane", "flip_horizontal"]
+
+    def test_stamped_zero_point_orders_after_geometric_ops(self):
+        gui = {
+            "set_zero_xy": (5, 6),
+            "set_zero_after_geometric_ops": 1,
+            "geometric_ops": [{"op": "rotate_90_cw"}],
+        }
+        state = processing_state_from_gui(gui)
+        assert [s.op for s in state.steps] == ["rotate_90_cw", "set_zero_point"]
