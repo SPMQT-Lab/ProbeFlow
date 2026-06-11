@@ -356,3 +356,78 @@ class TestNavigationStateConsistency:
 
         assert grid.get_primary_entry() is entries[1]
         assert grid.get_entries() == entries
+
+
+# ── Shutdown drain ────────────────────────────────────────────────────────────
+
+class TestShutdownDrain:
+    """Worker pools must be drained before teardown no matter which window
+    quits the app (2026-06-11 review, focus #1 Test 1 item 9)."""
+
+    def test_drain_waits_for_inflight_global_pool_workers(self, qapp):
+        from PySide6.QtCore import QRunnable, QThreadPool
+
+        from probeflow.gui.app import ProbeFlowWindow
+
+        done = []
+
+        class Slow(QRunnable):
+            def run(self):
+                import time
+                time.sleep(0.2)
+                done.append(True)
+
+        QThreadPool.globalInstance().start(Slow())
+        win = ProbeFlowWindow.__new__(ProbeFlowWindow)  # no heavy __init__
+        ProbeFlowWindow._drain_worker_pools(win, timeout_ms=5000)
+
+        assert done == [True], "drain returned before in-flight worker finished"
+        assert QThreadPool.globalInstance().activeThreadCount() == 0
+
+    def test_drain_tolerates_stuck_pool_and_missing_optional_pools(self, qapp, monkeypatch):
+        """A pool that never finishes must produce a bounded wait and a log
+        warning — not a hang or an exception; absent optional pools
+        (_features_preview_pool, _fc_window) are skipped."""
+        from PySide6.QtCore import QThreadPool
+
+        from probeflow.gui.app import ProbeFlowWindow
+
+        calls = []
+
+        class StuckPool:
+            def clear(self):
+                calls.append("clear")
+
+            def waitForDone(self, _ms):
+                calls.append("wait")
+                return False  # simulated stuck worker
+
+        monkeypatch.setattr(QThreadPool, "globalInstance",
+                            staticmethod(lambda: StuckPool()))
+        win = ProbeFlowWindow.__new__(ProbeFlowWindow)
+        ProbeFlowWindow._drain_worker_pools(win, timeout_ms=10)  # must not raise
+
+        assert calls == ["clear", "wait"]
+
+    def test_quit_drain_fires_on_about_to_quit(self, qapp):
+        """The drain must also be connected to QApplication.aboutToQuit:
+        closing a modeless viewer last (after the main window already
+        closed) quits the app without running the main window's closeEvent."""
+        from PySide6.QtWidgets import QMainWindow
+
+        from probeflow.gui.app import ProbeFlowWindow
+
+        win = ProbeFlowWindow.__new__(ProbeFlowWindow)
+        QMainWindow.__init__(win)  # minimal QObject init, no ProbeFlow UI
+        drained = []
+        win._drain_worker_pools = lambda *a, **k: drained.append(True)
+        try:
+            ProbeFlowWindow._install_quit_drain(win)
+            qapp.aboutToQuit.emit()
+            assert drained == [True]
+        finally:
+            try:
+                qapp.aboutToQuit.disconnect(win._drain_worker_pools)
+            except (RuntimeError, TypeError):
+                pass
+            win.deleteLater()
