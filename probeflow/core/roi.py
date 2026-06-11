@@ -314,8 +314,14 @@ class ROI:
         crop
             params must contain {"x0": int, "y0": int, "x1": int, "y1": int}
             (inclusive bounds of the crop region in the original image).
-        rotate_arbitrary
-            Always returns None.
+        scale_image
+            params must contain {"new_width": int, "new_height": int}.
+            Exact per-axis coordinate scaling — vector geometry resamples
+            losslessly, unlike raster masks.
+        rotate_arbitrary, shear
+            Always return None: rectangles/ellipses cannot represent the
+            rotated/sheared shape, and keeping the old geometry would
+            silently mislocate it over the transformed image.
 
         Raises ``ValueError`` for physical-coordinate ROIs (see
         :meth:`_require_pixel_coords`).
@@ -323,16 +329,72 @@ class ROI:
         self._require_pixel_coords("transform")
         operation = to_short(operation)
 
-        if operation == "rotate_arbitrary":
+        if operation in ("rotate_arbitrary", "shear"):
             return None
 
         if operation == "crop":
             return self._transform_crop(params, image_shape)
 
+        if operation == "scale_image":
+            return self._transform_scale(params, image_shape)
+
         if operation in LOSSLESS_OPS:
             return self._transform_lossless(operation, image_shape)
 
         raise ValueError(f"ROI.transform: unknown operation {operation!r}")
+
+    def _transform_scale(
+        self, params: dict[str, Any], image_shape: tuple[int, int],
+    ) -> "ROI | None":
+        """Scale all coordinates for a ``scale_image`` resample (exact)."""
+        Ny, Nx = image_shape
+        try:
+            new_w = int(params["new_width"])
+            new_h = int(params["new_height"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(
+                f"scale_image requires integer new_width/new_height params, "
+                f"got {params!r}"
+            ) from exc
+        if Nx <= 0 or Ny <= 0 or new_w <= 0 or new_h <= 0:
+            return None
+        sx, sy = new_w / Nx, new_h / Ny
+        g = self.geometry
+
+        if self.kind == "rectangle":
+            new_geom = {"x": float(g["x"]) * sx, "y": float(g["y"]) * sy,
+                        "width": float(g["width"]) * sx,
+                        "height": float(g["height"]) * sy}
+        elif self.kind == "ellipse":
+            new_geom = {"cx": float(g["cx"]) * sx, "cy": float(g["cy"]) * sy,
+                        "rx": float(g["rx"]) * sx, "ry": float(g["ry"]) * sy}
+        elif self.kind in ("polygon", "freehand"):
+            new_geom = {"vertices": [[float(v[0]) * sx, float(v[1]) * sy]
+                                     for v in g.get("vertices", [])]}
+        elif self.kind == "line":
+            new_geom = {"x1": float(g["x1"]) * sx, "y1": float(g["y1"]) * sy,
+                        "x2": float(g["x2"]) * sx, "y2": float(g["y2"]) * sy}
+        elif self.kind == "point":
+            new_geom = {"x": float(g["x"]) * sx, "y": float(g["y"]) * sy}
+        elif self.kind == "multipolygon":
+            def _scale_ring(ring):
+                return [[float(v[0]) * sx, float(v[1]) * sy] for v in ring]
+            new_geom = {"components": [
+                {"exterior": _scale_ring(comp.get("exterior", [])),
+                 "holes": [_scale_ring(h) for h in comp.get("holes", [])]}
+                for comp in g.get("components", [])
+            ]}
+        else:
+            return None
+
+        return ROI(
+            id=self.id,
+            name=self.name,
+            kind=self.kind,
+            geometry=new_geom,
+            coord_system=self.coord_system,
+            linked_file=self.linked_file,
+        )
 
     # ── Internal transform helpers ────────────────────────────────────────────
 

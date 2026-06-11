@@ -797,14 +797,17 @@ class ImageViewerProcessingExportMixin:
         dlg.exec()
 
     def _on_scale_image_applied(self, params: dict) -> None:
+        # ROI vector geometry scales exactly with the resample; raster masks
+        # cannot (invalidated with a status message) and the quick selection
+        # scales like the ROIs — same path as flips/rotations, which used to
+        # bypass scale entirely and leave every overlay silently mislocated.
+        self._transform_image_roi_set_for_display_op("scale_image", params)
         ops = list(self._processing.get("geometric_ops") or [])
         ops.append({"op": "scale_image", "params": params})
         self._processing["geometric_ops"] = ops
         self._refresh_processing_display()
         w, h = params["new_width"], params["new_height"]
-        self._status_lbl.setText(
-            f"Scaled to {w} × {h} px (ROI coordinates may be invalid — use Reset to undo)."
-        )
+        self._status_lbl.setText(f"Scaled to {w} × {h} px (ROIs rescaled to match).")
 
     def _on_shear(self) -> None:
         """Open the Shear dialog to apply a 2-component shear correction."""
@@ -818,12 +821,26 @@ class ImageViewerProcessingExportMixin:
         dlg.exec()
 
     def _on_shear_applied(self, params: dict) -> None:
+        # Shear invalidates ROIs, masks, and the quick selection (rectangles/
+        # ellipses cannot represent the sheared shape) — same policy as
+        # rotate_arbitrary. Previously nothing was transformed or even warned
+        # about, leaving stale overlays over the sheared image.
+        roi_set = self._image_roi_set
+        mask_set = getattr(self, "_image_mask_set", None)
+        n_overlays = (
+            (len(roi_set.rois) if roi_set is not None else 0)
+            + (len(mask_set.masks) if mask_set is not None else 0)
+        )
+        self._transform_image_roi_set_for_display_op("shear", params)
         ops = list(self._processing.get("geometric_ops") or [])
         ops.append({"op": "shear", "params": params})
         self._processing["geometric_ops"] = ops
         self._refresh_processing_display()
         sx, sy = params.get("shear_x", 0.0), params.get("shear_y", 0.0)
-        self._status_lbl.setText(f"Shear applied (x={sx:.4f}, y={sy:.4f}).")
+        msg = f"Shear applied (x={sx:.4f}, y={sy:.4f})."
+        if n_overlays:
+            msg += f" {n_overlays} ROI(s)/mask(s) removed (cannot be sheared)."
+        self._status_lbl.setText(msg)
 
     def _on_convert_bit_depth(self, bits: int) -> None:
         """Quantize the current image to *bits*-bit precision as a processing step."""
