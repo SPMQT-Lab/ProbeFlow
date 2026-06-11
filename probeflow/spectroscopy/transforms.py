@@ -64,7 +64,12 @@ def make_displayed_spectrum(
         if (opts.normalize_mode or "none").strip().lower() == "channel":
             raise ValueError("channel normalization cannot be combined with numerical derivative")
         x, y = numerical_derivative(x, y)
-        y_unit = f"{y_unit}/{trace.x_unit}".rstrip("/") if y_unit else ""
+        # Mirror SpectrumDeltaMeasurement.slope_unit: A/V for the usual
+        # case, bare y_unit when x is unitless, 1/x_unit when y is unitless.
+        if y_unit and trace.x_unit:
+            y_unit = f"{y_unit}/{trace.x_unit}"
+        elif trace.x_unit:
+            y_unit = f"1/{trace.x_unit}"
         if trace.x_unit == "V" and _looks_like_current(trace.y_channel, y_label):
             y_label = "numerical dI/dV"
         else:
