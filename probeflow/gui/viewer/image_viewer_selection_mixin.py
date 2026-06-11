@@ -50,6 +50,12 @@ class ImageViewerSelectionMixin:
         zoom = getattr(self, "_zoom_lbl", None)
         if zoom is not None and hasattr(zoom, "clear_selection"):
             zoom.clear_selection(emit=False)
+        # emit=False suppresses the canvas signal (no noisy status update), so
+        # the menu/toolbar resync its handler would have performed must happen
+        # here — otherwise selection-gated actions stay stale after a drop,
+        # navigation, or reset (review: quick-selection lifecycle).
+        if hasattr(self, "_sync_viewer_menu_actions"):
+            self._sync_viewer_menu_actions()
 
     # ── Promote to a managed ROI ──────────────────────────────────────────────
 

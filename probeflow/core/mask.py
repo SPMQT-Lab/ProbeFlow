@@ -172,7 +172,11 @@ class ImageMask:
             if sub.size == 0 or not sub.any():
                 return None
             new_data = sub
-        elif op == "rotate_arbitrary":
+        elif op in ("rotate_arbitrary", "scale_image", "shear",
+                    "affine_lattice_correction"):
+            # Resampling / shape-changing ops invalidate the raster, exactly
+            # as the docstring promises (the previous code raised ValueError
+            # for scale/shear/affine despite documenting None).
             return None
         else:
             raise ValueError(f"ImageMask.transform: unknown operation {operation!r}")

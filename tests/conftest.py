@@ -30,6 +30,8 @@ GUI_TEST_MODULES = {
     "test_edge_detection_dialog.py",
     "test_mask_manager_gui.py",
     "test_browse_worker_seams.py",
+    "test_quick_selection_lifecycle.py",
+    "test_scale_shear_geometry.py",
 }
 
 MIXED_QT_FIXTURE_MODULES = {

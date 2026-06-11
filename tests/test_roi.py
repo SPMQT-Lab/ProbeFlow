@@ -190,8 +190,11 @@ def test_lossless_transforms_preserve_expected_coordinates_and_identity():
     assert point.geometry["x"] == pytest.approx(89.0)
 
     assert rect_roi().transform("rotate_arbitrary", {}, SHAPE) is None
+    # Shear invalidates (a rectangle cannot represent the sheared shape) —
+    # same policy as rotate_arbitrary; truly unknown ops still raise.
+    assert rect_roi().transform("shear", {"shear_x": 0.1}, SHAPE) is None
     with pytest.raises(ValueError):
-        rect_roi().transform("shear", {}, SHAPE)
+        rect_roi().transform("bogus_op", {}, SHAPE)
 
 
 def test_crop_transform_shifts_clips_and_drops_rois_as_expected():

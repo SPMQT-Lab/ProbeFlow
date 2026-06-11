@@ -168,6 +168,17 @@ class ImageViewerToolbarMixin:
                 enabled_tip="Invert the active area ROI.",
                 disabled_tip="Draw or select an area ROI to invert the selection.",
             )
+            has_selection = (
+                self._has_quick_selection()
+                if hasattr(self, "_has_quick_selection") else False
+            )
+            self._quick_toolbar.set_action_enabled(
+                "promote_selection",
+                has_selection,
+                enabled_tip="Save the quick selection as a managed, named ROI.",
+                disabled_tip="Draw a quick selection (rectangle, ellipse, "
+                             "polygon, or freehand) to promote it to a ROI.",
+            )
 
     def _set_selection_tool(self, kind: str) -> None:
         """Compat shim: delegates to _set_drawing_tool, mapping 'none' → 'pan'."""
