@@ -687,6 +687,10 @@ def apply_processing_state(
                 snap_window_px=int(p.get("snap_window_px", 2)),
                 notch_shape=str(p.get("notch_shape", "spot")),
                 min_q_nm_inv=float(p.get("min_q_nm_inv", 0.0)),
+                extra_streaks_px=tuple(
+                    int(v) for v in (p.get("extra_streaks_px") or ())
+                ),
+                notch_fill=str(p.get("notch_fill", "zero")),
             )
         elif step.op == "inverse_fft_filter":
             # Selection geometry is stored in FFT-pixel offsets (exact for the

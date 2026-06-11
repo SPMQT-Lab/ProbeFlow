@@ -761,6 +761,17 @@ class ImageViewerChromeMixin:
         """Open the advanced-processing controls as a dismissible overlay."""
         self._present_modal_tool(self._advanced_widget, persistent=True)
 
+    def _on_apply_advanced_tools(self) -> None:
+        """Apply the pipeline from inside the Advanced overlay, then close it.
+
+        The overlay scrim hides the Process tab's own Apply button, so
+        committing from here must be a single action. Hiding the hosted
+        widget dismisses the ModalOverlay (it watches Hide/Close on its
+        content); the persistent widget survives for the next open.
+        """
+        self._on_apply_processing()
+        self._advanced_widget.hide()
+
     def _show_roi_manager(self) -> None:
         self._show_sidebar_tab("roi")
 

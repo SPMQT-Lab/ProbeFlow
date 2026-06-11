@@ -289,8 +289,22 @@ def _mains_streak_filter(
     radius_px: float,
     fast_axis: str,
     min_q_nm_inv: float,
+    fill: str = "zero",
 ) -> np.ndarray:
-    """Suppress full predicted mains streaks, optionally outside a radial q floor."""
+    """Suppress full predicted mains streaks, optionally outside a radial q floor.
+
+    ``fill`` selects what the notched bins become:
+
+    * ``"zero"`` — remove all energy (legacy; the streak reads as black in
+      the FFT and the genuine noise floor inside the notch is removed too).
+    * ``"background"`` — bring each notched bin's magnitude down to the local
+      background level (per-row/column median of the untouched bins along the
+      perpendicular axis), keeping its phase. Removes only the excess pickup
+      energy and preserves the noise floor — the FFT shows background where
+      the streak was, not a black gap. Bins are never brightened.
+    """
+    if fill not in ("zero", "background"):
+        raise ValueError("fill must be 'zero' or 'background'")
     a = arr.astype(np.float64, copy=True)
     Ny, Nx = a.shape
     if Ny < 2 or Nx < 2 or not peaks:
@@ -329,7 +343,27 @@ def _mains_streak_filter(
                     stripe = np.exp(-0.5 * ((yy - py) ** 2) / (sigma ** 2))
                     notch *= 1.0 - np.where(q_keep, stripe, 0.0)
 
-    out = np.fft.ifft2(np.fft.ifftshift(F * notch)).real + mean_val
+    if fill == "background":
+        mag = np.abs(F)
+        # Local background per perpendicular slice: for vertical streaks
+        # (fast_axis="x") each row's median magnitude over columns the notch
+        # left untouched; the symmetric layout keeps Hermitian symmetry to
+        # the same degree as zeroing (the residual imaginary part is
+        # discarded by .real below either way).
+        untouched = notch > 0.99
+        bg_src = np.where(untouched, mag, np.nan)
+        axis = 1 if fast_axis == "x" else 0
+        with np.errstate(all="ignore"):
+            bg_level = np.nanmedian(bg_src, axis=axis, keepdims=True)
+        bg_level = np.where(np.isfinite(bg_level), bg_level, 0.0)
+        target = np.minimum(mag, np.broadcast_to(bg_level, mag.shape))
+        new_mag = mag * notch + target * (1.0 - notch)
+        ratio = np.divide(new_mag, mag, out=np.ones_like(mag), where=mag > 0)
+        F_out = F * ratio
+    else:
+        F_out = F * notch
+
+    out = np.fft.ifft2(np.fft.ifftshift(F_out)).real + mean_val
     out[nan_mask] = np.nan
     return out
 
@@ -346,6 +380,8 @@ def mains_pickup_suppression(
     snap_window_px: int = 2,
     notch_shape: str = "spot",
     min_q_nm_inv: float = 0.0,
+    extra_streaks_px: "tuple[int, ...] | list[int]" = (),
+    notch_fill: str = "zero",
 ) -> np.ndarray:
     """Suppress predicted mains-pickup peaks with symmetric FFT notches.
 
@@ -353,7 +389,16 @@ def mains_pickup_suppression(
     |FFT| pixel or streak, then applies Gaussian notches and their conjugates.
     ``notch_shape="spot"`` preserves the legacy circular-spot behaviour;
     ``"streak"`` removes the predicted fast-axis streak outside ``min_q_nm_inv``.
-    Returns the original array unchanged when no peaks are predicted.
+
+    ``extra_streaks_px`` adds user-placed streak pairs at the given fast-axis
+    FFT-pixel offsets from DC (each entry notches ±offset), for pickup at
+    frequencies unrelated to mains. They work with or without a scan speed —
+    pass ``scan_speed_m_per_s=None`` to notch only the custom streaks.
+
+    ``notch_fill`` ("zero" | "background") selects whether notched bins are
+    zeroed or brought down to the local background magnitude (streak shape
+    only — raises for spot, where there is no perpendicular background to
+    estimate). Returns the original array unchanged when nothing is notched.
     """
     from probeflow.processing.filters import periodic_notch_filter
 
@@ -369,12 +414,23 @@ def mains_pickup_suppression(
         mains_frequency_hz=mains_frequency_hz, harmonics=harmonics,
         fast_axis=fast_axis,
     )
-    if not preds:
+    peaks = [(p["dx"], p["dy"]) for p in preds]
+    extras = [int(s) for s in (extra_streaks_px or ()) if int(s) != 0]
+    if extras:
+        if fast_axis == "x":
+            peaks.extend((s, 0) for s in extras)
+        else:
+            peaks.extend((0, s) for s in extras)
+    if not peaks:
         return a.copy()
 
-    peaks = [(p["dx"], p["dy"]) for p in preds]
     shape = str(notch_shape or "spot").lower()
+    fill = str(notch_fill or "zero").lower()
     if shape in {"spot", "circle", "circular"}:
+        if fill != "zero":
+            raise ValueError(
+                "notch_fill='background' requires notch_shape='streak'"
+            )
         if snap_window_px and snap_window_px > 0:
             peaks = _snap_peaks_to_brightest(a, peaks, int(snap_window_px))
         return periodic_notch_filter(a, peaks, radius_px=float(notch_radius_px))
@@ -392,5 +448,6 @@ def mains_pickup_suppression(
             radius_px=float(notch_radius_px),
             fast_axis=fast_axis,
             min_q_nm_inv=float(min_q_nm_inv),
+            fill=fill,
         )
     raise ValueError("notch_shape must be 'spot' or 'streak'")

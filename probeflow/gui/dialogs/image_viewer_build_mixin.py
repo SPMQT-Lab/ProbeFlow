@@ -716,9 +716,24 @@ class ImageViewerBuildMixin:
         self._undistort_shear_w, self._undistort_shear_spin = _spin_row(
             "Shear x (px):", -20.0, 20.0, 0.0, 0.25, 2)
         advanced_lay.addWidget(self._undistort_shear_w)
+        # ±20 % was too tight for real thermal-drift corrections; allow up to
+        # a factor of 2 either way (extreme values are still the user's call).
         self._undistort_scale_w, self._undistort_scale_spin = _spin_row(
-            "Scale y:", 0.80, 1.20, 1.0, 0.005, 3)
+            "Scale y:", 0.50, 2.00, 1.0, 0.005, 3)
         advanced_lay.addWidget(self._undistort_scale_w)
+
+        # The overlay is modal (scrim blocks the panel behind it): without an
+        # Apply button here, the user must dismiss the card and then find
+        # "Apply processing" underneath — which reads as an abandoned choice,
+        # not a commit. Apply directly and close the card.
+        adv_apply_btn = QPushButton("Apply processing")
+        adv_apply_btn.setFont(ui_font(9, weight=QFont.Bold))
+        adv_apply_btn.setToolTip(
+            "Apply the processing pipeline including these advanced settings, "
+            "then close this panel."
+        )
+        adv_apply_btn.clicked.connect(self._on_apply_advanced_tools)
+        advanced_lay.addWidget(adv_apply_btn)
 
         # ── Spectroscopy overlay (collapsible) ────────────────────────────────
         _, self._spec_overlay_widget, spec_lay = _collapsible_section(

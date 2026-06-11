@@ -276,3 +276,124 @@ class TestProcessingStateOp:
         img = _scan_with_mains()
         out = apply_processing_state(img, state)
         assert _column_power(out, NPX // 2 + 25) < 0.5 * _column_power(img, NPX // 2 + 25)
+
+
+# ── Custom streak pairs and background fill (2026-06-11 user feedback) ────────
+
+class TestExtraStreaksAndFill:
+    W_M = 10e-9
+    N = 160
+
+    def _striped(self, k_px: int = 37, amp: float = 5e-11):
+        """Synthetic image with a pure fast-axis stripe at FFT bin ±k_px."""
+        import numpy as np
+        yy, xx = np.mgrid[: self.N, : self.N]
+        rng = np.random.default_rng(5)
+        base = 1e-11 * rng.normal(size=(self.N, self.N))
+        stripe = amp * np.sin(2 * np.pi * k_px * xx / self.N)
+        return base + stripe, base
+
+    @staticmethod
+    def _col_mag(arr, k_px):
+        import numpy as np
+        F = np.fft.fftshift(np.fft.fft2(arr - arr.mean()))
+        cx = arr.shape[1] // 2
+        return float(np.abs(F[:, cx + k_px]).mean())
+
+    def test_custom_streak_removes_off_mains_stripe_without_scan_speed(self):
+        """User-placed pairs must work with no mains prediction at all —
+        pickup at frequencies unrelated to mains has no scan speed to give."""
+        from probeflow.processing.mains_pickup import mains_pickup_suppression
+
+        img, base = self._striped(k_px=37)
+        out = mains_pickup_suppression(
+            img,
+            scan_speed_m_per_s=None,
+            scan_range_m=(self.W_M, self.W_M),
+            notch_shape="streak",
+            extra_streaks_px=[37],
+        )
+        before = self._col_mag(img, 37)
+        after = self._col_mag(out, 37)
+        assert after < 0.05 * before, "custom streak not notched"
+        # The rest of the image is essentially untouched.
+        assert float(np.nanstd(out - base)) < 0.2 * float(np.nanstd(img - base))
+
+    def test_no_speed_and_no_extras_returns_copy(self):
+        from probeflow.processing.mains_pickup import mains_pickup_suppression
+
+        img, _ = self._striped()
+        out = mains_pickup_suppression(
+            img, scan_speed_m_per_s=None,
+            scan_range_m=(self.W_M, self.W_M), notch_shape="streak",
+        )
+        np.testing.assert_array_equal(out, img)
+
+    def test_background_fill_keeps_noise_floor_in_fft(self):
+        """fill='background' must bring the streak down to the local noise
+        floor, not to black: the notched column's magnitude ends near the
+        background median instead of ~0, while the stripe is still removed
+        from the image."""
+        from probeflow.processing.mains_pickup import mains_pickup_suppression
+
+        img, base = self._striped(k_px=37)
+        common = dict(
+            scan_speed_m_per_s=None,
+            scan_range_m=(self.W_M, self.W_M),
+            notch_shape="streak",
+            extra_streaks_px=[37],
+            snap_window_px=0,
+        )
+        zeroed = mains_pickup_suppression(img, notch_fill="zero", **common)
+        filled = mains_pickup_suppression(img, notch_fill="background", **common)
+
+        bg = self._col_mag(img, 60)  # far from the streak: noise floor
+        assert self._col_mag(zeroed, 37) < 0.1 * bg, "zero fill left energy"
+        ratio = self._col_mag(filled, 37) / bg
+        assert 0.3 < ratio < 3.0, (
+            f"background fill should land near the noise floor, got {ratio:.2f}x"
+        )
+        # The pickup itself is still gone from the image (stripe amplitude
+        # collapses to the noise scale).
+        stripe_before = float(np.nanstd(img - base))
+        stripe_after = float(np.nanstd(filled - base))
+        assert stripe_after < 0.25 * stripe_before
+
+    def test_background_fill_rejected_for_spot_shape(self):
+        from probeflow.processing.mains_pickup import mains_pickup_suppression
+
+        img, _ = self._striped()
+        with pytest.raises(ValueError, match="streak"):
+            mains_pickup_suppression(
+                img, scan_speed_m_per_s=None,
+                scan_range_m=(self.W_M, self.W_M),
+                notch_shape="spot", extra_streaks_px=[37],
+                notch_fill="background",
+            )
+
+    def test_params_replay_through_processing_state(self):
+        """The new params must survive the geometric_ops passthrough so an
+        applied removal replays identically from provenance."""
+        from probeflow.processing.gui_adapter import processing_state_from_gui
+        from probeflow.processing.state import apply_processing_state
+        from probeflow.processing.mains_pickup import mains_pickup_suppression
+
+        img, _ = self._striped(k_px=37)
+        params = {
+            "scan_speed_m_per_s": None,
+            "scan_range_m": [self.W_M, self.W_M],
+            "notch_shape": "streak",
+            "extra_streaks_px": [37],
+            "notch_fill": "background",
+            "snap_window_px": 0,
+        }
+        gui = {"geometric_ops": [
+            {"op": "mains_pickup_suppression", "params": params},
+        ]}
+        replayed = apply_processing_state(img, processing_state_from_gui(gui))
+        direct = mains_pickup_suppression(
+            img, scan_speed_m_per_s=None,
+            scan_range_m=(self.W_M, self.W_M), notch_shape="streak",
+            extra_streaks_px=[37], notch_fill="background", snap_window_px=0,
+        )
+        np.testing.assert_allclose(replayed, direct, atol=1e-15)
