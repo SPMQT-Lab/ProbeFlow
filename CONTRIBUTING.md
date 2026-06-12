@@ -64,21 +64,25 @@ and what does **not**. Read these before adding new code:
 If a change crosses a boundary, prefer adding a small adapter in the
 caller over moving domain code into a foreign package.
 
-## Where the implementation actually lives
+## Compatibility shims
 
-The package directory layout looks fully decomposed, but two large
-files still contain the bulk of the GUI and CLI implementation:
+The decomposition of the original monolithic GUI and CLI files is
+complete: the directory layout is the real code layout, and every class
+lives in its proper submodule (`gui/dialogs/`, `gui/viewer/`,
+`gui/browse/`, `cli/commands/`, …).
 
-- `probeflow/gui/_legacy.py` (~6,200 LoC) — main window, all dialogs,
-  panels, sidebars, the developer terminal.
-- `probeflow/cli/_legacy.py` (~2,200 LoC) — every command parser and
-  dispatcher.
+Two small shims remain only to keep the historical import surface
+stable:
 
-The other modules in `gui/` and `cli/` are mostly thin re-exports back
-into these files. We are decomposing `_legacy.py` opportunistically:
-when you touch a class for a feature, pull it out into its proper
-submodule. Avoid standalone refactor sprints — they have no stopping
-condition and break tests for too long.
+- `probeflow/gui/compat.py` — re-exports consumed via
+  `gui/__init__.py` so `from probeflow.gui import X` keeps working.
+- `probeflow/cli/_legacy.py` — re-exports every public CLI name into
+  the canonical `cli/parser.py`, `cli/processing_ops.py`, and
+  `cli/commands/*` modules.
+
+Do not add new code to either shim — new GUI or CLI code goes directly
+in the appropriate submodule. When a re-export stops having external
+users, it can simply be deleted.
 
 ## Commit style
 
