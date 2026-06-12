@@ -73,8 +73,6 @@ button in the quick toolbar). The viewer computes the FFT of the current
 processed image — subtract the background first, or the spectrum is
 dominated by the surface tilt.
 
-![FFT viewer on a moiré superlattice](images/gui_fft.png)
-
 The left pane shows the real-space source with its pixel and q-space
 resolution; the main pane shows log-magnitude FFT with reciprocal-space
 axes. The tabs below cover the common reciprocal-space tasks:
@@ -96,8 +94,6 @@ For a quick periodicity measurement without the full viewer, use
 
 Open **Measurements → Feature finder...** to detect point-like features —
 atoms, molecules, defects, moiré sites — on the current image.
-
-![Feature finder marking the minima of a moiré superlattice](images/gui_feature_finder.png)
 
 1. Choose the **Detection mode**: *Maxima* for protrusions, *Minima* for
    depressions.

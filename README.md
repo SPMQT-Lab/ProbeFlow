@@ -72,13 +72,9 @@ shows the spectrum with q-axes in nm⁻¹, intensity controls, and a radial
 profile; the tabs fit a reciprocal lattice, correct drift distortion,
 suppress mains pickup, and reconstruct a filtered image by inverse FFT.
 
-![FFT viewer on a moiré superlattice](docs/images/gui_fft.png)
-
 **Finding features.** `Measurements → Feature finder...` detects maxima or
 minima with threshold, spacing, and smoothing controls, then exports the
 coordinates to CSV or a synthetic feature image for lattice statistics.
-
-![Feature finder marking the minima of a moiré superlattice](docs/images/gui_feature_finder.png)
 
 ## Main features
 
