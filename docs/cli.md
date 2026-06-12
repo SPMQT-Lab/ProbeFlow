@@ -21,16 +21,24 @@ Run `probeflow <command> --help` for exact options.
 | `pipeline` | Apply ordered processing steps |
 | `prepare-png` | Write a PNG handoff with provenance sidecar |
 | `plane-bg` | Polynomial background subtraction |
+| `facet-level` | Plane-level using only flat-terrace pixels (stepped surfaces) |
 | `align-rows` | Per-row offset correction |
 | `remove-bad-lines` | Detect and interpolate bad scan lines |
 | `smooth` | Gaussian smoothing |
+| `tv-denoise` | Total-variation denoising (Huber-ROF / TV-L1) |
+| `edge` | Edge detection (Laplacian / LoG / DoG) |
+| `rotate`, `rotate-90`, `rotate-180`, `rotate-270` | Rotate a scan (arbitrary angle or lossless quarter turns) |
+| `flip-h`, `flip-v` | Mirror a scan about the vertical / horizontal axis |
 | `fft` | Fourier-domain filtering |
 | `histogram` | Pixel-value histogram |
 | `fft-spectrum` | FFT magnitude spectrum |
 | `profile` | Line profile from endpoints or a named line ROI |
+| `periodicity` | Find dominant spatial periodicities via power spectrum |
 | `autoclip` | Suggest display clip percentiles |
 | `particles`, `count`, `classify` | Feature analysis workflows |
+| `grains` | Detect grains / islands by threshold and print statistics |
 | `lattice`, `unit-cell` | Lattice extraction and unit-cell averaging |
+| `diag-z` | Diagnose Z-scale candidates for a Createc `.dat` file |
 | `spec-info`, `spec-plot`, `spec-overlay`, `spec-positions` | Spectroscopy utilities |
 
 Some feature/lattice commands require optional dependencies from the

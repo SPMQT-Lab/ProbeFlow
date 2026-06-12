@@ -1,5 +1,9 @@
 # ROI display & interaction — implementation notes
 
+> Point-in-time implementation notes (2026-05); cited line numbers drift.
+> The described architecture (hover/selection flow, `_ROI_HINTS`,
+> `DisplayRangeController`, per-region composite) remains current.
+
 Working notes for the per-region brightness/contrast + line-ROI click-fix work.
 Captures how the touched subsystems actually function so the in-app help/tooltip
 text (Part C) can be corrected against reality rather than assumption.

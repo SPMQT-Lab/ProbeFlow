@@ -1,7 +1,9 @@
 # ROI Manual Workflow Checklist
 
-Phase 4c stabilisation checklist for the matplotlib/QScrollArea image viewer.
-Run this on a representative STM image before moving on to DisplayLayer work.
+Manual regression checklist for the image viewer's ROI tools. Run it on a
+representative STM image after changes to the canvas, ROI items, or the ROI
+Manager — it covers the interactions that automated GUI tests exercise least
+(drag, hover, half-finished drawing, tool switching).
 
 ## Rectangle ROI
 
@@ -45,9 +47,9 @@ Run this on a representative STM image before moving on to DisplayLayer work.
 
 ## Tool Behaviour
 
-- Keyboard shortcuts switch tools: R rectangle, E ellipse, P polygon, F freehand, L line, T point, 1-9 ROI selection, I invert, Delete, Escape.
+- Keyboard shortcuts switch tools: R rectangle, E ellipse, G polygon, F freehand, L line, P point, 1-9 ROI selection, I invert, Delete, Escape.
 - Escape cancels active drawing before closing the dialog/window.
-- Pan mode left-drag on empty image pans the scroll area.
+- Pan mode left-drag on empty image pans the view.
 - Pan mode drag on the active ROI moves the ROI.
 - Middle mouse always pans.
 - ROI drag-move does not conflict with panning.

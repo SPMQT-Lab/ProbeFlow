@@ -1,6 +1,6 @@
 # ProbeFlow Review Status
 
-**Updated**: 2026-06-04
+**Updated**: 2026-06-12
 
 This is the single, consolidated record of ProbeFlow's code-review history. The
 detailed per-angle review files (`docs/reviews/2026-05-27-*.md`) and the earlier
@@ -10,7 +10,7 @@ findings are enacted. The conclusions and the remaining open items survive below
 
 ## Summary
 
-Two review efforts have run on ProbeFlow:
+Three review efforts have run on ProbeFlow:
 
 1. **Staged review (2026-05, "Stage 1/2/3")** — scientific-workflow/physics pass,
    an architecture/maintainability pass with bounded refactor slices, and a
@@ -19,6 +19,10 @@ Two review efforts have run on ProbeFlow:
    stability, image-processing pipeline, IO/instrument format, backend
    architecture, GUI architecture) producing **114 findings (S0=1, S1=36, S2=61,
    S3=16)**.
+3. **Adversarial review campaign (2026-06-09 → 06-12, PRs #20–#36)** — targeted
+   seam-by-seam passes over the areas the earlier reviews could not exercise
+   (GUI timing, async loading, replay fidelity, parsers under corruption). See
+   the dedicated section below.
 
 **Status: essentially complete.** Every S0 and S1 finding, and every physics /
 numerical-correctness finding, has been enacted. What remains (listed below) is
@@ -165,6 +169,38 @@ and a real import-churn/regression cost to change. Deliberately not pursued.
   `feature_points` / `feature_metadata` via `getattr` defaults — minor coupling,
   acceptable as-is.
 
+## Adversarial review campaign (2026-06-09 → 06-12, PRs #20–#36)
+
+A third effort ran as short adversarial passes, each shipping its fixes with
+regression tests before moving on. One PR per pass; the PR descriptions hold
+the per-finding detail.
+
+- **GUI robustness (#20)** — QPixmap built off the GUI thread, worker-signal
+  lifetime (`SIGSEGV` class), thread-pool drain at exit.
+- **Browse loading at scale (#21)** — network-drive freezes: async preview /
+  index workers, metadata peek budget, sliced card building, thumbnail
+  priority.
+- **Seam review, two passes (#22–#26)** — scoped-filter replay ordering,
+  browse async/navigation seams, sidecar discovery fallback, corrupt-sidecar
+  visibility, quick-selection lifecycle, scale/shear overlay transforms, and
+  the PySide wrapper-recycling test flake (root-caused and fixed).
+- **Physics reviews (#27, #29)** — spectroscopy: the qPlus setpoint gate
+  (Δf misread as amps), time-axis sanitisation, derivative units; FFT:
+  window-envelope compensation and odd-size soft-border centring.
+- **User-feedback batch (#28, #30)** — mains custom streak pairs, notch-width
+  visualisation, background notch fill, streak/overlay decoupling.
+- **Workflow-replay harness (#31)** — a permanent integration harness
+  asserting display == export == provenance-replay for representative
+  pipelines (plus a set-zero frame fix it caught).
+- **Parser adversarial review (#32–#34)** — mutated-fixture corpus tests for
+  every reader; strict VERT metadata summaries (fast path now agrees with the
+  full parse), partial-load warnings surfaced in the viewer, Nanonis
+  single-column fix, and recognition of the normal Createc trailing appendix
+  (no more spurious warnings on healthy files).
+- **Docs (#35–#36)** — GUI guide with offscreen-generated screenshots.
+
+Suite grew from ~2,260 to 2,449 tests across the campaign; main is green.
+
 ## Deferred (not in code-review scope)
 
 - A true Python 3.11/3.12 test matrix (only the local interpreter was available).
@@ -173,7 +209,9 @@ and a real import-churn/regression cost to change. Deliberately not pursued.
 
 ## Current user-facing / reference docs (kept)
 
+- `docs/gui.md`
 - `docs/cli.md`
 - `docs/createc_dat_reader.md`
 - `docs/roi_manual_test_checklist.md`
 - `docs/notes/roi-display-notes.md`
+- `docs/core_derisk_plan.md` (completed plan, kept as a design record)

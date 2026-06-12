@@ -1,5 +1,11 @@
 # Core de-risking plan
 
+> **Status: completed (2026-06).** All phases are done or were deliberately
+> re-assessed and closed with guard tests instead (Phases 2–3 below explain
+> why). Kept as a design record: it documents *why* the `Scan` lazy imports
+> and the `state.py` dispatcher look the way they do, so they aren't
+> "tidied" into regressions later.
+
 **Goal:** reduce the highest-risk structural brittleness in ProbeFlow's core —
 without changing behaviour — by working in small, independently-mergeable steps
 on short-lived branches.
