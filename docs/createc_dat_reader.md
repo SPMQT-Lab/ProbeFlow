@@ -43,6 +43,22 @@ contains decoded DAC values after ProbeFlow's safety cleanup:
    partial scan;
 5. the first stored column is removed by default.
 
+## Trailing Appendix
+
+Every healthy real Createc image fixture carries a small appendix after the
+image planes: four spare scan-line buffers (`4 * Num.X` floats), plus a
+32-float zero block in files with the newer header variant. The buffers are
+zero-filled apart from an occasional stray sample at the start — the
+turnaround point of a line that was never scanned. The appendix size does not
+scale with the channel count (10- and 40-channel fixtures carry the same
+`4 * Num.X + 32` floats as 4-channel ones).
+
+Because this appendix is normal format layout rather than data loss, the
+reader records its size in `ignored_tail_float_count` but does not emit a
+warning for tails within the `4 * Num.X + 32` budget. Tails larger than that
+budget indicate payload the reader does not understand and still produce a
+decode warning, which load paths surface to users.
+
 The historical `raw_channels_dac` property remains as a compatibility alias, but
 it points to the same cleaned decoded arrays. Use `original_header`,
 `original_Nx`, and `original_Ny` when the acquisition dimensions or raw header

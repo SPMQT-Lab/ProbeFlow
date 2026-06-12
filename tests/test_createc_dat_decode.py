@@ -19,6 +19,7 @@ from probeflow.core.scan_loader import load_scan
 
 TESTDATA = Path(__file__).resolve().parents[1] / "test_data"
 QPLUS_10CH_DAT = TESTDATA / "createc_scan_qplus_10ch_afm.dat"
+CREATEC_SCAN_FIXTURES = sorted(TESTDATA.glob("createc_scan_*.dat"))
 
 
 def test_report_records_trim_first_column_and_tail(first_sample_dat):
@@ -277,6 +278,40 @@ def test_header_two_channels_with_extra_telemetry_tail_stays_two(tmp_path):
     # Must trust the header: 2 channels, not 4 manufactured from telemetry.
     assert report.detected_channel_count == 2
     assert report.ignored_tail_float_count >= 12
+
+
+@pytest.mark.parametrize("path", CREATEC_SCAN_FIXTURES, ids=lambda p: p.name)
+def test_normal_appendix_tail_is_recorded_but_not_warned(path):
+    """Every healthy Createc image carries a zero appendix after the planes
+    (four spare scan-line buffers plus an optional 32-float block).  The
+    viewer surfaces ``scan.warnings`` in the status bar, so this normal
+    format layout must not produce a user-facing warning; the size stays
+    available on the report for diagnostics.
+    """
+    report = read_createc_dat_report(path, include_raw=False)
+
+    assert 0 < report.ignored_tail_float_count <= 4 * report.original_Nx + 32
+    assert not any("trailing float32" in w for w in report.warnings)
+
+    scan = load_scan(path)
+    assert not any("trailing float32" in w for w in scan.warnings)
+
+
+def test_oversized_tail_still_warns(tmp_path):
+    """A tail beyond the known appendix budget means payload the reader does
+    not understand and must stay loud."""
+    dat = tmp_path / "oversized_tail.dat"
+    header = b"[Paramco32]\nNum.X=2\nNum.Y=2\nChannels=2\n"
+    # 2 channels of (2,2) pixels = 8 floats, then 41 tail floats: one more
+    # than the 4*Nx + 32 = 40 appendix budget.
+    payload = np.arange(1, 50, dtype="<f4").tobytes()
+    dat.write_bytes(header + b"DATA" + zlib.compress(payload))
+
+    report = read_createc_dat_report(dat, include_raw=False)
+
+    assert report.detected_channel_count == 2
+    assert report.ignored_tail_float_count == 41
+    assert any("trailing float32" in w for w in report.warnings)
 
 
 def test_anonymized_qplus_fixture_decodes_all_10_channels():
