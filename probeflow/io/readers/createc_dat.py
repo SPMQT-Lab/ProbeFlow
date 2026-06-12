@@ -37,6 +37,17 @@ from probeflow.io.common import (
     z_scale_m_per_dac,
 )
 
+# Createc writes a small appendix after the image planes: four spare
+# scan-line buffers (4 * Nx floats, zero-filled apart from an occasional
+# stray turnaround sample), plus a 32-float zero block in newer headers.
+# Every healthy real fixture carries it regardless of channel count, so a
+# tail within this budget is normal format layout, not data loss; it is
+# still recorded as ``ignored_tail_float_count`` on the report.  Only tails
+# larger than the budget indicate payload this reader does not understand
+# and stay loud.
+_TAIL_SCANLINE_BUFFER_COUNT = 4
+_TAIL_TRAILER_FLOAT_COUNT = 32
+
 
 @dataclass(frozen=True)
 class CreatecChannelInfo:
@@ -133,10 +144,12 @@ def read_createc_dat_report(
     num_chan = _detect_channel_count(payload_float_count, Ny, Nx, header)
     needed = num_chan * Ny * Nx
     ignored_tail = payload_float_count - needed
-    if ignored_tail:
+    expected_tail = _TAIL_SCANLINE_BUFFER_COUNT * Nx + _TAIL_TRAILER_FLOAT_COUNT
+    if ignored_tail > expected_tail:
         warnings.append(
             f"ignored {ignored_tail} trailing float32 value(s) after "
-            f"{num_chan} channel(s)"
+            f"{num_chan} channel(s) — more than the expected Createc "
+            f"appendix of {expected_tail} value(s) for this image width"
         )
 
     arr = np.frombuffer(payload, dtype="<f4", count=needed).reshape((num_chan, Ny, Nx))
