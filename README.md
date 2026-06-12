@@ -44,6 +44,42 @@ A typical first session:
 Prefer the command line for inspection, conversion, and batch pipelines? See the
 [command-line guide](docs/cli.md).
 
+## A tour of the GUI
+
+The full walkthrough, with each step spelled out, is in the
+[GUI guide](docs/gui.md).
+
+**Loading images.** Open a folder (`File → Open folder...`) and every
+supported scan and spectrum appears in a thumbnail grid — switch thumbnail
+channel, colormap, and row alignment from the sidebar, then double-click a
+scan to open the image viewer.
+
+![Browse mode with a folder of scans loaded](docs/images/gui_browse.png)
+
+![The image viewer showing a terraced surface](docs/images/gui_viewer.png)
+
+**Subtracting a background.** `Processing → STM scan-line background...`
+(`Ctrl+Alt+B`) fits a per-scan-line background; switch between models
+(linear, polynomial, low-pass, piezo-creep variants) with the dropdown and
+watch the residual plots to judge the fit before applying. A polynomial
+plane fit lives next to it under `Processing → Plane/background
+subtraction...` (`Ctrl+Shift+B`).
+
+![STM scan-line background dialog with a linear fit previewed](docs/images/gui_stm_background.png)
+
+**Performing an FFT.** `Measurements → FFT viewer...` (`Ctrl+Shift+F`)
+shows the spectrum with q-axes in nm⁻¹, intensity controls, and a radial
+profile; the tabs fit a reciprocal lattice, correct drift distortion,
+suppress mains pickup, and reconstruct a filtered image by inverse FFT.
+
+![FFT viewer on a moiré superlattice](docs/images/gui_fft.png)
+
+**Finding features.** `Measurements → Feature finder...` detects maxima or
+minima with threshold, spacing, and smoothing controls, then exports the
+coordinates to CSV or a synthetic feature image for lattice statistics.
+
+![Feature finder marking the minima of a moiré superlattice](docs/images/gui_feature_finder.png)
+
 ## Main features
 
 ProbeFlow is honest about being a focused toolkit rather than a do-everything
@@ -149,6 +185,7 @@ dzdv = numeric_derivative(spec.x_array, z_smooth)
 
 ## Documentation
 
+- [GUI guide](docs/gui.md)
 - [Command-line guide](docs/cli.md)
 - [Createc `.dat` reader notes](docs/createc_dat_reader.md)
 - [ROI manual workflow checklist](docs/roi_manual_test_checklist.md)
