@@ -34,8 +34,6 @@ BROWSE_FIXTURES = [
 ]
 
 VIEWER_FIXTURE = "createc_scan_terrace_109nm.dat"
-FFT_FIXTURE = "sxm_moire_10nm.sxm"
-FEATURE_FIXTURE = "sxm_moire_10nm.sxm"
 
 
 def _settle(app, seconds: float = 2.0) -> None:
@@ -75,7 +73,6 @@ def main() -> int:
 
     app = QApplication.instance() or QApplication(sys.argv)
 
-    from probeflow.core.scan_loader import load_scan
     from probeflow.gui.models import SxmFile
     from probeflow.gui.styling import THEMES, _build_palette, _build_qss
 
@@ -115,52 +112,6 @@ def main() -> int:
         _grab(dlg, "gui_stm_background.png")
         dlg.close()
     viewer.close()
-    _settle(app, 0.5)
-
-    # ── 4. FFT viewer on an atomic-resolution scan ─────────────────────────────
-    from probeflow.gui.dialogs.fft_viewer import FFTViewerDialog
-
-    from probeflow.processing.alignment import align_rows
-    from probeflow.processing.background import subtract_background
-
-    scan = load_scan(scans / FFT_FIXTURE)
-    # The FFT viewer is normally opened on the processed image; mirror that
-    # by levelling the raw plane first so the Bragg peaks are visible.
-    arr = subtract_background(align_rows(scan.planes[0], "median"), order=1)
-    fft = FFTViewerDialog(arr, scan.scan_range_m, "gray", theme)
-    fft.resize(1280, 820)
-    fft.show()
-    _settle(app, 2.0)
-    # Zoom in on the spectral content, as a user inspecting Bragg peaks would.
-    fft._zoom_by(0.25)
-    _settle(app, 2.0)
-    _grab(fft, "gui_fft.png")
-    fft.close()
-    _settle(app, 0.5)
-
-    # ── 5. Feature finder with a detection run ─────────────────────────────────
-    from probeflow.gui.dialogs.feature_finder import FeatureFinderDialog
-
-    fscan = load_scan(scans / FEATURE_FIXTURE)
-    farr = subtract_background(align_rows(fscan.planes[0], "median"), order=1)
-    w_m, h_m = fscan.scan_range_m
-    px_x = w_m / farr.shape[1]
-    px_y = h_m / farr.shape[0]
-    finder = FeatureFinderDialog(
-        farr, pixel_size_x_m=px_x, pixel_size_y_m=px_y, theme=theme)
-    finder.resize(1100, 700)
-    finder.show()
-    _settle(app, 1.0)
-    # Detect the dark moiré sites: minima, smoothed a little, with a minimum
-    # spacing so each site is found once — the settings a user would dial in.
-    finder._minima_btn.click()
-    finder._below_btn.click()
-    finder._smooth_spin.setValue(2.0)
-    finder._dist_spin.setValue(8.0)
-    finder._run_detection()
-    _settle(app, 2.0)
-    _grab(finder, "gui_feature_finder.png")
-    finder.close()
     _settle(app, 0.5)
 
     shutil.rmtree(tmp, ignore_errors=True)
