@@ -241,7 +241,7 @@ class ImageViewerChromeMixin:
         processing_menu.addSeparator()
         self._add_combo_menu(
             processing_menu, "Align rows", self._processing_panel._align_combo,
-            ["None", "Median", "Mean"],
+            ["None", "Median", "Mean", "Linear"],
         )
         self._add_combo_menu(
             processing_menu, "Bad line correction", self._processing_panel._bad_lines_combo,
