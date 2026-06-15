@@ -25,6 +25,7 @@ class _DefinitionEntry:
     params: tuple[str, ...]
     summary: str
     equations: tuple[str, ...]
+    in_practice: str = ""
     details: tuple[str, ...] = ()
     cautions: tuple[str, ...] = ()
 
@@ -52,57 +53,70 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
         ),
         summary=(
             "An STM image is built one row at a time as the tip sweeps back and "
-            "forth. Sometimes the tip glitches part-way along a row and leaves a "
-            "short bright or dark streak that is not real surface. This tool finds "
-            "those short damaged stretches by comparing each row with the rows just "
-            "above and below it, then repairs only the bad stretch by copying from "
-            "its healthy neighbours. Everything else in the image is left exactly "
-            "as measured."
+            "forth. Sometimes the tip glitches and a stretch of a row reads too "
+            "bright or too dark — anything from a short spark to a long, faint "
+            "streak that is not real surface. This tool finds those damaged "
+            "stretches by comparing each row with the rows just above and below "
+            "it, then repairs only the bad stretch by copying from its healthy "
+            "neighbours. Everything else in the image is left exactly as measured."
+        ),
+        in_practice=(
+            "Click 'Preview detection' first, then lower the threshold until only "
+            "the real streaks light up. Use 'mad' for long, faint lines and 'step' "
+            "for short, sharp scars, and set 'polarity' to bright or dark to match "
+            "the streaks you see."
         ),
         equations=(
             "MADN(v) = 1.4826 * median(|v - median(v)|)\n"
             "b_i[j] = per-column median over nearby finite row samples\n"
-            "r_i[j] = z_i[j] - b_i[j]\n\n"
+            "r_i[j] = z_i[j] - b_i[j]   (residual vs neighbouring rows)\n\n"
             "segment convention:\n"
             "  S = [j0, j1) spans columns k where j0 <= k < j1\n"
             "  reject S when length(S) < min_segment_length_px\n\n"
-            "step mode:\n"
+            "step mode (sharp, short scars):\n"
             "  d_i[j] = r_i[j+1] - r_i[j]\n"
             "  cutoff = threshold_mad * MADN(d)\n"
             "  bright segment S=(j0:j1) requires d_i[j0-1] > cutoff and d_i[j1-1] < -cutoff\n"
             "  dark segment reverses those signs\n\n"
-            "mad mode:\n"
-            "  cutoff = threshold_mad * MADN(r)\n"
-            "  bright: r_i[j] - median(r_i) > cutoff\n"
-            "  dark:   r_i[j] - median(r_i) < -cutoff\n\n"
+            "mad mode (extended bright/dark lines, matched filter):\n"
+            "  s_i = smooth_along_row(r_i, window ~ 11 px)\n"
+            "  cutoff = threshold_mad * MADN(s)\n"
+            "  bright: s_i[j] > cutoff;   dark: s_i[j] < -cutoff\n"
+            "  bridge sub-threshold gaps <= ~4 px, then keep a run S only when\n"
+            "    length(S) >= min_segment_length_px and median(s on S) clears cutoff\n"
+            "  (no per-row median subtraction, and no upper length cap)\n\n"
             "repair:\n"
-            "  skip connected bad-row groups wider than max_adjacent_bad_lines\n"
+            "  skip a vertical stack of column-overlapping bad segments taller than\n"
+            "    max_adjacent_bad_lines consecutive rows\n"
             "  above/below neighbours must be finite on S and not marked bad on S\n"
             "  z'_i,S = 0.5 * (z_above,S + z_below,S) when both neighbours are valid\n"
             "  z'_i,S = nearest valid neighbour segment when only one side is valid",
         ),
         details=(
             "Two modes find the bad stretches. 'step' looks for a sudden jump up "
-            "and a matching jump back down, which is what a glitch streak looks "
-            "like. 'mad' simply flags pixels that sit far from the typical value "
-            "for that row. 'Polarity' tells it whether you are chasing bright "
-            "(too-high) or dark (too-low) streaks. The threshold is measured in "
-            "robust noise units (MAD), so a value of 3 means 'about three times "
-            "the usual row noise'.",
+            "and a matching jump back down — the signature of a short, sharp scar. "
+            "'mad' is built for extended lines: it compares each row to its "
+            "neighbours and, after smoothing along the row so a long faint streak "
+            "rises above the pixel noise, flags runs that stay too bright (or too "
+            "dark). 'Polarity' tells it whether you are chasing bright (too-high) "
+            "or dark (too-low) streaks. The threshold is measured in robust noise "
+            "units (MAD), so a value of 3 means 'about three times the usual "
+            "noise'.",
             "Minimum segment length ignores single-pixel speckle, so only genuine "
             "stretches are touched. Maximum adjacent bad lines is a safety brake: "
-            "if a whole block of neighbouring rows is damaged there are no healthy "
-            "neighbours to copy from, so the tool leaves that block alone rather "
-            "than guessing.",
+            "where many neighbouring rows are bad in the same columns there is no "
+            "healthy neighbour to copy from, so the tool leaves that overlapping "
+            "block alone rather than guessing — but streaks on adjacent rows in "
+            "different parts of the image are still repaired independently.",
             "Use 'Preview detection' first — it highlights what would be repaired "
             "without changing the data. Only 'Apply' edits the image, and even "
             "then only the accepted stretches change.",
         ),
         cautions=(
-            "This fixes local streaks, not whole-row level differences. Do not use "
-            "it to flatten real terrace steps or step edges — those are genuine "
-            "surface features, and row levelling (below) is the right tool if you "
-            "want to remove row-to-row offsets.",
+            "It repairs stretches that disagree with the neighbouring rows, so do "
+            "not point it at genuine surface features — real terraces and step "
+            "edges would be 'corrected' away. For systematic row-to-row level "
+            "offsets, use row levelling (below) instead.",
         ),
     ),
     _DefinitionEntry(
@@ -116,6 +130,11 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "'linear' option also removes a gentle tilt within each row. This is "
             "usually the first cleanup step, done before background subtraction or "
             "filtering."
+        ),
+        in_practice=(
+            "Reach for this first, almost every time. Leave it on 'median' unless "
+            "the rows are very clean; switch to 'linear' when the rows are tilted, "
+            "not just offset."
         ),
         equations=(
             "median: z'_i,j = z_i,j - median_j(z_i,j)\n"
@@ -156,6 +175,11 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "you care about are left sitting on a flat, level background. Order 1 "
             "removes a flat tilt (a plane); higher orders remove gentle curvature "
             "or bowing."
+        ),
+        in_practice=(
+            "Start with order 1 (a flat tilt) — it fixes most scans. Go higher "
+            "only for visible bowing, and draw a 'fit ROI' on clean background (or "
+            "'exclude ROI' over tall features) so islands don't drag the fit."
         ),
         equations=(
             "normalised coordinates: x, y in [-1, 1]\n"
@@ -209,6 +233,11 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "every row, flattening that top-to-bottom trend while leaving the "
             "side-to-side detail intact. It is the STM-specific complement to the "
             "polynomial background above, which works in both directions at once."
+        ),
+        in_practice=(
+            "Use it when the image ramps or bows from top to bottom. Try 'linear' "
+            "or 'low_pass' first; reach for a 'creep' model right after a big tip "
+            "move. Fit from a clean-background ROI when tall features are present."
         ),
         equations=(
             "optional x prefit per row:\n"
@@ -266,8 +295,13 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "Smooths the image by blending each pixel with its neighbours, "
             "weighting nearby pixels more than distant ones (a Gaussian, or "
             "bell-curve, weighting). This softens random pixel noise so faint, "
-            "broad features stand out. 'sigma_px' is the blur radius in pixels — "
-            "larger values blur more."
+            "broad features stand out. 'sigma_px' is the Gaussian width (its "
+            "standard deviation) in pixels — larger values blur more."
+        ),
+        in_practice=(
+            "Use a small sigma (about 0.5–1.5 px) to calm pixel noise without "
+            "erasing detail. The kernel reaches roughly ±4 sigma, so sigma is a "
+            "width, not a hard edge — start small and increase only if needed."
         ),
         equations=(
             "G_sigma(x,y) = exp(-(x^2 + y^2) / (2*sigma_px^2))\n"
@@ -293,7 +327,13 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "(the broad, slowly-varying part) and subtracts it, leaving only the "
             "fine, fast-changing detail. This is a quick way to flatten an uneven "
             "background and pop out small features like atoms or edges. 'sigma_px' "
-            "sets the scale — anything broader than this blur radius is removed."
+            "sets the scale — anything broader than this width is removed."
+        ),
+        in_practice=(
+            "Use it to flatten an uneven background and bring out small features. "
+            "Pick a sigma larger than the features you want to keep. Afterwards the "
+            "heights of big features are no longer trustworthy — it is for "
+            "visualising, not for measuring step heights."
         ),
         equations=(
             "background = GaussianSmooth(z, sigma_px)\n"
@@ -324,6 +364,11 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "edges to a common level, because the FFT secretly assumes the image "
             "tiles edge-to-edge, and a hard jump between opposite edges would "
             "create ripples across the result."
+        ),
+        in_practice=(
+            "Low-pass to smooth, high-pass to sharpen. Start near the default "
+            "cutoff and change one setting at a time while watching the preview; "
+            "raise 'border_frac' only if you see ripples near the edges."
         ),
         equations=(
             "m = mean_finite(z)\n"
@@ -367,6 +412,11 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "this for a quick filter; choose the soft-border version when keeping "
             "edge heights exactly right matters."
         ),
+        in_practice=(
+            "The quick FFT filter: low-pass to smooth, high-pass to sharpen. Add a "
+            "'hanning' window to soften ringing; switch to the soft-border version "
+            "when heights near the image border must stay exact."
+        ),
         equations=(
             "m = mean_finite(z)\n"
             "F(kx,ky) = fftshift(fft2((z_fill - m) * window))\n"
@@ -399,6 +449,12 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "and dim them, which removes that one periodic pattern from the image "
             "while leaving everything else. It is the precise way to kill a "
             "specific stripe or ripple without blurring the whole picture."
+        ),
+        in_practice=(
+            "Use it to remove one repeating ripple — mains interference or a "
+            "lattice — by clicking its bright FFT spots. Keep 'radius_px' small so "
+            "you only touch the spot, and keep an unfiltered copy if you still need "
+            "to measure that pattern."
         ),
         equations=(
             "m = mean_finite(z)\n"
@@ -434,6 +490,11 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "up, with opposite signs on the two sides of an edge. Useful for "
             "seeing shapes and boundaries clearly."
         ),
+        in_practice=(
+            "Use it to outline islands and steps, not to read heights. On noisy "
+            "data prefer 'LoG' or 'DoG' over the plain Laplacian, and raise 'sigma' "
+            "to choose the feature size you want to highlight."
+        ),
         equations=(
             "laplacian: z' = Laplacian(z)\n"
             "LoG:       z' = Laplacian(G_sigma * z)\n"
@@ -465,6 +526,11 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "that spot the new zero (everything is measured relative to it), or "
             "click three points on what should be a flat surface to define a "
             "level reference plane and remove an overall tilt by hand."
+        ),
+        in_practice=(
+            "Use it to set a trustworthy zero by hand: one click for a point zero, "
+            "or three clicks on a surface that should be flat for a level plane. "
+            "Pick clean, flat spots — not molecules, tip crashes, or step edges."
         ),
         equations=(
             "point reference:\n"
@@ -508,6 +574,11 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "It is a general-purpose building block rather than a specific "
             "correction."
         ),
+        in_practice=(
+            "A building block: subtract one scan from another to see what changed, "
+            "or add/scale by a constant. To only brighten the view, use the display "
+            "sliders instead — this rewrites the real measured values."
+        ),
         equations=(
             "constant operand:\n"
             "  add/subtract: z' = z +/- value_si\n"
@@ -544,6 +615,11 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "a height. Bit-depth conversion rounds the heights onto a fixed number "
             "of levels (256 for 8-bit, 65536 for 16-bit), as if re-digitising the "
             "image more coarsely."
+        ),
+        in_practice=(
+            "Use 'clip' to keep only a height band, or 'binarize' to make a 1/0 "
+            "mask of everything above a height (handy for counting islands). Both "
+            "throw data away, so keep an unprocessed copy."
         ),
         equations=(
             "threshold clip:\n"
@@ -591,6 +667,12 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "The program keeps the physical scale bar correct as the image size "
             "changes."
         ),
+        in_practice=(
+            "Flips and right-angle rotations are exact and lossless; arbitrary "
+            "rotation, shear and rescale interpolate and slightly change values, so "
+            "use them for presentation rather than fine measurement. The scale bar "
+            "is kept correct automatically."
+        ),
         equations=(
             "lossless transforms:\n"
             "  flip_horizontal, flip_vertical, rotate_90_cw,\n"
@@ -635,6 +717,12 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "lattice correction' gently warps the image so a measured atomic "
             "lattice matches its ideal geometry, undoing drift-induced distortion."
         ),
+        in_practice=(
+            "Advanced FFT corrections, usually driven from the FFT viewer. Always "
+            "check the preview and keep an uncorrected copy — because they work in "
+            "the FFT they can remove genuine periodic signal along with the "
+            "artifact."
+        ),
         equations=(
             "mains pickup suppression:\n"
             "  predict harmonics from scan_speed, scan_range, mains_frequency\n"
@@ -677,6 +765,11 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "two axes consistent. It rebuilds the image by sampling the original "
             "at the shifted positions."
         ),
+        in_practice=(
+            "Use it to straighten a steady sideways drift ('shear_x') or to fix an "
+            "x-versus-y pixel-size mismatch ('scale_y'). It reshapes geometry, not "
+            "height — don't use it to level or flatten."
+        ),
         equations=(
             "for output pixel (y, x):\n"
             "  src_y = y / scale_y\n"
@@ -707,6 +800,11 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "backward pass runs in reverse, it is flipped left-to-right first so "
             "the same physical point lines up, then the two are averaged."
         ),
+        in_practice=(
+            "Average the forward and backward passes (weight 0.5) to cut random "
+            "noise. The two planes must be the same size and cover the same scan "
+            "area so they line up point-for-point."
+        ),
         equations=(
             "b_mirror[i,j] = bwd[i, Nx - 1 - j]\n"
             "z'_i,j = weight * fwd_i,j + (1 - weight) * b_mirror_i,j\n"
@@ -734,9 +832,14 @@ _ROI_REFERENCE_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "small companion file saved next to the scan, so your regions are still "
             "there when you reopen it. Two ideas matter throughout: the 'active' "
             "ROI (the one currently highlighted, which canvas editing acts on) and "
-            "the ROI Manager 'selection' (one or more ROIs ticked in the ROI tab's "
+            "the ROI Manager 'selection' (one or more ROIs ticked in the ROI/Mask tab's "
             "list). When you run a tool, it uses that selection if you have one, "
             "otherwise it falls back to the active ROI."
+        ),
+        in_practice=(
+            "Draw a region and most tools act on it. Tick several ROIs in the "
+            "ROI/Mask tab to act on them all at once; with none ticked, the "
+            "highlighted (active) ROI is used. Regions are saved automatically."
         ),
         equations=(
             "coordinate convention:\n"
@@ -775,6 +878,11 @@ _ROI_REFERENCE_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "to select it, drag to pan, and Ctrl+scroll to zoom — no need to think "
             "about it."
         ),
+        in_practice=(
+            "Press a letter then draw — R rectangle, E ellipse, L line, P point, "
+            "G polygon, F freehand — and the viewer snaps back to the cursor. Press "
+            "Escape to cancel a half-drawn shape."
+        ),
         equations=(
             "shortcuts (press the key, then draw):\n"
             "  R rectangle · E ellipse · L line · P point · G polygon · F freehand\n\n"
@@ -810,6 +918,11 @@ _ROI_REFERENCE_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "stray click never accidentally drags the wrong shape. Renaming, "
             "deleting, copying, and duplicating live in the ROI Manager and the "
             "right-click menu."
+        ),
+        in_practice=(
+            "Click once to select (handles appear), then drag the shape or a handle "
+            "to reshape it. Hold Shift on a corner to keep proportions. Rename, "
+            "delete, copy and duplicate from the right-click menu or ROI Manager."
         ),
         equations=(
             "selection and movement:\n"
@@ -851,6 +964,11 @@ _ROI_REFERENCE_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "apply a filter to just one region, measure statistics inside it, take "
             "an FFT of only that area, or combine regions with set operations. They "
             "are the workhorse ROI for analysing part of a scan."
+        ),
+        in_practice=(
+            "Draw an area, then right-click it to filter just that region, measure "
+            "statistics, take an FFT, or combine shapes. Select exactly two areas "
+            "for a step-height measurement between them."
         ),
         equations=(
             "area mask kinds:\n"
@@ -896,6 +1014,11 @@ _ROI_REFERENCE_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "line is active, the profile panel under the image updates live as you "
             "move it, so you can drag the line and watch the cross-section change."
         ),
+        in_practice=(
+            "Draw a line across a step or feature to read its height profile in the "
+            "panel below, and drag it to watch the cross-section update. Increase "
+            "the line width to average out noise."
+        ),
         equations=(
             "line geometry:\n"
             "  p1 = (x1, y1), p2 = (x2, y2)\n"
@@ -934,6 +1057,11 @@ _ROI_REFERENCE_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "list of locations. Think of points as labelled pins rather than "
             "regions."
         ),
+        in_practice=(
+            "Drop points on features you want to record or feed to the feature "
+            "tools (pair-correlation, lattice matching). Copy a point's coordinates "
+            "from its right-click menu. Points can't act as a region mask."
+        ),
         equations=(
             "point geometry:\n"
             "  point = (x, y) in pixel coordinates\n"
@@ -966,6 +1094,12 @@ _ROI_REFERENCE_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "remember to save. Tools that refer to an ROI look it up at the moment "
             "they run, which means the result reflects the ROI as it is then, not "
             "as it was when you set the tool up."
+        ),
+        in_practice=(
+            "You never have to save ROIs — they are written next to the scan as you "
+            "go. Just remember that a step which references an ROI will follow that "
+            "ROI if you move or reshape it later, so leave it be once a step depends "
+            "on it."
         ),
         equations=(
             "persistence:\n"
@@ -1056,7 +1190,7 @@ _HOWTO_ENTRIES: tuple[_HowToEntry, ...] = (
             "Click a shape to select it — it lights up as you hover so you can see "
             "what a click will pick — and the selected ROI shows handles you can "
             "drag to reshape it.",
-            "Open the ROI tab, which holds the ROI Manager, to see every ROI, "
+            "Open the ROI/Mask tab, which holds the ROI Manager, to see every ROI, "
             "rename them, set which one is active, or select several at once.",
             "To delete, select an ROI and press Delete or Backspace, or use Delete "
             "in the ROI Manager (which can remove several selected ROIs at once).",
@@ -1174,12 +1308,12 @@ _HOWTO_ENTRIES: tuple[_HowToEntry, ...] = (
     ),
     _HowToEntry(
         title="Fix scan-line glitches (bad-line correction)",
-        goal="Remove short bright or dark streaks left when the tip glitches "
-             "part-way along a row.",
+        goal="Remove bright or dark streaks — short sparks or long faint lines — "
+             "left when the tip glitches along a row.",
         steps=(
             "In the Process tab, open the bad-line controls and choose a method "
-            "(step or mad) and a polarity (bright or dark) to match the streaks "
-            "you see.",
+            "and a polarity (bright or dark) to match the streaks you see: 'mad' "
+            "for long faint lines, 'step' for short sharp scars.",
             "Click 'Preview detection' to highlight what would be repaired — "
             "nothing is changed yet.",
             "Adjust the threshold (measured in robust noise units) until only the "
@@ -1188,8 +1322,9 @@ _HOWTO_ENTRIES: tuple[_HowToEntry, ...] = (
             "neighbouring rows.",
         ),
         notes=(
-            "This patches short local streaks only; it will not flatten real step "
-            "edges or terraces. Use row alignment or a background fit for those.",
+            "This patches streaks that differ from the rows around them; it will "
+            "not flatten real step edges or terraces. Use row alignment or a "
+            "background fit for those.",
         ),
     ),
     _HowToEntry(
@@ -1244,8 +1379,10 @@ _HOWTO_ENTRIES: tuple[_HowToEntry, ...] = (
             "spacing and angle. 'Show shell rings' draws the radii those spots "
             "should sit at for a known lattice, so a correct grid lines up with "
             "the rings.",
-            "The Expert tab exposes the ideal-lattice settings, interpolation "
-            "choice, and scanner-calibration helpers if you need finer control.",
+            "The Correction tab also exposes the ideal (target) lattice, the "
+            "interpolation choice, and a suggested piezo calibration if you need "
+            "finer control. Make sure the target lattice matches the spacing you "
+            "set for the Bragg rings / known structure.",
         ),
         tips=(
             "If the spots are hard to see, push the minimum slider up and the "
@@ -1385,6 +1522,10 @@ def _render_entry(entry: _DefinitionEntry, *, block_label: str = "Operation") ->
     blocks.append(f"<h2>{escape(entry.title)}</h2>")
     blocks.append(_render_params(entry.params))
     blocks.append(f"<p>{escape(entry.summary)}</p>")
+    if entry.in_practice:
+        blocks.append(
+            f'<p class="lead"><b>In practice:</b> {escape(entry.in_practice)}</p>'
+        )
     for equation in entry.equations:
         blocks.append(f'<p class="label">{escape(block_label)}</p>')
         blocks.append(f'<pre class="equation">{escape(equation)}</pre>')
@@ -1454,6 +1595,14 @@ def _reference_document(
       color: {p["muted"]};
       font-style: italic;
       margin: 0 0 6px 0;
+  }}
+  .lead {{
+      color: {p["heading"]};
+      background-color: {p["equation_bg"]};
+      border-left: 3px solid {p["keyword"]};
+      padding: 6px 10px;
+      margin: 6px 0 9px 0;
+      line-height: 1.45;
   }}
   .param {{
       color: {p["param"]};
