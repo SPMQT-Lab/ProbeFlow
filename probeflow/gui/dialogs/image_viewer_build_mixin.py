@@ -312,18 +312,20 @@ class ImageViewerBuildMixin:
             "processing", "Process",
             "Line corrections, background subtraction, filters and FFT tools.",
         )
-        _roi_tab, roi_lay = _sidebar_tab(
-            "roi", "ROI",
-            "Create, edit and combine regions of interest.",
-        )
-        _masks_tab, masks_lay = _sidebar_tab(
-            "masks", "Masks",
-            "Active mask layer: edge-detection output, cleanup, and conversion to ROIs.",
-        )
         _measurements_tab, measurements_lay = _sidebar_tab(
             "measurements", "Measure",
             "Distances, angles, ROI statistics, features and results.",
         )
+        # ROI and Masks share one tab; each is a collapsible section (built when
+        # the panels are created, below).
+        _roimask_tab, roimask_lay = _sidebar_tab(
+            "roi", "ROI/Mask",
+            "Regions of interest and the active mask layer (edge-detection "
+            "output, cleanup, conversion to ROIs).",
+        )
+        # Legacy alias so any "masks" navigation lands on the merged tab; no extra
+        # rail entry (the rail is driven by _sidebar_tab_meta only).
+        self._sidebar_tab_indices["masks"] = self._sidebar_tab_indices["roi"]
         _export_tab, export_lay = _sidebar_tab(
             "export", "Export",
             "Save images (PNG/PDF/SXM/GWY), provenance and hand-off to tools.",
@@ -787,9 +789,8 @@ class ImageViewerBuildMixin:
         roi_hint_lbl.setFont(ui_font(8))
         roi_hint_lbl.setWordWrap(True)
         roi_hint_lbl.setStyleSheet("color: palette(mid);")
-        roi_lay.addWidget(roi_hint_lbl)
-        # The ROI manager panel itself is added to ``roi_lay`` after it is
-        # constructed below (it needs the ROI-set getter and callbacks).
+        # The hint and the ROI manager panel are added to the ROI collapsible
+        # section of the "ROI/Mask" tab after the panel is constructed below.
 
         # The Measure tab is driven entirely by the ImageMeasurementsPanel's own
         # tool menu (added to ``measurements_lay`` after it is constructed below);
@@ -831,8 +832,8 @@ class ImageViewerBuildMixin:
         rail_lay.addWidget(rail_sep)
 
         _rail_abbrev = {
-            "View": "View", "Process": "Proc", "ROI": "ROI",
-            "Measure": "Meas", "Export": "Exp",
+            "View": "View", "Process": "Proc", "Measure": "Meas",
+            "ROI/Mask": "R/M", "Export": "Exp",
         }
         for _key, _label, _tip in self._sidebar_tab_meta:
             rail_btn = QToolButton()
@@ -956,18 +957,30 @@ class ImageViewerBuildMixin:
         )
         self._mask_panel.setObjectName("imageViewerMaskManagerPanel")
 
+        # ROI and Masks share the "ROI/Mask" tab as two collapsible sections
+        # (same pattern as the View tab's "Spectroscopy overlay"). ROI is open by
+        # default; Masks starts collapsed.
+        _roi_btn, _roi_body, roi_section_lay = _collapsible_section(
+            roimask_lay, "Regions of interest", expanded=True
+        )
+        roi_section_lay.addWidget(roi_hint_lbl)
+        roi_section_lay.addWidget(self._roi_panel, 1)
+
+        self._mask_section_btn, _mask_body, mask_section_lay = _collapsible_section(
+            roimask_lay, "Masks", expanded=False
+        )
         mask_hint = QLabel(
             "Masks come from Advanced Edge Detection (Process tab). The active "
             "mask (●) restricts statistics and can become ROI(s)."
         )
         mask_hint.setWordWrap(True)
         mask_hint.setFont(ui_font(8))
-        masks_lay.addWidget(mask_hint)
-        masks_lay.addWidget(self._mask_panel, 1)
+        mask_section_lay.addWidget(mask_hint)
+        mask_section_lay.addWidget(self._mask_panel, 1)
+        roimask_lay.addStretch(1)
 
-        # ROI manager and measurements now live in their sidebar tabs (built
-        # above) rather than in separate floating docks.
-        roi_lay.addWidget(self._roi_panel, 1)
+        # Measurements now lives in its sidebar tab (built above) rather than in a
+        # separate floating dock.
         measurements_lay.addWidget(self._measurement_panel, 1)
 
         # Manager for floating, dismissible tool panels over the canvas.

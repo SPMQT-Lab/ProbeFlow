@@ -188,6 +188,31 @@ def test_viewer_full_panel_round_trips_standard_processing_state(qapp):
     )
 
 
+def test_sidebar_merges_roi_mask_and_orders_tabs(qapp, monkeypatch):
+    from probeflow.gui import ImageViewerDialog, SxmFile, THEMES
+
+    monkeypatch.setattr(ImageViewerDialog, "_load_current", lambda self: None)
+    entry = SxmFile(path=Path("/tmp/example.sxm"), stem="example", Nx=8, Ny=8)
+    dlg = ImageViewerDialog(entry, [entry], "gray", THEMES["dark"])
+    try:
+        tabs = dlg._sidebar_tabs
+        assert [tabs.tabText(i) for i in range(tabs.count())] == [
+            "View", "Process", "Measure", "ROI/Mask", "Export",
+        ]
+        # The old "masks" key aliases onto the merged tab (no separate tab).
+        assert dlg._sidebar_tab_indices["masks"] == dlg._sidebar_tab_indices["roi"]
+        # ROI section open, Masks section collapsed by default.
+        assert dlg._mask_section_btn.isChecked() is False
+        # Navigating to "masks" selects the merged tab and reveals the section.
+        dlg._show_sidebar_tab("masks")
+        assert tabs.tabText(tabs.currentIndex()) == "ROI/Mask"
+        assert dlg._mask_section_btn.isChecked() is True
+    finally:
+        dlg.close()
+        dlg.deleteLater()
+        qapp.processEvents()
+
+
 def test_format_gaussian_readout_pure():
     from probeflow.gui.processing import format_gaussian_readout
 
