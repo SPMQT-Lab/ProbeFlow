@@ -120,6 +120,37 @@ def test_howto_reference_has_numbered_steps_and_key_workflows():
         assert expected in html, expected
 
 
+def test_measurements_reference_has_entries_and_formulas():
+    from probeflow.gui.dialogs.definitions import (
+        _MEASUREMENT_ENTRIES,
+        render_measurements_html,
+    )
+    from probeflow.gui.styling import THEMES
+
+    html = render_measurements_html(THEMES["light"])
+
+    # Every measurement entry renders an equation block and an "In practice" lead.
+    assert html.count('class="equation"') >= len(_MEASUREMENT_ENTRIES)
+    assert html.count("In practice:") >= len(_MEASUREMENT_ENTRIES)
+
+    for expected in (
+        "Measurements Reference",
+        "Distance",
+        "Angle",
+        "Line profile",
+        "Line periodicity",
+        "ROI statistics",
+        "Step height",
+        "Feature maxima",
+        "Pair correlation",
+        "Feature → lattice",
+        # A couple of formulas must match the implementation.
+        "rms_roughness = sqrt(mean((z - mean(z))^2))",
+        "height_difference = mean_b - mean_a",
+    ):
+        assert expected in html, expected
+
+
 def test_definitions_dialog_tabs_can_focus_howto_processing_and_roi(qapp):
     from probeflow.gui.dialogs.definitions import _DefinitionsDialog
     from probeflow.gui.styling import THEMES
@@ -127,18 +158,22 @@ def test_definitions_dialog_tabs_can_focus_howto_processing_and_roi(qapp):
     default = _DefinitionsDialog(THEMES["light"])
     roi_first = _DefinitionsDialog(THEMES["light"], initial_tab="roi")
     howto_first = _DefinitionsDialog(THEMES["light"], initial_tab="howto")
+    measure_first = _DefinitionsDialog(THEMES["light"], initial_tab="measurements")
     try:
         assert default.current_reference_tab() == "processing"
         default.set_reference_tab("roi")
         assert default.current_reference_tab() == "roi"
+        default.set_reference_tab("measurements")
+        assert default.current_reference_tab() == "measurements"
         default.set_reference_tab("howto")
         assert default.current_reference_tab() == "howto"
         default.set_reference_tab("processing")
         assert default.current_reference_tab() == "processing"
         assert roi_first.current_reference_tab() == "roi"
         assert howto_first.current_reference_tab() == "howto"
+        assert measure_first.current_reference_tab() == "measurements"
     finally:
-        for dlg in (default, roi_first, howto_first):
+        for dlg in (default, roi_first, howto_first, measure_first):
             dlg.close()
             dlg.deleteLater()
         qapp.processEvents()

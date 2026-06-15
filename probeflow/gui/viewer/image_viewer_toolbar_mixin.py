@@ -39,6 +39,17 @@ class ImageViewerToolbarMixin:
         dlg.raise_()
         dlg.activateWindow()
 
+    def _show_viewer_measurements(self) -> None:
+        dlg = getattr(self, "_definitions_dialog", None)
+        if dlg is None:
+            dlg = _DefinitionsDialog(self._t, self, initial_tab="measurements")
+            self._definitions_dialog = dlg
+        else:
+            dlg.set_reference_tab("measurements")
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+
     def _show_viewer_roi_reference(self) -> None:
         dlg = getattr(self, "_definitions_dialog", None)
         if dlg is None:

@@ -134,6 +134,11 @@ VIEWER_COMMANDS: tuple[ViewerCommand, ...] = (
     ViewerCommand("help.howto", "How-to guides", "Help", status_tip="Show step-by-step how-to walkthroughs for common tasks.", aliases=("tutorial", "guide", "walkthrough", "getting started")),
     ViewerCommand("help.definitions", "Definitions", "Help", status_tip="Show processing definitions and equations.", aliases=("reference", "math", "algorithms")),
     ViewerCommand(
+        "help.measurements", "Measurements Reference", "Help",
+        status_tip="Show what each measurement computes (distance, step height, roughness, …).",
+        aliases=("measure", "measurement", "stats", "step height", "roughness"),
+    ),
+    ViewerCommand(
         "help.roi_reference", "ROI Reference", "Help",
         status_tip="Show ROI actions, selection rules, and tool interactions.",
         aliases=("roi", "mask", "active roi", "selection"),

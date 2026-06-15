@@ -506,6 +506,11 @@ class ImageViewerChromeMixin:
             self._show_viewer_definitions,
         )
         help_menu.insertAction(github_action, definitions_action)
+        measurements_help_action = self._viewer_action(
+            "help.measurements",
+            self._show_viewer_measurements,
+        )
+        help_menu.insertAction(github_action, measurements_help_action)
         roi_reference_help_action = self._viewer_action(
             "help.roi_reference",
             self._show_viewer_roi_reference,
