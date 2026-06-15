@@ -36,6 +36,13 @@ from probeflow.gui.lattice_correction_ui import (
 )
 from PySide6.QtWidgets import QFileDialog, QInputDialog, QWidget
 
+# A genuine lattice correction is a few-percent tweak.  Flag corrections whose
+# principal scale factors fall outside this band — they almost always indicate a
+# mismatched ideal/target lattice (stale preset, or Å/nm unit error) rather than
+# real piezo distortion, and would silently resample the image.
+_CORRECTION_SCALE_MIN = 0.5
+_CORRECTION_SCALE_MAX = 2.0
+
 
 class FFTViewerLatticeMixin:
     """Known-structure presets, reciprocal-grid measurement, and affine correction."""
@@ -273,7 +280,16 @@ class FFTViewerLatticeMixin:
         }.get(structure.symmetry if isinstance(structure, KnownStructure) else "", "")
         if isinstance(structure, KnownStructure) and combo == structure_combo:
             ideal = ideal_lattice_from_structure(structure, measured_angle_deg=angle)
-            values = (ideal.a_nm, ideal.b_nm, ideal.angle_deg)
+            # The Bragg reference spacing is the lattice constant the user
+            # explicitly set (it positions the visible shells), so it is
+            # authoritative for absolute scale; the stored structure only
+            # contributes its b/a ratio and angle.  Without this rescale a stale
+            # active structure (e.g. the default Hexagonal a=2.46 Å) silently
+            # overrides a larger Bragg spacing the user typed (e.g. 26.88 Å for
+            # Si(111) 7×7), turning the correction into a ~10× down-scale.
+            ref_a_nm = self._reference_lattice_a_nm()
+            ratio = (ideal.b_nm / ideal.a_nm) if ideal.a_nm > 0 else 1.0
+            values = (ref_a_nm, ref_a_nm * ratio, ideal.angle_deg)
         elif combo == "Custom":
             return
         elif combo == "Square":
@@ -363,12 +379,33 @@ class FFTViewerLatticeMixin:
             result,
             preserve_orientation=self._fft_preserve_orientation_cb.isChecked(),
         )
-        corr_lbl.setText(
-            "\n".join(correction_lines)
-            + "\n→ Click 'Preview corrected image' to verify."
+        # Sanity guard: a physically meaningful lattice correction is a small
+        # tweak (piezo calibration is good to a few %, off by 5–10% at worst).
+        # A large scale factor almost always means the ideal/target lattice
+        # disagrees with the measured one by a unit/order-of-magnitude factor
+        # (e.g. a stale structure preset, or Å vs nm), which would silently
+        # down/up-sample the image.  The singular values of the correction
+        # matrix are its principal scale factors.
+        sing = np.linalg.svd(result.matrix, compute_uv=False)
+        scale_lo = float(np.min(sing))
+        scale_hi = float(np.max(sing))
+        scale_warning = (
+            scale_lo < _CORRECTION_SCALE_MIN or scale_hi > _CORRECTION_SCALE_MAX
         )
+        body = "\n".join(correction_lines)
+        if scale_warning:
+            body += (
+                f"\n⚠ Target lattice scales the image ×{scale_lo:.2g}/×{scale_hi:.2g} "
+                "— far from 1. Check the ideal spacing and units (e.g. Å vs nm) "
+                "before applying."
+            )
+        else:
+            body += "\n→ Click 'Preview corrected image' to verify."
+        corr_lbl.setText(body)
         if status_lbl is not None:
-            status_lbl.setText("Correction ready")
+            status_lbl.setText(
+                "Check target lattice scale" if scale_warning else "Correction ready"
+            )
         if self._get_image_fn is not None:
             self._fft_preview_btn.setEnabled(True)
         if self._apply_correction_fn is not None:

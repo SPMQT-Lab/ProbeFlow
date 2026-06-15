@@ -249,6 +249,45 @@ def test_fft_known_structure_updates_shell_and_target_controls(qapp):
         qapp.processEvents()
 
 
+def test_fft_ideal_scale_tracks_bragg_not_stale_structure(qapp):
+    """Regression: a stale active structure must not override the Bragg spacing.
+
+    The default Hexagonal preset stores a=0.246 nm (graphene 2.46 Å).  When the
+    user sets the Bragg reference to a much larger spacing (e.g. Si(111) 7×7 at
+    26.88 Å), the ideal/target lattice — and hence the affine correction scale —
+    must follow the Bragg field.  Otherwise the correction silently downsamples
+    the image ~10× (X×/Y× ≈ 0.1) and recommends an absurd piezo rescale.
+    """
+    import numpy as np
+    from probeflow.gui.lattice_correction_ui import KnownStructure
+
+    dlg = FFTViewerDialog(np.ones((16, 16)), (1e-9, 1e-9))
+    try:
+        dlg.show()
+        qapp.processEvents()
+
+        # Active structure is the small graphene-like hexagonal preset.
+        dlg._active_known_structure = KnownStructure(
+            "Hexagonal", "hexagonal", 0.246, 0.246, 60.0, "Å"
+        )
+        dlg._fft_ideal_combo.setCurrentText("Hexagonal")
+
+        # User sets the Bragg reference to a ~10× larger spacing.
+        dlg._bragg_unit_combo.setCurrentText("nm")
+        dlg._bragg_a_spin.setValue(2.688)
+
+        # Measured lattice (from a grid fit) is consistent with the Bragg field.
+        dlg._sync_fft_ideal_values(2.6, 2.6, 118.0)
+
+        # Ideal target follows the Bragg spacing, NOT the stale 0.246 structure.
+        assert dlg._fft_ideal_a_spin.value() == pytest.approx(2.688, rel=1e-6)
+        assert dlg._fft_ideal_b_spin.value() == pytest.approx(2.688, rel=1e-6)
+    finally:
+        dlg.close()
+        dlg.deleteLater()
+        qapp.processEvents()
+
+
 def test_wheel_over_fft_grid_spinbox_scrolls_panel_without_changing_value(qapp):
     import numpy as np
     from probeflow.gui.no_wheel import _no_wheel_filter
