@@ -188,6 +188,43 @@ def test_viewer_full_panel_round_trips_standard_processing_state(qapp):
     )
 
 
+def test_format_gaussian_readout_pure():
+    from probeflow.gui.processing import format_gaussian_readout
+
+    # Calibrated: σ, FWHM and kernel extent reported in nm (σ_nm = σ_px × px_nm,
+    # FWHM = 2.3548·σ, kernel half-width = int(4σ+0.5) to match scipy truncate=4).
+    text = format_gaussian_readout(1.0, 0.5)
+    assert "σ 1.0 px" in text
+    assert "0.5 nm" in text          # σ_nm
+    assert "FWHM 1.18 nm" in text     # 2.3548 * 0.5
+    assert "kernel ±4 px" in text
+    assert "±2 nm" in text            # 4 px × 0.5 nm
+
+    # Uncalibrated: px-only, no nm.
+    px_only = format_gaussian_readout(2.0, None)
+    assert "nm" not in px_only
+    assert "kernel ±8 px" in px_only
+
+
+def test_viewer_full_smooth_sigma_is_subpixel_float(qapp):
+    from probeflow.gui import ProcessingControlPanel
+
+    panel = ProcessingControlPanel("viewer_full")
+
+    # Sub-pixel σ now round-trips through the GUI slider.
+    panel.set_state({"smooth_sigma": 0.5})
+    assert panel.state()["smooth_sigma"] == pytest.approx(0.5)
+
+    # Physical readout reflects the calibration once the pixel size is known.
+    panel.set_pixel_size_nm(0.5)
+    assert "nm" in panel._smooth_readout_lbl.text()
+    assert "σ 0.5 px" in panel._smooth_readout_lbl.text()
+
+    # Without calibration the readout falls back to pixels only.
+    panel.set_pixel_size_nm(None)
+    assert "nm" not in panel._smooth_readout_lbl.text()
+
+
 def test_viewer_align_rows_applies_immediately(qapp, monkeypatch):
     from probeflow.gui import ImageViewerDialog, SxmFile, THEMES
 

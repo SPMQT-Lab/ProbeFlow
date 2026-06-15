@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
+from scipy.ndimage import uniform_filter1d
 
 from ._image_utils import _nonnegative_finite
 
@@ -36,6 +37,31 @@ class BadLineCorrectionInfo:
     polarity: str = "bright"
     min_segment_length_px: int = 2
     max_adjacent_bad_lines: int = 1
+
+
+# Maximum sub-threshold gap (px) bridged inside a MAD segment so per-pixel
+# noise holes don't shatter a coherent defect into fragments.  Kept small and
+# fixed (a noise-hole scale), independent of the minimum feature length.
+_NOISE_GAP_TOL_PX = 4
+
+# Along-row smoothing window (px) applied to the residual before MAD detection.
+# Acts as a matched filter for *extended* scan-line defects: a coherent line is
+# preserved while per-pixel noise averages down (SNR gain ~ sqrt(window)), so a
+# faint-but-long bad line clears the threshold without texture flooding in.
+_MAD_SMOOTH_WINDOW_PX = 11
+
+
+def _smooth_rows_nanaware(arr: np.ndarray, window: int) -> np.ndarray:
+    """Moving average along each row (axis 1), ignoring non-finite pixels."""
+    if window <= 1:
+        return arr
+    finite = np.isfinite(arr)
+    vals = np.where(finite, arr, 0.0)
+    num = uniform_filter1d(vals, size=window, axis=1, mode="nearest")
+    den = uniform_filter1d(finite.astype(np.float64), size=window, axis=1, mode="nearest")
+    out = np.full_like(arr, np.nan, dtype=np.float64)
+    np.divide(num, den, out=out, where=den > 1e-6)
+    return out
 
 
 def _normalise_bad_segment_method(method: str) -> str:
@@ -110,30 +136,89 @@ def _contiguous_true_runs(mask: np.ndarray) -> list[tuple[int, int]]:
     return runs
 
 
+def _close_small_gaps(mask: np.ndarray, gap_tol: int) -> np.ndarray:
+    """Bridge ``False`` gaps no longer than ``gap_tol`` between two ``True`` runs.
+
+    Per-pixel noise punches sub-threshold holes through an otherwise coherent
+    bright/dark segment; closing those holes lets the segment be recovered as a
+    single run instead of many short fragments.
+    """
+    if gap_tol <= 0:
+        return mask
+    out = np.asarray(mask, dtype=bool).copy()
+    runs = _contiguous_true_runs(out)
+    for (_s0, e0), (s1, _e1) in zip(runs, runs[1:]):
+        if s1 - e0 <= gap_tol:
+            out[e0:s1] = True
+    return out
+
+
 def _split_segments_by_adjacent_limit(
     segments: list[BadSegment] | tuple[BadSegment, ...],
     max_adjacent_bad_lines: int,
 ) -> tuple[list[BadSegment], list[BadSegment]]:
-    """Return (accepted, skipped) after applying adjacent-line safety limit."""
+    """Return (accepted, skipped) after applying the adjacent-line safety limit.
+
+    The limit guards against repairing a vertical *block* of bad pixels that has
+    no clean neighbour row to copy from.  Crucially it is **column-aware**: two
+    segments on adjacent lines only belong to the same stack when their column
+    ranges overlap.  Segments that merely share a line index with unrelated bad
+    lines elsewhere in the image are independently repairable and are kept.  A
+    stack taller than ``max_adjacent_bad_lines`` consecutive overlapping lines is
+    skipped; everything else is repaired.
+    """
     max_adjacent_bad_lines = max(1, int(max_adjacent_bad_lines))
-    by_line: dict[int, list[BadSegment]] = {}
-    for seg in segments:
-        by_line.setdefault(int(seg.line_index), []).append(seg)
+    segs = list(segments)
+    n = len(segs)
+    if n == 0:
+        return [], []
+
+    parent = list(range(n))
+
+    def find(x: int) -> int:
+        root = x
+        while parent[root] != root:
+            root = parent[root]
+        while parent[x] != root:
+            parent[x], x = root, parent[x]
+        return root
+
+    def union(a: int, b: int) -> None:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    by_line: dict[int, list[int]] = {}
+    for i, seg in enumerate(segs):
+        by_line.setdefault(int(seg.line_index), []).append(i)
+
+    def _overlaps(a: int, b: int) -> bool:
+        return (int(segs[a].start_col) < int(segs[b].end_col)
+                and int(segs[b].start_col) < int(segs[a].end_col))
+
+    # Link a segment to any column-overlapping segment on the next line; the
+    # connected components are the vertical stacks of contiguous bad pixels.
+    for i, seg in enumerate(segs):
+        for j in by_line.get(int(seg.line_index) + 1, ()):
+            if _overlaps(i, j):
+                union(i, j)
+
+    components: dict[int, list[int]] = {}
+    for i in range(n):
+        components.setdefault(find(i), []).append(i)
+
     accepted: list[BadSegment] = []
     skipped: list[BadSegment] = []
-    lines = sorted(by_line)
-    i = 0
-    while i < len(lines):
-        group = [lines[i]]
-        i += 1
-        while i < len(lines) and lines[i] == group[-1] + 1:
-            group.append(lines[i])
-            i += 1
-        group_segments = [seg for line in group for seg in by_line[line]]
-        if len(group) > max_adjacent_bad_lines:
-            skipped.extend(group_segments)
-        else:
-            accepted.extend(group_segments)
+    for members in components.values():
+        lines = {int(segs[i].line_index) for i in members}
+        # Members are linked only through ±1-line overlaps, so the line set is a
+        # consecutive run; its span is the stack thickness.
+        stack_height = max(lines) - min(lines) + 1
+        target = accepted if stack_height <= max_adjacent_bad_lines else skipped
+        target.extend(segs[i] for i in members)
+
+    accepted.sort(key=lambda s: (int(s.line_index), int(s.start_col)))
+    skipped.sort(key=lambda s: (int(s.line_index), int(s.start_col)))
     return accepted, skipped
 
 
@@ -203,27 +288,50 @@ def detect_bad_scanline_segments(
                 k += 2
         return segments
 
-    scale = _robust_scale(residuals)
+    # The residual is already referenced to the *neighbour rows*, so good pixels
+    # sit at ~0 and a bright/dark defect is a direct deviation from zero.  We do
+    # NOT subtract each row's own median (the previous behaviour): once a defect
+    # covers more than ~half the row it becomes the row median, nets its own
+    # pixels to ~0, and vanishes — so lowering the threshold only surfaced noise.
+    #
+    # Scan-line defects are *extended*, so we smooth the residual along each row
+    # first (a matched filter): this preserves a coherent line's amplitude while
+    # averaging per-pixel noise down, letting a faint-but-long line clear the
+    # threshold without texture flooding in.  ``step`` remains the detector for
+    # sharp, short scars.
+    window = max(1, min(_MAD_SMOOTH_WINDOW_PX, Nx))
+    smoothed = _smooth_rows_nanaware(residuals, window)
+    scale = _robust_scale(smoothed)
     cutoff = threshold * scale
     if not np.isfinite(cutoff):
         return []
+
+    sign = 1.0 if polarity == "bright" else -1.0
     segments = []
     for row in range(Ny):
-        residual = residuals[row]
-        finite = np.isfinite(residual)
+        sm = smoothed[row]
+        finite = np.isfinite(sm)
         if not finite.any():
             continue
-        centre = float(np.median(residual[finite]))
-        if polarity == "bright":
-            bad = finite & ((residual - centre) > cutoff)
-        else:
-            bad = finite & ((residual - centre) < -cutoff)
+        bad = finite & ((sign * sm) > cutoff)
+        # Bridge short noise-sized holes (independent of ``min_length`` so
+        # raising the minimum feature length to reject texture does not start
+        # merging unrelated noise spikes into spurious long runs).
+        bad = _close_small_gaps(bad, _NOISE_GAP_TOL_PX) & finite
         for start, end in _contiguous_true_runs(bad):
-            length = end - start
-            if not (min_length <= length <= max_len):
+            # No upper-length cap: a long (even full-width) coherent defect is
+            # exactly the target, and the neighbour-referenced baseline stays
+            # valid no matter how much of the row is affected.
+            if end - start < min_length:
                 continue
-            local = np.abs(residual[start:end] - centre)
-            score = float(np.nanmedian(local) / max(scale, 1e-15))
+            seg = sm[start:end]
+            seg = seg[np.isfinite(seg)]
+            if seg.size == 0:
+                continue
+            seg_median = float(np.median(seg))
+            if (sign * seg_median) <= cutoff:
+                continue  # not a defect on the median
+            score = float(abs(seg_median) / max(scale, 1e-15))
             segments.append(BadSegment(row, start, end, score, method))
     return segments
 

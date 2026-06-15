@@ -94,21 +94,71 @@ class TestRemoveBadLines:
         np.testing.assert_allclose(out[7, 6:14], arr[7, 6:14], atol=1e-12)
 
     def test_mad_outlier_method_repairs_only_segment(self):
-        yy, xx = np.mgrid[:16, :24]
-        arr = (0.02 * yy + 0.01 * xx).astype(np.float64)
+        # The MAD method is a matched-filter detector for extended defects, so
+        # the segment must be longer than the smoothing window and the image
+        # needs realistic noise (a noise-free image collapses the robust scale).
+        rng = np.random.default_rng(0)
+        yy, xx = np.mgrid[:24, :48]
+        arr = (0.02 * yy + 0.01 * xx + rng.normal(0.0, 0.05, (24, 48))).astype(np.float64)
         damaged = arr.copy()
-        damaged[8, 5:11] -= 8.0
+        damaged[12, 8:36] -= 8.0  # one long dark segment, rest of the row fine
 
         corrected, info = correct_bad_scanline_segments(
             damaged, threshold=5.0, method="mad", polarity="dark")
 
-        assert len(info.segments) == 1
-        seg = info.segments[0]
-        assert (seg.line_index, seg.start_col, seg.end_col) == (8, 5, 11)
-        outside = np.ones(damaged.shape, dtype=bool)
-        outside[8, 5:11] = False
-        np.testing.assert_array_equal(corrected[outside], damaged[outside])
-        np.testing.assert_allclose(corrected[8, 5:11], arr[8, 5:11], atol=1e-12)
+        assert {s.line_index for s in info.segments} == {12}  # only the defect row
+        seg = max(info.segments, key=lambda s: s.end_col - s.start_col)
+        assert seg.start_col <= 10 and seg.end_col >= 34  # covers the defect
+        # the defect interior is repaired back toward the clean surface
+        np.testing.assert_allclose(corrected[12, 12:32], arr[12, 12:32], atol=0.3)
+        # rows away from the defect are untouched
+        np.testing.assert_array_equal(corrected[:11], damaged[:11])
+        np.testing.assert_array_equal(corrected[14:], damaged[14:])
+
+    def test_mad_detects_whole_line_offset_not_just_internal_segments(self):
+        # A uniformly bright scan line has no internal step and nets to ~0 once a
+        # per-line median is subtracted, so the older segment-only logic missed it
+        # entirely.  The augmented MAD method must flag the whole line.
+        rng = np.random.default_rng(1)
+        arr = (rng.normal(0.0, 0.3, (40, 60))
+               + np.linspace(0.0, 2.0, 60)[None, :]).astype(np.float64)
+        damaged = arr.copy()
+        damaged[20] += 6.0  # whole-line bright offset, flat across the row
+
+        segs = detect_bad_scanline_segments(
+            damaged, threshold=4.0, method="mad", polarity="bright")
+        by_line = {s.line_index: s for s in segs}
+        assert 20 in by_line, "whole bright line not detected by MAD method"
+        seg = by_line[20]
+        assert (seg.start_col, seg.end_col) == (0, 60)  # full-width, not a scar
+
+        # The step method targets internal edges and cannot see a flat offset.
+        step = detect_bad_scanline_segments(
+            damaged, threshold=4.0, method="step", polarity="bright")
+        assert 20 not in {s.line_index for s in step}
+
+    def test_mad_detects_long_partial_segment_against_noise(self):
+        # The real artifact: a long bright segment (~200 of 256 px) while the
+        # rest of the row is fine, on a noisy image.  Per-pixel thresholding
+        # shatters it into fragments and per-row-median centring hides it once it
+        # exceeds half the row; the detector must instead recover it as a single
+        # coherent run and ignore the surrounding noise.
+        rng = np.random.default_rng(7)
+        Ny, Nx = 60, 256
+        arr = (rng.normal(0.0, 1.0, (Ny, Nx))
+               + np.linspace(0.0, 3.0, Nx)[None, :]).astype(np.float64)
+        damaged = arr.copy()
+        damaged[30, 20:220] += 6.0
+
+        segs = detect_bad_scanline_segments(
+            damaged, threshold=4.0, method="mad", polarity="bright")
+
+        assert {s.line_index for s in segs} == {30}  # only the defect row
+        on_row = [s for s in segs if s.line_index == 30]
+        assert len(on_row) == 1  # one coherent run, not many fragments
+        seg = on_row[0]
+        assert seg.start_col <= 30 and seg.end_col >= 210
+        assert (seg.end_col - seg.start_col) >= 180
 
     def test_bright_polarity_detects_positive_not_negative_segment(self):
         arr = np.ones((14, 20), dtype=np.float64)
@@ -179,6 +229,30 @@ class TestRemoveBadLines:
         assert len(info.skipped_segments) == 3
         assert info.corrected_segments == ()
         np.testing.assert_array_equal(corrected, arr)
+
+    def test_adjacent_limit_is_column_aware(self):
+        # Two bad segments on adjacent lines in DIFFERENT columns are
+        # independently repairable; the adjacent-line limit must not discard
+        # them together just because their line indices are consecutive.
+        arr = np.ones((14, 40), dtype=np.float64)
+        arr[5, 2:14] += 10.0
+        arr[6, 24:36] += 10.0  # adjacent line, non-overlapping columns
+
+        corrected, info = correct_bad_scanline_segments(
+            arr, threshold=5.0, method="step", polarity="bright",
+            max_adjacent_bad_lines=1)
+
+        assert {s.line_index for s in info.corrected_segments} == {5, 6}
+        assert info.skipped_segments == ()
+        # A genuinely overlapping 2-high stack is still skipped at the limit.
+        arr2 = np.ones((14, 40), dtype=np.float64)
+        arr2[5, 4:20] += 10.0
+        arr2[6, 4:20] += 10.0
+        _c2, info2 = correct_bad_scanline_segments(
+            arr2, threshold=5.0, method="step", polarity="bright",
+            max_adjacent_bad_lines=1)
+        assert info2.corrected_segments == ()
+        assert len(info2.skipped_segments) == 2
 
     def test_high_threshold_gives_no_correction(self):
         arr = np.ones((16, 16), dtype=np.float64)
