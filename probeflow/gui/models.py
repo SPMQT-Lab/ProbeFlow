@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -10,6 +11,16 @@ from probeflow.io.createc_interpretation import scan_mode_label, spec_measuremen
 
 # ── Data model ────────────────────────────────────────────────────────────────
 PLANE_NAMES = ["Z fwd", "Z bwd", "I fwd", "I bwd"]
+
+# Placeholder name given to unnamed/auxiliary scan planes (e.g. createc DAC
+# channels beyond the known signals — see createc_dat.py). These flood the Browse
+# preview with dozens of duplicate raw ADC slots, so they are hidden there.
+_RAW_CHANNEL_RE = re.compile(r"^raw (channel|column) \d+$")
+
+
+def is_raw_channel_name(name: str) -> bool:
+    """True for generic 'Raw channel N' / 'Raw column N' placeholder planes."""
+    return bool(_RAW_CHANNEL_RE.match(str(name).strip().lower()))
 
 
 @dataclass
