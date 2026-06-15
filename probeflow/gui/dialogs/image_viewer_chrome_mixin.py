@@ -651,6 +651,12 @@ class ImageViewerChromeMixin:
         idx = self._sidebar_tab_indices.get(key)
         if idx is not None:
             self._sidebar_tabs.setCurrentIndex(idx)
+        # ROI and Masks share one tab; a request to show "masks" expands that
+        # collapsible section so the mask controls are revealed.
+        if key == "masks":
+            btn = getattr(self, "_mask_section_btn", None)
+            if btn is not None:
+                btn.setChecked(True)
 
     def _show_sidebar_tool(self, title: str, widget, on_close=None) -> None:
         """Host an interactive tool's controls in the sidebar column (page 1).
