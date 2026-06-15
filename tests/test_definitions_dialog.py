@@ -38,6 +38,7 @@ def test_definitions_reference_has_equations_and_light_theme_contrast():
         "STM background subtraction",
         "Gaussian high-pass",
         "Periodic notch filtering",
+        "Advanced edge detection (Canny",
         "Manual zero reference",
         "Image arithmetic",
         "Thresholding and bit-depth conversion",
@@ -46,6 +47,9 @@ def test_definitions_reference_has_equations_and_light_theme_contrast():
         "Forward/backward scan blending",
     ):
         assert operation in html
+    # Advanced edge detection explains hysteresis and the mask/ROI outputs.
+    assert "hysteresis" in html
+    assert "Sobel / Scharr" in html
 
     assert "color: #111827" in html
     assert "#cdd6f4" not in lowered
@@ -147,6 +151,8 @@ def test_measurements_reference_has_entries_and_formulas():
         # A couple of formulas must match the implementation.
         "rms_roughness = sqrt(mean((z - mean(z))^2))",
         "height_difference = mean_b - mean_a",
+        # The line tool's drawing/editing is cross-referenced to the ROI tab.
+        "Line ROI actions",
     ):
         assert expected in html, expected
 

@@ -517,6 +517,63 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
         ),
     ),
     _DefinitionEntry(
+        title="Advanced edge detection (Canny / Sobel–Scharr)",
+        params=(
+            "method = Canny | Sobel/Scharr",
+            "sigma",
+            "low / high threshold (percentile or absolute)",
+            "preset",
+            "output = overlay | new image | mask | ROI(s)",
+        ),
+        summary=(
+            "A dedicated edge-finding tool (opened from 'Advanced Edge "
+            "Detection…' on the Process tab) that turns edges into something you "
+            "can act on — a clean outline, a mask, or ROIs — rather than just a "
+            "picture. 'Canny' traces thin, connected edge lines; 'Sobel/Scharr' "
+            "gives a continuous gradient (how steep the surface is at each "
+            "pixel). Use it to outline islands, grains, or step edges and feed "
+            "them to the mask/ROI tools."
+        ),
+        in_practice=(
+            "Pick a Canny preset (e.g. 'Step edges / islands'), watch the live "
+            "preview, then send the result to a mask or ROIs with the output "
+            "buttons. Raise 'sigma' on noisy scans; raise the thresholds to keep "
+            "only the strongest edges."
+        ),
+        equations=(
+            "Canny (skimage):\n"
+            "  1. Gaussian-smooth the image with sigma (in px)\n"
+            "  2. gradient magnitude + non-maximum suppression -> thin ridges\n"
+            "  3. hysteresis: keep ridge pixels >= high threshold (strong) and\n"
+            "     pixels >= low threshold that connect to a strong edge\n"
+            "  thresholds are percentiles of the gradient magnitude inside the\n"
+            "  valid region (or absolute values) -> boolean edge mask\n\n"
+            "Sobel / Scharr:\n"
+            "  gx, gy = Sobel|Scharr derivative kernels\n"
+            "  magnitude = sqrt(gx^2 + gy^2)   (or x, y, or orientation atan2(gy, gx))\n"
+            "  optional: mask = magnitude >= percentile(magnitude, threshold)",
+        ),
+        details=(
+            "This is the analysis cousin of the 'Edge detection' display filter "
+            "above: instead of replacing the image, it produces a boolean edge "
+            "map you can overlay, open as a new image, store as the active mask "
+            "layer, or convert to ROIs for measuring. Canny's two thresholds give "
+            "hysteresis — a high bar to start an edge and a lower bar to continue "
+            "it — which traces faint but real boundaries without lighting up "
+            "noise. Percentile thresholds are the robust default because they "
+            "adapt to each channel's units.",
+            "Restricting the detector to an ROI computes its thresholds from "
+            "inside that region only, so background pixels outside do not dilute "
+            "the statistics.",
+        ),
+        cautions=(
+            "Edge maps are a derived overlay, not height data — measure on the "
+            "image, not the edge picture. Too small a sigma or too low a threshold "
+            "fragments edges and picks up noise; too large merges or misses them. "
+            "Tune against the preview.",
+        ),
+    ),
+    _DefinitionEntry(
         title="Manual zero reference",
         params=("set_zero_point", "set_zero_plane_points", "patch"),
         summary=(
@@ -1040,6 +1097,9 @@ _ROI_REFERENCE_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "repeat spacing (periodicity) from the profile, or set the line width. "
             "The ruler/distance tool reports the line's true physical length using "
             "the scan calibration.",
+            "The measurements a line produces — Line profile (and Δ), Distance, "
+            "Angle, and Line periodicity — are described in full in the "
+            "Measurements tab.",
         ),
         cautions=(
             "A line is not an area, so area-only actions — region statistics, "
@@ -1226,6 +1286,9 @@ _MEASUREMENT_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "line, which smooths a noisy profile while keeping the same length "
             "axis. The length axis is calibrated, so spacings read directly in "
             "nanometres.",
+            "The line itself is a line ROI: how to draw it, move its endpoints, "
+            "and set its averaging width is covered under 'Line ROI actions' in "
+            "the ROI Actions tab. Distance and Angle (above) also use line ROIs.",
         ),
         cautions=(
             "Averaging over a wide swath blurs sloped or curved features — keep the "
