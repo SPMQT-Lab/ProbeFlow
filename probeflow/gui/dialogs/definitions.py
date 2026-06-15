@@ -517,6 +517,63 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
         ),
     ),
     _DefinitionEntry(
+        title="Advanced edge detection (Canny / Sobel–Scharr)",
+        params=(
+            "method = Canny | Sobel/Scharr",
+            "sigma",
+            "low / high threshold (percentile or absolute)",
+            "preset",
+            "output = overlay | new image | mask | ROI(s)",
+        ),
+        summary=(
+            "A dedicated edge-finding tool (opened from 'Advanced Edge "
+            "Detection…' on the Process tab) that turns edges into something you "
+            "can act on — a clean outline, a mask, or ROIs — rather than just a "
+            "picture. 'Canny' traces thin, connected edge lines; 'Sobel/Scharr' "
+            "gives a continuous gradient (how steep the surface is at each "
+            "pixel). Use it to outline islands, grains, or step edges and feed "
+            "them to the mask/ROI tools."
+        ),
+        in_practice=(
+            "Pick a Canny preset (e.g. 'Step edges / islands'), watch the live "
+            "preview, then send the result to a mask or ROIs with the output "
+            "buttons. Raise 'sigma' on noisy scans; raise the thresholds to keep "
+            "only the strongest edges."
+        ),
+        equations=(
+            "Canny (skimage):\n"
+            "  1. Gaussian-smooth the image with sigma (in px)\n"
+            "  2. gradient magnitude + non-maximum suppression -> thin ridges\n"
+            "  3. hysteresis: keep ridge pixels >= high threshold (strong) and\n"
+            "     pixels >= low threshold that connect to a strong edge\n"
+            "  thresholds are percentiles of the gradient magnitude inside the\n"
+            "  valid region (or absolute values) -> boolean edge mask\n\n"
+            "Sobel / Scharr:\n"
+            "  gx, gy = Sobel|Scharr derivative kernels\n"
+            "  magnitude = sqrt(gx^2 + gy^2)   (or x, y, or orientation atan2(gy, gx))\n"
+            "  optional: mask = magnitude >= percentile(magnitude, threshold)",
+        ),
+        details=(
+            "This is the analysis cousin of the 'Edge detection' display filter "
+            "above: instead of replacing the image, it produces a boolean edge "
+            "map you can overlay, open as a new image, store as the active mask "
+            "layer, or convert to ROIs for measuring. Canny's two thresholds give "
+            "hysteresis — a high bar to start an edge and a lower bar to continue "
+            "it — which traces faint but real boundaries without lighting up "
+            "noise. Percentile thresholds are the robust default because they "
+            "adapt to each channel's units.",
+            "Restricting the detector to an ROI computes its thresholds from "
+            "inside that region only, so background pixels outside do not dilute "
+            "the statistics.",
+        ),
+        cautions=(
+            "Edge maps are a derived overlay, not height data — measure on the "
+            "image, not the edge picture. Too small a sigma or too low a threshold "
+            "fragments edges and picks up noise; too large merges or misses them. "
+            "Tune against the preview.",
+        ),
+    ),
+    _DefinitionEntry(
         title="Manual zero reference",
         params=("set_zero_point", "set_zero_plane_points", "patch"),
         summary=(
@@ -1040,6 +1097,9 @@ _ROI_REFERENCE_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "repeat spacing (periodicity) from the profile, or set the line width. "
             "The ruler/distance tool reports the line's true physical length using "
             "the scan calibration.",
+            "The measurements a line produces — Line profile (and Δ), Distance, "
+            "Angle, and Line periodicity — are described in full in the "
+            "Measurements tab.",
         ),
         cautions=(
             "A line is not an area, so area-only actions — region statistics, "
@@ -1129,6 +1189,361 @@ _ROI_REFERENCE_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "ROI after you configured a step will change what that step does the "
             "next time it is replayed. If you want a step frozen, avoid editing the "
             "ROI it depends on.",
+        ),
+    ),
+)
+
+
+_MEASUREMENT_ENTRIES: tuple[_DefinitionEntry, ...] = (
+    _DefinitionEntry(
+        title="Distance",
+        params=("line ROI", "length_m", "dx_m", "dy_m", "angle_deg"),
+        summary=(
+            "Measures the straight-line distance between two points using a line "
+            "ROI, in real units from the scan calibration. It also reports the "
+            "horizontal and vertical components (Δx, Δy) and the line's angle from "
+            "horizontal. Use it for feature sizes, spacings, and how far apart two "
+            "things are."
+        ),
+        in_practice=(
+            "Draw a line ROI across the gap you want, then take the Distance "
+            "measurement. The length is calibrated, so it is a real nanometre "
+            "distance, not pixels."
+        ),
+        equations=(
+            "from line endpoints (x1, y1) -> (x2, y2) in pixels:\n"
+            "  dx_m = (x2 - x1) * pixel_size_x_m\n"
+            "  dy_m = (y2 - y1) * pixel_size_y_m\n"
+            "  length_m = sqrt(dx_m^2 + dy_m^2)\n"
+            "  angle_deg = atan2(|dy_m|, |dx_m|)   (from the horizontal)",
+        ),
+        details=(
+            "The two axes are scaled by their own pixel sizes before the length is "
+            "computed, so distances are correct even when the scan has "
+            "non-square pixels.",
+        ),
+        cautions=(
+            "The number is only as good as where you place the endpoints. Zoom in "
+            "and snap them to the real feature edges; a line drawn a few pixels off "
+            "changes the reading.",
+        ),
+    ),
+    _DefinitionEntry(
+        title="Angle",
+        params=("two line ROIs", "angle_deg in [0, 90]"),
+        summary=(
+            "Measures the angle between two directions — for example two step "
+            "edges, or two lattice rows — by drawing two line ROIs. The result is "
+            "the acute angle between them, always reported between 0 and 90 "
+            "degrees."
+        ),
+        in_practice=(
+            "Draw two line ROIs along the directions you care about, select both, "
+            "and take the Angle measurement. Direction is what matters, not which "
+            "way you drew each line."
+        ),
+        equations=(
+            "line vectors a and b in physical units (scaled by pixel size):\n"
+            "  cos(theta) = (a . b) / (|a| * |b|)\n"
+            "  angle_deg = acos(clamp(cos(theta), -1, 1))\n"
+            "  if angle_deg > 90: angle_deg = 180 - angle_deg",
+        ),
+        details=(
+            "Because only the directions matter, the angle is folded into 0–90°: "
+            "drawing a line the other way round gives the same answer.",
+        ),
+        cautions=(
+            "Very short lines make the direction uncertain — a one-pixel wobble at "
+            "the ends swings the angle. Draw each line as long as the feature "
+            "allows.",
+        ),
+    ),
+    _DefinitionEntry(
+        title="Line profile (and Δ)",
+        params=("line ROI", "width", "length", "delta_y", "delta_x"),
+        summary=(
+            "Reads out the surface height along a line as a graph — the "
+            "cross-section you use to measure step heights, feature widths, and "
+            "spacings. Drop two markers on the graph to read the height difference "
+            "(Δy) and horizontal separation (Δx) between them."
+        ),
+        in_practice=(
+            "Draw a line across a step or feature; the profile updates live in the "
+            "panel below. Increase the line width to average out noise, and use the "
+            "two markers to read a step height (Δy) directly."
+        ),
+        equations=(
+            "sample height along the line:\n"
+            "  s runs from 0 to the physical length of the line\n"
+            "  z(s) = image sampled along the line (bilinear)\n"
+            "  width > 1 px: average finite pixels in a perpendicular swath\n\n"
+            "two-marker delta:\n"
+            "  delta_x = |s_2 - s_1|   (physical distance along the line)\n"
+            "  delta_y = z(s_2) - z(s_1)   (height difference)",
+        ),
+        details=(
+            "A width greater than one pixel averages a strip perpendicular to the "
+            "line, which smooths a noisy profile while keeping the same length "
+            "axis. The length axis is calibrated, so spacings read directly in "
+            "nanometres.",
+            "The line itself is a line ROI: how to draw it, move its endpoints, "
+            "and set its averaging width is covered under 'Line ROI actions' in "
+            "the ROI Actions tab. Distance and Angle (above) also use line ROIs.",
+        ),
+        cautions=(
+            "Averaging over a wide swath blurs sloped or curved features — keep the "
+            "width small when the step you are measuring is short or tilted.",
+        ),
+    ),
+    _DefinitionEntry(
+        title="Line periodicity",
+        params=(
+            "line profile",
+            "method = autocorrelation | peak_spacing | fft",
+            "period_m",
+        ),
+        summary=(
+            "Estimates the repeat spacing of a regular pattern sampled along a line "
+            "profile — for instance the period of an atomic row or a standing-wave "
+            "ripple. It reports one characteristic period (and how many repeats fit "
+            "along the line)."
+        ),
+        in_practice=(
+            "Draw a line along the periodic direction (several repeats long), then "
+            "estimate periodicity from the line-profile tools. A longer line gives "
+            "a more reliable period."
+        ),
+        equations=(
+            "detrend the profile z(s), then by method:\n"
+            "  autocorrelation: C(lag) = sum_s z(s) z(s + lag);\n"
+            "                   period = first strong off-zero peak in C\n"
+            "  peak_spacing:    period = median spacing of detected profile peaks\n"
+            "  fft:             period = 1 / (dominant spatial frequency of z(s))\n\n"
+            "n_periods = line_length / period",
+        ),
+        details=(
+            "Autocorrelation (the default) is the most robust on noisy data: it "
+            "asks 'how far must I shift the profile for it to line up with itself "
+            "again?'. The FFT method is sharpest when the pattern is clean and "
+            "spans many repeats.",
+        ),
+        cautions=(
+            "A line that covers only one or two repeats cannot pin a period down. "
+            "Make sure the line spans several periods, and keep it parallel to the "
+            "pattern, not across it.",
+        ),
+    ),
+    _DefinitionEntry(
+        title="ROI statistics",
+        params=(
+            "area ROI",
+            "mean_height",
+            "median_height",
+            "std_height",
+            "rms_roughness",
+            "area",
+        ),
+        summary=(
+            "Summarises the heights inside an area ROI: the average and middle "
+            "height, the spread, the surface roughness, the min/max, and the "
+            "physical area. Use it to characterise a patch — how rough a terrace "
+            "is, how tall an island sits, how much area a phase covers."
+        ),
+        in_practice=(
+            "Draw an area ROI over the patch you care about and read its "
+            "statistics. Level the image first (row align / background) so heights "
+            "are measured against a flat reference."
+        ),
+        equations=(
+            "over finite pixels z inside the ROI mask:\n"
+            "  mean_height   = mean(z)\n"
+            "  median_height = median(z)\n"
+            "  std_height    = std(z)\n"
+            "  rms_roughness = sqrt(mean((z - mean(z))^2))   (Sq)\n"
+            "  peak_to_peak  = max(z) - min(z)\n"
+            "  area = (number of selected pixels) * pixel_size_x_m * pixel_size_y_m",
+        ),
+        details=(
+            "'RMS roughness' (Sq) is the root-mean-square height deviation from the "
+            "mean — the standard single-number measure of how rough a surface is. "
+            "Non-finite (gap) pixels are ignored, and the area counts only the "
+            "selected finite pixels.",
+        ),
+        cautions=(
+            "Heights are relative to whatever reference the current processing "
+            "leaves in place. A residual tilt or background inflates roughness and "
+            "shifts the mean — level the surface before trusting these numbers.",
+        ),
+    ),
+    _DefinitionEntry(
+        title="Step height",
+        params=("two area ROIs", "height_difference"),
+        summary=(
+            "Measures the height difference between two flat regions — the classic "
+            "way to read a terrace or island step. Draw one ROI on the upper level "
+            "and one on the lower, and it reports the difference between their "
+            "average heights."
+        ),
+        in_practice=(
+            "Place two area ROIs on the flat areas either side of the step (not on "
+            "the step itself), select both, and take Step height. Averaging over a "
+            "patch beats reading two single pixels."
+        ),
+        equations=(
+            "over finite pixels in each ROI:\n"
+            "  mean_a = mean(z in ROI A)\n"
+            "  mean_b = mean(z in ROI B)\n"
+            "  height_difference = mean_b - mean_a",
+        ),
+        details=(
+            "Using the mean over a whole region (rather than two clicked points) "
+            "averages away pixel noise, giving a much more stable step height. The "
+            "per-ROI medians and standard deviations are also recorded.",
+        ),
+        cautions=(
+            "Both regions must sit on genuinely flat terrace, not on the step face "
+            "or on adsorbates. A tilt across the image biases the difference — "
+            "level first, and keep the two ROIs close to the step.",
+        ),
+    ),
+    _DefinitionEntry(
+        title="Feature maxima",
+        params=(
+            "threshold_mode = above | below | between",
+            "threshold_low / high",
+            "min_distance_px",
+        ),
+        summary=(
+            "Automatically finds the bright peaks (or dark pits) in the image — the "
+            "positions of atoms, molecules, or islands — and drops a point at each "
+            "one. The detected points become a list you can count, measure, or feed "
+            "to the pair-correlation and lattice tools."
+        ),
+        in_practice=(
+            "Set the polarity (above for bright maxima, below for dark minima), a "
+            "height threshold, and a minimum spacing so each feature is counted "
+            "once. Preview, then convert the peaks to point ROIs."
+        ),
+        equations=(
+            "keep a pixel as a candidate when it passes the threshold:\n"
+            "  above:   z >= threshold_low\n"
+            "  below:   z <= threshold_high\n"
+            "  between: threshold_low <= z <= threshold_high\n"
+            "local maxima are then thinned so no two are closer than\n"
+            "  min_distance_px (one detection per feature)\n"
+            "n_points = number of detected features",
+        ),
+        details=(
+            "The minimum-distance rule stops a single broad feature from being "
+            "counted many times — only the strongest pixel within that radius "
+            "survives. 'below' mode detects pits/minima by the same logic with the "
+            "sign flipped.",
+        ),
+        cautions=(
+            "Too low a threshold or too small a spacing counts noise as features; "
+            "too high misses real ones. Tune against the preview, and remember the "
+            "threshold is in the image's height units, which shift if you reprocess.",
+        ),
+    ),
+    _DefinitionEntry(
+        title="Point mask / FFT",
+        params=("point set", "dominant_frequency"),
+        summary=(
+            "Takes a set of points (your point ROIs or detected feature maxima), "
+            "stamps them onto a blank image, and Fourier-transforms that — turning "
+            "an arrangement of points into its repeating spacings and directions. "
+            "Bright spots in the result reveal the dominant lattice spacing of the "
+            "points."
+        ),
+        in_practice=(
+            "Detect or place the points first, then run Point mask / FFT. Bright "
+            "off-centre spots mark the main repeat directions; their distance from "
+            "the centre gives the spacing (spacing = 1 / frequency)."
+        ),
+        equations=(
+            "M(x, y) = 1 at each point, 0 elsewhere\n"
+            "F(qx, qy) = |fftshift(fft2(M))|\n"
+            "qx, qy from fftfreq with the physical pixel size (cycles per length)\n"
+            "dominant spacing = 1 / |q| of the brightest off-centre peak",
+        ),
+        details=(
+            "Because it transforms only the point positions (not the height data), "
+            "it isolates how the features are arranged from how tall they are — a "
+            "clean way to see order in a scatter of detections.",
+        ),
+        cautions=(
+            "A handful of points gives a noisy, hard-to-read transform; it needs "
+            "many well-detected features to show clear spots. Stray or missed "
+            "detections smear the pattern.",
+        ),
+    ),
+    _DefinitionEntry(
+        title="Pair correlation",
+        params=("point set", "nn_median", "g(r)"),
+        summary=(
+            "Describes how a set of points is arranged relative to each other: it "
+            "measures every point's distance to its nearest neighbour and builds "
+            "the pair-correlation function g(r), which shows at what separations "
+            "points tend to sit. It is the standard way to quantify ordering, "
+            "spacing, and clustering."
+        ),
+        in_practice=(
+            "Detect features or place point ROIs, then run Pair correlation. The "
+            "nearest-neighbour median is a quick characteristic spacing; peaks in "
+            "g(r) mark preferred separations (an ordered lattice gives sharp "
+            "peaks)."
+        ),
+        equations=(
+            "pairwise distances d_ij = |r_i - r_j| (physical units)\n"
+            "nearest-neighbour: nn_i = min_{j != i} d_ij;  report median(nn_i)\n\n"
+            "g(r): histogram all d_ij into radial bins, then normalise by the\n"
+            "  number of pairs, the point density, and the bin's annulus area,\n"
+            "  with an edge correction for pairs cut off by the ROI boundary",
+        ),
+        details=(
+            "g(r) is built so that a completely random arrangement averages to 1; "
+            "values above 1 mean points are more likely than random at that "
+            "separation (a preferred spacing), below 1 means less likely. The edge "
+            "correction stops the finite ROI from artificially suppressing long "
+            "distances.",
+        ),
+        cautions=(
+            "Reliable statistics need many points; a few detections give a noisy "
+            "g(r). Missed or spurious features distort the nearest-neighbour "
+            "distance, so check the detection first.",
+        ),
+    ),
+    _DefinitionEntry(
+        title="Feature → lattice",
+        params=("point set", "ideal lattice", "rms_displacement_m"),
+        summary=(
+            "Compares detected features against an ideal, perfectly regular lattice "
+            "and measures how far each one is displaced from where it 'should' be. "
+            "The single-number result — the RMS displacement — quantifies disorder, "
+            "strain, or distortion in an otherwise periodic arrangement."
+        ),
+        in_practice=(
+            "Detect the features, define or fit the ideal lattice, then run "
+            "Feature-to-lattice. A small RMS displacement means a well-ordered "
+            "lattice; a large one flags strain or disorder."
+        ),
+        equations=(
+            "match each feature to its nearest ideal lattice site (within a radius)\n"
+            "displacement d_k = |feature_k - matched_site_k|\n"
+            "rms_displacement = sqrt(mean(d_k^2))   over matched features\n"
+            "reported in pixels and in metres",
+        ),
+        details=(
+            "Only features that fall within the match radius of a lattice site are "
+            "counted, so a few stray detections do not dominate the result. The RMS "
+            "displacement is the root-mean-square of how far the real features sit "
+            "from the ideal grid.",
+        ),
+        cautions=(
+            "The answer depends on the ideal lattice you compare against — a wrong "
+            "lattice constant or orientation inflates the displacement. Make sure "
+            "the reference lattice matches the real one before reading disorder "
+            "from this number.",
         ),
     ),
 )
@@ -1690,6 +2105,27 @@ def render_roi_reference_html(theme: Mapping[str, object] | None = None) -> str:
     )
 
 
+def render_measurements_html(theme: Mapping[str, object] | None = None) -> str:
+    """Return theme-aware HTML for the image-measurements reference."""
+    return _render_reference_html(
+        title="Measurements Reference",
+        intro=(
+            "These are the measurements you can take from the Measure tab. Every "
+            "one works on the real, calibrated data — physical heights and "
+            "distances in metres/nanometres and angles in degrees — not on the "
+            "colours on screen. Each result is added to the Measure-tab table with "
+            "its units, kept with the ROI it came from, and exported with the "
+            "image. Each entry below has a plain-language summary, when to reach "
+            "for it, the formula the program uses, and cautions. Level the image "
+            "first (row alignment / background) so heights are measured against a "
+            "flat reference."
+        ),
+        entries=_MEASUREMENT_ENTRIES,
+        theme=theme,
+        block_label="Computation",
+    )
+
+
 def _render_howto_entry(entry: _HowToEntry) -> str:
     blocks = [f'<div class="entry" id="{_entry_id(entry.title)}">']
     blocks.append(f"<h2>{escape(entry.title)}</h2>")
@@ -1728,6 +2164,7 @@ def render_howto_html(theme: Mapping[str, object] | None = None) -> str:
 
 _DEFINITIONS_HTML = render_definitions_html()
 _ROI_REFERENCE_HTML = render_roi_reference_html()
+_MEASUREMENTS_HTML = render_measurements_html()
 _HOWTO_HTML = render_howto_html()
 
 
@@ -1776,6 +2213,13 @@ class _ROIReferencePanel(_HtmlReferencePanel):
         super().__init__(t, render_roi_reference_html(t), parent)
 
 
+class _MeasurementsPanel(_HtmlReferencePanel):
+    """Scrollable reference panel describing the image measurements."""
+
+    def __init__(self, t: dict, parent=None):
+        super().__init__(t, render_measurements_html(t), parent)
+
+
 class _HowToPanel(_HtmlReferencePanel):
     """Scrollable panel with step-by-step how-to walkthroughs."""
 
@@ -1796,15 +2240,17 @@ class _DefinitionsDialog(QDialog):
         self._tabs = QTabWidget(self)
         self._howto_panel = _HowToPanel(t, self)
         self._panel = _DefinitionsPanel(t, self)
+        self._measurements_panel = _MeasurementsPanel(t, self)
         self._roi_panel = _ROIReferencePanel(t, self)
         self._tabs.addTab(self._howto_panel, "How-to")
         self._tabs.addTab(self._panel, "Processing")
+        self._tabs.addTab(self._measurements_panel, "Measurements")
         self._tabs.addTab(self._roi_panel, "ROI Actions")
         lay.addWidget(self._tabs)
         self.set_reference_tab(initial_tab)
 
     # Stable tab keys -> tab index (How-to first as the friendliest landing).
-    _TAB_INDEX = {"howto": 0, "processing": 1, "roi": 2}
+    _TAB_INDEX = {"howto": 0, "processing": 1, "measurements": 2, "roi": 3}
 
     def set_reference_tab(self, tab: str) -> None:
         """Switch to the named reference tab."""
@@ -1813,6 +2259,8 @@ class _DefinitionsDialog(QDialog):
             key = "roi"
         elif key in {"howto", "how_to", "guides", "guide"}:
             key = "howto"
+        elif key in {"measurements", "measurement", "measure"}:
+            key = "measurements"
         else:
             key = "processing"
         self._tabs.setCurrentIndex(self._TAB_INDEX[key])

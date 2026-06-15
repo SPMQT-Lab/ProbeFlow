@@ -54,6 +54,7 @@ def test_command_finder_shortcut_and_visible_commands_are_high_level():
     assert "fft.periodic_filter" in finder_ids
     assert "measure.clear_lattice_grid" in finder_ids
     assert "help.definitions" in finder_ids
+    assert "help.measurements" in finder_ids
     assert "help.roi_reference" in finder_ids
     assert viewer_command("help.roi_reference").shortcuts == ()
     assert not any(command_id.startswith("roi.tool.") for command_id in finder_ids)
