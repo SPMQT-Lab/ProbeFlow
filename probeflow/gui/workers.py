@@ -15,7 +15,12 @@ from PySide6.QtCore import QObject, QRunnable, Signal
 from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QApplication
 
-from probeflow.gui.models import SxmFile, VertFile, browse_entry_key
+from probeflow.gui.models import (
+    SxmFile,
+    VertFile,
+    browse_entry_key,
+    is_raw_channel_name,
+)
 from probeflow.core.resources import FILE_CUSHIONS_DIR
 from probeflow.core.scan_loader import SUPPORTED_SUFFIXES as _SCAN_SUFFIXES
 from probeflow.gui.rendering import (
@@ -307,9 +312,21 @@ class ChannelPreviewLoader(_PooledWorker):
         names = list(scan.plane_names or []) or [
             f"Channel {i}" for i in range(scan.n_planes)
         ]
+        # Hide generic 'Raw channel N' auxiliary planes (e.g. createc DAC slots
+        # beyond the known signals) so the Browse preview shows only meaningful
+        # channels. Keep all of them if none are named, so the grid is never
+        # blank. ``visible`` pairs each kept plane's source index with its name;
+        # previews are emitted by display position so they line up with the slots
+        # the panel builds from the (filtered) names.
+        visible = [
+            (i, name) for i, name in enumerate(names)
+            if not is_raw_channel_name(name)
+        ]
+        if not visible:
+            visible = list(enumerate(names))
         header = dict(getattr(scan, "header", {}) or {})
-        self.signals.meta_ready.emit(names, header, self.token)
-        for i in range(scan.n_planes):
+        self.signals.meta_ready.emit([name for _, name in visible], header, self.token)
+        for slot, (i, _name) in enumerate(visible):
             # Guard each plane independently: one unusual plane must emit a
             # null preview for its slot, not kill the worker mid-stream and
             # leave the remaining slots on their placeholders with no
@@ -330,7 +347,7 @@ class ChannelPreviewLoader(_PooledWorker):
                     self.entry.path, exc,
                 )
                 qimg = QImage()
-            self.signals.loaded.emit(i, qimg, self.token)
+            self.signals.loaded.emit(slot, qimg, self.token)
 
 
 # ── Worker: channel thumbnails ────────────────────────────────────────────────

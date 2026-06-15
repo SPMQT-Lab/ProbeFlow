@@ -155,6 +155,69 @@ class TestWorkerFailureEmission:
         assert not failed
         assert all(img.isNull() for _idx, img, _tok in loaded)
 
+    def test_channel_preview_loader_hides_raw_channels(self, qapp, monkeypatch):
+        """Generic 'Raw channel N' auxiliary planes (e.g. createc DAC slots) are
+        filtered out of the Browse preview; meta_ready carries only the named
+        channels and previews are emitted by contiguous display position."""
+        import probeflow.core.scan_loader as scan_loader
+        import probeflow.gui.workers as workers
+
+        names = ["Z forward", "Current forward", "Frequency shift"] + [
+            f"Raw channel {k}" for k in range(3, 12)
+        ]
+        scan = SimpleNamespace(
+            n_planes=len(names), plane_names=names, header={"Channels": len(names)},
+            planes=[np.ones((4, 4))] * len(names),
+        )
+        monkeypatch.setattr(scan_loader, "load_scan", lambda p: scan)
+        monkeypatch.setattr(workers, "render_scan_image", lambda **_kw: np.ones((4, 4)))
+
+        meta, loaded = [], []
+        loader = workers.ChannelPreviewLoader(_scan_entry(), "gray", object(), 8, 8)
+        loader.signals.meta_ready.connect(lambda *a: meta.append(a))
+        loader.signals.loaded.connect(lambda *a: loaded.append(a))
+        loader.work()
+
+        assert meta[0][0] == ["Z forward", "Current forward", "Frequency shift"]
+        # Previews emitted by display position 0..2 (line up with the panel slots).
+        assert sorted(idx for idx, _img, _tok in loaded) == [0, 1, 2]
+        # Header is untouched, so "Show all metadata" still reports every channel.
+        assert meta[0][1]["Channels"] == len(names)
+
+    def test_channel_preview_loader_keeps_all_when_all_raw(self, qapp, monkeypatch):
+        """If every plane is a raw placeholder, show them all rather than a blank
+        grid."""
+        import probeflow.core.scan_loader as scan_loader
+        import probeflow.gui.workers as workers
+
+        names = [f"Raw channel {k}" for k in range(3)]
+        scan = SimpleNamespace(
+            n_planes=3, plane_names=names, header={}, planes=[np.ones((4, 4))] * 3,
+        )
+        monkeypatch.setattr(scan_loader, "load_scan", lambda p: scan)
+        monkeypatch.setattr(workers, "render_scan_image", lambda **_kw: np.ones((4, 4)))
+
+        meta, loaded = [], []
+        loader = workers.ChannelPreviewLoader(_scan_entry(), "gray", object(), 8, 8)
+        loader.signals.meta_ready.connect(lambda *a: meta.append(a))
+        loader.signals.loaded.connect(lambda *a: loaded.append(a))
+        loader.work()
+
+        assert meta[0][0] == names
+        assert len(loaded) == 3
+
+
+def test_is_raw_channel_name():
+    from probeflow.gui.models import is_raw_channel_name
+
+    assert is_raw_channel_name("Raw channel 12")
+    assert is_raw_channel_name("raw column 3")
+    assert is_raw_channel_name("  Raw channel 0  ")
+    assert not is_raw_channel_name("Z forward")
+    assert not is_raw_channel_name("Current backward")
+    assert not is_raw_channel_name("Frequency shift")
+    assert not is_raw_channel_name("Raw channels")  # no index
+
 
 # ── Thumbnail grid: timer-sliced card build ───────────────────────────────────
 
