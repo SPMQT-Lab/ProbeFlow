@@ -129,10 +129,11 @@ class ProcessingControlPanel(QWidget):
         line_lbl.setAlignment(Qt.AlignCenter)
         lay.addWidget(line_lbl)
 
-        self._align_combo = _combo_row("Align rows:", ["None", "Median", "Mean"])
+        self._align_combo = _combo_row("Align rows:", ["None", "Median", "Mean", "Linear"])
         self._align_combo.setToolTip(
             "Level each scan line by subtracting its median or mean, removing "
-            "row-to-row offsets and slow tilt along the slow-scan direction."
+            "row-to-row offsets and slow tilt along the slow-scan direction. "
+            "'Linear' also fits and removes a straight slope within each row."
         )
 
         self._bad_lines_combo = _combo_row(
@@ -340,7 +341,7 @@ class ProcessingControlPanel(QWidget):
         lay.addWidget(self._filter_section)
 
     def state(self) -> dict:
-        align_map = {0: None, 1: "median", 2: "mean"}
+        align_map = {0: None, 1: "median", 2: "mean", 3: "linear"}
         bad_map = {0: None, 1: "step", 2: "mad"}
         cfg = {
             "align_rows": align_map[self._align_combo.currentIndex()],
@@ -382,7 +383,7 @@ class ProcessingControlPanel(QWidget):
         state = state or {}
         old_block = self._align_combo.blockSignals(True)
         self._align_combo.setCurrentIndex(
-            {None: 0, "median": 1, "mean": 2}.get(state.get("align_rows"), 0))
+            {None: 0, "median": 1, "mean": 2, "linear": 3}.get(state.get("align_rows"), 0))
         self._align_combo.blockSignals(old_block)
         self._bad_lines_combo.setCurrentIndex(
             {None: 0, "step": 1, "step_segments": 1,

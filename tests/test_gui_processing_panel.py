@@ -145,6 +145,20 @@ def test_browse_quick_panel_emits_only_thumbnail_corrections(qapp):
     assert panel.state() == {"align_rows": "median", "remove_bad_lines": None}
 
 
+def test_align_rows_exposes_linear_option(qapp):
+    # The backend align_rows supports median/mean/linear; the GUI must offer all
+    # three so the documented 'linear' option is actually reachable.
+    from probeflow.gui import ProcessingControlPanel
+
+    panel = ProcessingControlPanel("viewer_full")
+    items = [panel._align_combo.itemText(i) for i in range(panel._align_combo.count())]
+    assert items == ["None", "Median", "Mean", "Linear"]
+
+    panel.set_state({"align_rows": "linear"})
+    assert panel._align_combo.currentIndex() == 3
+    assert panel.state()["align_rows"] == "linear"
+
+
 def test_viewer_full_panel_round_trips_standard_processing_state(qapp):
     from PySide6.QtWidgets import QCheckBox, QLabel, QPushButton
     from probeflow.gui import ProcessingControlPanel
