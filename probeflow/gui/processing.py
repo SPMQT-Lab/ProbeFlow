@@ -10,6 +10,38 @@ from PySide6.QtWidgets import (
     QSizePolicy, QSlider, QVBoxLayout, QWidget,
 )
 
+# The smooth-σ slider is an integer QSlider scaled by this factor so it can
+# express sub-pixel σ (e.g. a slider value of 5 → σ = 0.5 px).
+_SMOOTH_SIGMA_SCALE = 10
+# FWHM of a Gaussian = 2·sqrt(2·ln 2)·σ.
+_GAUSSIAN_FWHM_FACTOR = 2.35482004503
+
+
+def format_gaussian_readout(sigma_px: float, px_nm: float | None) -> str:
+    """One-line description of the Gaussian-blur kernel's physical extent.
+
+    ``sigma_px`` is the standard deviation in pixels.  The kernel is truncated at
+    ±4σ to match scipy's ``gaussian_filter(truncate=4.0)`` default, so the
+    half-width in pixels is ``int(4σ + 0.5)``.  When ``px_nm`` (pixel size in nm)
+    is known the σ, FWHM and kernel extent are also reported in nanometres.
+    """
+    sigma_px = float(sigma_px)
+    fwhm_px = _GAUSSIAN_FWHM_FACTOR * sigma_px
+    r_px = int(4.0 * sigma_px + 0.5)
+    if px_nm and px_nm > 0:
+        sigma_nm = sigma_px * px_nm
+        fwhm_nm = fwhm_px * px_nm
+        r_nm = r_px * px_nm
+        return (
+            f"σ {sigma_px:.1f} px · {sigma_nm:.3g} nm   "
+            f"FWHM {fwhm_nm:.3g} nm   "
+            f"kernel ±{r_px} px (±{r_nm:.3g} nm)"
+        )
+    return (
+        f"σ {sigma_px:.1f} px   FWHM {fwhm_px:.2f} px   kernel ±{r_px} px"
+    )
+
+
 class ProcessingControlPanel(QWidget):
     """Internal processing controls shared by Browse and Viewer."""
 
@@ -26,6 +58,7 @@ class ProcessingControlPanel(QWidget):
         if mode not in ("browse_quick", "viewer_full"):
             raise ValueError(f"Unknown processing panel mode: {mode}")
         self._mode = mode
+        self._smooth_px_nm: float | None = None
         self._build()
 
     def _build(self):
@@ -57,7 +90,10 @@ class ProcessingControlPanel(QWidget):
             return cb
 
         def _sub_slider(label: str, mn: int, mx: int, init: int,
-                        fmt="{v}") -> tuple[QWidget, QSlider, QLabel]:
+                        fmt="{v}", scale: int = 1) -> tuple[QWidget, QSlider, QLabel]:
+            # ``scale`` > 1 makes the integer slider represent a fractional value:
+            # the displayed/logical value is ``slider_value / scale`` (e.g. scale=10
+            # gives 0.1 steps).  scale=1 is the original integer behaviour.
             w = QWidget()
             rl = QHBoxLayout(w)
             rl.setContentsMargins(0, 0, 0, 0)
@@ -67,11 +103,15 @@ class ProcessingControlPanel(QWidget):
             sl = QSlider(Qt.Horizontal)
             sl.setRange(mn, mx)
             sl.setValue(init)
-            val_lbl = QLabel(fmt.format(v=init))
+
+            def _disp(v: int) -> str:
+                return fmt.format(v=(v / scale if scale != 1 else v))
+
+            val_lbl = QLabel(_disp(init))
             val_lbl.setFont(ui_font(8))
-            val_lbl.setFixedWidth(28)
+            val_lbl.setFixedWidth(28 if scale == 1 else 44)
             sl.valueChanged.connect(
-                lambda v, vl=val_lbl, f=fmt: vl.setText(f.format(v=v)))
+                lambda v, vl=val_lbl: vl.setText(_disp(v)))
             rl.addWidget(lbl)
             rl.addWidget(sl, 1)
             rl.addWidget(val_lbl)
@@ -239,14 +279,27 @@ class ProcessingControlPanel(QWidget):
         self._smooth_combo = _combo_row("Smooth:", ["None", "Gaussian"], L, 54)
         self._smooth_combo.setToolTip(
             "Gaussian blur to suppress noise. Larger sigma (px) smooths more, but "
-            "also blurs genuine fine features."
+            "also blurs genuine fine features. The kernel spans ±4σ; σ may be "
+            "sub-pixel (down to 0.2 px) for gentle denoising."
         )
         self._smooth_sigma_w, self._smooth_sigma_sl, _ = _sub_slider(
-            "sigma:", 1, 20, 1, "{v}px")
+            "sigma:", 2, 200, _SMOOTH_SIGMA_SCALE, "{v:.1f}px",
+            scale=_SMOOTH_SIGMA_SCALE)
         L.addWidget(self._smooth_sigma_w)
         self._smooth_sigma_w.setVisible(False)
+        # Physical readout: σ/FWHM/kernel extent in nm (when calibrated) or px.
+        self._smooth_readout_lbl = QLabel()
+        self._smooth_readout_lbl.setFont(ui_font(7))
+        self._smooth_readout_lbl.setWordWrap(True)
+        self._smooth_readout_lbl.setVisible(False)
+        L.addWidget(self._smooth_readout_lbl)
+        self._smooth_sigma_sl.valueChanged.connect(
+            lambda _v: self._update_smooth_readout())
         self._smooth_combo.currentIndexChanged.connect(
-            lambda i: self._smooth_sigma_w.setVisible(i != 0))
+            lambda i: (self._smooth_sigma_w.setVisible(i != 0),
+                       self._smooth_readout_lbl.setVisible(i != 0),
+                       self._update_smooth_readout()))
+        self._update_smooth_readout()
 
         self._highpass_combo = _combo_row("Hi-pass:", ["None", "Gaussian"], L, 54)
         self._highpass_sigma_w, self._highpass_sigma_sl, _ = _sub_slider(
@@ -314,7 +367,10 @@ class ProcessingControlPanel(QWidget):
             "remove_bad_lines_max_adjacent_bad_lines": int(
                 self._bad_line_adjacent_spin.value()
             ),
-            "smooth_sigma": self._smooth_sigma_sl.value() if smooth_i != 0 else None,
+            "smooth_sigma": (
+                self._smooth_sigma_sl.value() / _SMOOTH_SIGMA_SCALE
+                if smooth_i != 0 else None
+            ),
             "highpass_sigma": self._highpass_sigma_sl.value() if highpass_i != 0 else None,
             "edge_method": edge_map[edge_i],
             "edge_sigma": self._edge_sigma_sl.value(),
@@ -348,7 +404,8 @@ class ProcessingControlPanel(QWidget):
         sigma = state.get("smooth_sigma")
         if sigma:
             self._smooth_combo.setCurrentIndex(1)
-            self._smooth_sigma_sl.setValue(int(sigma))
+            self._smooth_sigma_sl.setValue(
+                int(round(float(sigma) * _SMOOTH_SIGMA_SCALE)))
         else:
             self._smooth_combo.setCurrentIndex(0)
 
@@ -364,6 +421,18 @@ class ProcessingControlPanel(QWidget):
             {None: 0, "laplacian": 1, "log": 2, "dog": 3,
              "sobel": 4, "scharr": 5}.get(edge, 0))
         self._edge_sigma_sl.setValue(int(state.get("edge_sigma", 1)))
+
+    def set_pixel_size_nm(self, px_nm: float | None) -> None:
+        """Tell the panel the loaded scan's pixel size (nm) for the σ readout."""
+        self._smooth_px_nm = float(px_nm) if px_nm else None
+        self._update_smooth_readout()
+
+    def _update_smooth_readout(self) -> None:
+        lbl = getattr(self, "_smooth_readout_lbl", None)
+        if lbl is None:  # browse_quick panel has no smooth control
+            return
+        sigma_px = self._smooth_sigma_sl.value() / _SMOOTH_SIGMA_SCALE
+        lbl.setText(format_gaussian_readout(sigma_px, self._smooth_px_nm))
 
     def bad_line_method(self) -> str | None:
         return self.state().get("remove_bad_lines")

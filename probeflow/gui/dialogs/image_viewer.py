@@ -365,6 +365,11 @@ class ImageViewerDialog(
         return w_m / Nx, h_m / Ny
 
     def _refresh_display_array(self, reset_zoom_if_shape_changed: bool = False):
+        # Keep the Gaussian-blur σ readout calibrated to the loaded scan.
+        panel = getattr(self, "_processing_panel", None)
+        if panel is not None and hasattr(panel, "set_pixel_size_nm"):
+            psx, _psy = self._processing_pixel_sizes_m()
+            panel.set_pixel_size_nm(psx * 1e9 if psx else None)
         old_shape = self._display_arr.shape if self._display_arr is not None else None
         # display array: raw with processing applied (no grain overlay — that's visual only)
         if self._raw_arr is not None and self._processing:
