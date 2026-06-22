@@ -752,11 +752,20 @@ def apply_processing_state(
                 patch=int(p.get("patch", 1)),
             )
         elif step.op == "set_zero_plane":
-            a = _proc.set_zero_plane(
-                a,
-                p.get("points_px", ()),
-                patch=int(p.get("patch", 1)),
-            )
+            try:
+                a = _proc.set_zero_plane(
+                    a,
+                    p.get("points_px", ()),
+                    patch=int(p.get("patch", 1)),
+                )
+            except ValueError as _zp_err:
+                import warnings
+                warnings.warn(
+                    f"set_zero_plane skipped: {_zp_err}. "
+                    "Re-place the three reference points so they form a "
+                    "non-degenerate triangle.",
+                    stacklevel=2,
+                )
         elif step.op == "roi":
             if _depth >= 2:
                 raise ValueError(
