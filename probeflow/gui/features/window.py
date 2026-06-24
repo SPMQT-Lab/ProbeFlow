@@ -58,7 +58,10 @@ class FeatureCountingWindow(QMainWindow):
     # ProbeFlowWindow listens and calls load_entry() with the data.
     load_from_browse_needed = Signal()
 
-    def __init__(self, parent=None, theme: dict | None = None):
+    # Emitted when "Send to Particle Statistics" builds a set: (scan_context, set_id).
+    open_particle_statistics_needed = Signal(object, str)
+
+    def __init__(self, parent=None, theme: dict | None = None, feature_set_store=None):
         # Qt.Window ensures this is an independent top-level window with its own
         # taskbar entry on Windows, not a child that hides behind the main window.
         super().__init__(parent, Qt.Window)
@@ -96,6 +99,7 @@ class FeatureCountingWindow(QMainWindow):
             status_cb=self._status_bar.showMessage,
             preview_pool=self._preview_pool,
             parent_widget=self,
+            feature_set_store=feature_set_store,
         )
 
         # ── Remaining signals not owned by the controller ────────────────────
@@ -104,6 +108,9 @@ class FeatureCountingWindow(QMainWindow):
             self.load_from_browse_needed.emit)
         # "← Browse" button hides this window (Browse is always in main window).
         self._panel.go_to_browse_requested.connect(self.hide)
+        # Bridge the controller's "open Particle Statistics" request to the host app.
+        self._ctrl.open_particle_statistics_requested.connect(
+            self.open_particle_statistics_needed.emit)
 
         # ── Layout ───────────────────────────────────────────────────────────
         splitter = QSplitter(Qt.Horizontal)

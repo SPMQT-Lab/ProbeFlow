@@ -388,6 +388,12 @@ class ProbeFlowWindow(QMainWindow):
         # Floating Feature Counting window (lazy-created on first open)
         self._fc_window = None
 
+        # One application-level feature-set store shared across image viewers,
+        # Feature Counting, and file imports, so points from any source can be
+        # pooled together in Particle Statistics.
+        from probeflow.measurements.feature_sets import FeatureSetStore
+        self._feature_set_store = FeatureSetStore()
+
         # TV-denoise tab plumbing
         self._tv_pool    = QThreadPool.globalInstance()
         self._tv_signals = _TVWorkerSignals()
@@ -434,7 +440,10 @@ class ProbeFlowWindow(QMainWindow):
             status_cb=lambda msg: self._status_bar.showMessage(msg),
             preview_pool=self._features_preview_pool,
             parent_widget=self,
+            feature_set_store=self._feature_set_store,
         )
+        self._features_ctrl.open_particle_statistics_requested.connect(
+            self._on_open_particle_statistics_from_features)
 
         # Status bar
         self._status_bar = QStatusBar()
@@ -1156,9 +1165,13 @@ class ProbeFlowWindow(QMainWindow):
         if self._fc_window is None:
             from probeflow.gui.features.window import FeatureCountingWindow
             theme = THEMES[self._theme_name]
-            self._fc_window = FeatureCountingWindow(parent=None, theme=theme)
+            self._fc_window = FeatureCountingWindow(
+                parent=None, theme=theme, feature_set_store=self._feature_set_store
+            )
             self._fc_window.load_from_browse_needed.connect(
                 self._on_fc_load_from_browse)
+            self._fc_window.open_particle_statistics_needed.connect(
+                self._on_open_particle_statistics_from_features)
         self._fc_window.show()
         self._fc_window.raise_()
         self._fc_window.activateWindow()
@@ -1272,6 +1285,43 @@ class ProbeFlowWindow(QMainWindow):
             analysis_scan.record_processing_state(processing_state)
 
         return arr, px_m, px_x_m, px_y_m, plane_idx, analysis_scan
+
+    def _on_open_particle_statistics_from_features(self, scan_context, set_id: str) -> None:
+        """Open (or raise) Particle Statistics for a set sent from Feature Counting."""
+        from probeflow.gui.dialogs.particle_statistics import ParticleStatisticsDialog
+
+        theme = THEMES[self._theme_name]
+        dlg = getattr(self, "_features_particle_statistics_dialog", None)
+        try:
+            if dlg is not None:
+                dlg.isVisible()
+        except RuntimeError:
+            dlg = None
+        if dlg is None:
+            dlg = ParticleStatisticsDialog(
+                scan=scan_context,
+                feature_set_store=self._feature_set_store,
+                theme=theme,
+                initial_mode="real",
+                parent=None,
+            )
+            self._features_particle_statistics_dialog = dlg
+            try:
+                dlg.destroyed.connect(
+                    lambda _obj=None: setattr(self, "_features_particle_statistics_dialog", None)
+                )
+            except Exception:
+                pass
+        else:
+            dlg.refresh_probe_context(
+                scan=scan_context, feature_set_store=self._feature_set_store
+            )
+            dlg.set_current_mode("real")
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+        if set_id:
+            dlg.select_feature_set(set_id)
 
     def _on_fc_load_from_browse(self) -> None:
         """Bridge: read Browse selection → load into the floating FC window (off-thread)."""
@@ -1430,6 +1480,8 @@ class ProbeFlowWindow(QMainWindow):
                                     processing=proc,
                                     spec_image_map=self._spec_image_map,
                                     initial_plane_idx=initial_plane_idx)
+            # Share the application-level feature-set store with this viewer.
+            dlg._feature_set_store_obj = self._feature_set_store
         # Use show() instead of exec() so the dialog is non-modal: the browse
         # window stays interactive, and all child windows (FFT viewer, Reciprocal
         # Grid panel, etc.) get normal macOS window controls (minimize, resize).

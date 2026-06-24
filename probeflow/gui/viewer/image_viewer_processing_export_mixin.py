@@ -989,7 +989,11 @@ class ImageViewerProcessingExportMixin:
             if not visible:
                 continue
             try:
-                dlg.close()
+                force_close = getattr(dlg, "force_close", None)
+                if callable(force_close):
+                    force_close()
+                else:
+                    dlg.close()
             except Exception:
                 pass
 

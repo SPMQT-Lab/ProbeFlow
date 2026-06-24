@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
@@ -58,6 +59,9 @@ class FeatureFinderDialog(QDialog):
         pixel_size_y_m: float = 1e-10,
         roi_mask: np.ndarray | None = None,
         theme: dict | None = None,
+        value_scale: float = 1.0,
+        value_unit: str = "",
+        on_send_to_particle_statistics: Any = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -70,6 +74,11 @@ class FeatureFinderDialog(QDialog):
         self._px_y_m = float(pixel_size_y_m)
         self._roi_mask = roi_mask
         self._t = theme or {}
+        # Thresholds display in the channel's natural unit (raw_value * value_scale),
+        # e.g. nm or pA, so the spinboxes are readable instead of raw SI.
+        self._value_scale = float(value_scale) if value_scale else 1.0
+        self._value_unit = str(value_unit or "")
+        self._on_send_to_particle_statistics = on_send_to_particle_statistics
         self._result: FeatureDetectionResult | None = None
 
         self._build()
@@ -159,8 +168,13 @@ class FeatureFinderDialog(QDialog):
         v_min = float(arr_finite.min()) if arr_finite.size else 0.0
         v_max = float(arr_finite.max()) if arr_finite.size else 1.0
         v_range = v_max - v_min or 1.0
-        step = v_range / 100.0
-        decimals = max(3, -int(np.floor(np.log10(abs(step) + 1e-30))))
+        # Display in the channel's natural unit (raw * scale), e.g. nm / pA.
+        scale = self._value_scale
+        d_min = v_min * scale
+        d_range = v_range * scale
+        step = abs(d_range) / 100.0 or 1.0
+        decimals = max(2, min(6, -int(np.floor(np.log10(step + 1e-30))) + 1))
+        suffix = f" {self._value_unit}" if self._value_unit else ""
 
         # Low threshold
         self._low_row = QHBoxLayout()
@@ -169,7 +183,8 @@ class FeatureFinderDialog(QDialog):
         self._low_spin.setRange(-1e15, 1e15)
         self._low_spin.setDecimals(decimals)
         self._low_spin.setSingleStep(step)
-        self._low_spin.setValue(v_min + 0.5 * v_range)
+        self._low_spin.setSuffix(suffix)
+        self._low_spin.setValue(d_min + 0.5 * d_range)
         self._low_row.addWidget(self._low_lbl)
         self._low_row.addWidget(self._low_spin)
         lay.addLayout(self._low_row)
@@ -181,7 +196,8 @@ class FeatureFinderDialog(QDialog):
         self._high_spin.setRange(-1e15, 1e15)
         self._high_spin.setDecimals(decimals)
         self._high_spin.setSingleStep(step)
-        self._high_spin.setValue(v_max)
+        self._high_spin.setSuffix(suffix)
+        self._high_spin.setValue(d_min + d_range)
         self._high_row.addWidget(self._high_lbl)
         self._high_row.addWidget(self._high_spin)
         lay.addLayout(self._high_row)
@@ -230,6 +246,22 @@ class FeatureFinderDialog(QDialog):
         self._count_lbl = QLabel("Detected features: —")
         self._count_lbl.setFont(ui_font(9))
         lay.addWidget(self._count_lbl)
+
+        if self._on_send_to_particle_statistics is not None:
+            self._send_btn = QPushButton("Send to Particle Statistics")
+            self._send_btn.setObjectName("featureFinderSendToParticleStatistics")
+            self._send_btn.setFixedHeight(30)
+            self._send_btn.setFont(ui_font(10, weight=QFont.Bold))
+            self._send_btn.setStyleSheet(
+                "QPushButton { background-color: #2fb344; color: #071b0b; "
+                "border: 2px solid #83e89b; font-weight: 800; } "
+                "QPushButton:hover { background-color: #39c956; }"
+            )
+            self._send_btn.setToolTip(
+                "Save these features and open them in Particle Statistics."
+            )
+            self._send_btn.clicked.connect(self._send_to_particle_statistics)
+            lay.addWidget(self._send_btn)
 
         # ── Export coordinates ──────────────────────────────────────────────
         lay.addWidget(_sep())
@@ -325,8 +357,10 @@ class FeatureFinderDialog(QDialog):
             else None
         )
         thr = self._threshold_mode()
-        tlo = self._low_spin.value() if thr in ("above", "between") else None
-        thi = self._high_spin.value() if thr in ("below", "between") else None
+        # Spinboxes are in display units; convert back to raw for detection.
+        scale = self._value_scale or 1.0
+        tlo = self._low_spin.value() / scale if thr in ("above", "between") else None
+        thi = self._high_spin.value() / scale if thr in ("below", "between") else None
         try:
             self._result = find_image_features(
                 self._arr,
@@ -367,6 +401,22 @@ class FeatureFinderDialog(QDialog):
             self._ax.scatter(xs, ys, marker="+", c="#f38ba8", s=60, linewidths=1.2,
                              zorder=5)
         self._canvas.draw_idle()
+
+    # ── Send ────────────────────────────────────────────────────────────────────
+
+    def _send_to_particle_statistics(self) -> None:
+        if self._on_send_to_particle_statistics is None:
+            return
+        if self._result is None or not self._result.points:
+            self._status_lbl.setText("Run detection first.")
+            return
+        try:
+            self._on_send_to_particle_statistics(self._result)
+            self._status_lbl.setText(
+                f"Sent {len(self._result.points)} features to Particle Statistics."
+            )
+        except Exception as exc:  # noqa: BLE001 - surface failures in the dialog
+            self._status_lbl.setText(f"Could not send features: {exc}")
 
     # ── Export ────────────────────────────────────────────────────────────────
 

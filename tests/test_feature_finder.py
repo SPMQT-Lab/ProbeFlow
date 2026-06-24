@@ -243,3 +243,31 @@ def test_find_image_features_and_detect_local_maxima_agree_on_peak_locations():
     ff_locs = sorted((round(pt.x_px), round(pt.y_px)) for pt in ff_result.points)
     dlm_locs = sorted((round(pt.x_px), round(pt.y_px)) for pt in dlm_points)
     assert ff_locs == dlm_locs
+
+
+@pytest.fixture
+def qapp():
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication([])
+    yield app
+
+
+def test_feature_finder_thresholds_display_in_channel_unit(qapp):
+    from probeflow.gui.dialogs.feature_finder import FeatureFinderDialog
+
+    arr = np.linspace(0.0, 2e-9, 64, dtype=float).reshape(8, 8)  # metres
+    dlg = FeatureFinderDialog(arr, value_scale=1e9, value_unit="nm")  # m -> nm
+
+    # High threshold defaults to the data max, shown in nm (≈2.0) not raw SI.
+    assert dlg._high_spin.suffix().strip() == "nm"
+    assert dlg._high_spin.value() == pytest.approx(2.0, abs=1e-3)
+
+    # Detection converts the displayed value back to raw metres.
+    dlg._set_threshold_mode("below") if hasattr(dlg, "_set_threshold_mode") else None
+    dlg._high_spin.setValue(1.0)  # 1.0 nm
+    scale = dlg._value_scale
+    assert dlg._high_spin.value() / scale == pytest.approx(1e-9)
+
+    dlg.close()
+    dlg.deleteLater()

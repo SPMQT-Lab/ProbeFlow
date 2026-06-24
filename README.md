@@ -183,6 +183,8 @@ dzdv = numeric_derivative(spec.x_array, z_smooth)
 
 - [GUI guide](docs/gui.md)
 - [Command-line guide](docs/cli.md)
+- [Particle Statistics guide](docs/adstat_user_guide.md)
+- [AdStat integration](docs/adstat_integration.md)
 - [Createc `.dat` reader notes](docs/createc_dat_reader.md)
 - [ROI manual workflow checklist](docs/roi_manual_test_checklist.md)
 - [Review and cleanup status](docs/review_status.md)

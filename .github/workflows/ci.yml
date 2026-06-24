@@ -45,6 +45,20 @@ jobs:
       - name: Run pytest
         run: pytest -v
 
+      - name: Try install optional AdStat extra
+        id: adstat_extra
+        run: |
+          if python -m pip install -e ".[adstat]"; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "AdStat extra is not available in this environment; adapter tests already skip without it."
+          fi
+
+      - name: Run AdStat adapter tests
+        if: steps.adstat_extra.outputs.available == 'true'
+        run: pytest -v tests/test_adstat_adapter.py tests/test_adstat_results_dialog.py
+
   lint:
     name: ruff
     runs-on: ubuntu-latest

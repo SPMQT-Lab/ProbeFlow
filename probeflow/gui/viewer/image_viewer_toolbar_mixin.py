@@ -280,12 +280,15 @@ class ImageViewerToolbarMixin:
 
     def _pixel_size_xy_m(self) -> tuple[float, float]:
         shape = self._current_array_shape()
-        if shape is None or self._scan_range_m is None:
+        scan_range = getattr(self, "_display_scan_range_m", None)
+        if scan_range is None:
+            scan_range = getattr(self, "_scan_range_m", None)
+        if shape is None or scan_range is None:
             return 1e-10, 1e-10
         Ny, Nx = shape
         try:
-            w_m = float(self._scan_range_m[0])
-            h_m = float(self._scan_range_m[1])
+            w_m = float(scan_range[0])
+            h_m = float(scan_range[1])
         except (TypeError, ValueError, IndexError):
             return 1e-10, 1e-10
         px_x = w_m / Nx if Nx > 0 and w_m > 0 else 1e-10
