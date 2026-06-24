@@ -1507,6 +1507,7 @@ def test_particle_statistics_import_csv_from_disk(qapp, tmp_path, monkeypatch):
 
 def test_particle_statistics_export_csv(qapp, tmp_path, monkeypatch):
     """The Export menu writes per-statistic CSVs from the current result."""
+    pytest.importorskip("adstat")  # building a real view spec needs the engine
     from types import SimpleNamespace
 
     from PySide6.QtWidgets import QFileDialog

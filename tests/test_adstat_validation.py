@@ -19,8 +19,11 @@ import math
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
-from probeflow.analysis.adstat_adapter import (
+pytest.importorskip("adstat")
+
+from probeflow.analysis.adstat_adapter import (  # noqa: E402
     ORDERING_STATISTICS,
     compare_point_source_view_spec,
 )

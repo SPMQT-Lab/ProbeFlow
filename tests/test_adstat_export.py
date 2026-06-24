@@ -7,9 +7,12 @@ import json
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
-from probeflow.analysis.adstat_adapter import compare_point_source_view_spec
-from probeflow.measurements.adstat_export import (
+pytest.importorskip("adstat")
+
+from probeflow.analysis.adstat_adapter import compare_point_source_view_spec  # noqa: E402
+from probeflow.measurements.adstat_export import (  # noqa: E402
     export_result_csvs,
     export_result_json,
     panel_curve_csv_text,
