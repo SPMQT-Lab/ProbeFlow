@@ -1419,6 +1419,7 @@ class FeaturesSidebar(QWidget):
     load_from_browse_requested = Signal()
     run_requested              = Signal(str)   # mode
     export_requested           = Signal(str)   # mode
+    send_to_particle_statistics_requested = Signal(str)  # mode
     crop_template_requested    = Signal()
     mask_paint_toggled         = Signal(bool)  # True = start painting
     mask_clear_requested       = Signal()
@@ -1932,6 +1933,18 @@ class FeaturesSidebar(QWidget):
         self._export_btn.clicked.connect(
             lambda: self.export_requested.emit(self._current_mode()))
         lay.addWidget(self._export_btn)
+
+        self._send_stats_btn = QPushButton("Send to Particle Statistics…")
+        self._send_stats_btn.setFont(ui_font(9))
+        self._send_stats_btn.setFixedHeight(28)
+        self._send_stats_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self._send_stats_btn.setToolTip(_tip(
+            "Send the current mode's particle/detection positions to Particle "
+            "Statistics as a feature set for spatial-statistics analysis. Run an "
+            "analysis first so there are positions to send."))
+        self._send_stats_btn.clicked.connect(
+            lambda: self.send_to_particle_statistics_requested.emit(self._current_mode()))
+        lay.addWidget(self._send_stats_btn)
 
         lay.addStretch(1)
         return page

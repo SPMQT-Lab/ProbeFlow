@@ -124,3 +124,52 @@ def test_pct_to_nm2_rectangle():
     # total area = 200 * 100 * 0.5nm * 2.0nm = 20000 nm²
     # 0.5% of 20000 = 100 nm²
     assert _pct_to_nm2(0.5, arr, px_x_m, px_y_m) == pytest.approx(100.0)
+
+
+def test_send_to_particle_statistics_builds_set_and_emits():
+    """Send-to-stats builds a FeatureSet, adds it to the shared store, emits a request."""
+    from types import SimpleNamespace
+
+    from probeflow.measurements.feature_sets import FeatureSetStore
+
+    panel, sidebar, pool, status_cb, preview_pool = _make_mocks()
+    store = FeatureSetStore()
+    try:
+        ctrl = FeatureCountingController(
+            panel, sidebar, pool, status_cb,
+            preview_pool=preview_pool,
+            feature_set_store=store,
+        )
+    except RuntimeError:
+        pytest.skip("Qt not available in this environment")
+
+    panel.get_particles.return_value = [
+        SimpleNamespace(to_dict=lambda: {"centroid_x_m": 10e-9, "centroid_y_m": 20e-9}),
+        SimpleNamespace(to_dict=lambda: {"centroid_x_m": 30e-9, "centroid_y_m": 40e-9}),
+    ]
+    panel.current_scan.return_value = SimpleNamespace(
+        scan_range_m=(100e-9, 80e-9), dims=(200, 160)
+    )
+    panel.current_entry.return_value = SimpleNamespace(stem="imgA")
+
+    captured: dict = {}
+    ctrl.open_particle_statistics_requested.connect(
+        lambda ctx, sid: captured.update(ctx=ctx, sid=sid)
+    )
+    ctrl._on_send_to_particle_statistics("particles")
+
+    assert len(store) == 1
+    assert captured.get("sid")
+    assert store.all()[0].point_count == 2
+
+
+def test_send_to_particle_statistics_without_store_is_noop():
+    panel, sidebar, pool, status_cb, preview_pool = _make_mocks()
+    try:
+        ctrl = FeatureCountingController(
+            panel, sidebar, pool, status_cb, preview_pool=preview_pool
+        )
+    except RuntimeError:
+        pytest.skip("Qt not available in this environment")
+    ctrl._on_send_to_particle_statistics("particles")
+    panel.get_particles.assert_not_called()

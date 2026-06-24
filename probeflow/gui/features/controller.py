@@ -25,7 +25,7 @@ import numpy as np
 import os as _os
 _os.environ.setdefault("QT_API", "pyside6")
 
-from PySide6.QtCore import QObject, QThreadPool
+from PySide6.QtCore import QObject, QThreadPool, Signal
 
 from probeflow.gui.features import FeaturesPanel, FeaturesSidebar, _FeaturesWorker
 
@@ -84,7 +84,14 @@ class FeatureCountingController(QObject):
         instance is used (not recommended for preview — use a 1-thread pool).
     parent_widget
         Parent for file dialogs (``None`` centres dialogs on screen).
+    feature_set_store
+        Shared :class:`FeatureSetStore` that "Send to Particle Statistics" adds
+        the built set to.  ``None`` disables that action.
     """
+
+    # Emitted after a feature set is sent to Particle Statistics:
+    # ``(scan_context, set_id)``.  The host window/app opens the dialog.
+    open_particle_statistics_requested = Signal(object, str)
 
     def __init__(
         self,
@@ -95,6 +102,7 @@ class FeatureCountingController(QObject):
         *,
         preview_pool: QThreadPool | None = None,
         parent_widget: QWidget | None = None,
+        feature_set_store: object | None = None,
     ) -> None:
         super().__init__()
         self._panel = panel
@@ -102,6 +110,7 @@ class FeatureCountingController(QObject):
         self._pool = pool
         self._status_cb = status_cb
         self._parent_widget = parent_widget
+        self._feature_set_store = feature_set_store
 
         self._preview_pool = preview_pool or QThreadPool.globalInstance()
         self._preview_generation = 0
@@ -120,6 +129,8 @@ class FeatureCountingController(QObject):
         sidebar.preview_requested.connect(self._on_preview)
         sidebar.run_requested.connect(self._on_run)
         sidebar.export_requested.connect(self._on_export)
+        sidebar.send_to_particle_statistics_requested.connect(
+            self._on_send_to_particle_statistics)
         sidebar.classify_params_changed.connect(self._on_classify_params_changed)
         sidebar.mode_changed.connect(self._on_mode_changed)
         sidebar.mask_paint_toggled.connect(self._on_mask_paint_toggled)
@@ -511,6 +522,69 @@ class FeatureCountingController(QObject):
             self._status_cb(f"Exported {kind} → {out_path}")
         except Exception as exc:
             self._sidebar.set_status(f"Export failed: {exc}")
+
+    def _on_send_to_particle_statistics(self, mode: str) -> None:
+        """Build a feature set from particles/detections and open Particle Statistics."""
+        from types import SimpleNamespace
+
+        if self._feature_set_store is None:
+            self._sidebar.set_status("Particle Statistics is not available here.")
+            return
+        if mode == "particles":
+            items = self._panel.get_particles()
+        elif mode == "template":
+            items = self._panel.get_detections()
+        else:
+            self._sidebar.set_status(
+                "Send to Particle Statistics supports Particles or Template modes."
+            )
+            return
+        if not items:
+            self._sidebar.set_status("Nothing to send — run an analysis first.")
+            return
+
+        scan = self._panel.current_scan()
+        entry = self._panel.current_entry()
+        arr = self._panel.current_array()
+        if scan is not None:
+            scan_range_m = (float(scan.scan_range_m[0]), float(scan.scan_range_m[1]))
+            nx, ny = scan.dims
+            image_shape = (int(ny), int(nx))
+        elif arr is not None:
+            px_x_m, px_y_m = self._panel.current_pixel_sizes()
+            ny, nx = arr.shape[:2]
+            image_shape = (int(ny), int(nx))
+            scan_range_m = (nx * float(px_x_m), ny * float(px_y_m))
+        else:
+            self._sidebar.set_status("No scan loaded.")
+            return
+
+        scan_ctx = SimpleNamespace(
+            scan_range_m=scan_range_m,
+            dims=(image_shape[1], image_shape[0]),
+            source_path=getattr(entry, "path", None),
+        )
+        try:
+            from probeflow.measurements.point_table_io import feature_items_to_feature_set
+
+            label = f"{entry.stem if entry else 'features'} · {mode} (N={len(items)})"
+            feature_set = feature_items_to_feature_set(
+                items,
+                scan_range_m=scan_range_m,
+                image_shape=image_shape,
+                name=label,
+                source_type=f"feature_counting_{mode}",
+                image_label=(entry.stem if entry else ""),
+                metadata={"feature_counting_mode": mode},
+            )
+        except Exception as exc:  # noqa: BLE001 - report conversion failures to the user
+            self._sidebar.set_status(f"Could not send features: {exc}")
+            return
+
+        set_id = self._feature_set_store.add(feature_set)
+        self.open_particle_statistics_requested.emit(scan_ctx, set_id)
+        self._status_cb(f"Sent {len(items)} points to Particle Statistics.")
+        self._sidebar.set_status(f"Sent {feature_set.point_count} points to Particle Statistics.")
 
     # ── Zero-plane / histogram ────────────────────────────────────────────────
 

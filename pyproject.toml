@@ -21,9 +21,10 @@ dependencies = [
 
 [project.optional-dependencies]
 dev      = ["pytest", "vulture"]
+adstat   = ["adstat>=0.2,<0.3"]
 features = ["opencv-python", "scikit-learn"]
 gwyddion = ["gwyfile"]
-all      = ["opencv-python", "scikit-learn", "gwyfile", "pytest"]
+all      = ["adstat>=0.2,<0.3", "opencv-python", "scikit-learn", "gwyfile", "pytest"]
 
 [project.scripts]
 probeflow = "probeflow.cli:main"

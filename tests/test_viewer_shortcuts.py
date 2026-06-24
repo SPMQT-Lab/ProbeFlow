@@ -56,6 +56,10 @@ def test_command_finder_shortcut_and_visible_commands_are_high_level():
     assert "help.definitions" in finder_ids
     assert "help.measurements" in finder_ids
     assert "help.roi_reference" in finder_ids
+    assert "measure.particle_statistics" in finder_ids
+    assert "measure.adstat_workbench" not in finder_ids
+    assert "measure.adstat_statistics" not in finder_ids
+    assert "measure.adstat_sandbox" not in finder_ids
     assert viewer_command("help.roi_reference").shortcuts == ()
     assert not any(command_id.startswith("roi.tool.") for command_id in finder_ids)
     assert "image.threshold" in finder_ids

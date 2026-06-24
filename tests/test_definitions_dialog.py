@@ -185,6 +185,61 @@ def test_definitions_dialog_tabs_can_focus_howto_processing_and_roi(qapp):
         qapp.processEvents()
 
 
+def test_particle_statistics_reference_has_models_and_formulas():
+    from probeflow.gui.dialogs.definitions import (
+        _PARTICLE_STATISTICS_ENTRIES,
+        render_particle_statistics_html,
+    )
+    from probeflow.gui.styling import THEMES
+
+    html = render_particle_statistics_html(THEMES["light"])
+
+    # Every entry that defines an Operation block renders an equation.
+    with_equations = sum(1 for entry in _PARTICLE_STATISTICS_ENTRIES if entry.equations)
+    assert html.count('class="equation"') >= with_equations
+
+    # The methodology, all three null models, and each statistic are documented.
+    for heading in (
+        "How a comparison works",
+        "Homogeneous Poisson",
+        "Hard-core random",
+        "Measured-feature Poisson",
+        "Pair correlation g(r)",
+        "Nearest-neighbour distribution",
+        "Ripley",  # apostrophe in "Ripley's L" is HTML-escaped
+        "Cluster sizes",
+        "Reading verdicts and limitations",
+    ):
+        assert heading in html, heading
+
+    # The mathematical defence and honest caveats are present.
+    assert "extreme rank length" in html.lower()
+    assert "exchangeable" in html.lower()
+    assert "lambda = N / A" in html  # CSR intensity
+    assert "L(r) = sqrt( K(r) / pi )" in html  # Ripley L transform
+    assert "non-equilibrium" in html.lower()  # hard-core honesty
+    assert "least user-tested" in html.lower()  # maturity note in the intro
+
+
+def test_definitions_dialog_can_focus_particle_statistics_tab(qapp):
+    from probeflow.gui.dialogs.definitions import _DefinitionsDialog
+    from probeflow.gui.styling import THEMES
+
+    stats_first = _DefinitionsDialog(THEMES["light"], initial_tab="particle_statistics")
+    default = _DefinitionsDialog(THEMES["light"])
+    try:
+        assert stats_first.current_reference_tab() == "particle_statistics"
+        default.set_reference_tab("particle_statistics")
+        assert default.current_reference_tab() == "particle_statistics"
+        default.set_reference_tab("stats")  # alias
+        assert default.current_reference_tab() == "particle_statistics"
+    finally:
+        for dlg in (stats_first, default):
+            dlg.close()
+            dlg.deleteLater()
+        qapp.processEvents()
+
+
 def test_howto_help_command_is_registered():
     from probeflow.gui.viewer.shortcuts import VIEWER_COMMANDS
 

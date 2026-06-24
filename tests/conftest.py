@@ -39,6 +39,8 @@ GUI_TEST_MODULES = {
 MIXED_QT_FIXTURE_MODULES = {
     "test_feature_lattice.py",
     "test_pair_correlation.py",
+    "test_adstat_results_dialog.py",
+    "test_adstat_workbench_dialog.py",
     "test_fft_viewer_utils.py",
     "test_definitions_dialog.py",
     "test_lattice_grid.py",
@@ -48,6 +50,7 @@ MIXED_QT_FIXTURE_MODULES = {
 # so the fixturename-based gating in MIXED_QT_FIXTURE_MODULES cannot see them.
 MIXED_QT_TESTS = {
     ("test_lattice_grid.py", "test_export_png_creates_file"),
+    ("test_layout_compatibility.py", "test_gui_entrypoint_import_when_qt_available"),
 }
 
 

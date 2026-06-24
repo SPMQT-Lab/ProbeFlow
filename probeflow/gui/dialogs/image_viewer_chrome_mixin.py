@@ -414,6 +414,23 @@ class ImageViewerChromeMixin:
             self._on_open_pair_correlation,
         )
         features_menu.addAction(pair_corr_action)
+        particle_statistics_action = self._viewer_action(
+            "measure.particle_statistics",
+            lambda: self._on_open_particle_statistics(),
+        )
+        features_menu.addAction(particle_statistics_action)
+        self._viewer_action(
+            "measure.adstat_workbench",
+            lambda: self._on_open_adstat_workbench(),
+        )
+        self._viewer_action(
+            "measure.adstat_statistics",
+            self._on_open_adstat_statistics,
+        )
+        self._viewer_action(
+            "measure.adstat_sandbox",
+            self._on_open_adstat_sandbox,
+        )
         feat_lat_action = self._viewer_action(
             "measure.feature_lattice",
             self._on_open_feature_lattice,

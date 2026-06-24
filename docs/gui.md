@@ -108,7 +108,9 @@ atoms, molecules, defects, moiré sites — on the current image.
 From the **Export** section you can write the coordinates to CSV, render
 a synthetic *feature image* (a disk at every detection, useful for pair
 correlation and lattice statistics), or send that feature image straight
-to the FFT viewer.
+to the FFT viewer. When Particle Statistics is available, **Send to Particle
+Statistics** saves the current detections as a calibrated session feature set
+for single-image or pooled spatial statistics.
 
 For segmentation-based workflows — particle size statistics, template
 matching, classification, lattice extraction — use the **Feature
@@ -118,6 +120,16 @@ optional `features` extra:
 ```bash
 pip install "probeflow[features]"
 ```
+
+For particle spatial-statistics workflows, these detected features and point
+ROIs can be analysed from **Measurements → Features → Particle Statistics...**.
+Use **Analyze scan points** for real ProbeFlow data, **Learn with tutorial** for
+a guided walkthrough, or **Model simulations** to explore synthetic patterns and
+null-model behaviour freely before applying the tool to a scan. Particle
+Statistics is the newest and least user-tested part of ProbeFlow — treat its
+verdicts as exploratory and verify important results independently. See the
+[Particle Statistics guide](adstat_user_guide.md)
+and the developer-facing [AdStat integration](adstat_integration.md) contract.
 
 ## Beyond the basics
 

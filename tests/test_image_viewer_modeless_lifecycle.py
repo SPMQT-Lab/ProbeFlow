@@ -34,6 +34,7 @@ def _fake_dialog(visible: bool = True, raise_close: bool = False):
     # tracker does not blow up.
     dlg.destroyed = MagicMock()
     dlg.destroyed.connect = MagicMock()
+    dlg.force_close = None
     return dlg
 
 
@@ -90,6 +91,18 @@ def test_close_modeless_children_closes_visible_dialogs():
 
     visible.close.assert_called_once()
     hidden.close.assert_not_called()
+
+
+def test_close_modeless_children_uses_force_close_when_available():
+    host = _Host()
+    dialog = _fake_dialog(visible=True)
+    dialog.force_close = MagicMock()
+    host._modeless_children.append(dialog)
+
+    host._close_modeless_children()
+
+    dialog.force_close.assert_called_once()
+    dialog.close.assert_not_called()
 
 
 def test_close_modeless_children_tolerates_runtime_error_on_isvisible():
