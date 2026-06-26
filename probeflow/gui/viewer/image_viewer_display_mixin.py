@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 
+import numpy as np
 from PySide6.QtCore import Slot
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import QMenu
@@ -37,6 +38,13 @@ class ImageViewerDisplayMixin:
         if rerender:
             if self._set_zero_plane_btn.isChecked():
                 self._set_zero_plane_btn.setChecked(False)
+            # Re-levelling moves the data baseline; a manual contrast window
+            # tuned to the old baseline can leave the whole image clamped to
+            # one end of the colour scale (current channels especially shift
+            # far enough to render solid black). Reset to auto so the
+            # re-levelled result is visible. reset_silent avoids a double
+            # refresh — _refresh_processing_display re-renders below.
+            self._drs.reset_silent(self._clip_low, self._clip_high)
             self._refresh_processing_display()
 
     def _refresh_zero_markers(self):
@@ -193,6 +201,62 @@ class ImageViewerDisplayMixin:
         self._show_sidebar_tab("display")
         if hasattr(self, "_viewer_cmap_cb"):
             self._viewer_cmap_cb.showPopup()
+
+    # ── Stale manual contrast after a re-levelling op ─────────────────────────
+    def _revalidate_manual_display_range(self) -> None:
+        """Drop a manual contrast range that no longer overlaps the data.
+
+        A processing op such as Set Zero Plane re-levels the image, so its
+        value range can shift entirely away from the manual vmin/vmax the user
+        set on the *previous* pipeline output.  Manual ``resolve()`` returns the
+        stored limits without looking at the array, so every pixel would clamp
+        to one end of the colour scale — the image goes flat and a colormap swap
+        merely recolours that flat field (the "display error" symptom).  When
+        the manual window no longer intersects the finite data range, fall back
+        to percentile (auto) so the image — and the colormap — read correctly
+        again.  Mirrors the manual-limit reset already done on channel change.
+
+        Each per-region (per-ROI) range is revalidated against its own masked
+        sub-array for the same reason.
+        """
+        arr = self._display_arr
+        drs = getattr(self, "_drs", None)
+        if arr is None or drs is None:
+            return
+        clip_low = getattr(self, "_clip_low", 1.0)
+        clip_high = getattr(self, "_clip_high", 99.0)
+
+        def _stale(drs, sub) -> bool:
+            # A manual contrast window is "stale" when the (changed) data has
+            # moved so far out from under it that the window now captures almost
+            # no pixels — the image renders as a near-flat clamped field. Using
+            # a small capture fraction rather than strict non-overlap also
+            # catches the partial-overlap case where the window clips a thin
+            # sliver of the data (e.g. a re-levelled current channel). This runs
+            # only on processing changes, not on slider edits, so it never
+            # fights a contrast the user is actively setting.
+            if drs.mode != "manual" or drs.vmin is None or drs.vmax is None:
+                return False
+            finite = sub[np.isfinite(sub)]
+            if finite.size == 0:
+                return False
+            inside = int(np.count_nonzero((finite >= drs.vmin) & (finite <= drs.vmax)))
+            return inside < 0.02 * finite.size   # window captures <2% → stale
+
+        if _stale(drs, arr):
+            drs.reset_silent(clip_low, clip_high)
+
+        region_drs = getattr(self, "_region_drs", None)
+        if region_drs and getattr(self, "_image_roi_set", None) is not None:
+            from probeflow.gui.roi_context import area_roi_mask
+            shape = arr.shape[:2]
+            for roi_id, drs in region_drs.items():
+                roi = self._image_roi_set.get(roi_id)
+                mask = area_roi_mask(roi, shape) if roi is not None else None
+                if mask is None or not mask.any():
+                    continue
+                if _stale(drs, arr[mask]):
+                    drs.reset_silent(clip_low, clip_high)
 
     # ── Display range sliders ─────────────────────────────────────────────────
 

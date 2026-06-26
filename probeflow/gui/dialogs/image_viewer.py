@@ -426,6 +426,10 @@ class ImageViewerDialog(
             self._processing_error = ""
             self._display_arr = self._raw_arr
             self._display_scan_range_m = getattr(self, "_scan_range_m", None)
+        # A re-levelling op (e.g. Set Zero Plane) can shift the data range out
+        # from under a manual contrast window; drop limits that no longer
+        # overlap the data so the image doesn't render as a flat clamped field.
+        self._revalidate_manual_display_range()
         new_shape = self._display_arr.shape if self._display_arr is not None else None
         if reset_zoom_if_shape_changed and old_shape is not None and new_shape != old_shape:
             self._reset_zoom_on_next_pixmap = True
