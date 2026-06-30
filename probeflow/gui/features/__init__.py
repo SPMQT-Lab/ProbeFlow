@@ -2105,9 +2105,22 @@ class FeaturesSidebar(QWidget):
         enc_box_lay = QVBoxLayout(enc_box)
         enc_box_lay.setSpacing(4)
 
+        from probeflow.analysis.features import clip_available
+        self._clip_available = clip_available()
+
         self._enc_group = QButtonGroup(enc_box)
         self._enc_group.setExclusive(True)
         self._enc_btns: dict = {}
+        _clip_tip = (
+            "Embed each molecule crop with OpenAI CLIP ViT-B/32 and match by "
+            "cosine similarity — the encoder the upstream UniMR tool uses. Far "
+            "more discriminative than the pixel encoders."
+        )
+        if not self._clip_available:
+            _clip_tip += (
+                "\n\nUnavailable: install with  pip install 'probeflow[clip]'  "
+                "(torch + openai-clip), then restart."
+            )
         _enc_tips = {
             "raw":        "Compare particles by their raw pixel patterns "
                           "(brightness-normalised). Simplest and usually a "
@@ -2115,20 +2128,24 @@ class FeaturesSidebar(QWidget):
             "pca_kmeans": "Reduce each particle crop to its main components "
                           "with PCA before comparing. Can be more robust to "
                           "noise when you have many particles.",
-            "auto":       "Let ProbeFlow choose the encoding. Currently falls "
-                          "back to Raw Features (the learned encoder is not "
-                          "bundled).",
+            "clip":       _clip_tip,
+            "auto":       "Let ProbeFlow choose the encoding: CLIP when it is "
+                          "installed, otherwise Raw Features.",
         }
         for key, label in [("raw",       "Raw Features"),
                             ("pca_kmeans", "PCA + KMeans"),
+                            ("clip",      "CLIP (ViT-B/32)"),
                             ("auto",      "Auto Select")]:
             rb = QRadioButton(label)
             rb.setFont(ui_font(9))
             rb.setToolTip(_tip(_enc_tips[key]))
+            if key == "clip" and not self._clip_available:
+                rb.setEnabled(False)
             self._enc_group.addButton(rb)
             enc_box_lay.addWidget(rb)
             self._enc_btns[key] = rb
-        self._enc_btns["raw"].setChecked(True)
+        # Default to CLIP when available (matches UniMR), else Raw.
+        self._enc_btns["clip" if self._clip_available else "raw"].setChecked(True)
         l.addWidget(enc_box)
 
         # ── Augmentation & options ─────────────────────────────────────────────
@@ -2297,7 +2314,7 @@ class FeaturesSidebar(QWidget):
             (k for k, rb in self._enc_btns.items() if rb.isChecked()), "raw"
         )
         if encoder == "auto":
-            encoder = "raw"   # CLIP unavailable; auto → raw features
+            encoder = "clip" if getattr(self, "_clip_available", False) else "raw"
         return {
             "use_sharpness":    self._sharpness_cb.isChecked(),
             "threshold_method": thr_method,

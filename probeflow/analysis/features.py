@@ -543,6 +543,86 @@ def _embed_pca_kmeans(crops: np.ndarray, *, n_components: int = 16) -> np.ndarra
     return pca.fit_transform(flat)
 
 
+# ── CLIP encoder (UniMR-faithful, optional dependency) ────────────────────────
+# UniMR (the upstream feature-counting tool) vectorises each molecule crop with
+# OpenAI CLIP ViT-B/32 and matches by cosine similarity. ProbeFlow's port
+# shipped only the pixel encoders to stay torch-free; this restores CLIP as a
+# *selectable* encoder. torch + the openai-clip package are optional — install
+# ``probeflow[clip]`` — and imported lazily so the core app never requires them.
+
+_CLIP_CACHE: dict = {}
+
+
+def clip_available() -> bool:
+    """True when the optional CLIP stack (``clip`` + ``torch``) actually imports.
+
+    Uses a real (cached) import rather than ``find_spec`` so a broken or partial
+    install — e.g. a torch wheel that failed to extract — reports ``False``
+    instead of enabling an encoder that would crash on first use.
+    """
+    if "ok" not in _CLIP_CACHE:
+        try:
+            import clip  # noqa: F401
+            import torch  # noqa: F401
+            _CLIP_CACHE["ok"] = True
+        except Exception:
+            _CLIP_CACHE["ok"] = False
+    return _CLIP_CACHE["ok"]
+
+
+def _load_clip():
+    """Load and cache CLIP ViT-B/32 (model, preprocess, device). UniMR-style."""
+    if "model" not in _CLIP_CACHE:
+        try:
+            import clip
+            import torch
+        except ImportError as exc:  # pragma: no cover - deps guard
+            raise ImportError(
+                _missing_extra_message("CLIP", "clip", "the CLIP classify encoder")
+                + "\n  (also needs: torch, torchvision)"
+            ) from exc
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        model, preprocess = clip.load("ViT-B/32", device=device)
+        model.eval()
+        _CLIP_CACHE.update(model=model, preprocess=preprocess, device=device)
+    return _CLIP_CACHE["model"], _CLIP_CACHE["preprocess"], _CLIP_CACHE["device"]
+
+
+def _normalise_brightness_u8(crop_u8: np.ndarray, target: float = 120.0) -> np.ndarray:
+    """Scale a uint8 crop so its mean luminance is ~``target`` (UniMR step)."""
+    mean = float(crop_u8.mean())
+    if mean <= 1e-6:
+        return crop_u8
+    scaled = crop_u8.astype(np.float64) * (target / mean)
+    return np.clip(scaled, 0, 255).astype(np.uint8)
+
+
+def _embed_clip(crops: np.ndarray, *, batch_size: int = 64) -> np.ndarray:
+    """CLIP image embeddings for crops, mirroring UniMR's pipeline.
+
+    Each float crop is percentile-clipped to uint8, brightness-normalised to a
+    mean of 120, expanded to 3-channel RGB, run through CLIP's own ``preprocess``
+    (resize/centre-crop to 224 + CLIP normalisation), and encoded with
+    ``model.encode_image``.  Returns an ``(N, 512)`` float64 array.
+    """
+    import torch
+    from PIL import Image
+
+    model, preprocess, device = _load_clip()
+    tensors = []
+    for crop in crops:
+        u8 = _normalise_brightness_u8(_to_uint8(crop))
+        rgb = np.repeat(u8[:, :, None], 3, axis=2)   # grayscale → RGB
+        tensors.append(preprocess(Image.fromarray(rgb, mode="RGB")))
+
+    feats: list[np.ndarray] = []
+    with torch.no_grad():
+        for i in range(0, len(tensors), batch_size):
+            batch = torch.stack(tensors[i:i + batch_size]).to(device)
+            feats.append(model.encode_image(batch).cpu().numpy())
+    return np.concatenate(feats, axis=0).astype(np.float64)
+
+
 def _rotate_crop(crop: np.ndarray, angle_deg: float) -> np.ndarray:
     """Rotate a 2-D float array by ``angle_deg`` degrees (OpenCV, reflect-padded).
 
@@ -656,6 +736,9 @@ def classify_particles(
     encoder
         ``"raw"`` — flattened z-normalised pixel vectors.
         ``"pca_kmeans"`` — PCA-reduced pixel vectors.
+        ``"clip"`` — OpenAI CLIP ViT-B/32 image embeddings (UniMR-faithful;
+        needs the optional ``probeflow[clip]`` extra). Far more discriminative
+        than the pixel encoders, which the upstream UniMR tool relies on.
     threshold_method
         How to pick the "match" cutoff: ``"gmm"`` (default), ``"otsu"``,
         ``"distribution"``, or ``"manual"`` (uses ``manual_threshold``).
@@ -718,6 +801,12 @@ def classify_particles(
     elif encoder == "pca_kmeans":
         combined = np.concatenate([pcrops, scrops], axis=0)
         emb = _embed_pca_kmeans(combined)
+        p_emb = emb[:len(pcrops)]
+        s_emb = emb[len(pcrops):]
+    elif encoder == "clip":
+        # Embed particles and samples together so they share one forward pass.
+        combined = np.concatenate([pcrops, scrops], axis=0)
+        emb = _embed_clip(combined)
         p_emb = emb[:len(pcrops)]
         s_emb = emb[len(pcrops):]
     else:
