@@ -10,6 +10,14 @@ classification is Phase 2.
 GUI-free and dependency-light (json + numpy only): the embeddings are produced by
 ``probeflow.analysis.features._embed_clip`` upstream and passed in as plain lists,
 so this module never imports torch/clip.
+
+KNOWN GAP (physics review 2026-07-02, not yet fixed): entries record no pixel
+size, but crops are a fixed 48 px (see ``embed_particles_clip`` in
+``probeflow.analysis.features``), so a banked sample's physical field of view
+depends on its source scan's resolution. CLIP embeddings are not scale
+invariant, so cross-scan classification is scale-blind and there is currently
+no way to detect the mismatch after the fact. See ``make_entry`` below for
+where to add the fix.
 """
 
 from __future__ import annotations
@@ -59,7 +67,14 @@ def make_entry(
     particle_index: int,
     bbox_px=None,
 ) -> dict:
-    """Build one bank entry (a labelled CLIP embedding + provenance)."""
+    """Build one bank entry (a labelled CLIP embedding + provenance).
+
+    TODO(scale-blind bank, see module docstring): while the schema is still
+    young (``BANK_SCHEMA_VERSION`` above), consider adding the source scan's
+    pixel size (or the crop's physical size in nm) here so Phase-2
+    classification can warn on or weight by a scale mismatch between the bank
+    entry and the particle being classified.
+    """
     return {
         "class_name": str(class_name),
         "embedding": [float(x) for x in np.asarray(embedding, dtype=float).ravel()],
