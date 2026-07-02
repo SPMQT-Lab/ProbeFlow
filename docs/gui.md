@@ -84,6 +84,12 @@ axes. The tabs below cover the common reciprocal-space tasks:
 * **Mains** — detect and suppress mains-frequency pickup streaks.
 * **Inverse FFT** — mask regions of the spectrum and reconstruct the
   filtered image.
+* **Symmetrize** — enforce an n-fold (optionally mirrored) symmetry by
+  averaging the image with its rotated copies. Rotated copies are
+  registered back onto the original automatically, so the symmetry axis
+  need not sit at the image centre. Always check the **Residual**
+  preview: it holds everything symmetrization removed — noise, but also
+  real defects and domain boundaries.
 
 **Focus FFT** and the zoom buttons home in on the spectral content near
 the origin, and the **Export** menu saves the spectrum or filtered image.
@@ -135,9 +141,9 @@ and the developer-facing [AdStat integration](adstat_integration.md) contract.
 
 ## Beyond the basics
 
-* **ROIs** — draw rectangles, ellipses, and lines from the ROI tab; ROIs
-  restrict background fits, FFTs, and statistics, and are saved as
-  sidecar files next to the scan.
+* **ROIs** — draw rectangles, ellipses, polygons, freehand outlines,
+  lines, and points from the ROI tab; ROIs restrict background fits,
+  FFTs, and statistics, and are saved as sidecar files next to the scan.
 * **Measurements** — distance and angle measurements, line profiles, ROI
   statistics, step heights, pair correlation.
 * **Spectroscopy** — `.VERT` and Nanonis spectroscopy files open in a
