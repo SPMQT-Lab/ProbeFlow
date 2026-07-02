@@ -374,6 +374,13 @@ def main(
         force = bool(args.force)
         verbose = bool(args.verbose)
 
+    # Programmatic callers may pass only some keywords; fall back to the same
+    # defaults the CLI path uses instead of crashing on Path(None).
+    if src is None:
+        src = DEFAULT_INPUT_DIR
+    if out_root is None:
+        out_root = DEFAULT_OUTPUT_DIR
+
     setup_logging(verbose)
 
     src_path = Path(src)
