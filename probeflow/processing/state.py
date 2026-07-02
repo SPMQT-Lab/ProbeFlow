@@ -706,6 +706,19 @@ def apply_processing_state(
                 conjugate=bool(p.get("conjugate_symmetric", True)),
                 soft_px=float(p.get("soft_px", 0.0)),
             )
+        elif step.op == "symmetrize_fft":
+            # Rotate-and-average n-fold symmetrization.  Registration shifts
+            # are recomputed from the data on replay (deterministic), so only
+            # the symmetry parameters are stored.
+            a = _proc.symmetrize_filter(
+                a,
+                int(p.get("n_fold", 1)),
+                mirror=bool(p.get("mirror", False)),
+                mirror_axis_deg=float(p.get("mirror_axis_deg", 0.0)),
+                register=bool(p.get("register", True)),
+                interpolation=str(p.get("interpolation", "linear")),
+                strict_coverage=bool(p.get("strict_coverage", False)),
+            )
         elif step.op == "linear_undistort":
             a = _proc.linear_undistort(
                 a,

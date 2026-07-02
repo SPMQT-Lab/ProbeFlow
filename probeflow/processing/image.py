@@ -7,6 +7,7 @@ from probeflow.processing.filters import *        # noqa: F401,F403
 from probeflow.processing.edge_detection import *  # noqa: F401,F403
 from probeflow.processing.mains_pickup import *    # noqa: F401,F403
 from probeflow.processing.inverse_fft import *     # noqa: F401,F403
+from probeflow.processing.symmetrize import *      # noqa: F401,F403
 from probeflow.processing.analysis import *       # noqa: F401,F403
 from probeflow.processing.png_export import *     # noqa: F401,F403
 from probeflow.processing.tv import *             # noqa: F401,F403

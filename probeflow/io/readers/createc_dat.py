@@ -388,6 +388,11 @@ def _trim_createc_stack(
         rows_from_header = image_y_pos_max - 1
         if 1 <= rows_from_header < Ny:
             return stack[:, :rows_from_header, :], rows_from_header
+        if rows_from_header >= Ny:
+            # The header confirms every declared row completed. Skip the
+            # legacy channel-0 nonzero heuristic, which would silently drop
+            # genuine trailing rows whose DAC values happen to be zero.
+            return stack, Ny
 
     return trim_stack(stack)
 

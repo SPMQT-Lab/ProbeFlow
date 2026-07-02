@@ -70,7 +70,8 @@ subtraction...` (`Ctrl+Shift+B`).
 **Performing an FFT.** `Measurements → FFT viewer...` (`Ctrl+Shift+F`)
 shows the spectrum with q-axes in nm⁻¹, intensity controls, and a radial
 profile; the tabs fit a reciprocal lattice, correct drift distortion,
-suppress mains pickup, and reconstruct a filtered image by inverse FFT.
+suppress mains pickup, reconstruct a filtered image by inverse FFT, and
+symmetrize the image by rotational averaging.
 
 **Finding features.** `Measurements → Feature finder...` detects maxima or
 minima with threshold, spacing, and smoothing controls, then exports the
@@ -100,9 +101,11 @@ suite. What it does today:
 - **FFT tools** (the FFT viewer) — inspect the magnitude and radial profile with
   q in nm⁻¹; overlay a draggable reciprocal-lattice grid and apply an affine
   lattice correction; show Bragg-shell rings for a known structure; predict and
-  notch out **mains pickup** (50/60 Hz); and use the **inverse-FFT /
+  notch out **mains pickup** (50/60 Hz); use the **inverse-FFT /
   Fourier-reconstruction** tool to select circle/ellipse features, *remove* or
-  *keep* them, preview the reconstructed image and the residual, then apply.
+  *keep* them, preview the reconstructed image and the residual, then apply;
+  and **symmetrize** an image by n-fold (optionally mirrored) rotational
+  averaging, with the removed residual always shown alongside.
 - **ROIs and measurements** — rectangle, ellipse, polygon, freehand, line, and
   point ROIs; ROI-scoped processing; line profiles, periodicity, ROI
   statistics, step heights, distances and angles, feature points, point-mask
@@ -112,10 +115,17 @@ suite. What it does today:
   molecule segmentation, counting, few-shot classification, template-match
   counting, lattice extraction, and reproducible step-edge exclusion. Requires
   the `features` extra (OpenCV + scikit-learn).
+- **Particle Statistics** *(optional)* — test detected point patterns against
+  spatial null models (random, hard-core, measured-feature) with simulation
+  envelopes, plus a guided tutorial and free-play simulations. Model runs
+  require the `adstat` extra; treat verdicts as exploratory (see the
+  [guide](docs/adstat_user_guide.md)).
 - **Spectroscopy** — inspect single traces or overlays / waterfalls. Smoothing,
   derivative, normalization, outlier masking, and offsets operate on derived
   display data; the raw loaded arrays are left intact.
-- **Convert** Createc `.dat` scans to Nanonis-compatible `.sxm` (and PNG).
+- **Convert** Createc `.dat` scans to Nanonis-compatible `.sxm` (and PNG), or
+  export them as raw / physical NumPy `.npy` bundles with header and
+  provenance sidecars (`dat2npy`).
 - **Export with context** — PNG, PDF, CSV, JSON, SXM, and optional Gwyddion
   `.gwy`. Many exports also write a JSON provenance sidecar (source file and
   channel, display settings, processing state, ROIs, and warnings). It is not a
@@ -133,6 +143,7 @@ suite. What it does today:
 | Input | Nanonis `.dat` | Point spectroscopy |
 | Input | RHK `.sm4` | STM/SPM image scan |
 | Output | `.sxm` | Converted or processed scan data |
+| Output | `.npy` | Raw / physical NumPy array bundles (with header + provenance sidecars) |
 | Output | `.png`, `.pdf` | Figure / image export |
 | Output | `.csv`, `.json` | Numerical data, metadata, or provenance |
 | Output | `.gwy` | Optional Gwyddion export when `gwyfile` is installed |
@@ -143,18 +154,23 @@ are in [docs/createc_dat_reader.md](docs/createc_dat_reader.md).
 ## Installation notes
 
 Python 3.11 or newer is required. The core install pulls in numpy, scipy,
-Pillow, PySide6, matplotlib, and shapely.
+Pillow, PySide6, matplotlib, shapely, and scikit-image.
 
 Optional extras:
 
 ```bash
 python -m pip install -e ".[features]"   # particle/feature + lattice tools (OpenCV, scikit-learn)
+python -m pip install -e ".[adstat]"     # Particle Statistics engine (adstat)
+python -m pip install -e ".[clip]"       # CLIP encoder for few-shot classification (torch)
 python -m pip install -e ".[gwyddion]"   # Gwyddion .gwy writer (gwyfile)
-python -m pip install -e ".[dev]"        # test + lint tooling
+python -m pip install -e ".[dev]"        # test tooling (pytest, vulture)
+python -m pip install -e ".[all]"        # features + adstat + gwyddion + pytest (no CLIP)
 ```
 
 The Feature Counting and lattice-extraction tools are inactive until the
-`features` extra is installed; everything else works with the core install.
+`features` extra is installed, Particle Statistics model comparisons need the
+`adstat` extra, and the CLIP feature encoder needs the `clip` extra;
+everything else works with the core install.
 
 ## Using ProbeFlow from Python
 
@@ -195,7 +211,7 @@ dzdv = numeric_derivative(spec.x_array, z_smooth)
 ```bash
 python -m pip install -e ".[dev,features]"
 pytest                          # run the test suite
-ruff check probeflow tests      # lint
+ruff check probeflow tests      # lint (install ruff separately or via pre-commit)
 ```
 
 Repository layout:

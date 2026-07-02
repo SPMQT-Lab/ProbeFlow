@@ -1,6 +1,6 @@
 # ProbeFlow Review Status
 
-**Updated**: 2026-06-12
+**Updated**: 2026-07-03
 
 This is the single, consolidated record of ProbeFlow's code-review history. The
 detailed per-angle review files (`docs/reviews/2026-05-27-*.md`) and the earlier
@@ -200,6 +200,102 @@ the per-finding detail.
 - **Docs (#35–#36)** — GUI guide with offscreen-generated screenshots.
 
 Suite grew from ~2,260 to 2,449 tests across the campaign; main is green.
+
+## Scheduled deep review, 2026-07-03 (new-code pass: .dat→.npy converter, feature bank, CLIP classify, contrast fix)
+
+Targets: everything merged since the adversarial campaign that earlier passes
+had not covered — the Createc `.dat`→`.npy` converter (+ the #46 scan-range
+fix), the feature bank Phases 1–2, the CLIP classify encoder, and the
+viewer-black contrast fix (8a2950d). Particle Statistics (#45) was itself a
+review and was not re-reviewed.
+
+### Fixed in this pass (uncommitted, suite green: 2508 passed / 3 skipped)
+
+1. **Feature-bank silent data loss (the one real find)** —
+   `analysis/feature_bank.py`: a corrupt/unparseable bank file made
+   `load_bank` silently return an empty bank, so the next "Add to bank"
+   overwrote the user's entire cross-scan labelled-sample collection with just
+   the new entries. `append_entries` now loads strict (`ValueError`, surfaced
+   on the GUI status bar, original file untouched) and writes atomically
+   (tmp + `os.replace`), closing the truncated-write corruption source too.
+   Read path (classification) stays permissive. New `tests/test_feature_bank.py`
+   (the module previously had **zero** tests).
+2. **Createc complete-scan trim hazard** — `io/readers/createc_dat.py`
+   `_trim_createc_stack`: when `ImageYPosMax` confirmed the scan completed
+   (`= Num.Y + 1`), the code still fell through to the legacy channel-0
+   nonzero heuristic, which silently drops genuine trailing rows whose DAC
+   values are zero (and drops the last row if the bottom-right pixel is 0/NaN).
+   Header-confirmed-complete now returns untrimmed. Pinned in
+   `tests/test_createc_dat_decode.py`.
+3. **Converter `main()` partial-kwarg crash** —
+   `io/converters/createc_dat_to_npy.py`: programmatic calls that passed only
+   some keywords (e.g. `basis=` without `src=`) skipped the CLI arg-parse
+   branch and crashed on `Path(None)`. Defaults now resolved unconditionally.
+4. **Mojibake log line** — `gui/workers.py` NumPy-conversion log printed
+   `â”€â”€` (double-encoded box-drawing chars) in the convert dialog.
+
+### Verified sound (no change needed)
+
+- `decoded_scan_range_m` (#46): per-pixel step from the programmed frame ×
+  decoded pixel count — physically correct for first-column removal and
+  partial-scan trims; metadata path consistent (`shape` (Ny, Nx) + decoded range).
+- CLIP classify + bank integration (`analysis/features.py`): bank-dimension
+  guard, zero-norm cosine guard, bank-only degenerate sample stack, sharpness
+  z-norm padding for bank entries, encoder gating in the GUI controller.
+- Contrast revalidation (8a2950d): sound; known tradeoff — a deliberate manual
+  window capturing <2% of finite data is reset by the next processing op.
+- Previously-flagged gaps now confirmed fixed: shear ROI/mask invalidation
+  (`_on_shear_applied`), quick-selection menu sync after transform-drop.
+
+### Larger items — outlined fixes (not done; ordered by value)
+
+1. **Feature-bank scale blindness** (tracked TODO in `feature_bank.py`): crops
+   are fixed 48 px, so a banked embedding's physical field of view depends on
+   the source scan resolution and cross-scan matches are scale-blind.
+   *Plan:* bump `BANK_SCHEMA_VERSION` → 2; `make_entry` gains
+   `pixel_size_m` (or crop physical size in nm) threaded from the features
+   panel's scan; `bank_to_samples` returns it; `classify_particles` warns when
+   bank-entry crop size differs from the current crop's physical size by more
+   than ~2× (later: resample crops to a canonical nm/px before embedding).
+   Old v1 entries: treat as unknown scale, warn once.
+2. **Background-dominated CLIP embedding** (carried from UniMR review):
+   similarities crush to ~0.998–1.0 because the 48 px crop is mostly flat
+   background, so outlier rejection is unreliable in general. *Plan:* mask or
+   weight the crop by the particle contour before embedding (contours already
+   exist on `Particle`); re-verify `_threshold_similarities` guards afterwards
+   — the spread guard may become unnecessary.
+3. **Bundle-provenance pixel-key convention**: in the `.npy` bundle sidecars,
+   `original_shape`/`decoded_shape` are `(Nx, Ny)` while each plane's `shape`
+   is `(rows, cols)` — same word, opposite conventions in one JSON (e.g.
+   A250407: `decoded_shape: [255, 9]` vs plane `shape: [9, 255]`). *Plan:*
+   rename the bundle keys to `original_pixels`/`decoded_pixels` (matching
+   `scan_pixels`) while the format is young; regenerate the committed sample
+   bundles under `test_data/output_raw_npy/`; grep for external consumers first.
+4. **Bank rotation-augmentation asymmetry**: in-image samples get 36 rotated
+   copies under `rotate_augment`; bank vectors are single unrotated embeddings,
+   so banked classes are disadvantaged for rotated instances. *Plan:* either
+   bank all 36 rotated embeddings per sample (36× file size) or store the raw
+   crop in the entry and re-embed with rotations at classify time (slower,
+   smaller file). Decide with real usage data.
+
+### Next-run candidates (unexplored, carried forward)
+
+- `processed_export.py` / provenance replay **without** canonical sidecars, and
+  a CLI replay smoke test of new-format sidecars.
+- `image_canvas.py` selection internals (~1500 lines, only ever grepped).
+- Spectroscopy display wiring (`gui/spec_viewer/`), `io/readers/createc_vert.py`
+  + `nanonis_spec.py` decoders, `analysis/spec_plot.py`.
+- Partial `.sxm`/`.dat` thumbnail decode in browse (open since the browse
+  loading review).
+- Feature-bank GUI flows under Qt (add-to-bank dialog, `refresh_bank_status`)
+  have no GUI-level tests.
+
+Environment note for future runs: the full suite needs
+`QT_QPA_PLATFORM_PLUGIN_PATH=$(python -c "import PySide6,pathlib; print(pathlib.Path(PySide6.__file__).parent/'Qt'/'plugins'/'platforms')")`
+alongside `QT_QPA_PLATFORM=offscreen` in sandboxed shells, or `qapp` creation
+aborts (SIGABRT) at `test_feature_finder.py`; `test_fft_viewer_utils.py` and
+`test_lattice_grid.py` still segfault under offscreen Qt on anaconda py3.13
+(environmental, pre-existing).
 
 ## Deferred (not in code-review scope)
 

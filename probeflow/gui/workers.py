@@ -552,7 +552,7 @@ class ConversionWorker(_PooledWorker):
 
             if self.do_npy_raw or self.do_npy_physical:
                 from probeflow.io.converters.createc_dat_to_npy import main as npy_main
-                _log("â”€â”€ NumPy conversion â”€â”€", "info")
+                _log("── NumPy conversion ──", "info")
                 basis = (
                     "both"
                     if self.do_npy_raw and self.do_npy_physical

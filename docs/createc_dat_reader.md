@@ -82,7 +82,11 @@ ProbeFlow interprets it as the one-based next Y position, so completed rows are
 `ImageYPosMax - 1`. If that value is inside the declared image height, the scan
 is marked partial and decoded arrays are trimmed to the completed rows.
 
-If `ImageYPosMax` is absent or outside the declared height, ProbeFlow falls back
-to the existing channel-0 row heuristic. `is_partial_scan`, `image_y_pos_max`,
+If `ImageYPosMax` indicates that every declared row completed
+(`ImageYPosMax - 1 >= Num.Y`), the stack is returned untrimmed and the
+channel-0 row heuristic is skipped — the heuristic could otherwise silently
+drop genuine trailing rows whose DAC values happen to be zero. Only when
+`ImageYPosMax` is absent (or nonsensical, below 1) does ProbeFlow fall back to
+the channel-0 row heuristic. `is_partial_scan`, `image_y_pos_max`,
 `original_Ny`, and `trimmed_Ny` are recorded in the decode report so callers can
 distinguish a completed smaller image from an interrupted acquisition.
