@@ -627,7 +627,6 @@ def test_compare_with_mask_region_excludes_outside_points_and_reports() -> None:
 
 def test_pooled_hard_core_cap_uses_densest_record(monkeypatch) -> None:
     import math
-    from types import SimpleNamespace
 
     from adstat import analysis as adstat_analysis
 
