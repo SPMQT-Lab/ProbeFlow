@@ -740,6 +740,7 @@ def classify_particles(
     use_sharpness: bool = False,
     sharpness_weight: float = 3.0,
     rotate_augment: bool = False,
+    bank_samples: Optional[Sequence[Tuple[str, Sequence[float]]]] = None,
 ) -> List[Classification]:
     """Classify each particle against labelled sample particles.
 
@@ -781,6 +782,16 @@ def classify_particles(
         labelled sample crop before embedding.  The best-match similarity
         across all rotations is used, making classification rotation-invariant.
         Mirrors the UniMR rotation-augmentation approach.
+    bank_samples
+        Optional ``(class_name, embedding)`` pairs from the persistent feature
+        bank (:mod:`probeflow.analysis.feature_bank`) — pre-computed CLIP
+        vectors of samples labelled on *other* scans.  They join the in-image
+        samples as extra match candidates (same max-pool-by-class semantics),
+        so classification can draw on examples gathered across many images.
+        Only valid with ``encoder="clip"``: bank vectors are CLIP embeddings
+        and are not comparable to the per-image raw/PCA pixel vectors.  With a
+        non-empty bank, ``samples`` may be empty — a new scan can be classified
+        without labelling anything in it.
 
     Returns
     -------
@@ -790,7 +801,13 @@ def classify_particles(
     """
     if not particles:
         return []
-    if not samples:
+    bank = list(bank_samples) if bank_samples else []
+    if bank and encoder != "clip":
+        raise ValueError(
+            "bank_samples holds CLIP embeddings and requires encoder='clip' "
+            f"(got encoder={encoder!r})"
+        )
+    if not samples and not bank:
         return [Classification(p.index, "other", 0.0) for p in particles]
 
     all_particles = list(particles)
@@ -799,9 +816,14 @@ def classify_particles(
     pcrops = np.stack([_crop_particle(arr, p, crop_size_px)
                        for p in all_particles], axis=0)
 
-    # Build sample crops — optionally augmented with 36 rotations
+    # Build sample crops — optionally augmented with 36 rotations.  With a
+    # bank-only run (no in-image samples) this degenerates to an empty stack;
+    # every match candidate then comes from the bank.
     raw_scrops = [_crop_particle(arr, sp, crop_size_px) for sp in sample_particles]
-    if rotate_augment:
+    if not raw_scrops:
+        scrops = np.empty((0,) + pcrops.shape[1:], dtype=pcrops.dtype)
+        sample_names: List[str] = []
+    elif rotate_augment:
         aug_scrops: List[np.ndarray] = []
         aug_names:  List[str]        = []
         for (name, _), scrop in zip(samples, raw_scrops):
@@ -856,6 +878,29 @@ def classify_particles(
                      ).reshape(-1, 1)
         p_emb = np.concatenate([p_emb, p_sharp_n], axis=1)
         s_emb = np.concatenate([s_emb, s_sharp_n], axis=1)
+
+    # ── Banked samples (cross-scan CLIP embeddings) ───────────────────────────
+    # Appended after the sharpness dimension: bank entries carry no sharpness,
+    # so they get 0.0 — the z-normalised mean — as a neutral value.
+    if bank:
+        bank_names = [str(name) for name, _ in bank]
+        bank_emb = np.asarray(
+            [np.asarray(v, dtype=np.float64).ravel() for _, v in bank],
+            dtype=np.float64,
+        )
+        expected = p_emb.shape[1] - (1 if use_sharpness else 0)
+        if bank_emb.ndim != 2 or bank_emb.shape[1] != expected:
+            raise ValueError(
+                f"bank embeddings have dimension "
+                f"{bank_emb.shape[1] if bank_emb.ndim == 2 else '?'} but the "
+                f"CLIP encoder produces {expected}; the bank file may be "
+                "corrupt or from an incompatible encoder"
+            )
+        if use_sharpness:
+            bank_emb = np.concatenate(
+                [bank_emb, np.zeros((bank_emb.shape[0], 1))], axis=1)
+        s_emb = np.concatenate([s_emb, bank_emb], axis=0)
+        sample_names = list(sample_names) + bank_names
 
     # Cosine similarity: normalise rows, dot.
     def _unit(x: np.ndarray) -> np.ndarray:

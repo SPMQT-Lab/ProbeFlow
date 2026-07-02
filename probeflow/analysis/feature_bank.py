@@ -88,6 +88,9 @@ def append_entries(path, new_entries: Sequence[dict]) -> dict:
     ``{"added", "skipped", "total", "path"}``.
     """
     p = Path(path)
+    # Materialise up front: a generator would be consumed by the loop below,
+    # making the ``skipped`` count in the summary wrong (negative).
+    new_entries = list(new_entries)
     bank = load_bank(p)
     seen = {
         (e.get("source_path"), e.get("particle_index"))
@@ -105,7 +108,24 @@ def append_entries(path, new_entries: Sequence[dict]) -> dict:
     p.write_text(json.dumps(bank, indent=2), encoding="utf-8")
     return {
         "added": added,
-        "skipped": len(list(new_entries)) - added,
+        "skipped": len(new_entries) - added,
         "total": len(bank["entries"]),
         "path": str(p),
     }
+
+
+def bank_to_samples(bank: dict) -> list:
+    """Return ``(class_name, embedding)`` pairs from a loaded bank.
+
+    Malformed entries (missing name or empty embedding) are skipped rather than
+    raised, so one corrupt row can't block classification with the rest of the
+    bank. This is the Phase-2 read path: the pairs feed straight into
+    ``classify_particles(bank_samples=...)``.
+    """
+    out = []
+    for e in bank.get("entries", []):
+        name = e.get("class_name")
+        emb = e.get("embedding")
+        if isinstance(name, str) and name and isinstance(emb, list) and emb:
+            out.append((name, emb))
+    return out

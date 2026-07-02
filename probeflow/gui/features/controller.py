@@ -304,6 +304,8 @@ class FeatureCountingController(QObject):
         self._status_cb(
             f"Feature bank: +{result['added']} ({result['total']} total) → "
             f"{result['path']}")
+        # Keep the 'Use sample bank' checkbox label/enabled state current.
+        self._sidebar.refresh_bank_status()
 
     # ── Live preview (slider drag) ────────────────────────────────────────────
 
@@ -478,9 +480,25 @@ class FeatureCountingController(QObject):
                 self._sidebar.set_status(
                     "Press '① Segment' first to find particles.")
                 return
-            if not self._panel.has_sample_labels():
+            run_p = self._sidebar.classify_run_params()
+
+            # Sample bank (Phase 2): match against embeddings saved on previous
+            # scans. The bank holds CLIP vectors, so it needs the CLIP encoder.
+            bank_samples = None
+            if run_p.get("use_bank"):
+                if run_p.get("encoder") != "clip":
+                    self._sidebar.set_status(
+                        "The sample bank needs the CLIP encoder — select "
+                        "CLIP (ViT-B/32) or Auto.")
+                    return
+                from probeflow.analysis import feature_bank
+                bank = feature_bank.load_bank(feature_bank.default_bank_path())
+                bank_samples = feature_bank.bank_to_samples(bank) or None
+
+            if not self._panel.has_sample_labels() and not bank_samples:
                 self._sidebar.set_status(
-                    "Click particles on the image to label at least one example.")
+                    "Click particles on the image to label at least one "
+                    "example, or enable the sample bank.")
                 return
             idx_to_p = {p.index: p for p in particles}
             samples = [
@@ -488,16 +506,19 @@ class FeatureCountingController(QObject):
                 for k, v in self._panel._sample_labels.items()
                 if k in idx_to_p
             ]
-            run_p = self._sidebar.classify_run_params()
             params = {
                 "particles":        particles,
                 "samples":          samples,
+                "bank_samples":     bank_samples,
                 "use_sharpness":    run_p.get("use_sharpness",    False),
                 "threshold_method": run_p.get("threshold_method", "gmm"),
                 "manual_threshold": run_p.get("manual_threshold", 0.5),
                 "encoder":          run_p.get("encoder",          "raw"),
                 "rotate_augment":   run_p.get("rotate_augment",   False),
             }
+            if bank_samples:
+                self._sidebar.set_status(
+                    f"Classifying with {len(bank_samples)} banked sample(s)…")
         else:
             self._sidebar.set_status(f"Unknown mode {mode!r}")
             return

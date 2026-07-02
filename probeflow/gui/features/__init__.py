@@ -469,6 +469,7 @@ class _FeaturesWorker(QRunnable):
                     manual_threshold=self._params.get("manual_threshold", 0.5),
                     encoder=self._params.get("encoder", "raw"),
                     rotate_augment=self._params.get("rotate_augment", False),
+                    bank_samples=self._params.get("bank_samples"),
                 )
             else:
                 raise ValueError(f"Unknown mode {self._mode!r}")
@@ -2169,6 +2170,18 @@ class FeaturesSidebar(QWidget):
         self._enc_btns["clip" if self._clip_available else "raw"].setChecked(True)
         l.addWidget(enc_box)
 
+        # ── Sample bank (Phase 2: reuse banked examples across scans) ──────────
+        self._use_bank_cb = QCheckBox("Use sample bank")
+        self._use_bank_cb.setFont(ui_font(9))
+        self._use_bank_cb.setToolTip(_tip(
+            "Also match against the sample bank — the CLIP embeddings you saved "
+            "with 'Add samples to bank' on previous scans. With a non-empty "
+            "bank you can even classify a new scan without labelling anything "
+            "in it. CLIP encoder only."))
+        self._use_bank_cb.toggled.connect(self._on_use_bank_toggled)
+        l.addWidget(self._use_bank_cb)
+        self.refresh_bank_status()
+
         # ── Augmentation & options ─────────────────────────────────────────────
         self._rotate_aug_cb = QCheckBox("Rotation Augmentation")
         self._rotate_aug_cb.setFont(ui_font(9))
@@ -2342,7 +2355,45 @@ class FeaturesSidebar(QWidget):
             "manual_threshold": self._cls_manual_spin.value(),
             "encoder":          encoder,
             "rotate_augment":   self._rotate_aug_cb.isChecked(),
+            "use_bank":         (self._use_bank_cb.isChecked()
+                                 and self._use_bank_cb.isEnabled()),
         }
+
+    # ── Sample bank ───────────────────────────────────────────────────────────
+
+    def refresh_bank_status(self) -> None:
+        """Sync the 'Use sample bank' checkbox with the bank file on disk.
+
+        Shows the entry/class counts in the label and disables the box when
+        CLIP is missing or the bank is empty. Called at build time and again
+        after 'Add samples to bank' succeeds, so the count stays current.
+        """
+        from probeflow.analysis import feature_bank
+        if not getattr(self, "_clip_available", False):
+            self._use_bank_cb.setEnabled(False)
+            self._use_bank_cb.setText("Use sample bank (needs CLIP)")
+            return
+        try:
+            bank = feature_bank.load_bank(feature_bank.default_bank_path())
+            n_classes = len(feature_bank.class_counts(bank["entries"]))
+            n = len(bank["entries"])
+        except Exception:
+            n, n_classes = 0, 0
+        if n == 0:
+            self._use_bank_cb.setChecked(False)
+            self._use_bank_cb.setEnabled(False)
+            self._use_bank_cb.setText("Use sample bank (empty)")
+        else:
+            self._use_bank_cb.setEnabled(True)
+            self._use_bank_cb.setText(
+                f"Use sample bank ({n} sample{'s' if n != 1 else ''}, "
+                f"{n_classes} class{'es' if n_classes != 1 else ''})")
+
+    def _on_use_bank_toggled(self, checked: bool) -> None:
+        # The bank holds CLIP embeddings, so matching against it needs the CLIP
+        # encoder — switch the radio visibly rather than overriding at run time.
+        if checked and getattr(self, "_clip_available", False):
+            self._enc_btns["clip"].setChecked(True)
 
     # ── Mask helpers ──────────────────────────────────────────────────────────
 
