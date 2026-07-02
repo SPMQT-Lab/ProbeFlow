@@ -1,18 +1,18 @@
 {
   "artifact_type": "createc_dat_npy_bundle",
-  "source_path": "C:\\Users\\rnpla\\Desktop\\stm\\ProbeFlow\\test_data\\sample_input\\A250320.191933.dat",
+  "source_path": "/Users/peterjacobson/ProbeFlow/test_data/sample_input/A250320.191933.dat",
   "source_format": "dat",
-  "basis": "raw",
-  "bundle_dir": "C:\\Users\\rnpla\\Desktop\\stm\\ProbeFlow\\test_data\\output_raw_npy\\npy\\A250320.191933_raw_npy",
-  "bundle_name": "A250320.191933_raw_npy",
-  "raw_definition": "RAW means decoded Createc numerical arrays after ProbeFlow's parser cleanup, before physical scaling or PNG normalization. It is not a byte-exact copy of the compressed file payload.",
+  "basis": "physical",
+  "bundle_dir": "test_data/output_raw_npy/npy/A250320.191933_physical_npy",
+  "bundle_name": "A250320.191933_physical_npy",
+  "raw_definition": "Physical arrays are converted with ProbeFlow's Createc calibration logic and match the public Scan representation.",
   "scan_pixels": [
     511,
     60
   ],
   "scan_range_m": [
-    2.0020142000000002e-07,
-    2.0020142000000002e-07
+    1.9981040160156252e-07,
+    2.3461103906250004e-08
   ],
   "original_shape": [
     512,
@@ -35,7 +35,7 @@
       "file_name": "A250320.191933_1.npy",
       "public_name": "Z forward",
       "public_unit": "m",
-      "saved_unit": "DAC",
+      "saved_unit": "m",
       "source_native_index": 0,
       "source_name": "Z forward",
       "source_unit": "m",
@@ -43,7 +43,7 @@
       "direction": "forward",
       "synthetic": false,
       "scale_factor": 3.8000000000000005e-13,
-      "dtype": "float32",
+      "dtype": "float64",
       "shape": [
         60,
         511
@@ -54,7 +54,7 @@
       "file_name": "A250320.191933_2.npy",
       "public_name": "Z backward",
       "public_unit": "m",
-      "saved_unit": "DAC",
+      "saved_unit": "m",
       "source_native_index": 0,
       "source_name": "Z forward",
       "source_unit": "m",
@@ -62,7 +62,7 @@
       "direction": "backward",
       "synthetic": true,
       "scale_factor": 3.8000000000000005e-13,
-      "dtype": "float32",
+      "dtype": "float64",
       "shape": [
         60,
         511
@@ -73,7 +73,7 @@
       "file_name": "A250320.191933_3.npy",
       "public_name": "Current forward",
       "public_unit": "A",
-      "saved_unit": "DAC",
+      "saved_unit": "A",
       "source_native_index": 1,
       "source_name": "Current forward",
       "source_unit": "A",
@@ -81,7 +81,7 @@
       "direction": "forward",
       "synthetic": false,
       "scale_factor": -9.5367431640625e-15,
-      "dtype": "float32",
+      "dtype": "float64",
       "shape": [
         60,
         511
@@ -92,7 +92,7 @@
       "file_name": "A250320.191933_4.npy",
       "public_name": "Current backward",
       "public_unit": "A",
-      "saved_unit": "DAC",
+      "saved_unit": "A",
       "source_native_index": 1,
       "source_name": "Current forward",
       "source_unit": "A",
@@ -100,7 +100,7 @@
       "direction": "backward",
       "synthetic": true,
       "scale_factor": -9.5367431640625e-15,
-      "dtype": "float32",
+      "dtype": "float64",
       "shape": [
         60,
         511
@@ -635,6 +635,6 @@
     "PSTMAFM.EXE_Date": "07/10/2022 07:44:44  DSP-COMPDATE= Mar  6 2022 12:44:26",
     "memo:0": ""
   },
-  "export_path": "C:\\Users\\rnpla\\Desktop\\stm\\ProbeFlow\\test_data\\output_raw_npy\\npy\\A250320.191933_raw_npy",
+  "export_path": "test_data/output_raw_npy/npy/A250320.191933_physical_npy",
   "export_format": "npy"
 }

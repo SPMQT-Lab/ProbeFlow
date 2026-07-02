@@ -1,18 +1,18 @@
 {
   "artifact_type": "createc_dat_npy_bundle",
-  "source_path": "C:\\Users\\rnpla\\Desktop\\stm\\ProbeFlow\\test_data\\sample_input\\A250407.141806.dat",
+  "source_path": "/Users/peterjacobson/ProbeFlow/test_data/sample_input/A250407.141806.dat",
   "source_format": "dat",
-  "basis": "raw",
-  "bundle_dir": "C:\\Users\\rnpla\\Desktop\\stm\\ProbeFlow\\test_data\\output_raw_npy\\npy\\A250407.141806_raw_npy",
-  "bundle_name": "A250407.141806_raw_npy",
-  "raw_definition": "RAW means decoded Createc numerical arrays after ProbeFlow's parser cleanup, before physical scaling or PNG normalization. It is not a byte-exact copy of the compressed file payload.",
+  "basis": "physical",
+  "bundle_dir": "test_data/output_raw_npy/npy/A250407.141806_physical_npy",
+  "bundle_name": "A250407.141806_physical_npy",
+  "raw_definition": "Physical arrays are converted with ProbeFlow's Createc calibration logic and match the public Scan representation.",
   "scan_pixels": [
     255,
     9
   ],
   "scan_range_m": [
-    9.98468e-08,
-    9.98468e-08
+    9.94567734375e-08,
+    3.5102390625e-09
   ],
   "original_shape": [
     256,
@@ -35,7 +35,7 @@
       "file_name": "A250407.141806_1.npy",
       "public_name": "Z forward",
       "public_unit": "m",
-      "saved_unit": "DAC",
+      "saved_unit": "m",
       "source_native_index": 0,
       "source_name": "Z forward",
       "source_unit": "m",
@@ -43,7 +43,7 @@
       "direction": "forward",
       "synthetic": false,
       "scale_factor": 3.7000000000000004e-13,
-      "dtype": "float32",
+      "dtype": "float64",
       "shape": [
         9,
         255
@@ -54,7 +54,7 @@
       "file_name": "A250407.141806_2.npy",
       "public_name": "Z backward",
       "public_unit": "m",
-      "saved_unit": "DAC",
+      "saved_unit": "m",
       "source_native_index": 2,
       "source_name": "Z backward",
       "source_unit": "m",
@@ -62,7 +62,7 @@
       "direction": "backward",
       "synthetic": false,
       "scale_factor": 3.7000000000000004e-13,
-      "dtype": "float32",
+      "dtype": "float64",
       "shape": [
         9,
         255
@@ -73,7 +73,7 @@
       "file_name": "A250407.141806_3.npy",
       "public_name": "Current forward",
       "public_unit": "A",
-      "saved_unit": "DAC",
+      "saved_unit": "A",
       "source_native_index": 1,
       "source_name": "Current forward",
       "source_unit": "A",
@@ -81,7 +81,7 @@
       "direction": "forward",
       "synthetic": false,
       "scale_factor": -9.5367431640625e-15,
-      "dtype": "float32",
+      "dtype": "float64",
       "shape": [
         9,
         255
@@ -92,7 +92,7 @@
       "file_name": "A250407.141806_4.npy",
       "public_name": "Current backward",
       "public_unit": "A",
-      "saved_unit": "DAC",
+      "saved_unit": "A",
       "source_native_index": 3,
       "source_name": "Current backward",
       "source_unit": "A",
@@ -100,7 +100,7 @@
       "direction": "backward",
       "synthetic": false,
       "scale_factor": -9.5367431640625e-15,
-      "dtype": "float32",
+      "dtype": "float64",
       "shape": [
         9,
         255
@@ -639,6 +639,6 @@
     "{\u00f9\u00a0X\u00a4\u0011Gp\u009f\u00d9\u00c0\u00cd\u00e6\u00ff\u0000g}\u00a2\u00de\u00d2x0\u00e8\u00a0\u000f[\u00d3\u00fe,\u00dd\u00e8\u00d676\u00ba": "\u00a5\u00cbw\u0002E%\u00d5\u009e\u009b\u00a7YI\u0004\u00d1E,Q]\u00d9\u00ff\u0000fXi\u00ef\u0014\u00d8\u0090\u0019\u0092yn\u00a0\u009b\u00c9\u00826\u0088B\u00af\u0014\u00992\u00fcM\u00f1",
     "{\u00f9\u00a0X\u00a4\u0011Gp\u009f\u00d9\u00c0\u00cd\u00e6\u00ff\u0000g}\u00a2\u00de\u00d2x0\u00e8\u00a0\u000f[\u00d3\u00fe,\u00dd\u00e8\u00d676\u00ba/\u0087<": "\u00a5\u00cbw\u0002E%\u00d5\u009e\u009b\u00a7YI\u0004\u00d1E,Q]\u00d9\u00ff\u0000fXi\u00ef\u0014\u00d8\u0090\u0019\u0092yn\u00a0\u009b\u00c9\u00826\u0088B\u00af\u0014\u00992\u00fcM\u00f1"
   },
-  "export_path": "C:\\Users\\rnpla\\Desktop\\stm\\ProbeFlow\\test_data\\output_raw_npy\\npy\\A250407.141806_raw_npy",
+  "export_path": "test_data/output_raw_npy/npy/A250407.141806_physical_npy",
   "export_format": "npy"
 }

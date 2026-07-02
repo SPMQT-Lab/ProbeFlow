@@ -16,7 +16,7 @@ from probeflow.io.readers.createc_dat import read_createc_dat_report, scale_chan
 from probeflow.io.readers.createc_scan import (
     createc_public_planes_from_report,
 )
-from probeflow.io.readers.createc_dat import scan_range_m_from_header
+from probeflow.io.readers.createc_dat import decoded_scan_range_m
 from probeflow.provenance.export import write_provenance_sidecars
 
 log = logging.getLogger(__name__)
@@ -228,7 +228,8 @@ def build_createc_dat_npy_bundle(
         bundle_name=bundle_dir.name,
         raw_definition=_basis_note(basis),
         scan_pixels=(int(report.decoded_Nx), int(report.decoded_Ny)),
-        scan_range_m=scan_range_m_from_header(report.header),
+        # Matches scan_pixels: the decoded planes' extent, not the programmed frame.
+        scan_range_m=decoded_scan_range_m(report),
         original_shape=(int(report.original_Nx), int(report.original_Ny)),
         decoded_shape=(int(report.decoded_Nx), int(report.decoded_Ny)),
         detected_channel_count=int(report.detected_channel_count),

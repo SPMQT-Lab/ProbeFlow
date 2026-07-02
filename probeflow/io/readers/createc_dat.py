@@ -222,11 +222,36 @@ def scale_channels_for_scan(report: CreatecDatDecodeReport) -> list[np.ndarray]:
 
 
 def scan_range_m_from_header(hdr: dict[str, str]) -> tuple[float, float]:
-    """Return Createc lateral scan range in metres."""
+    """Return the *programmed acquisition frame* in metres.
+
+    ``Length x/y[A]`` describe the frame the controller scanned:
+    ``original_Nx`` × ``original_Ny`` pixels. The decoded planes ProbeFlow
+    exposes are smaller (first column removed; partial scans row-trimmed), so
+    callers pairing a physical range with decoded arrays must use
+    :func:`decoded_scan_range_m` instead.
+    """
 
     lx_a = _f(hdr.get("Length x[A]", "0"), 0.0)
     ly_a = _f(hdr.get("Length y[A]", "0"), 0.0)
     return (lx_a * 1e-10, ly_a * 1e-10)
+
+
+def decoded_scan_range_m(report: CreatecDatDecodeReport) -> tuple[float, float]:
+    """Physical extent of the decoded planes in metres.
+
+    The per-pixel step is fixed by the acquisition grid
+    (``Length / original_N``; independently confirmed by the header's own
+    ``Delta X [Dac] * Dacto[A]xy`` calibration), so the decoded extent is that
+    step times the decoded pixel count. Using the full-frame lengths with the
+    decoded shape would overestimate the x pixel size by ``Nx/(Nx-1)`` on every
+    scan (and the y pixel size by ``Ny/trimmed_Ny`` on partial scans) in every
+    downstream measurement, FFT axis, and lattice vector.
+    """
+
+    full_x_m, full_y_m = scan_range_m_from_header(report.original_header)
+    px_x_m = full_x_m / report.original_Nx if report.original_Nx > 0 else 0.0
+    px_y_m = full_y_m / report.original_Ny if report.original_Ny > 0 else 0.0
+    return (px_x_m * report.decoded_Nx, px_y_m * report.decoded_Ny)
 
 
 def _split_createc_dat_payload(path: Path, raw: bytes) -> tuple[bytes, bytes]:
