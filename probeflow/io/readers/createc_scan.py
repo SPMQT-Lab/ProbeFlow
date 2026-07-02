@@ -47,7 +47,7 @@ from probeflow.io.readers.createc_dat import (
     has_legacy_stm_two_channel_layout,
     read_createc_dat_report,
     scale_channels_for_scan,
-    scan_range_m_from_header,
+    decoded_scan_range_m,
 )
 from probeflow.core.scan_model import Scan
 
@@ -269,7 +269,9 @@ def read_dat(path) -> Scan:
         plane_units=plane_units,
         plane_synthetic=synthetic,
         header=hdr,
-        scan_range_m=scan_range_m_from_header(hdr),
+        # Extent of the decoded planes (first column removed, partial rows
+        # trimmed), not the programmed frame — keeps pixel sizes physical.
+        scan_range_m=decoded_scan_range_m(report),
         source_path=path,
         source_format="dat",
         experiment_metadata=createc_dat_experiment_metadata(hdr),

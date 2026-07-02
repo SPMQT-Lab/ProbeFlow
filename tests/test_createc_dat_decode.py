@@ -519,3 +519,69 @@ def test_trailing_bytes_after_zlib_stream_still_decode(tmp_path):
 
     report = read_createc_dat_report(dat, include_raw=False)
     assert report.detected_channel_count == 4
+
+
+# --------------------------------------------------------------------------- #
+# Decoded scan range: pixel step from the acquisition grid, extent from the
+# decoded shape (physics review 2026-07-02)
+# --------------------------------------------------------------------------- #
+def test_decoded_scan_range_keeps_acquisition_pixel_step(sample_dat_files):
+    """Pairing full-frame Length x/y with the decoded (first-column-removed)
+    shape overestimated pixel_size_x by Nx/(Nx-1) and made square scans read
+    as anisotropic. The decoded range must preserve the acquisition step."""
+    from probeflow.io.readers.createc_dat import (
+        decoded_scan_range_m,
+        scan_range_m_from_header,
+    )
+    from probeflow.io.readers.createc_scan import read_dat
+
+    path = sample_dat_files[0]
+    report = read_createc_dat_report(path, include_raw=False)
+    full = scan_range_m_from_header(report.original_header)
+    step_x = full[0] / report.original_Nx
+    step_y = full[1] / report.original_Ny
+
+    got = decoded_scan_range_m(report)
+    assert got[0] == pytest.approx(step_x * report.decoded_Nx, rel=1e-12)
+    assert got[1] == pytest.approx(step_y * report.decoded_Ny, rel=1e-12)
+
+    scan = read_dat(path)
+    ny, nx = scan.planes[0].shape
+    px_x = scan.scan_range_m[0] / nx
+    px_y = scan.scan_range_m[1] / ny
+    assert px_x == pytest.approx(step_x, rel=1e-12)
+    assert px_y == pytest.approx(step_y, rel=1e-12)
+    # This fixture is a physically square scan: pixel sizes must match, not
+    # differ by the phantom Nx/(Nx-1) anisotropy the old pairing produced.
+    if abs(full[0] - full[1]) < 1e-15 and report.original_Nx == report.original_Ny:
+        assert px_x == pytest.approx(px_y, rel=1e-12)
+
+
+def test_decoded_scan_range_shrinks_with_partial_scan_trim(tmp_path):
+    """A scan stopped early keeps the programmed Length y in its header; the
+    decoded range must scale by trimmed_Ny/original_Ny or every y-distance is
+    wrong by the inverse factor (2x for a half-finished scan)."""
+    from probeflow.io.readers.createc_dat import decoded_scan_range_m
+
+    Nx = Ny = 4
+    header = (
+        b"[Paramco32]\n"
+        b"Num.X=4\nNum.Y=4\n"
+        b"Length x[A]=40.0\nLength y[A]=40.0\n"
+        b"ImageYPosMax=3\n"  # one-based next-Y: 2 completed rows
+    )
+    payload = zlib.compress(
+        np.arange(1, 2 * Ny * Nx + 1, dtype="<f4").tobytes()
+    )
+    dat = tmp_path / "partial.dat"
+    dat.write_bytes(header + b"DATA" + payload)
+
+    report = read_createc_dat_report(dat, include_raw=False)
+    assert report.trimmed_Ny == 2
+    assert report.is_partial_scan
+    assert report.first_column_removed
+
+    width_m, height_m = decoded_scan_range_m(report)
+    # step = 40 A / 4 px = 1 nm per pixel on both axes
+    assert width_m == pytest.approx(1e-9 * 3, rel=1e-12)   # 3 columns remain
+    assert height_m == pytest.approx(1e-9 * 2, rel=1e-12)  # 2 rows completed

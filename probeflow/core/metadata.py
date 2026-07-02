@@ -128,9 +128,11 @@ def metadata_from_createc_dat_report(report) -> ScanMetadata:
     from probeflow.io.createc_interpretation import createc_dat_experiment_metadata
     experiment_metadata = createc_dat_experiment_metadata(hdr)
 
-    lx_a = _f(hdr.get("Length x[A]", "0"), 0.0)
-    ly_a = _f(hdr.get("Length y[A]", "0"), 0.0)
-    scan_range = (lx_a * 1e-10, ly_a * 1e-10)
+    from probeflow.io.readers.createc_dat import decoded_scan_range_m
+
+    # Extent of the decoded planes, consistent with ``shape`` below — pairing
+    # the full programmed frame with the decoded shape skews pixel sizes.
+    scan_range = decoded_scan_range_m(report)
 
     return ScanMetadata(
         path=Path(report.path),
