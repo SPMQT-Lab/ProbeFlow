@@ -17,6 +17,7 @@ Run `probeflow <command> --help` for exact options.
 | `convert` | Convert or export based on input/output suffixes |
 | `dat2sxm` | Convert Createc `.dat` to `.sxm` |
 | `dat2png` | Render Createc `.dat` to PNG |
+| `dat2npy` | Export Createc `.dat` to NumPy bundles |
 | `sxm2png` | Render `.sxm` or supported scans to PNG |
 | `pipeline` | Apply ordered processing steps |
 | `prepare-png` | Write a PNG handoff with provenance sidecar |
@@ -58,6 +59,16 @@ Convert Createc `.dat` to Nanonis-compatible `.sxm`:
 ```bash
 probeflow convert scan.dat scan.sxm
 ```
+
+Export Createc `.dat` to NumPy bundles:
+
+```bash
+probeflow dat2npy -- --input-dir data/scans --output-dir out/npy
+```
+
+The NumPy exporter writes a bundle directory per input file, plus
+`*.probeflow.json` and `*.provenance.json` sidecars that record source path,
+basis, channel mapping, warnings, and other provenance metadata.
 
 Render a scan to PNG:
 

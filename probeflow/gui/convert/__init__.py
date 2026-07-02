@@ -147,9 +147,13 @@ class ConvertSidebar(QWidget):
 
         self.png_cb = QCheckBox("PNG preview")
         self.sxm_cb = QCheckBox("SXM (Nanonis)")
+        self.npy_raw_cb = QCheckBox("RAW .npy")
+        self.npy_physical_cb = QCheckBox("Physical .npy")
         self.png_cb.setChecked(cfg.get("do_png", False))
         self.sxm_cb.setChecked(cfg.get("do_sxm", True))
-        for cb in (self.png_cb, self.sxm_cb):
+        self.npy_raw_cb.setChecked(cfg.get("do_npy_raw", False))
+        self.npy_physical_cb.setChecked(cfg.get("do_npy_physical", False))
+        for cb in (self.png_cb, self.sxm_cb, self.npy_raw_cb, self.npy_physical_cb):
             cb.setFont(ui_font(11))
             lay.addWidget(cb)
 

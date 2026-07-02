@@ -19,4 +19,11 @@ def _cmd_dat2png(args) -> int:
     return _main() or 0
 
 
-__all__ = ["_cmd_dat2png", "_cmd_dat2sxm"]
+def _cmd_dat2npy(args) -> int:
+    from probeflow.io.converters.createc_dat_to_npy import main as _main
+    forwarded = args.rest[1:] if args.rest and args.rest[0] == "--" else args.rest
+    sys.argv = ["dat-npy"] + forwarded
+    return _main() or 0
+
+
+__all__ = ["_cmd_dat2png", "_cmd_dat2npy", "_cmd_dat2sxm"]

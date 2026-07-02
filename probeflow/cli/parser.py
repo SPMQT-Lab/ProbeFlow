@@ -37,7 +37,7 @@ from probeflow.cli.commands.analysis import (
     _cmd_tv_denoise,
     _cmd_unit_cell,
 )
-from probeflow.cli.commands.conversion import _cmd_dat2png, _cmd_dat2sxm
+from probeflow.cli.commands.conversion import _cmd_dat2npy, _cmd_dat2png, _cmd_dat2sxm
 from probeflow.cli.commands.gui import _cmd_gui
 from probeflow.cli.commands.processing import (
     _cmd_pipeline,
@@ -75,6 +75,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "      --png -o scan_processed.png\n"
             "  probeflow periodicity scan.sxm --n-peaks 3 --json\n"
             "  probeflow dat2sxm -- --input-dir data/scans --output-dir out/sxm\n"
+            "  probeflow dat2npy -- --input-dir data/scans --output-dir out/npy\n"
         ),
     )
     sub = p.add_subparsers(dest="command", required=True, metavar="<command>")
@@ -91,6 +92,12 @@ def _build_parser() -> argparse.ArgumentParser:
     dat2png.add_argument("rest", nargs=argparse.REMAINDER,
         help="Arguments forwarded to dat-png (prefix with '--')")
     dat2png.set_defaults(func=_cmd_dat2png)
+
+    dat2npy = sub.add_parser("dat2npy",
+        help="Createc .dat -> NumPy bundles with provenance sidecars (delegates to dat-npy)")
+    dat2npy.add_argument("rest", nargs=argparse.REMAINDER,
+        help="Arguments forwarded to dat-npy (prefix with '--')")
+    dat2npy.set_defaults(func=_cmd_dat2npy)
 
     sxm2png_p = sub.add_parser("sxm2png",
         help="Export a plane of an .sxm to a colorised PNG")

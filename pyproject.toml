@@ -31,6 +31,7 @@ all      = ["adstat>=0.2,<0.3", "opencv-python", "scikit-learn", "gwyfile", "pyt
 probeflow = "probeflow.cli:main"
 dat-sxm   = "probeflow.io.converters.createc_dat_to_sxm:main"
 dat-png   = "probeflow.io.converters.createc_dat_to_png:main"
+dat-npy   = "probeflow.io.converters.createc_dat_to_npy:main"
 
 [tool.setuptools]
 include-package-data = true

@@ -1621,6 +1621,8 @@ class ProbeFlowWindow(QMainWindow):
         out_dir = self._conv_panel.get_output_dir()
         do_png  = self._convert_sidebar.png_cb.isChecked()
         do_sxm  = self._convert_sidebar.sxm_cb.isChecked()
+        do_npy_raw = self._convert_sidebar.npy_raw_cb.isChecked()
+        do_npy_physical = self._convert_sidebar.npy_physical_cb.isChecked()
         clip_lo = self._convert_sidebar.clip_low_spin.value()
         clip_hi = self._convert_sidebar.clip_high_spin.value()
 
@@ -1628,7 +1630,7 @@ class ProbeFlowWindow(QMainWindow):
             self._conv_panel.log("ERROR: Please select an input folder.", "err"); return
         if out_dir and not Path(out_dir).is_dir():
             self._conv_panel.log(f"ERROR: Output folder not found: {out_dir}", "err"); return
-        if not do_png and not do_sxm:
+        if not do_png and not do_sxm and not do_npy_raw and not do_npy_physical:
             self._conv_panel.log("ERROR: Select at least one output format.", "err"); return
         if not Path(in_dir).is_dir():
             self._conv_panel.log(f"ERROR: Input folder not found: {in_dir}", "err"); return
@@ -1638,7 +1640,11 @@ class ProbeFlowWindow(QMainWindow):
         self._convert_sidebar.run_btn.setEnabled(False)
         self._status_bar.showMessage("Converting…")
 
-        worker = ConversionWorker(in_dir, out_dir, do_png, do_sxm, clip_lo, clip_hi)
+        worker = ConversionWorker(
+            in_dir, out_dir, do_png, do_sxm, clip_lo, clip_hi,
+            do_npy_raw=do_npy_raw,
+            do_npy_physical=do_npy_physical,
+        )
         worker.signals.log_msg.connect(self._conv_panel.log)
         worker.signals.finished.connect(self._on_done)
         QThreadPool.globalInstance().start(worker)

@@ -493,13 +493,17 @@ class ConversionSignals(QObject):
 class ConversionWorker(_PooledWorker):
     def __init__(self, in_dir: str, out_dir: str,
                  do_png: bool, do_sxm: bool,
-                 clip_low: float, clip_high: float):
+                 clip_low: float, clip_high: float,
+                 do_npy_raw: bool = False,
+                 do_npy_physical: bool = False):
         super().__init__(ConversionSignals())
         self.in_dir    = in_dir
         # if no custom output, use the input dir as base
         self.out_dir   = out_dir if out_dir else in_dir
         self.do_png    = do_png
         self.do_sxm    = do_sxm
+        self.do_npy_raw = do_npy_raw
+        self.do_npy_physical = do_npy_physical
         self.clip_low  = clip_low
         self.clip_high = clip_high
 
@@ -545,6 +549,27 @@ class ConversionWorker(_PooledWorker):
                     else:
                         _log("All SXM files processed successfully.", "ok")
                     _log(f"Output: {sxm_out}", "info")
+
+            if self.do_npy_raw or self.do_npy_physical:
+                from probeflow.io.converters.createc_dat_to_npy import main as npy_main
+                _log("â”€â”€ NumPy conversion â”€â”€", "info")
+                basis = (
+                    "both"
+                    if self.do_npy_raw and self.do_npy_physical
+                    else "raw"
+                    if self.do_npy_raw
+                    else "physical"
+                )
+                npy_out = out_path / "npy"
+                npy_main(
+                    src=in_path,
+                    out_root=npy_out,
+                    basis=basis,
+                    force=False,
+                    verbose=False,
+                )
+                _log("NumPy done.", "ok")
+                _log(f"Output: {npy_out}", "info")
         except Exception as exc:
             _log(f"Unexpected error: {exc}", "err")
         finally:
