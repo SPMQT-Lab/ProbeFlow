@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, replace
+from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
@@ -134,6 +135,7 @@ _REAL_EMPTY_STATE_MESSAGE = (
 
 _DEFAULT_FOCUS_STATISTIC = "pair_correlation_g_r"
 _MODEL_SUMMARY_FOCUS = "model_summary"
+_QUICK_SUMMARY_FOCUS = "quick_summary"
 _STATISTIC_GROUPS = (
     (
         "General spatial pattern",
@@ -165,6 +167,7 @@ _STATISTIC_LABELS = {
     "ripley_l_function": "Ripley L",
     "cluster_size_counts": "Cluster sizes",
     _MODEL_SUMMARY_FOCUS: "Model verdict summary",
+    _QUICK_SUMMARY_FOCUS: "Data summary",
 }
 _STATISTIC_TITLES = {
     "pair_correlation_g_r": "Pair correlation g(r)",
@@ -175,6 +178,7 @@ _STATISTIC_TITLES = {
     "ripley_l_function": "Ripley L",
     "cluster_size_counts": "Cluster sizes",
     _MODEL_SUMMARY_FOCUS: "Model verdict summary",
+    _QUICK_SUMMARY_FOCUS: "Descriptive summary — before any model",
 }
 _FALLBACK_STAT_GUIDES = {
     "pair_correlation_g_r": {
@@ -225,6 +229,16 @@ _FALLBACK_STAT_GUIDES = {
         "before_run": "Comparing verdicts for random, no-overlap, and feature-biased models…",
         "how_to_read": "Read model verdicts as consistency checks, not mechanism proof.",
     },
+    _QUICK_SUMMARY_FOCUS: {
+        "title": "Data summary",
+        "focus_question": "How many particles, how dense, how far apart?",
+        "before_run": "Counting points and measuring nearest-neighbour distances…",
+        "how_to_read": (
+            "The dashed line marks the mean nearest-neighbour distance a random "
+            "pattern of this density would have — a hint, not a test. Run a "
+            "model comparison to test it."
+        ),
+    },
 }
 _SHORT_STAT_READS = {
     "pair_correlation_g_r": "Orange = observed data; blue = model simulations. Above band = more pairs.",
@@ -235,6 +249,9 @@ _SHORT_STAT_READS = {
     "ripley_l_function": "Above band = accumulated clustering; below band = depletion.",
     "cluster_size_counts": "More large groups = more clustering.",
     _MODEL_SUMMARY_FOCUS: "Read consistency by model, not as mechanism proof.",
+    _QUICK_SUMMARY_FOCUS: (
+        "Histogram left of the dashed line = closer than random; right = more spread out."
+    ),
 }
 _STATISTIC_ANNOTATIONS = {
     "pair_correlation_g_r_theta": (
@@ -321,6 +338,10 @@ _TUTORIALS: tuple[ParticleTutorialExample, ...] = (
                 title="Welcome",
                 question="Particle Statistics tests whether particle positions are consistent with simple spatial models.",
                 look_for="Start with the point field: the particles are the data.",
+                why=(
+                    "A visual impression of randomness is unreliable; a model "
+                    "comparison replaces it with evidence."
+                ),
                 pattern="random",
                 model="homogeneous_poisson",
                 n=80,
@@ -340,8 +361,15 @@ _TUTORIALS: tuple[ParticleTutorialExample, ...] = (
         steps=(
             ParticleTutorialStep(
                 title="Observed point pattern",
-                question="The image is reduced to calibrated x,y particle positions.",
+                question=(
+                    "The image is reduced to calibrated x,y particle positions — "
+                    "that list is all the statistics ever see."
+                ),
                 look_for="The observed particles are the only layer shown.",
+                why=(
+                    "Everything downstream depends on detection quality and "
+                    "calibration; wrong positions give confident-looking wrong verdicts."
+                ),
                 pattern="random",
                 model="homogeneous_poisson",
                 n=120,
@@ -355,14 +383,56 @@ _TUTORIALS: tuple[ParticleTutorialExample, ...] = (
         ),
     ),
     ParticleTutorialExample(
+        key="describe_data",
+        title="02 - Describe the data",
+        summary="Count, density, and spacing before any model.",
+        steps=(
+            ParticleTutorialStep(
+                title="Describe the data",
+                question=(
+                    "How many particles, how dense, how far apart? The Data "
+                    "summary answers this with no model run at all."
+                ),
+                look_for=(
+                    "The dashed line marks the mean nearest-neighbour distance a "
+                    "random pattern of this density would have."
+                ),
+                caution=(
+                    "The dashed line is a hint, not a test. The simulation "
+                    "envelope later in this tutorial is the test."
+                ),
+                why=(
+                    "Descriptive numbers catch unit and detection mistakes early, "
+                    "and the observed-versus-random spacing hint tells you which "
+                    "model comparison is worth running."
+                ),
+                statistic_label="Data summary",
+                visible_panel="plot",
+                target_tab="Setup",
+                pattern="random",
+                model="homogeneous_poisson",
+                n=120,
+                seed=7,
+                simulations=60,
+                show_simulated=False,
+                show_features=False,
+                focus_statistic=_QUICK_SUMMARY_FOCUS,
+            ),
+        ),
+    ),
+    ParticleTutorialExample(
         key="model_baseline_observed",
-        title="02 - Model baseline A",
+        title="03 - Model baseline A",
         summary="Observed particles only.",
         steps=(
             ParticleTutorialStep(
                 title="Observed data",
                 question="These are the observed particle positions. They are the data we want to test.",
                 look_for="Only observed particles are visible.",
+                why=(
+                    "A test needs a concrete null: 'random' must be something we "
+                    "can simulate, not a feeling."
+                ),
                 pattern="random",
                 model="homogeneous_poisson",
                 n=120,
@@ -371,13 +441,12 @@ _TUTORIALS: tuple[ParticleTutorialExample, ...] = (
                 show_simulated=False,
                 show_features=False,
                 direct_labels=("observed particles",),
-                primary_action="Show a random model",
             ),
         ),
     ),
     ParticleTutorialExample(
         key="model_baseline_model",
-        title="03 - Model baseline B",
+        title="04 - Model baseline B",
         summary="One simulated model layout.",
         steps=(
             ParticleTutorialStep(
@@ -394,14 +463,17 @@ _TUTORIALS: tuple[ParticleTutorialExample, ...] = (
                 show_simulated=True,
                 show_features=False,
                 direct_labels=("model simulation",),
-                primary_action="Overlay observed particles",
+                why=(
+                    "Simulation makes the null hypothesis concrete: this is what "
+                    "'independent random placement' actually looks like."
+                ),
                 more_detail="One simulated layout is not enough for a verdict. It only shows what the model can generate.",
             ),
         ),
     ),
     ParticleTutorialExample(
         key="model_baseline_overlay",
-        title="04 - Model baseline C",
+        title="05 - Model baseline C",
         summary="Observed particles and one model simulation together.",
         steps=(
             ParticleTutorialStep(
@@ -417,20 +489,27 @@ _TUTORIALS: tuple[ParticleTutorialExample, ...] = (
                 show_simulated=True,
                 show_features=False,
                 direct_labels=("observed data", "model simulation"),
-                primary_action="Show the statistic",
+                why=(
+                    "Eyes find patterns in pure noise; if you cannot tell data "
+                    "from model here, you need a statistic — that is the point."
+                ),
                 more_detail="Our eye may see patterns, but the statistical curve compares the data to many model simulations.",
             ),
         ),
     ),
     ParticleTutorialExample(
         key="image_to_statistic",
-        title="05 - From image to statistic",
+        title="06 - From image to statistic",
         summary="Visual comparison is not enough.",
         steps=(
             ParticleTutorialStep(
                 title="From image to statistic",
-                question="The spatial view is only the starting point.",
+                question="How do positions become something testable?",
                 look_for="Pair correlation turns positions into a measurable comparison.",
+                why=(
+                    "A statistic compresses the pattern into a curve that can be "
+                    "compared against many simulations, not one impression."
+                ),
                 model_label="Homogeneous Poisson",
                 statistic_label="Pair correlation g(r)",
                 visible_panel="plot",
@@ -445,19 +524,28 @@ _TUTORIALS: tuple[ParticleTutorialExample, ...] = (
                 focus_statistic="pair_correlation_g_r",
                 curve_mode="observed_only",
                 compute_on_show=True,
-                primary_action="Show model band",
             ),
         ),
     ),
     ParticleTutorialExample(
         key="simulation_envelope",
-        title="06 - Simulation envelope",
+        title="07 - Simulation envelope",
         summary="Orange observed statistic versus blue model band.",
         steps=(
             ParticleTutorialStep(
                 title="Simulation envelope",
                 question="Many model layouts form the expected blue band.",
                 look_for="Orange is observed data; blue is the model envelope.",
+                what_changes="Sixty random layouts are simulated instead of one.",
+                expected_effect=(
+                    "this pattern really is random, so the orange curve should "
+                    "stay inside the blue band."
+                ),
+                where_to_check="the pair-correlation plot.",
+                why=(
+                    "The band shows the statistic's spread under the model; only "
+                    "excursions beyond it count as evidence."
+                ),
                 model_label="Homogeneous Poisson",
                 statistic_label="Pair correlation g(r)",
                 visible_panel="plot",
@@ -472,13 +560,12 @@ _TUTORIALS: tuple[ParticleTutorialExample, ...] = (
                 focus_statistic="pair_correlation_g_r",
                 curve_mode="comparison",
                 compute_on_show=True,
-                primary_action="Read the verdict",
             ),
         ),
     ),
     ParticleTutorialExample(
         key="verdict",
-        title="07 - Verdict language",
+        title="08 - Verdict language",
         summary="Consistent or inconsistent with this model.",
         steps=(
             ParticleTutorialStep(
@@ -498,13 +585,16 @@ _TUTORIALS: tuple[ParticleTutorialExample, ...] = (
                 show_features=False,
                 focus_statistic=_MODEL_SUMMARY_FOCUS,
                 compute_on_show=True,
-                primary_action="Explain Poisson model",
+                why=(
+                    "'Consistent' means not ruled out — never proof of "
+                    "randomness; a small or noisy sample may simply lack power."
+                ),
             ),
         ),
     ),
     ParticleTutorialExample(
         key="homogeneous_poisson",
-        title="08 - Homogeneous Poisson",
+        title="09 - Homogeneous Poisson",
         summary="Random placement with one average density.",
         steps=(
             ParticleTutorialStep(
@@ -526,19 +616,29 @@ _TUTORIALS: tuple[ParticleTutorialExample, ...] = (
                 focus_statistic="pair_correlation_g_r",
                 curve_mode="comparison",
                 compute_on_show=True,
-                primary_action="Try clustered pattern",
+                why=(
+                    "Poisson is the reference point: every departure is measured "
+                    "against independent placement at one average density."
+                ),
             ),
         ),
     ),
     ParticleTutorialExample(
         key="clustered",
-        title="09 - Clustered pattern",
+        title="10 - Clustered pattern",
         summary="Too many close pairs.",
         steps=(
             ParticleTutorialStep(
                 title="Clustered pattern",
-                question="Clustered points create too many close particle pairs.",
+                question="What do too many close pairs do to g(r)?",
                 look_for="A small-distance peak rises above the random-placement band.",
+                what_changes="The generated pattern is now clustered (same N, same field).",
+                expected_effect="an excess of close pairs: g(r) should rise above the band at small r.",
+                where_to_check="the left edge of the pair-correlation plot.",
+                why=(
+                    "The signature of aggregation lives at small distances; "
+                    "learning it here trains your eye for real data."
+                ),
                 model_label="Homogeneous Poisson",
                 statistic_label="Pair correlation g(r)",
                 caution="This shows spatial clustering, not the physical cause.",
@@ -554,13 +654,12 @@ _TUTORIALS: tuple[ParticleTutorialExample, ...] = (
                 focus_statistic="pair_correlation_g_r",
                 curve_mode="comparison",
                 compute_on_show=True,
-                primary_action="Try ordered islands",
             ),
         ),
     ),
     ParticleTutorialExample(
         key="hard_core_meaning",
-        title="10 - Hard-core model meaning",
+        title="11 - Hard-core model meaning",
         summary="Minimum separation and no direct overlap.",
         steps=(
             ParticleTutorialStep(
@@ -581,19 +680,30 @@ _TUTORIALS: tuple[ParticleTutorialExample, ...] = (
                 show_simulated=True,
                 show_features=False,
                 direct_labels=("model simulation", "minimum separation"),
-                primary_action="Try radius",
+                why=(
+                    "Finite particle size alone forbids close pairs; the null "
+                    "must include exclusion before any depletion can be called "
+                    "'interaction'."
+                ),
             ),
         ),
     ),
     ParticleTutorialExample(
         key="hard_core_parameters",
-        title="11 - Hard-core parameter sandbox",
+        title="12 - Hard-core parameter sandbox",
         summary="Change radius and particle number; generate points.",
         steps=(
             ParticleTutorialStep(
                 title="Try radius",
                 question="Increase the hard-core radius to strengthen exclusion.",
                 look_for="Larger radius removes more very close neighbours.",
+                what_changes="The hard-core radius is raised from 1.5 to 3 nm.",
+                expected_effect="the shortest separations vanish and points look more evenly spread.",
+                where_to_check="the point field after generating.",
+                why=(
+                    "Sweeping a parameter in the sandbox teaches what each knob "
+                    "does before it matters on real data."
+                ),
                 model_label="Hard-core random",
                 visible_panel="controls",
                 visible_controls=("model_hard_core_radius",),
@@ -616,13 +726,19 @@ _TUTORIALS: tuple[ParticleTutorialExample, ...] = (
     ),
     ParticleTutorialExample(
         key="hard_core_statistic",
-        title="12 - Hard-core statistic",
+        title="13 - Hard-core statistic",
         summary="Nearest-neighbor distances lose very short separations.",
         steps=(
             ParticleTutorialStep(
                 title="Nearest neighbors",
-                question="The nearest-neighbor plot should lose very short distances.",
+                question="Where does a minimum separation show up in the statistics?",
                 look_for="Close neighbours are forbidden, so the left side is depleted.",
+                expected_effect="the nearest-neighbour histogram should be empty below the 3 nm radius.",
+                where_to_check="the left side of the nearest-neighbour plot.",
+                why=(
+                    "Exclusion appears as a missing left tail in nearest-neighbour "
+                    "distances — the most direct fingerprint of a minimum separation."
+                ),
                 model_label="Hard-core random",
                 statistic_label="Nearest-neighbor distance",
                 visible_panel="plot",
@@ -639,13 +755,12 @@ _TUTORIALS: tuple[ParticleTutorialExample, ...] = (
                 focus_statistic="nearest_neighbor_distribution",
                 curve_mode="comparison",
                 compute_on_show=True,
-                primary_action="Try local order",
             ),
         ),
     ),
     ParticleTutorialExample(
         key="ordered_cluster_vs_order",
-        title="13 - Order A",
+        title="14 - Order A",
         summary="Clustering is not the same as local order.",
         steps=(
             ParticleTutorialStep(
@@ -668,13 +783,16 @@ _TUTORIALS: tuple[ParticleTutorialExample, ...] = (
                 show_features=False,
                 visible_controls=("ordered_lattice",),
                 direct_labels=("ordered islands",),
-                primary_action="Show radial spacing",
+                why=(
+                    "Dense is not the same as ordered: a 'clustered' verdict says "
+                    "nothing about internal arrangement."
+                ),
             ),
         ),
     ),
     ParticleTutorialExample(
         key="ordered_radial_spacing",
-        title="14 - Order B",
+        title="15 - Order B",
         summary="Radial g(r) shows spacing but removes direction.",
         steps=(
             ParticleTutorialStep(
@@ -698,13 +816,16 @@ _TUTORIALS: tuple[ParticleTutorialExample, ...] = (
                 focus_statistic="pair_correlation_g_r",
                 curve_mode="comparison",
                 compute_on_show=True,
-                primary_action="Show directions",
+                why=(
+                    "Peaks in g(r) reveal repeated spacings but average away "
+                    "direction — one number per distance."
+                ),
             ),
         ),
     ),
     ParticleTutorialExample(
         key="ordered_directional_pairs",
-        title="15 - Order C",
+        title="16 - Order C",
         summary="Directional pair density keeps angle.",
         steps=(
             ParticleTutorialStep(
@@ -729,13 +850,16 @@ _TUTORIALS: tuple[ParticleTutorialExample, ...] = (
                 focus_statistic="pair_correlation_g_r_theta",
                 curve_mode="comparison",
                 compute_on_show=True,
-                primary_action="Show ψ6",
+                why=(
+                    "Keeping the pair angle exposes lattice directions that "
+                    "radial averaging hides."
+                ),
             ),
         ),
     ),
     ParticleTutorialExample(
         key="ordered_bond_order",
-        title="16 - Order D",
+        title="17 - Order D",
         summary="ψ6 asks whether each particle has triangular-like neighbors.",
         steps=(
             ParticleTutorialStep(
@@ -760,19 +884,30 @@ _TUTORIALS: tuple[ParticleTutorialExample, ...] = (
                 focus_statistic="bond_order_psi6",
                 curve_mode="comparison",
                 compute_on_show=True,
-                primary_action="Show ψ4",
+                why=(
+                    "ψ6 asks each particle a local question — do your neighbours "
+                    "sit at 60° steps? — so ordered islands stand out even in "
+                    "mixed fields."
+                ),
             ),
         ),
     ),
     ParticleTutorialExample(
         key="ordered_square_order",
-        title="17 - Order E",
+        title="18 - Order E",
         summary="ψ4 is the square-like local-order check.",
         steps=(
             ParticleTutorialStep(
                 title="ψ4 local order",
                 question="ψ4 measures square-like local order around each particle.",
                 look_for="Square islands shift ψ4 toward 1 more than ψ6.",
+                what_changes="The generated islands are now square lattices, not triangular.",
+                expected_effect="ψ4 should shift toward 1 while ψ6 stays lower.",
+                where_to_check="this ψ4 histogram against the previous lesson's ψ6.",
+                why=(
+                    "Choosing the symmetry to test is a physics decision; the "
+                    "statistic can only answer the question you pose."
+                ),
                 model_label="Homogeneous Poisson",
                 statistic_label="ψ4 square order",
                 caution="Choose the symmetry that matches the structure you want to test.",
@@ -791,13 +926,12 @@ _TUTORIALS: tuple[ParticleTutorialExample, ...] = (
                 focus_statistic="bond_order_psi4",
                 curve_mode="comparison",
                 compute_on_show=True,
-                primary_action="Mix in disorder",
             ),
         ),
     ),
     ParticleTutorialExample(
         key="ordered_mixed",
-        title="18 - Order F",
+        title="19 - Order F",
         summary="Mixed ordered and disordered regions need local metrics.",
         steps=(
             ParticleTutorialStep(
@@ -823,13 +957,16 @@ _TUTORIALS: tuple[ParticleTutorialExample, ...] = (
                 focus_statistic="bond_order_psi6",
                 curve_mode="comparison",
                 compute_on_show=True,
-                primary_action="Try feature-biased model",
+                why=(
+                    "Global averages dilute local order; a mixed field needs "
+                    "local metrics plus your eyes on the image."
+                ),
             ),
         ),
     ),
     ParticleTutorialExample(
         key="feature_biased",
-        title="19 - Feature-biased model",
+        title="20 - Feature-biased model",
         summary="Association with an independently measured feature layer.",
         steps=(
             ParticleTutorialStep(
@@ -849,7 +986,10 @@ _TUTORIALS: tuple[ParticleTutorialExample, ...] = (
                 show_features=True,
                 visible_controls=("layer_features",),
                 direct_labels=("feature layer",),
-                primary_action="Add particles",
+                why=(
+                    "Association tests need an independently measured reference "
+                    "layer — it must not come from the tested particles."
+                ),
             ),
             ParticleTutorialStep(
                 title="Particles and features",
@@ -866,7 +1006,10 @@ _TUTORIALS: tuple[ParticleTutorialExample, ...] = (
                 show_features=True,
                 visible_controls=("layer_observed",),
                 direct_labels=("observed particles", "feature layer"),
-                primary_action="Read feature verdict",
+                why=(
+                    "Judging association by eye invites confirmation bias; the "
+                    "matched null does the counting."
+                ),
             ),
             ParticleTutorialStep(
                 title="Feature-biased verdict",
@@ -886,13 +1029,16 @@ _TUTORIALS: tuple[ParticleTutorialExample, ...] = (
                 show_features=True,
                 focus_statistic=_MODEL_SUMMARY_FOCUS,
                 compute_on_show=True,
-                primary_action="Review statistics",
+                why=(
+                    "Model verdict cards summarise which placement assumptions "
+                    "survive — read them per model, not as one number."
+                ),
             ),
         ),
     ),
     ParticleTutorialExample(
         key="other_statistics",
-        title="20 - Statistics reference",
+        title="21 - Statistics reference",
         summary="Four statistics answer different spatial questions.",
         steps=(
             ParticleTutorialStep(
@@ -912,6 +1058,10 @@ _TUTORIALS: tuple[ParticleTutorialExample, ...] = (
                 focus_statistic="nearest_neighbor_distribution",
                 curve_mode="comparison",
                 compute_on_show=True,
+                why=(
+                    "Each statistic answers one question; nearest-neighbour "
+                    "distances are the sharpest probe of contact and exclusion."
+                ),
             ),
             ParticleTutorialStep(
                 title="Ripley L",
@@ -928,6 +1078,10 @@ _TUTORIALS: tuple[ParticleTutorialExample, ...] = (
                 focus_statistic="ripley_l_function",
                 curve_mode="comparison",
                 compute_on_show=True,
+                why=(
+                    "Ripley's L accumulates structure over scale, catching "
+                    "clustering that a single distance can miss."
+                ),
             ),
             ParticleTutorialStep(
                 title="Cluster sizes",
@@ -945,13 +1099,17 @@ _TUTORIALS: tuple[ParticleTutorialExample, ...] = (
                 focus_statistic="cluster_size_counts",
                 curve_mode="comparison",
                 compute_on_show=True,
-                primary_action="Learn pooling",
+                why=(
+                    "Group-size counts turn 'it looks clumpy' into how many "
+                    "pairs, triples, and islands — always report the linking "
+                    "distance with them."
+                ),
             ),
         ),
     ),
     ParticleTutorialExample(
         key="pooling_single",
-        title="21 - Pooling A",
+        title="22 - Pooling A",
         summary="One generated image gives one noisy statistic.",
         steps=(
             ParticleTutorialStep(
@@ -971,13 +1129,16 @@ _TUTORIALS: tuple[ParticleTutorialExample, ...] = (
                 curve_mode="comparison",
                 compute_on_show=True,
                 direct_labels=("single image",),
-                primary_action="Add second image",
+                why=(
+                    "One image is one noisy draw; deciding from it alone risks "
+                    "overreading fluctuations."
+                ),
             ),
         ),
     ),
     ParticleTutorialExample(
         key="pooling_two",
-        title="22 - Pooling B",
+        title="23 - Pooling B",
         summary="Pool two independent generated images.",
         steps=(
             ParticleTutorialStep(
@@ -1001,7 +1162,13 @@ _TUTORIALS: tuple[ParticleTutorialExample, ...] = (
                 curve_mode="comparison",
                 compute_on_show=True,
                 direct_labels=("pooled: 2 images",),
-                primary_action="Compare one vs two",
+                what_changes="A second independent image of the same condition joins the pool.",
+                expected_effect="the pooled curve smooths and its spread narrows.",
+                where_to_check="the blue pooled band against the orange single-image reference.",
+                why=(
+                    "Replication is the honest way to strengthen a verdict — pool "
+                    "independent images, never repeated detections of the same one."
+                ),
                 more_detail=(
                     "The orange reference is one generated image. The blue pooled "
                     "curve uses two independent images; its band shows image-to-image "
@@ -1012,7 +1179,7 @@ _TUTORIALS: tuple[ParticleTutorialExample, ...] = (
     ),
     ParticleTutorialExample(
         key="model_simulations_sandbox",
-        title="23 - Model simulations sandbox",
+        title="24 - Model simulations sandbox",
         summary="Explore model parameters outside the linear tutorial.",
         steps=(
             ParticleTutorialStep(
@@ -1032,20 +1199,27 @@ _TUTORIALS: tuple[ParticleTutorialExample, ...] = (
                 model_hard_core_radius_nm=3.0,
                 show_simulated=True,
                 show_features=False,
-                primary_action="Move to real data",
+                why=(
+                    "Free experimentation with the models builds the intuition "
+                    "the linear lessons cannot."
+                ),
                 more_detail="The sandbox uses the same point field, layer controls, statistic plot, and results view as real analysis.",
             ),
         ),
     ),
     ParticleTutorialExample(
         key="real_workflow",
-        title="24 - Real ProbeFlow workflow",
+        title="25 - Real ProbeFlow workflow",
         summary="Feature Finder to Particle Statistics to verdict.",
         steps=(
             ParticleTutorialStep(
                 title="Real workflow",
                 question="Real analysis begins with Feature Finder positions.",
-                look_for="Use saved feature sets, then choose region, model, statistic, simulations, and verdicts.",
+                look_for=(
+                    "With real points loaded, the Data summary card appears "
+                    "first; then choose region, model, statistic, simulations, "
+                    "and read the verdicts."
+                ),
                 mode="real",
                 model_label="Choose model from real controls",
                 visible_panel="controls",
@@ -1053,8 +1227,12 @@ _TUTORIALS: tuple[ParticleTutorialExample, ...] = (
                 target_tab="Setup",
                 show_simulated=False,
                 show_features=False,
-                primary_action="Final caution",
-                more_detail="Workflow: detect particles, send them to Particle Statistics, confirm calibration and region, choose a model and statistic, run simulations, read verdicts, and pool comparable images.",
+                why=(
+                    "The full path — detect, describe, choose region and model, "
+                    "simulate, read verdicts — is the same one you just "
+                    "practised on generated data."
+                ),
+                more_detail="Workflow: detect particles, send them to Particle Statistics, read the Data summary (count, density, spacing), confirm calibration and region, choose a model and statistic, run simulations, read verdicts, and pool comparable images.",
                 caution=(
                     "Pooling is only valid for independent images from the same "
                     "experimental condition. Pixel-level point ROIs also limit the "
@@ -1065,7 +1243,7 @@ _TUTORIALS: tuple[ParticleTutorialExample, ...] = (
     ),
     ParticleTutorialExample(
         key="final_caution",
-        title="25 - Final caution",
+        title="26 - Final caution",
         summary="Statistical verdicts need physical interpretation.",
         steps=(
             ParticleTutorialStep(
@@ -1079,6 +1257,7 @@ _TUTORIALS: tuple[ParticleTutorialExample, ...] = (
                 primary_action="Restart tutorial",
                 action_kind="restart",
                 caution="Physical mechanism requires experimental interpretation.",
+                why="Statistics rules models out; only physics rules mechanisms in.",
             ),
         ),
     ),
@@ -1488,6 +1667,13 @@ class FocusedStatisticPanel(QFrame):
         self._annotation.setVisible(False)
         layout.addWidget(self._annotation)
 
+        self._summary_lbl = QLabel("", self)
+        self._summary_lbl.setObjectName("particleStatisticsFocusSummary")
+        self._summary_lbl.setWordWrap(True)
+        self._summary_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self._summary_lbl.setVisible(False)
+        layout.addWidget(self._summary_lbl)
+
         self._plot_host = QWidget(self)
         self._plot_layout = QVBoxLayout(self._plot_host)
         self._plot_layout.setContentsMargins(0, 0, 0, 0)
@@ -1513,6 +1699,7 @@ class FocusedStatisticPanel(QFrame):
         empty_message: str | None = None,
         show_observed_curve: bool = True,
         show_model_curves: bool = True,
+        summary_lines: tuple[str, ...] | None = None,
     ) -> None:
         self._statistic_id = str(statistic_id or _DEFAULT_FOCUS_STATISTIC)
         self._clear_plot()
@@ -1523,6 +1710,12 @@ class FocusedStatisticPanel(QFrame):
         annotation = _plot_annotation_text(self._statistic_id)
         self._annotation.setText(annotation)
         self._annotation.setVisible(bool(annotation and panel is not None))
+        if summary_lines:
+            self._summary_lbl.setText("<br>".join(str(line) for line in summary_lines))
+            self._summary_lbl.setVisible(True)
+        else:
+            self._summary_lbl.setText("")
+            self._summary_lbl.setVisible(False)
         if panel is not None:
             if str(getattr(panel, "kind", "")) == "series_curve":
                 quick_read = _series_focus_read_text(panel)
@@ -1744,6 +1937,9 @@ class ParticleStatisticsDialog(QDialog):
         self._pooling_reference_curve: dict[str, Any] | None = None
         self._focused_statistic = _DEFAULT_FOCUS_STATISTIC
         self._focused_curve_mode = "comparison"
+        self._quick_summary: Any = None
+        self._quick_summary_subject = ""
+        self._populating_feature_sets = False
         self._last_view_spec = _empty_view_spec("Run a comparison to populate result panels.")
         self._field = ParticleFieldView(theme=self._theme, parent=self)
         self._focus_panel = FocusedStatisticPanel(theme=self._theme, parent=self)
@@ -1786,13 +1982,25 @@ class ParticleStatisticsDialog(QDialog):
             if self._tutorial_active
             else "sandbox"
             if initial in {"sandbox", "model_simulations"}
-            else "landing"
+            # With point data already at hand, land directly on the data
+            # summary instead of the workflow chooser; the Workflows button
+            # still reaches the chooser.
+            else ("landing" if not self._has_point_data() else "real")
             if initial in {"landing", "start", "home"}
             else "real"
         )
         self._set_mode(start_mode)
         if self._tutorial_active:
             self._apply_tutorial_step(self._current_tutorial_step_obj(), stage_generated=True)
+
+    def _has_point_data(self) -> bool:
+        """True when a live point source or a non-empty saved set is available."""
+
+        for source in self._point_sources:
+            points_m = getattr(source, "points_m", None)
+            if points_m is not None and len(points_m):
+                return True
+        return any(getattr(fs, "point_count", 0) for fs in self._feature_sets)
 
     @property
     def current_mode(self) -> str:
@@ -1967,6 +2175,20 @@ class ParticleStatisticsDialog(QDialog):
     def _refresh_focus_panel(self) -> None:
         if not hasattr(self, "_focus_panel"):
             return
+        if self._focused_statistic == _QUICK_SUMMARY_FOCUS:
+            panel, summary_lines, message = self._quick_summary_focus_content()
+            self._focus_panel.set_statistic(
+                _QUICK_SUMMARY_FOCUS,
+                panel=panel,
+                data_mode=(
+                    "sandbox" if self._active_mode in {"generated", "sandbox"} else "real"
+                ),
+                curve_mode=self._focused_curve_mode,
+                has_result=False,
+                empty_message=message,
+                summary_lines=summary_lines,
+            )
+            return
         panel = _panel_for_statistic(self._last_view_spec, self._focused_statistic)
         empty_message = None
         if not _view_spec_has_result(self._last_view_spec):
@@ -1983,6 +2205,86 @@ class ParticleStatisticsDialog(QDialog):
             show_observed_curve=self._show_observed_curve_in_focus(),
             show_model_curves=self._show_model_curves_in_focus(),
         )
+
+    def _refresh_quick_summary(self) -> None:
+        """Recompute the instant descriptive summary from the current inputs.
+
+        Live point source wins; otherwise a single ticked saved feature set is
+        summarised. In the generated/sandbox surfaces (tutorial), the staged
+        field points are summarised instead. Cheap and synchronous (k-d tree
+        NN), no AdStat needed.
+        """
+
+        from probeflow.analysis.point_summary import summarize_point_pattern
+
+        if self._active_mode in {"generated", "sandbox"}:
+            model = self._field._model
+            xy_nm = np.asarray(model.observed_xy_nm, dtype=float)
+            if len(xy_nm):
+                self._quick_summary = summarize_point_pattern(
+                    xy_nm * 1e-9,
+                    scan_range_m=(model.width_nm * 1e-9, model.height_nm * 1e-9),
+                    image_shape=(512, 512),  # synthetic grid: only the area matters
+                    mask=None,
+                    region_label="Generated field",
+                )
+                self._quick_summary_subject = "Generated pattern"
+            else:
+                self._quick_summary = None
+                self._quick_summary_subject = ""
+            return
+        source = self._selected_source()
+        points_m = getattr(source, "points_m", None) if source is not None else None
+        if points_m is not None and len(points_m):
+            mask, region_label = self._selected_region_mask_and_label()
+            self._quick_summary = summarize_point_pattern(
+                np.asarray(points_m, dtype=float),
+                scan_range_m=getattr(self._scan, "scan_range_m", None),
+                image_shape=self._image_shape,
+                mask=mask,
+                region_label=region_label,
+            )
+            self._quick_summary_subject = str(getattr(source, "label", "") or "Point source")
+            return
+        ticked = self._selected_feature_sets()
+        if len(ticked) == 1:
+            fs = ticked[0]
+            self._quick_summary = summarize_point_pattern(
+                np.asarray(fs.points_m, dtype=float),
+                scan_range_m=fs.scan_range_m,
+                image_shape=fs.image_shape,
+                mask=None,
+                region_label="Full image",
+            )
+            self._quick_summary_subject = str(fs.name)
+            return
+        self._quick_summary = None
+        self._quick_summary_subject = ""
+        if len(ticked) > 1:
+            self._quick_summary_subject = "__multiple_sets__"
+
+    def _quick_summary_focus_content(self) -> tuple[Any, tuple[str, ...] | None, str | None]:
+        """(histogram panel, summary text lines, empty message) for the focus card."""
+
+        self._refresh_quick_summary()
+        summary = self._quick_summary
+        if summary is None:
+            if self._quick_summary_subject == "__multiple_sets__":
+                return (
+                    None,
+                    None,
+                    "Several saved sets are ticked. The summary follows one set - "
+                    "tick exactly one, or use 'Run selected sets' to pool them.",
+                )
+            return None, None, _REAL_EMPTY_STATE_MESSAGE
+        lines = _quick_summary_lines(summary, subject=self._quick_summary_subject)
+        if summary.n_in_region < 2:
+            message = (
+                "Nearest-neighbour statistics need at least two points inside "
+                "the analysis region."
+            )
+            return None, tuple(lines), message
+        return _nn_histogram_panel(summary), tuple(lines), None
 
     def _show_observed_curve_in_focus(self) -> bool:
         if not hasattr(self, "_observed_layer_cb"):
@@ -2543,6 +2845,7 @@ class ParticleStatisticsDialog(QDialog):
         self._feature_sets_list = QListWidget(self._feature_sets_group)
         self._feature_sets_list.setObjectName("particleStatisticsFeatureSets")
         self._feature_sets_list.setMinimumHeight(120)
+        self._feature_sets_list.itemChanged.connect(self._on_feature_set_item_changed)
         sets_layout.addWidget(self._feature_sets_list, 1)
         feature_layer_row = QHBoxLayout()
         feature_layer_row.addWidget(QLabel("Feature layer:"))
@@ -2951,6 +3254,27 @@ class ParticleStatisticsDialog(QDialog):
         self._ordering_stat_buttons: dict[str, QPushButton] = {}
         self._statistic_description_labels: dict[str, QLabel] = {}
         self._statistic_group_labels: list[QLabel] = []
+
+        # Real-data-only descriptive card: shows count/density/NN instantly,
+        # before (and without) any model comparison.
+        summary_group_label = QLabel("<b>Describe the data</b>", parent)
+        summary_group_label.setObjectName("particleStatisticsStatisticGroup_describe_the_data")
+        self._statistic_group_labels.append(summary_group_label)
+        self._quick_summary_group_lbl = summary_group_label
+        layout.addWidget(summary_group_label)
+        summary_btn = QPushButton(_STATISTIC_LABELS[_QUICK_SUMMARY_FOCUS], parent)
+        summary_btn.setObjectName(f"particleStatisticsFocus_{_QUICK_SUMMARY_FOCUS}")
+        summary_btn.setCheckable(True)
+        summary_btn.setMinimumWidth(150)
+        summary_btn.setMinimumHeight(30)
+        summary_btn.setToolTip(_statistic_row_description(_QUICK_SUMMARY_FOCUS))
+        summary_btn.clicked.connect(
+            lambda _checked=False: self.focus_statistic(_QUICK_SUMMARY_FOCUS)
+        )
+        self._statistic_buttons[_QUICK_SUMMARY_FOCUS] = summary_btn
+        self._quick_summary_btn = summary_btn
+        layout.addWidget(summary_btn)
+
         for group_title, statistic_ids in _STATISTIC_GROUPS:
             group_label = QLabel(f"<b>{group_title}</b>", parent)
             group_label.setObjectName(
@@ -3167,6 +3491,10 @@ class ParticleStatisticsDialog(QDialog):
                 label = self._statistic_description_labels.get(statistic_id)
                 if label is not None:
                     label.setVisible(False)
+            if hasattr(self, "_quick_summary_btn"):
+                # The descriptive summary card is real-data-only.
+                self._quick_summary_btn.setVisible(not is_generated)
+                self._quick_summary_group_lbl.setVisible(not is_generated)
             self._result_view.set_technical_details_visible(True)
             self._refresh_generated_banner()
             return
@@ -3265,6 +3593,15 @@ class ParticleStatisticsDialog(QDialog):
             label = self._statistic_description_labels.get(statistic_id)
             if label is not None:
                 label.setVisible(False)
+        if (
+            hasattr(self, "_quick_summary_btn")
+            and is_generated
+            and str(step.focus_statistic) != _QUICK_SUMMARY_FOCUS
+        ):
+            # The descriptive summary card is real-data-only, except when a
+            # tutorial step is explicitly teaching it on generated data.
+            self._quick_summary_btn.setVisible(False)
+            self._quick_summary_group_lbl.setVisible(False)
 
         self._result_view.set_technical_details_visible(bool(step.show_technical_details))
         self._refresh_generated_banner()
@@ -3323,7 +3660,12 @@ class ParticleStatisticsDialog(QDialog):
         self._raise_self()
 
     def clear_real_view(self) -> None:
-        """Reset the real-data field, focused statistic, and result panels to empty."""
+        """Reset the real-data results and return focus to the data summary."""
+        self._quick_summary = None
+        self._quick_summary_subject = ""
+        if self._active_mode == "real":
+            self._focused_statistic = _QUICK_SUMMARY_FOCUS
+            self._sync_statistic_buttons()
         self._set_result_view_spec(
             _empty_view_spec("Run a comparison to populate result panels."),
             source_label="Particle Statistics",
@@ -3753,10 +4095,22 @@ class ParticleStatisticsDialog(QDialog):
         self._restart_tutorial_btn.setVisible(True)
         self._restart_tutorial_btn.setText("Restart tutorial")
 
-        # Body: the question, what to look for, and context chips (title is above).
+        # Body: the question, prediction prompt, what to look for, and context
+        # chips (title is above).
         question = step.question or step.body
         look_for = step.look_for or step.statistic_hint
         parts = [question]
+        predict_parts = []
+        if step.what_changes:
+            predict_parts.append(f"<b>Change:</b> {step.what_changes}")
+        if step.expected_effect:
+            predict_parts.append(f"<b>Predict first:</b> {step.expected_effect}")
+        if step.where_to_check:
+            predict_parts.append(f"<b>Then check:</b> {step.where_to_check}")
+        if predict_parts:
+            parts.append(
+                "<span style='color:#f0b429;'>" + " &nbsp; ".join(predict_parts) + "</span>"
+            )
         if look_for:
             parts.append(f"<span style='color:#7cc7ff;'><b>Look for:</b> {look_for}</span>")
         context_chips = []
@@ -3771,8 +4125,10 @@ class ParticleStatisticsDialog(QDialog):
                 + "</span>"
             )
         if hasattr(self, "_tutorial_why_lbl"):
-            self._tutorial_why_lbl.setText("")
-            self._tutorial_why_frame.setVisible(False)
+            # The always-visible takeaway bar (green, SEMITIP-style).
+            why = str(step.why or "").strip()
+            self._tutorial_why_lbl.setText(f"<b>Why it matters:</b> {why}" if why else "")
+            self._tutorial_why_frame.setVisible(bool(why))
         self._tutorial_step_lbl.setText("<br>".join(p for p in parts if p))
         self._refresh_tutorial_detail(step)
         self._refresh_tutorial_action_style()
@@ -4068,6 +4424,20 @@ class ParticleStatisticsDialog(QDialog):
         self._real_model_group.setVisible(not is_sandbox_like)
         if hasattr(self, "_feature_sets_group"):
             self._feature_sets_group.setVisible(not is_sandbox_like)
+        if hasattr(self, "_quick_summary_btn"):
+            # The descriptive summary describes real scan data only.
+            self._quick_summary_btn.setVisible(not is_sandbox_like)
+            self._quick_summary_group_lbl.setVisible(not is_sandbox_like)
+            if is_sandbox_like and self._focused_statistic == _QUICK_SUMMARY_FOCUS:
+                self._focused_statistic = _DEFAULT_FOCUS_STATISTIC
+                self._sync_statistic_buttons()
+            elif previous != mode and mode == "real":
+                # Entering real mode always resets the result view below, so
+                # lead with the instant data summary rather than an empty
+                # envelope plot. Re-entering real mode (previous == mode, e.g.
+                # from run_selected_feature_sets) keeps the user's focus.
+                self._focused_statistic = _QUICK_SUMMARY_FOCUS
+                self._sync_statistic_buttons()
         if hasattr(self, "_generated_data_group"):
             self._generated_data_group.setTitle(
                 "Generated pattern" if mode == "sandbox" else "Generated / fake data"
@@ -4207,7 +4577,8 @@ class ParticleStatisticsDialog(QDialog):
             self,
             "Import point table",
             "",
-            "Point tables (*.csv *.json);;CSV files (*.csv);;JSON files (*.json);;All files (*)",
+            "Point tables (*.csv *.tsv *.txt *.dat *.json);;"
+            "CSV/TSV files (*.csv *.tsv *.txt *.dat);;JSON files (*.json);;All files (*)",
         )
         if not path:
             return
@@ -4319,29 +4690,41 @@ class ParticleStatisticsDialog(QDialog):
             return
         self._status_lbl.setText("Exported result JSON.")
 
+    def _on_feature_set_item_changed(self, _item: QListWidgetItem) -> None:
+        """Ticking saved sets retargets the quick summary (single ticked set)."""
+        if self._populating_feature_sets or self._active_mode != "real":
+            return
+        self._refresh_quick_summary()
+        if self._focused_statistic == _QUICK_SUMMARY_FOCUS:
+            self._refresh_focus_panel()
+
     def _populate_feature_sets(self) -> None:
         if not hasattr(self, "_feature_sets_list"):
             return
         self._sync_feature_sets_from_store()
         checked_ids = set(self._checked_feature_set_ids())
-        self._feature_sets_list.clear()
-        for fs in self._feature_sets:
-            label = f"{fs.name}  ·  {fs.point_count} pts"
-            item = QListWidgetItem(label, self._feature_sets_list)
-            item.setData(Qt.UserRole, fs.set_id)
-            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-            item.setCheckState(
-                Qt.Checked if fs.set_id in checked_ids else Qt.Unchecked
-            )
-        empty = not self._feature_sets
-        self._feature_sets_group.setVisible(self._active_mode not in {"generated", "sandbox"})
-        self._run_feature_sets_btn.setEnabled(not empty)
-        if empty:
-            placeholder = QListWidgetItem(
-                "No saved sets yet — use 'Send to Particle Statistics' in Feature Finder.",
-                self._feature_sets_list,
-            )
-            placeholder.setFlags(Qt.NoItemFlags)
+        self._populating_feature_sets = True
+        try:
+            self._feature_sets_list.clear()
+            for fs in self._feature_sets:
+                label = f"{fs.name}  ·  {fs.point_count} pts"
+                item = QListWidgetItem(label, self._feature_sets_list)
+                item.setData(Qt.UserRole, fs.set_id)
+                item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+                item.setCheckState(
+                    Qt.Checked if fs.set_id in checked_ids else Qt.Unchecked
+                )
+            empty = not self._feature_sets
+            self._feature_sets_group.setVisible(self._active_mode not in {"generated", "sandbox"})
+            self._run_feature_sets_btn.setEnabled(not empty)
+            if empty:
+                placeholder = QListWidgetItem(
+                    "No saved sets yet — use 'Send to Particle Statistics' in Feature Finder.",
+                    self._feature_sets_list,
+                )
+                placeholder.setFlags(Qt.NoItemFlags)
+        finally:
+            self._populating_feature_sets = False
         if hasattr(self, "_feature_layer_set_cb"):
             previous = str(self._feature_layer_set_cb.currentData() or "")
             self._feature_layer_set_cb.blockSignals(True)
@@ -4443,6 +4826,7 @@ class ParticleStatisticsDialog(QDialog):
             models=(model,),
             n_simulations=int(self._real_sim_spin.value()),
             random_seed=int(self._real_seed_spin.value()),
+            include_ordering=self._include_ordering_enabled(),
         )
         worker = _ParticleFeatureSetWorker(
             generation=generation,
@@ -4471,6 +4855,8 @@ class ParticleStatisticsDialog(QDialog):
             else f"Combined: {len(sets)} images, {total} points"
         )
         self._set_result_view_spec(spec, source_label=label, data_mode="real")
+        if self._focused_statistic == _QUICK_SUMMARY_FOCUS:
+            self.focus_statistic(_DEFAULT_FOCUS_STATISTIC)
         self._status_lbl.setText(f"Comparison complete for {label}.")
         self._raise_self()
 
@@ -4576,7 +4962,10 @@ class ParticleStatisticsDialog(QDialog):
             status=status,
             mask=mask,
         )
+        self._refresh_quick_summary()
         self._update_info(status=status)
+        if self._focused_statistic == _QUICK_SUMMARY_FOCUS:
+            self._refresh_focus_panel()
         self._sync_layer_controls()
         self._run_btn.setEnabled(self._scan is not None and source is not None)
         self._sync_workflow_actions()
@@ -4636,6 +5025,8 @@ class ParticleStatisticsDialog(QDialog):
         )
         self._update_info(status=status)
         self._refresh_sandbox_warning()
+        if self._focused_statistic == _QUICK_SUMMARY_FOCUS:
+            self._refresh_focus_panel()
         self._sync_layer_controls()
         self._run_btn.setEnabled(True)
         self._sync_workflow_actions()
@@ -4810,6 +5201,10 @@ class ParticleStatisticsDialog(QDialog):
             return
         label = getattr(context, "point_source_label", None) or self._current_source_label()
         self._set_result_view_spec(context.view_spec, source_label=label, data_mode="real")
+        if self._focused_statistic == _QUICK_SUMMARY_FOCUS:
+            # A comparison just finished: hand focus from the descriptive
+            # summary to the model-envelope plot the user asked for.
+            self.focus_statistic(_DEFAULT_FOCUS_STATISTIC)
         self._status_lbl.setText(f"Particle Statistics comparison complete for {label}.")
         self._raise_self()
 
@@ -4967,6 +5362,14 @@ class ParticleStatisticsDialog(QDialog):
             f"Mode: {self._sandbox_source_label() if model.mode == 'generated' else 'Real scan points'}",
             f"Points: {len(model.observed_xy_nm)}",
         ]
+        summary = self._quick_summary
+        if (
+            model.mode != "generated"
+            and summary is not None
+            and summary.density_per_nm2 is not None
+            and summary.density_per_nm2 > 0.0
+        ):
+            lines.append(f"Density: {summary.density_per_nm2:.3g} nm⁻²")
         if model.model_label:
             lines.append(f"Model: {model.model_label}")
         # The detail below is useful but not needed at a glance; keep it last.
@@ -5236,6 +5639,73 @@ def _panel_for_statistic(view_spec: Any, statistic_id: str) -> Any | None:
         if str(getattr(panel, "statistic", "")) == str(statistic_id):
             return panel
     return None
+
+
+def _quick_summary_lines(summary: Any, *, subject: str = "") -> list[str]:
+    """Human-readable lines for the quick data summary card."""
+
+    lines: list[str] = []
+    if subject:
+        lines.append(f"<b>{subject}</b>")
+    if summary.n_in_region != summary.n_total:
+        lines.append(
+            f"Points: <b>{summary.n_in_region}</b> of {summary.n_total} "
+            f"inside {summary.region_label}"
+        )
+    else:
+        lines.append(f"Points: <b>{summary.n_total}</b> ({summary.region_label})")
+    if summary.area_nm2 is not None:
+        lines.append(f"Analysis area: {summary.area_nm2:.4g} nm²")
+    if summary.density_per_nm2 is not None and summary.density_per_nm2 > 0.0:
+        lines.append(
+            f"Density: <b>{summary.density_per_nm2:.3g} nm⁻²</b> "
+            f"(≈ one particle per {1.0 / summary.density_per_nm2:.3g} nm²)"
+        )
+    if summary.nn_mean_nm is not None:
+        lines.append(
+            f"Nearest neighbour: mean {summary.nn_mean_nm:.3g} nm, "
+            f"median {summary.nn_median_nm:.3g} nm "
+            f"(min {summary.nn_min_nm:.3g}, max {summary.nn_max_nm:.3g})"
+        )
+    if summary.expected_csr_nn_mean_nm is not None and summary.nn_mean_nm is not None:
+        ratio = summary.nn_mean_nm / summary.expected_csr_nn_mean_nm
+        lines.append(
+            f"Random pattern of this density would average "
+            f"{summary.expected_csr_nn_mean_nm:.3g} nm (dashed line); "
+            f"observed/expected = {ratio:.2f} — run a model comparison to test this."
+        )
+    if summary.message:
+        lines.append(summary.message)
+    return lines
+
+
+def _nn_histogram_panel(summary: Any) -> Any | None:
+    """Panel-shaped object rendering the NN-distance histogram as a staircase."""
+
+    from probeflow.analysis.point_summary import nn_histogram_nm
+
+    edges, counts = nn_histogram_nm(summary.nn_distances_nm)
+    if len(counts) == 0:
+        return None
+    # Staircase outline: each bin edge appears twice except the outermost ones.
+    x = np.repeat(edges, 2)[1:-1]
+    observed = np.repeat(counts.astype(float), 2)
+    return SimpleNamespace(
+        statistic=_QUICK_SUMMARY_FOCUS,
+        title="Nearest-neighbour distances",
+        kind="curve",
+        x=x,
+        observed=observed,
+        band_low=None,
+        band_high=None,
+        central=None,
+        x_label="NN distance (nm)",
+        y_label="Count",
+        reference_line=None,
+        reference_line_x=summary.expected_csr_nn_mean_nm,
+        caption_lines=(),
+        metadata={"n_in_region": summary.n_in_region},
+    )
 
 
 def _view_spec_has_result(view_spec: Any) -> bool:

@@ -85,13 +85,28 @@ images of the same condition is the practical way to strengthen a conclusion.
 
 Use **Analyze scan points** for real ProbeFlow data.
 
+When the dialog opens with point data already available (a Feature Finder
+result, point ROIs, or saved feature sets), it skips the workflow chooser and
+lands directly on the **Data summary** card: particle count, analysis-region
+area, density (nm⁻²), nearest-neighbour distance statistics, and a small
+histogram of nearest-neighbour distances. The dashed vertical line on the
+histogram marks the mean nearest-neighbour distance a completely random
+pattern of the same density would have — it is a visual hint, *not* a
+statistical test; run a model comparison to test it. None of this requires a
+model run (or the optional AdStat engine). The **Workflows** button still
+reaches the three-card chooser.
+
 1. Generate or curate a point collection:
    Feature Finder maxima/minima, feature maxima, or point ROIs are available in
    the current viewer workflow.
-2. Open **Particle Statistics...** and stay on **Analyze scan points**.
+2. Open **Particle Statistics...** — the Data summary appears immediately.
 3. Choose one point source as the tested population.
 4. Choose the analysis region: active area ROI, active mask, or full image.
-5. Choose a model and run the comparison.
+   Points outside the region are excluded from the analysis — the observed
+   statistics and the null models always describe the same window — and both
+   the summary and the result note how many points were kept.
+5. Choose a model and run the comparison. When it finishes, the focus moves
+   from the Data summary to the model-envelope plot.
 
 For session feature-set workflows, click **Send to Particle Statistics** from
 Feature Finder. The set is saved with its image calibration. Tick one saved set
@@ -117,13 +132,27 @@ points from any of these sources can be ticked together and pooled:
    appear directly in the *Analyze scan points* dropdown (point ROIs include any
    loaded from a `.rois.json` sidecar).
 4. **Load points from disk…** — import an external position table. Accepted
-   formats: CSV position tables (with or without a leading particle-number
-   column; units inferred from `x_px` / `x_nm` / `x_m` / `x_phys` headers or
-   chosen on import), ProbeFlow's own Feature Finder / measurements CSV, and
-   ProbeFlow JSON (Feature Counting exports and saved feature-set files). For a
-   file with no embedded calibration, a small dialog (prefilled from the file)
-   asks for the position units and physical field size before the points become a
-   feature set.
+   formats: CSV/TSV position tables (with or without a leading particle-number
+   column), ProbeFlow's own Feature Finder / measurements CSV, and ProbeFlow
+   JSON (Feature Counting exports and saved feature-set files). The reader
+   copes with common format variations: Excel byte-order marks, comma /
+   semicolon / tab / whitespace delimiters, `#`-comment lines (a trailing
+   comment naming the columns is used as the header), European decimal commas
+   (`1,25`), and unit-decorated headers such as `x (nm)`, `X [nm]`, or `x.nm`.
+   Units are inferred from `x_px` / `x_nm` / `x_A` / `x_pm` / `x_um` / `x_m` /
+   `x_phys` headers or chosen on import (pixels, nm, Å, pm, µm, m). ImageJ-style
+   `XM`/`YM` columns are recognised as coordinates but their unit is never
+   guessed — it depends on the image calibration, so the dialog asks.
+   For a file with no embedded calibration, the import dialog shows the first
+   rows with the chosen x/y columns highlighted, plus any detection notes, and
+   asks for units and physical field size. ProbeFlow CSV re-imports prefill the
+   calibration from the file's own pixel/nm column ratio. A multi-image column
+   (`frame` / `slice` / `image`) with several values imports as one feature set
+   per image — all sharing one calibration and one re-centring shift, so the
+   sets can be pooled. The suggested field size matches the point extent;
+   tables whose coordinates carry an offset or absolute origin (e.g. stage
+   coordinates) are re-centred in the field on import — a rigid shift that
+   leaves all inter-point distances unchanged.
 
 Use **Save feature sets…** to write the current pool to a JSON file; it can be
 re-imported later with **Load points from disk…**.
@@ -149,9 +178,14 @@ The input points themselves are exported separately via **Save feature sets…**
 
 Use **Learn with tutorial** (the **Tutorial** card on the workflow start page)
 for a guided walkthrough that builds up particle-pattern analysis one idea at a
-time, using generated example data rather than the current image. It steps
-through random placement, sample size, pooling, clustering, hard-core spacing,
-and feature association, then hands you off to the real scan-points workflow.
+time, using generated example data rather than the current image. The 27
+lessons step through describing the data (count, density, spacing — the same
+Data summary the real workflow opens on), what a null model is, the simulation
+envelope and verdict language, clustering, hard-core spacing, local order,
+feature association, and pooling, then hand you off to the real scan-points
+workflow. Every lesson ends with a green **Why it matters** takeaway, and the
+model-exploration lessons ask you to **predict** what a change will do before
+you look — check your expectation against the plot before moving on.
 
 ## Model Simulations
 
