@@ -55,6 +55,10 @@ _MINIMAL_PARAMS: dict[str, dict] = {
         "selections": [{"dx": 2, "dy": 0, "rx": 1.0, "ry": 1.0, "angle_deg": 0.0}],
         "mode": "remove_selected", "conjugate_symmetric": True, "soft_px": 0.0,
     },
+    "symmetrize_fft": {
+        "n_fold": 2, "mirror": False, "mirror_axis_deg": 0.0,
+        "register": True, "interpolation": "linear", "strict_coverage": False,
+    },
     "linear_undistort": {"shear_x": 0.0, "scale_y": 1.0},
     "affine_lattice_correction": {
         "matrix": [[1.0, 0.0], [0.0, 1.0]], "expand_canvas": False,

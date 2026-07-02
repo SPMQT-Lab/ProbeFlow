@@ -60,6 +60,7 @@ SCOPE_SEMANTICS_MASKED_PASTE = "full_image_compute_masked_paste"
 _FILTER_OPS_PASSTHROUGH: frozenset[str] = frozenset({
     "mains_pickup_suppression",
     "inverse_fft_filter",
+    "symmetrize_fft",
 })
 
 

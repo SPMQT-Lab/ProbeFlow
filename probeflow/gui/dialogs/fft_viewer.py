@@ -22,6 +22,7 @@ from probeflow.gui.lattice_correction_ui import load_known_structures
 from probeflow.gui.dialogs.fft_viewer_lattice_mixin import FFTViewerLatticeMixin
 from probeflow.gui.dialogs.fft_viewer_mains_mixin import FFTViewerMainsMixin
 from probeflow.gui.dialogs.fft_viewer_reconstruct_mixin import FFTViewerReconstructMixin
+from probeflow.gui.dialogs.fft_viewer_symmetrize_mixin import FFTViewerSymmetrizeMixin
 from probeflow.gui.no_wheel import install_no_wheel_spinboxes
 from probeflow.gui.viewer.display_range import DisplayRangeController
 from probeflow.gui.viewer.display_sliders import DisplaySliderController
@@ -83,6 +84,7 @@ class FFTViewerDialog(
     FFTViewerLatticeMixin,
     FFTViewerMainsMixin,
     FFTViewerReconstructMixin,
+    FFTViewerSymmetrizeMixin,
     QDialog,
 ):
     """Side-by-side real-space / FFT inspection window."""
@@ -171,6 +173,8 @@ class FFTViewerDialog(
         self._fft_selection_overlay = None
         self._reconstruct_tab_index = -1
         self._reconstruct_preview_active = False
+        self._symmetrize_tab_index = -1
+        self._symmetrize_preview_active = False
         self._new_image_fn = new_image_fn
 
         self._fft_drs = DisplayRangeController(clip_low=0.0, clip_high=100.0, parent=self)
@@ -806,6 +810,8 @@ class FFTViewerDialog(
             self._build_mains_tab(), "⚡ Mains")
         self._reconstruct_tab_index = self._tab_widget.addTab(
             self._build_reconstruct_tab(), "Inverse FFT")
+        self._symmetrize_tab_index = self._tab_widget.addTab(
+            self._build_symmetrize_tab(), "Symmetrize")
 
         self._fft_splitter = QSplitter(Qt.Vertical)
         self._fft_splitter.addWidget(fft_top)
