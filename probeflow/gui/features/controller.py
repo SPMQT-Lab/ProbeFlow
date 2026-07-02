@@ -136,6 +136,7 @@ class FeatureCountingController(QObject):
         sidebar.mask_paint_toggled.connect(self._on_mask_paint_toggled)
         sidebar.mask_clear_requested.connect(self._on_mask_clear)
         sidebar.step_exclude_changed.connect(self._on_step_exclude_changed)
+        sidebar.add_to_bank_requested.connect(self._on_add_to_bank)
 
         # Zero-plane / histogram
         sidebar.zero_plane_armed.connect(self._on_zero_plane_armed)
@@ -219,6 +220,90 @@ class FeatureCountingController(QObject):
         self._sidebar.set_status(
             "Classification cleared — particle contours restored.")
         self._status_cb("Classification cleared.")
+
+    # ── Feature bank (Phase 1: persist labelled CLIP embeddings) ───────────────
+
+    def _on_add_to_bank(self) -> None:
+        """Persist the human-labelled samples' CLIP embeddings to the bank.
+
+        A deliberate, confirmed action: after the user has reviewed the labels,
+        this embeds each labelled sample with CLIP (the same crop + encoder the
+        classifier uses) and appends them to the shared bank file, so future
+        classifications can reuse examples gathered across scans.
+        """
+        from PySide6.QtWidgets import QMessageBox
+        from probeflow.analysis.features import clip_available, embed_particles_clip
+        from probeflow.analysis import feature_bank
+
+        if not clip_available():
+            self._sidebar.set_status(
+                "CLIP not available — install 'probeflow[clip]' to use the bank.")
+            return
+        if not self._panel.has_sample_labels():
+            self._sidebar.set_status(
+                "Label at least one sample molecule before adding to the bank.")
+            return
+        arr = self._panel.get_analysis_array()
+        if arr is None:
+            self._sidebar.set_status("Load a scan first.")
+            return
+
+        idx_to_p = {p.index: p for p in self._panel.get_particles()}
+        rows = [
+            (r["class_name"], idx_to_p[r["particle_index"]])
+            for r in self._panel.sample_label_rows()
+            if r["particle_index"] in idx_to_p
+        ]
+        if not rows:
+            self._sidebar.set_status(
+                "Labelled samples don't match the current particles — re-segment.")
+            return
+
+        counts: dict = {}
+        for name, _ in rows:
+            counts[name] = counts.get(name, 0) + 1
+        summary = ", ".join(f"{k}={v}" for k, v in sorted(counts.items()))
+        bank_path = feature_bank.default_bank_path()
+        resp = QMessageBox.question(
+            self._parent_widget,
+            "Add samples to feature bank",
+            f"Add {len(rows)} labelled sample(s) to the bank?\n\n"
+            f"By class: {summary}\n\n"
+            f"Their CLIP embeddings will be appended to:\n{bank_path}",
+            QMessageBox.Yes | QMessageBox.Cancel,
+            QMessageBox.Yes,
+        )
+        if resp != QMessageBox.Yes:
+            self._sidebar.set_status("Add to bank cancelled.")
+            return
+
+        entry = self._panel.current_entry()
+        source_path = str(entry.path) if entry is not None else None
+        try:
+            embs = embed_particles_clip(arr, [p for _, p in rows])
+            new_entries = [
+                feature_bank.make_entry(
+                    embs[i], name,
+                    source_path=source_path,
+                    particle_index=p.index,
+                    bbox_px=getattr(p, "bbox_px", None),
+                )
+                for i, (name, p) in enumerate(rows)
+            ]
+            result = feature_bank.append_entries(bank_path, new_entries)
+        except Exception as exc:
+            self._sidebar.set_status(f"Add to bank failed: {exc}")
+            self._status_cb(f"Add to bank failed: {exc}")
+            return
+
+        skipped = (f", {result['skipped']} already in bank"
+                   if result["skipped"] else "")
+        self._sidebar.set_status(
+            f"Added {result['added']} to bank{skipped} — "
+            f"{result['total']} total.")
+        self._status_cb(
+            f"Feature bank: +{result['added']} ({result['total']} total) → "
+            f"{result['path']}")
 
     # ── Live preview (slider drag) ────────────────────────────────────────────
 

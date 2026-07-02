@@ -597,6 +597,25 @@ def _normalise_brightness_u8(crop_u8: np.ndarray, target: float = 120.0) -> np.n
     return np.clip(scaled, 0, 255).astype(np.uint8)
 
 
+def embed_particles_clip(
+    arr: np.ndarray, particles: Sequence["Particle"], *, crop_size_px: int = 48
+) -> np.ndarray:
+    """CLIP-embed a set of particles cropped from ``arr``. Returns an (N, 512) array.
+
+    Public helper (used by the feature-bank GUI) so callers get the exact same
+    crop + embedding pipeline the classifier uses, without reaching into the
+    private ``_crop_particle`` / ``_embed_clip`` internals. Returns an empty
+    ``(0, 512)`` array when given no particles.
+    """
+    particles = list(particles)
+    if not particles:
+        return np.empty((0, 512), dtype=np.float64)
+    crops = np.stack(
+        [_crop_particle(arr, p, crop_size_px) for p in particles], axis=0
+    )
+    return _embed_clip(crops)
+
+
 def _embed_clip(crops: np.ndarray, *, batch_size: int = 64) -> np.ndarray:
     """CLIP image embeddings for crops, mirroring UniMR's pipeline.
 

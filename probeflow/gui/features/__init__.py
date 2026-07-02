@@ -1414,6 +1414,7 @@ class FeaturesSidebar(QWidget):
     clear_segmentation_requested   = Signal()  # "Remove Segmentation" — clear overlay
     advance_phase2_requested       = Signal()  # "Move to Phase 2" — advance using found particles
     clear_classification_requested = Signal()  # "Remove Classification" — drop labels (Phase 2)
+    add_to_bank_requested          = Signal()  # "Add samples to bank" — persist labelled CLIP embeddings
     preview_requested              = Signal()  # debounced live preview (slider drag)
     undo_label_requested       = Signal()
     load_from_browse_requested = Signal()
@@ -1933,6 +1934,26 @@ class FeaturesSidebar(QWidget):
         self._export_btn.clicked.connect(
             lambda: self.export_requested.emit(self._current_mode()))
         lay.addWidget(self._export_btn)
+
+        # Feature bank (Phase 1): persist the human-labelled CLIP embeddings so
+        # future classifications can reuse examples across scans. CLIP-only —
+        # the raw/PCA pixel vectors aren't comparable between images.
+        self._add_bank_btn = QPushButton("➕ Add samples to bank…")
+        self._add_bank_btn.setFont(ui_font(9))
+        self._add_bank_btn.setFixedHeight(28)
+        self._add_bank_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        if getattr(self, "_clip_available", False):
+            self._add_bank_btn.setToolTip(_tip(
+                "Save the CLIP embeddings of your labelled sample molecules to a "
+                "reusable bank, after a confirmation step. Builds a library of "
+                "examples across scans for better future classification."))
+        else:
+            self._add_bank_btn.setEnabled(False)
+            self._add_bank_btn.setToolTip(_tip(
+                "Needs the CLIP encoder (install 'probeflow[clip]'). The bank "
+                "stores CLIP embeddings, which the raw/PCA encoders don't produce."))
+        self._add_bank_btn.clicked.connect(self.add_to_bank_requested.emit)
+        lay.addWidget(self._add_bank_btn)
 
         self._send_stats_btn = QPushButton("Send to Particle Statistics…")
         self._send_stats_btn.setFont(ui_font(9))
