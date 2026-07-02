@@ -430,6 +430,30 @@ def test_image_y_pos_max_records_partial_scan_without_guessing_full_height(tmp_p
     assert report.decoded_channels_dac.shape == (1, 3, 2)
 
 
+def test_image_y_pos_max_complete_scan_keeps_zero_valued_trailing_rows(tmp_path):
+    # ImageYPosMax = Num.Y + 1 means every declared row completed; the legacy
+    # channel-0 nonzero heuristic must not trim genuine all-zero trailing rows.
+    dat = tmp_path / "complete_flat_tail.dat"
+    header = (
+        b"[Paramco32]\n"
+        b"Num.X=3\n"
+        b"Num.Y=4\n"
+        b"Channels=1\n"
+        b"ImageYPosMax=5\n"
+    )
+    data = np.arange(1, 13, dtype="<f4").reshape(4, 3)
+    data[-1, :] = 0.0  # genuine data that happens to be zero DAC
+    dat.write_bytes(header + b"DATA" + zlib.compress(data.tobytes()))
+
+    report = read_createc_dat_report(dat)
+
+    assert report.image_y_pos_max == 5
+    assert report.is_partial_scan is False
+    assert report.trimmed_Ny == 4
+    assert report.decoded_channels_dac is not None
+    assert report.decoded_channels_dac.shape == (1, 4, 2)
+
+
 def test_read_dat_preserves_decode_warnings_on_scan(tmp_path):
     dat = tmp_path / "partial.dat"
     header = (
