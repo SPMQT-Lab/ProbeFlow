@@ -266,6 +266,56 @@ def feature_layers_to_adstat(
     return tuple(converted)
 
 
+def _filter_table_to_region(table: Any, region: Any) -> Any:
+    """Restrict a particle table to the points inside the analysis region.
+
+    Null models simulate the observed count uniformly inside the region, so
+    observed points outside it would inflate the simulated density and bias
+    every matched statistic toward a false "not random" verdict. Points outside
+    are dropped; the drop is recorded on the table metadata so view specs can
+    report it.
+    """
+
+    adstat = _adstat()
+    n_total = len(table)
+    if n_total == 0:
+        return table
+    xy_nm = np.asarray(table.xy_nm, dtype=float)
+    keep = np.asarray(region.contains(xy_nm), dtype=bool)
+    n_kept = int(keep.sum())
+    if n_kept == n_total:
+        return table
+    if n_kept == 0:
+        raise ValueError(
+            f"none of the {n_total} points lie inside the analysis region"
+        )
+    if n_kept < 2:
+        raise ValueError(
+            f"only {n_kept} of {n_total} points lies inside the analysis "
+            "region; comparison requires at least two points inside it"
+        )
+    particles = tuple(
+        particle for particle, kept in zip(table.particles, keep) if kept
+    )
+    metadata = dict(table.metadata)
+    metadata["region_filtered"] = True
+    metadata["n_points_total"] = n_total
+    metadata["n_points_in_region"] = n_kept
+    return adstat.ParticleTable(particles=particles, metadata=metadata)
+
+
+def _region_filter_status_lines(table: Any) -> tuple[str, ...]:
+    metadata = getattr(table, "metadata", {}) or {}
+    if not metadata.get("region_filtered"):
+        return ()
+    kept = metadata.get("n_points_in_region")
+    total = metadata.get("n_points_total")
+    return (
+        f"{kept} of {total} points lie inside the analysis region; the rest "
+        "were excluded from the statistics and the null models.",
+    )
+
+
 def point_set_record(
     *,
     dataset_id: str | None,
@@ -278,7 +328,11 @@ def point_set_record(
     series_unit: str | None = None,
     series_label: str | None = None,
 ) -> AdStatPointSetRecord:
-    """Build one manifest-like in-memory record for a ProbeFlow scan."""
+    """Build one manifest-like in-memory record for a ProbeFlow scan.
+
+    The table is restricted to the points inside the analysis region so the
+    observed statistics and the simulated nulls describe the same window.
+    """
 
     calibration = scan_calibration_to_adstat(scan)
     if point_source is not None:
@@ -290,10 +344,13 @@ def point_set_record(
             scan_id=dataset_id,
             calibration=calibration,
         )
-        source_metadata = dict(table.metadata)
+        source_metadata = None
     else:
         raise ValueError("point_set_record requires a point_source or feature_counting_items")
     region = roi_to_region(roi_or_mask, scan=scan, image_shape=image_shape)
+    table = _filter_table_to_region(table, region)
+    if source_metadata is None:
+        source_metadata = dict(table.metadata)
     return AdStatPointSetRecord(
         dataset_id=dataset_id,
         table=table,
@@ -373,7 +430,11 @@ def _default_statistic_scales(
     width = float(getattr(region, "width_nm", 0.0) or 0.0)
     height = float(getattr(region, "height_nm", 0.0) or 0.0)
     if char <= 0.0:
-        char = max(min(width, height), max(width, height))
+        char = (
+            math.sqrt(width * height)
+            if width > 0.0 and height > 0.0
+            else max(width, height)
+        )
     if char <= 0.0:
         char = 100.0  # last-resort fallback for degenerate regions
     max_radius = 0.2 * char
@@ -441,10 +502,10 @@ def _bond_order_neighbor_radius_nm(
         return None
     if xy_nm.ndim != 2 or xy_nm.shape[1] != 2 or len(xy_nm) < 2:
         return None
-    deltas = xy_nm[:, None, :] - xy_nm[None, :, :]
-    distances = np.linalg.norm(deltas, axis=2)
-    np.fill_diagonal(distances, np.inf)
-    nearest = distances.min(axis=1)
+    from scipy.spatial import cKDTree
+
+    distances, _ = cKDTree(xy_nm).query(xy_nm, k=2)
+    nearest = distances[:, 1]
     nearest = nearest[np.isfinite(nearest) & (nearest > 0.0)]
     if len(nearest) == 0:
         return None
@@ -670,7 +731,8 @@ def compare_particle_collection_view_spec(
             scales,
             explicit_pair_bin_width_nm=explicit_pair_bin_width_nm,
             explicit_nn_bin_width_nm=explicit_nn_bin_width_nm,
-        ),
+        )
+        + _region_filter_status_lines(table),
         resolution_limited=_automatic_bins_resolution_limited(
             scales,
             explicit_pair_bin_width_nm=explicit_pair_bin_width_nm,
@@ -802,7 +864,7 @@ def compare_point_set_record_view_spec(
     spec = _with_resolution_metadata(
         spec,
         scales=scales,
-        status_lines=_resolution_status_lines(scales),
+        status_lines=_resolution_status_lines(scales) + _region_filter_status_lines(table),
     )
     return spec if include_ordering else _filter_ordering_statistics(spec)
 
@@ -818,10 +880,12 @@ def compare_point_set_records_view_spec(
 
     Each ``record`` is an :class:`AdStatPointSetRecord` (e.g. from
     ``FeatureSet.to_point_set_record``). Statistic scales are derived from the
-    first record's region (shared across all images so AdStat can pool them), and
-    the hard-core radius from the smallest point count. Renders through AdStat's
-    coverage-series view spec, which exposes per-statistic pooled panels plus the
-    combined verdict rows.
+    first record's region (shared across all images so AdStat can pool them).
+    Distance ranges use the smallest point count (the sparsest image has the
+    largest spacings to cover) while the hard-core radius cap uses the largest
+    point count (the densest image constrains what the null can still place).
+    Renders through AdStat's coverage-series view spec, which exposes
+    per-statistic pooled panels plus the combined verdict rows.
     """
 
     record_list = list(records)
@@ -842,9 +906,31 @@ def compare_point_set_records_view_spec(
         n_points=min(counts),
         resolution_floor_nm=resolution_floor_nm,
     )
+    # The hard-core cap must stay placeable for the densest image (smallest
+    # mean spacing), so it is derived from the largest count — unlike the
+    # NN distance range above, which must cover the sparsest image.
+    dense_scales = _default_statistic_scales(
+        record_list[0].region,
+        n_points=max(counts),
+        resolution_floor_nm=resolution_floor_nm,
+    )
     # Statistic scales come from the first record's region; warn if the pooled
     # images are heterogeneous enough that the shared scales may not suit them.
     pool_status_lines: list[str] = []
+    n_filtered_images = 0
+    n_filtered_points = 0
+    for rec in record_list:
+        metadata = getattr(rec.table, "metadata", {}) or {}
+        if metadata.get("region_filtered"):
+            n_filtered_images += 1
+            n_filtered_points += int(metadata.get("n_points_total", 0)) - int(
+                metadata.get("n_points_in_region", 0)
+            )
+    if n_filtered_points > 0:
+        pool_status_lines.append(
+            f"{n_filtered_points} points outside their analysis regions were "
+            f"excluded across {n_filtered_images} image(s)."
+        )
     areas = [_region_area_nm2(rec.region) for rec in record_list]
     finite_areas = [area for area in areas if area > 0.0]
     if len(finite_areas) >= 2 and max(finite_areas) > 1.5 * min(finite_areas):
@@ -864,7 +950,7 @@ def compare_point_set_records_view_spec(
         nn_bin_width_nm=scales.nn_bin_width_nm,
         nn_max_distance_nm=scales.nn_max_distance_nm,
         cluster_radius_nm=scales.cluster_radius_nm,
-        hard_core_radius_nm=scales.hard_core_radius_nm,
+        hard_core_radius_nm=dense_scales.hard_core_radius_nm,
     )
     items = [
         (rec.table, rec.region, rec.dataset_id or f"image_{index + 1}")
