@@ -76,3 +76,28 @@ def save_mask_annotation(
     state_path = save_review_record(scan_path, record)
     return mask_path, state_path
 
+
+def save_review_annotation(
+    scan_path: str | Path,
+    *,
+    config: DatasetTaskConfig,
+    status: str,
+    notes: str = "",
+) -> Path:
+    """Save review metadata for labels that have no raster/object artifact."""
+
+    scan_path = Path(scan_path)
+    record = ReviewRecord(
+        source_path=str(scan_path),
+        plane_index=config.plane_index,
+        task=config.task,
+        label_type=config.label_type,
+        label_name=config.label_name,
+        status=status,
+        annotator=config.annotator,
+        notes=notes,
+        proposal_method=None,
+        proposal_parameters={},
+        updated_at=utc_now(),
+    )
+    return save_review_record(scan_path, record)

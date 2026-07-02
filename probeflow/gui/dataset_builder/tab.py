@@ -25,13 +25,18 @@ from PySide6.QtWidgets import (
 )
 
 from probeflow.core.mask import ImageMask
-from probeflow.dataset_builder.annotations import proposal_to_mask, save_mask_annotation
+from probeflow.dataset_builder.annotations import (
+    proposal_to_mask,
+    save_mask_annotation,
+    save_review_annotation,
+)
 from probeflow.dataset_builder.export import export_dataset
 from probeflow.dataset_builder.loading import load_scan_plane
 from probeflow.dataset_builder.models import DatasetExportSpec, DatasetQueueItem, DatasetTaskConfig
+from probeflow.dataset_builder.painting import paint_mask
 from probeflow.dataset_builder.proposals import generate_proposal
 from probeflow.dataset_builder.queue import build_queue, queue_counts
-from probeflow.gui.image_canvas import ImageCanvas
+from probeflow.gui.dataset_builder.canvas import DatasetBuilderCanvas
 from probeflow.io.mask_sidecar import load_mask_set_sidecar
 from probeflow.processing.display import array_to_uint8
 
@@ -54,6 +59,8 @@ class DatasetBuilderPanel(QWidget):
         self._px_y_m = 1e-10
         self._current_mask: ImageMask | None = None
         self._overlay_visible = True
+        self._paint_mode = "brush"
+        self._undo_stack: list[np.ndarray] = []
 
         root = QVBoxLayout(self)
         root.setContentsMargins(8, 8, 8, 8)
@@ -95,7 +102,7 @@ class DatasetBuilderPanel(QWidget):
         canvas_lay.setContentsMargins(0, 0, 0, 0)
         canvas_lay.setSpacing(4)
         self._canvas_status = QLabel("No scan loaded")
-        self._canvas = ImageCanvas()
+        self._canvas = DatasetBuilderCanvas()
         self._canvas.setMinimumSize(420, 360)
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(False)
@@ -128,6 +135,10 @@ class DatasetBuilderPanel(QWidget):
         right_lay.addLayout(form)
 
         propose_btn = QPushButton("Generate Proposal")
+        brush_btn = QPushButton("Brush")
+        brush_btn.setCheckable(True)
+        eraser_btn = QPushButton("Eraser")
+        eraser_btn.setCheckable(True)
         save_btn = QPushButton("Save")
         save_next_btn = QPushButton("Save + Next")
         accept_btn = QPushButton("Accept")
@@ -136,6 +147,8 @@ class DatasetBuilderPanel(QWidget):
         clear_btn = QPushButton("Clear Overlay")
         for btn in (
             propose_btn,
+            brush_btn,
+            eraser_btn,
             save_btn,
             save_next_btn,
             accept_btn,
@@ -163,12 +176,18 @@ class DatasetBuilderPanel(QWidget):
         self._filter_combo.currentTextChanged.connect(lambda _text: self._refresh_queue_list())
         self._plane_spin.valueChanged.connect(lambda _v: self.load_queue() if self._source_entry.text() else None)
         propose_btn.clicked.connect(self.generate_proposal)
+        brush_btn.clicked.connect(lambda: self.set_paint_mode("brush"))
+        eraser_btn.clicked.connect(lambda: self.set_paint_mode("eraser"))
         save_btn.clicked.connect(self.save_current)
         save_next_btn.clicked.connect(self.save_and_next)
         accept_btn.clicked.connect(lambda: self._set_status("accepted"))
         uncertain_btn.clicked.connect(lambda: self._set_status("uncertain"))
         reject_btn.clicked.connect(lambda: self._set_status("rejected"))
         clear_btn.clicked.connect(self.clear_overlay)
+        self._brush_btn = brush_btn
+        self._eraser_btn = eraser_btn
+        self._canvas.mask_painted.connect(self._paint_at)
+        self.set_paint_mode("brush")
 
         self._install_shortcuts()
         self.apply_theme(theme)
@@ -206,10 +225,16 @@ class DatasetBuilderPanel(QWidget):
             sc = QShortcut(QKeySequence(key), self)
             sc.setContext(Qt.WidgetWithChildrenShortcut)
             sc.activated.connect(slot)
-        for key, message in (("E", "Eraser mode armed"), ("R", "Brush mode armed"), ("Z", "Undo stack is empty"), ("V", "View toggle")):
+        extra = {
+            "E": lambda: self.set_paint_mode("eraser"),
+            "R": lambda: self.set_paint_mode("brush"),
+            "Z": self.undo_paint,
+            "V": self.toggle_overlay,
+        }
+        for key, slot in extra.items():
             sc = QShortcut(QKeySequence(key), self)
             sc.setContext(Qt.WidgetWithChildrenShortcut)
-            sc.activated.connect(lambda msg=message: self.status_message.emit(msg))
+            sc.activated.connect(slot)
 
     def _browse_source(self) -> None:
         path = QFileDialog.getExistingDirectory(self, "Dataset Builder source folder")
@@ -291,6 +316,7 @@ class DatasetBuilderPanel(QWidget):
     def _load_current(self) -> None:
         self._current_mask = None
         self._overlay_visible = True
+        self._undo_stack.clear()
         self._canvas.clear_mask_overlay()
         if not (0 <= self._current_index < len(self._queue)):
             self._arr = None
@@ -327,6 +353,78 @@ class DatasetBuilderPanel(QWidget):
         if mask is not None:
             self._current_mask = mask
             self._show_mask(mask.data)
+
+    def set_paint_mode(self, mode: str) -> None:
+        if mode not in {"brush", "eraser"}:
+            return
+        self._paint_mode = mode
+        self._brush_btn.setChecked(mode == "brush")
+        self._eraser_btn.setChecked(mode == "eraser")
+        self._canvas.set_paint_enabled(True)
+        self.status_message.emit(f"{mode.capitalize()} mode")
+
+    def undo_paint(self) -> None:
+        if self._current_mask is None or not self._undo_stack:
+            self.status_message.emit("Undo stack is empty")
+            return
+        self._current_mask.data = self._undo_stack.pop()
+        self._show_mask(self._current_mask.data)
+        self._update_canvas_status()
+        self.status_message.emit("Undid last mask edit")
+
+    def _paint_at(self, x: int, y: int) -> None:
+        if self._arr is None or not (0 <= self._current_index < len(self._queue)):
+            return
+        if self._current_mask is None:
+            self._current_mask = ImageMask.new(
+                np.zeros(self._arr.shape, dtype=bool),
+                method="manual",
+                parameters={
+                    "dataset_builder_task": self._task(),
+                    "label_name": "step_edge",
+                    "data_basis": "scan_plane",
+                },
+                name="step_edge",
+            )
+        before = self._current_mask.data.copy()
+        edited, changed = paint_mask(
+            self._current_mask.data,
+            x=x,
+            y=y,
+            radius=self._brush_spin.value(),
+            value=self._paint_mode == "brush",
+        )
+        if not changed:
+            return
+        self._undo_stack.append(before)
+        if len(self._undo_stack) > 25:
+            self._undo_stack.pop(0)
+        self._current_mask.data = edited
+        self._mark_mask_edited()
+        self._overlay_visible = True
+        self._show_mask(edited)
+        self._update_canvas_status()
+
+    def _mark_mask_edited(self) -> None:
+        if self._current_mask is None:
+            return
+        if not str(self._current_mask.method).endswith("+manual"):
+            self._current_mask.method = f"{self._current_mask.method}+manual"
+        params = dict(self._current_mask.parameters)
+        params["human_corrected"] = True
+        params["edit_count"] = int(params.get("edit_count") or 0) + 1
+        params["last_edit_mode"] = self._paint_mode
+        self._current_mask.parameters = params
+
+    def _update_canvas_status(self) -> None:
+        if not (0 <= self._current_index < len(self._queue)):
+            return
+        item = self._queue[self._current_index]
+        coverage = 100.0 * float(self._current_mask.data.mean()) if self._current_mask else 0.0
+        self._canvas_status.setText(
+            f"{item.display_id} | task: {self._task()} | status: {item.status} | "
+            f"mask coverage: {coverage:.2f}%"
+        )
 
     def _show_mask(self, data: np.ndarray) -> None:
         if self._overlay_visible:
@@ -406,6 +504,15 @@ class DatasetBuilderPanel(QWidget):
         self._status_combo.setCurrentText(status)
         if status == "rejected" and self._current_mask is None and 0 <= self._current_index < len(self._queue):
             item = self._queue[self._current_index]
+            try:
+                save_review_annotation(
+                    item.source_path,
+                    config=self._config(),
+                    status=status,
+                )
+            except Exception as exc:
+                self.status_message.emit(f"Save failed: {exc}")
+                return
             self._queue[self._current_index] = DatasetQueueItem(
                 source_path=item.source_path,
                 plane_index=item.plane_index,

@@ -9,10 +9,11 @@ import numpy as np
 
 from probeflow.cli.parser import _build_parser
 from probeflow.core.mask import ImageMask
-from probeflow.dataset_builder.annotations import save_mask_annotation
+from probeflow.dataset_builder.annotations import save_mask_annotation, save_review_annotation
 from probeflow.dataset_builder.export import export_dataset
 from probeflow.dataset_builder.loading import load_scan_plane
 from probeflow.dataset_builder.models import DatasetExportSpec, DatasetTaskConfig
+from probeflow.dataset_builder.painting import paint_mask
 from probeflow.dataset_builder.proposals import generate_proposal
 from probeflow.dataset_builder.queue import build_queue
 
@@ -51,6 +52,33 @@ def test_dataset_builder_review_state_preserves_existing_probeflow_sidecar(tmp_p
     assert len(queue) == 1
     assert queue[0].status == "accepted"
     assert queue[0].has_mask_sidecar is True
+
+
+def test_dataset_builder_review_status_can_be_saved_without_mask(tmp_path):
+    scan_path = _sample_scan(tmp_path)
+    config = DatasetTaskConfig(plane_index=0)
+
+    save_review_annotation(scan_path, config=config, status="rejected")
+
+    queue = build_queue(tmp_path, plane_index=0)
+    assert len(queue) == 1
+    assert queue[0].status == "rejected"
+    assert queue[0].has_mask_sidecar is False
+
+
+def test_dataset_builder_paint_mask_brush_and_eraser():
+    mask = np.zeros((9, 9), dtype=bool)
+
+    brushed, changed = paint_mask(mask, x=4, y=4, radius=2, value=True)
+    assert changed is True
+    assert bool(brushed[4, 4]) is True
+    assert brushed.sum() > 1
+    assert mask.sum() == 0
+
+    erased, changed = paint_mask(brushed, x=4, y=4, radius=1, value=False)
+    assert changed is True
+    assert bool(erased[4, 4]) is False
+    assert erased.sum() < brushed.sum()
 
 
 def test_dataset_builder_step_edge_proposal_matches_plane_shape(tmp_path):
@@ -129,4 +157,3 @@ def test_dataset_cli_parser_exposes_dataset_subcommands():
     assert args.command == "dataset"
     assert args.dataset_command == "export"
     assert args.status == ["accepted", "uncertain"]
-
