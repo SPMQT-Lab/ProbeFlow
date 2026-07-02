@@ -123,7 +123,9 @@ pip install "probeflow[features]"
 
 For particle spatial-statistics workflows, these detected features and point
 ROIs can be analysed from **Measurements → Features → Particle Statistics...**.
-Use **Analyze scan points** for real ProbeFlow data, **Learn with tutorial** for
+With points already detected, the tool opens straight onto a Data summary
+(count, density, nearest-neighbour histogram) — no model run needed. Use
+**Analyze scan points** for real ProbeFlow data, **Learn with tutorial** for
 a guided walkthrough, or **Model simulations** to explore synthetic patterns and
 null-model behaviour freely before applying the tool to a scan. Particle
 Statistics is the newest and least user-tested part of ProbeFlow — treat its

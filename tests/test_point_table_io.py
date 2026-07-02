@@ -233,3 +233,228 @@ def test_feature_items_to_feature_set_accepts_objects():
     )
     assert fs.point_count == 1
     np.testing.assert_allclose(fs.points_m[0], [5e-9, 6e-9], rtol=1e-6)
+
+
+# --------------------------------------------------------------------------- #
+# Offset / absolute coordinate origins
+# --------------------------------------------------------------------------- #
+def test_default_scan_range_sized_to_extent_for_offset_origin():
+    bbox = (100.0, 200.0, 110.0, 208.0)  # nm, offset origin
+    w, h = default_scan_range_m(bbox, "nm")
+    np.testing.assert_allclose(w, 10e-9 * 1.05)
+    np.testing.assert_allclose(h, 8e-9 * 1.05)
+
+
+def test_offset_origin_points_recentred_and_distances_preserved(tmp_path):
+    raw_nm = np.array([[100.0, 200.0], [110.0, 208.0], [104.0, 203.0]])
+    csv_text = "x_nm,y_nm\n" + "\n".join(f"{x},{y}" for x, y in raw_nm) + "\n"
+    p = _write(tmp_path / "offset.csv", csv_text)
+
+    preview = sniff_point_table(p)
+    assert any("offset origin" in note for note in preview.notes)
+
+    (fs,) = load_point_table(p)
+    w, h = fs.scan_range_m
+    assert (fs.points_m >= 0.0).all()
+    assert (fs.points_m[:, 0] <= w).all()
+    assert (fs.points_m[:, 1] <= h).all()
+    assert "import_recentered_offset_m" in fs.metadata
+    # Re-centring is a rigid translation: inter-point distances are unchanged.
+    raw_m = raw_nm * 1e-9
+    np.testing.assert_allclose(
+        np.linalg.norm(fs.points_m[1] - fs.points_m[0]),
+        np.linalg.norm(raw_m[1] - raw_m[0]),
+    )
+
+
+def test_negative_coordinates_recentred_into_field(tmp_path):
+    csv_text = "x_nm,y_nm\n-50.0,-40.0\n-45.0,-38.0\n-42.0,-33.0\n"
+    p = _write(tmp_path / "negative.csv", csv_text)
+    (fs,) = load_point_table(p)
+    w, h = fs.scan_range_m
+    assert (fs.points_m >= 0.0).all()
+    assert (fs.points_m[:, 0] <= w).all()
+    assert (fs.points_m[:, 1] <= h).all()
+
+
+def test_points_that_fit_an_explicit_field_are_not_shifted(tmp_path):
+    # A corner cluster inside a user-specified field must stay put, so
+    # multi-file imports sharing one coordinate frame remain aligned.
+    csv_text = "x_nm,y_nm\n60.0,70.0\n90.0,85.0\n"
+    p = _write(tmp_path / "corner.csv", csv_text)
+    (fs,) = load_point_table(p, scan_range_m=(100e-9, 100e-9), image_shape=(100, 100))
+    np.testing.assert_allclose(fs.points_m[0], [60e-9, 70e-9])
+    np.testing.assert_allclose(fs.points_m[1], [90e-9, 85e-9])
+    assert "import_recentered_offset_m" not in fs.metadata
+
+
+# --------------------------------------------------------------------------- #
+# Format-robustness battery: "slightly different" real-world CSV shapes
+# --------------------------------------------------------------------------- #
+def test_excel_bom_does_not_hide_units(tmp_path):
+    p = _write(tmp_path / "bom.csv", "﻿x_nm,y_nm\n1.0,2.0\n3.0,4.0\n")
+    preview = sniff_point_table(p)
+    assert preview.units == "nm"
+
+
+def test_parenthesised_and_bracketed_unit_headers(tmp_path):
+    for name, text in (
+        ("paren.csv", "x (nm),y (nm)\n1.0,2.0\n3.0,4.0\n"),
+        ("bracket.csv", "X [nm],Y [nm]\n1.0,2.0\n3.0,4.0\n"),
+        ("dotted.csv", "x.nm,y.nm\n1.0,2.0\n3.0,4.0\n"),
+    ):
+        preview = sniff_point_table(_write(tmp_path / name, text))
+        assert preview.units == "nm", name
+        assert preview.n_points == 2, name
+
+
+def test_decimal_comma_values_parse(tmp_path):
+    p = _write(tmp_path / "euro.csv", "x_nm;y_nm\n1,25;2,50\n3,75;4,10\n")
+    preview = sniff_point_table(p)
+    assert preview.units == "nm"
+    assert preview.n_points == 2
+    assert any("Decimal commas" in note for note in preview.notes)
+    (fs,) = load_point_table(p, scan_range_m=(10e-9, 10e-9), image_shape=(10, 10))
+    np.testing.assert_allclose(fs.points_m[0], [1.25e-9, 2.50e-9])
+
+
+def test_comment_header_and_space_delimited(tmp_path):
+    p = _write(tmp_path / "commented.csv", "# x_nm y_nm\n1.0 2.0\n3.0 4.0\n")
+    preview = sniff_point_table(p)
+    assert preview.units == "nm"
+    assert preview.n_points == 2
+    (fs,) = load_point_table(p, scan_range_m=(10e-9, 10e-9), image_shape=(10, 10))
+    np.testing.assert_allclose(fs.points_m[1], [3e-9, 4e-9])
+
+
+def test_gwyddion_style_bare_comment_header(tmp_path):
+    p = _write(tmp_path / "gwy.csv", "# point list\n# x y\n1.0e-9 2.0e-9\n3.0e-9 4.0e-9\n")
+    preview = sniff_point_table(p)
+    assert preview.n_points == 2
+    assert preview.units == "unknown"  # bare x/y: user chooses (here: m)
+    (fs,) = load_point_table(p, units="m", scan_range_m=(10e-9, 10e-9), image_shape=(10, 10))
+    np.testing.assert_allclose(fs.points_m[0], [1e-9, 2e-9])
+
+
+def test_imagej_xm_ym_is_ambiguous_not_metres(tmp_path):
+    p = _write(tmp_path / "ij.csv", " ,Area,XM,YM\n1,5,1.0,2.0\n2,6,3.0,4.0\n")
+    preview = sniff_point_table(p)
+    assert preview.units == "unknown"
+    assert any("ImageJ" in note for note in preview.notes)
+    # The XM/YM columns are still the chosen coordinate columns.
+    assert preview.x_col == 2 and preview.y_col == 3
+
+
+def test_angstrom_and_pm_units(tmp_path):
+    p = _write(tmp_path / "ang.csv", "x_A,y_A\n10.0,20.0\n30.0,40.0\n")
+    preview = sniff_point_table(p)
+    assert preview.units == "angstrom"
+    (fs,) = load_point_table(p, scan_range_m=(10e-9, 10e-9), image_shape=(10, 10))
+    np.testing.assert_allclose(fs.points_m[0], [1e-9, 2e-9])  # 10 A = 1 nm
+
+    p2 = _write(tmp_path / "pico.csv", "x_pm,y_pm\n1000,2000\n3000,4000\n")
+    preview2 = sniff_point_table(p2)
+    assert preview2.units == "pm"
+    (fs2,) = load_point_table(p2, scan_range_m=(10e-9, 10e-9), image_shape=(10, 10))
+    np.testing.assert_allclose(fs2.points_m[0], [1e-9, 2e-9])  # 1000 pm = 1 nm
+
+
+def test_unparseable_rows_are_counted_and_explained(tmp_path):
+    p = _write(tmp_path / "mixed.csv", "x_nm,y_nm\n1.0,2.0\nbad,row\n3.0,4.0\n")
+    preview = sniff_point_table(p)
+    assert preview.n_points == 2
+    assert preview.n_dropped_rows == 1
+    assert any("skipped" in note for note in preview.notes)
+
+
+def test_all_rows_unparseable_gives_actionable_error(tmp_path):
+    # Decimal commas with a comma delimiter cannot be auto-fixed; the error
+    # should say rows failed to parse rather than "no point rows found".
+    p = _write(tmp_path / "broken.csv", "x_nm,y_nm\na,b\nc,d\n")
+    with pytest.raises(ValueError, match="failed to\\s+parse"):
+        load_point_table(p, scan_range_m=(10e-9, 10e-9), image_shape=(10, 10))
+
+
+def test_sample_rows_and_columns_exposed_for_preview(tmp_path):
+    p = _write(tmp_path / "prev.csv", "id,x_nm,y_nm\n0,1.0,2.0\n1,3.0,4.0\n")
+    preview = sniff_point_table(p)
+    assert preview.x_col == 1 and preview.y_col == 2
+    assert preview.sample_rows[0] == ("0", "1.0", "2.0")
+
+
+# --------------------------------------------------------------------------- #
+# Multi-image (frame) splitting
+# --------------------------------------------------------------------------- #
+def test_frame_column_splits_into_aligned_sets(tmp_path):
+    p = _write(
+        tmp_path / "frames.csv",
+        "particle,frame,x_nm,y_nm\n"
+        "0,0,101.0,102.0\n1,0,103.0,104.0\n"
+        "2,1,101.5,102.5\n3,1,103.5,104.5\n",
+    )
+    preview = sniff_point_table(p)
+    assert preview.frame_column == "frame"
+    assert preview.n_sets == 2
+
+    sets = load_point_table(p)
+    assert [fs.point_count for fs in sets] == [2, 2]
+    a, b = sets
+    assert a.scan_range_m == b.scan_range_m
+    # One global re-centring shift: cross-set geometry is preserved.
+    np.testing.assert_allclose((b.points_m[0] - a.points_m[0]) * 1e9, [0.5, 0.5])
+    assert a.metadata["import_frame"] == "0"
+    assert b.metadata["import_frame"] == "1"
+
+
+def test_single_valued_frame_column_does_not_split(tmp_path):
+    p = _write(
+        tmp_path / "oneframe.csv",
+        "particle,frame,x_nm,y_nm\n0,0,1.0,2.0\n1,0,3.0,4.0\n",
+    )
+    preview = sniff_point_table(p)
+    assert preview.frame_column is None
+    assert preview.n_sets == 1
+    sets = load_point_table(p, scan_range_m=(10e-9, 10e-9), image_shape=(10, 10))
+    assert len(sets) == 1 and sets[0].point_count == 2
+
+
+# --------------------------------------------------------------------------- #
+# Pixel-size derivation (ProbeFlow CSV round-trip)
+# --------------------------------------------------------------------------- #
+def test_pixel_size_derived_from_px_and_nm_columns(tmp_path):
+    p = _write(
+        tmp_path / "ff.csv",
+        "index,x_px,y_px,x_nm,y_nm,value\n"
+        "0,10.0,20.0,5.0,15.0,1.2\n"
+        "1,30.0,40.0,15.0,30.0,3.4\n",
+    )
+    preview = sniff_point_table(p)
+    assert preview.kind == "probeflow_csv"
+    assert preview.pixel_size_m is not None
+    np.testing.assert_allclose(preview.pixel_size_m, [0.5e-9, 0.75e-9])
+    assert any("Pixel size" in note for note in preview.notes)
+
+
+# --------------------------------------------------------------------------- #
+# Feature Counting fallback consistency (no AdStat)
+# --------------------------------------------------------------------------- #
+def test_items_fallback_applies_status_filter(monkeypatch):
+    import probeflow.analysis.adstat_adapter as adapter
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("simulate missing AdStat")
+
+    monkeypatch.setattr(adapter, "feature_counting_to_particle_table", _boom)
+    items = [
+        {"x_m": 1e-9, "y_m": 2e-9, "status": "accepted"},
+        {"x_m": 3e-9, "y_m": 4e-9, "status": "rejected"},
+        {"x_m": 5e-9, "y_m": 6e-9, "status": "manual"},
+        {"x_m": 7e-9, "y_m": 8e-9},  # no status -> accepted by default
+    ]
+    fs = feature_items_to_feature_set(
+        items,
+        scan_range_m=(10e-9, 10e-9),
+        image_shape=(10, 10),
+        name="fallback",
+    )
+    assert fs.point_count == 3  # the rejected item is excluded, as with AdStat

@@ -532,3 +532,152 @@ def test_adstat_sandbox_state_and_view_spec_are_probe_flow_renderable() -> None:
     assert spec.panels[0].metadata["feature_xy_nm"] is not None
     assert spec.verdict_rows
     assert spec.metadata["has_result"] is True
+
+
+# --------------------------------------------------------------------------- #
+# Region filtering (observed points must match the simulated window)
+# --------------------------------------------------------------------------- #
+def test_point_set_record_filters_points_outside_mask_region() -> None:
+    scan = _SquareScan()  # 20 nm field, 10x10 px (2 nm per pixel)
+    mask = np.zeros((10, 10), dtype=bool)
+    mask[:, :5] = True  # left half: x < 10 nm
+    points_px = np.array([[1.0, 1.0], [2.0, 6.0], [3.0, 3.0], [8.0, 8.0]])
+    source = PointSource(
+        label="pts",
+        source_type="feature_finder",
+        points_px=points_px,
+        points_m=points_px * 2e-9,
+        metadata={},
+    )
+
+    record = point_set_record(
+        dataset_id="scan",
+        scan=scan,
+        point_source=source,
+        roi_or_mask=mask,
+        image_shape=(10, 10),
+    )
+
+    assert len(record.table) == 3
+    assert record.table.metadata["region_filtered"] is True
+    assert record.table.metadata["n_points_total"] == 4
+    assert record.table.metadata["n_points_in_region"] == 3
+    xy_nm = np.asarray(record.table.xy_nm, dtype=float)
+    assert (xy_nm[:, 0] < 10.0).all()
+
+
+def test_point_set_record_raises_when_too_few_points_inside_region() -> None:
+    scan = _SquareScan()
+    mask = np.zeros((10, 10), dtype=bool)
+    mask[:, :5] = True
+    points_px = np.array([[1.0, 1.0], [8.0, 8.0], [9.0, 2.0]])  # one inside
+    source = PointSource(
+        label="pts",
+        source_type="feature_finder",
+        points_px=points_px,
+        points_m=points_px * 2e-9,
+        metadata={},
+    )
+
+    with pytest.raises(ValueError, match="analysis region"):
+        point_set_record(
+            dataset_id="scan",
+            scan=scan,
+            point_source=source,
+            roi_or_mask=mask,
+            image_shape=(10, 10),
+        )
+
+
+def test_compare_with_mask_region_excludes_outside_points_and_reports() -> None:
+    from types import SimpleNamespace
+
+    rng = np.random.default_rng(3)
+    nx = ny = 64
+    scan = SimpleNamespace(scan_range_m=(100e-9, 100e-9), dims=(nx, ny))
+    points_m = rng.uniform(0.0, 100e-9, size=(60, 2))
+    source = PointSource(
+        label="csr",
+        source_type="feature_finder",
+        points_px=points_m / (100e-9 / nx),
+        points_m=points_m,
+        metadata={},
+    )
+    mask = np.zeros((ny, nx), dtype=bool)
+    mask[:, : nx // 2] = True  # left half of the image
+
+    spec = compare_point_source_view_spec(
+        source,
+        scan=scan,
+        roi_or_mask=mask,
+        image_shape=(ny, nx),
+        n_simulations=19,
+        random_seed=0,
+    )
+
+    joined = " ".join(spec.status_lines)
+    assert "inside the analysis region" in joined
+    # CSR data restricted to the mask window must not be declared non-random:
+    # before the region filter, every statistic here reported
+    # "inconsistent_with_null" because the observed points spanned the full
+    # image while the null simulated the same N inside the half-image mask.
+    verdicts = {str(row[2]) for row in spec.verdict_rows}
+    assert "inconsistent_with_null" not in verdicts
+
+
+def test_pooled_hard_core_cap_uses_densest_record(monkeypatch) -> None:
+    import math
+
+    from adstat import analysis as adstat_analysis
+
+    from probeflow.measurements.feature_sets import FeatureSet
+
+    rng = np.random.default_rng(0)
+
+    def _feature_set(name: str, n: int) -> FeatureSet:
+        points_m = rng.uniform(0.0, 100e-9, size=(n, 2))
+        return FeatureSet.from_points(
+            name=name,
+            points_px=points_m / 1e-9,
+            points_m=points_m,
+            scan_range_m=(100e-9, 100e-9),
+            image_shape=(100, 100),
+        )
+
+    records = [
+        _feature_set("sparse", 3).to_point_set_record(),
+        _feature_set("dense", 1500).to_point_set_record(),
+    ]
+
+    captured: dict[str, object] = {}
+
+    class _Stop(Exception):
+        pass
+
+    def _capture(items, **kwargs):
+        captured["overrides"] = kwargs["overrides"]
+        raise _Stop
+
+    monkeypatch.setattr(adstat_analysis, "pool_particle_tables", _capture)
+    with pytest.raises(_Stop):
+        compare_point_set_records_view_spec(records, n_simulations=4)
+
+    overrides = captured["overrides"]
+    area_nm2 = 100.0 * 100.0
+    # Hard-core cap follows the densest image (smallest mean spacing), so the
+    # null stays placeable there; before the fix it followed the sparsest image.
+    dense_cap = 0.5 * math.sqrt(area_nm2 / 1500.0)
+    assert overrides.hard_core_radius_nm == pytest.approx(dense_cap)
+    assert overrides.hard_core_radius_nm < 1.5  # sparse-derived value was 1.5
+    # NN distance range still covers the sparsest image (largest spacings).
+    assert overrides.nn_max_distance_nm == pytest.approx(45.0)
+
+
+def test_bond_order_neighbor_radius_matches_median_nearest_neighbor() -> None:
+    from types import SimpleNamespace
+
+    from probeflow.analysis.adstat_adapter import _bond_order_neighbor_radius_nm
+
+    xy = np.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [5.0, 5.0]])
+    radius = _bond_order_neighbor_radius_nm(SimpleNamespace(xy_nm=xy))
+    assert radius == pytest.approx(1.35)  # 1.35 * median NN distance (1.0)

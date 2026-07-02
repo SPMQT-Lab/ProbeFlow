@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from PySide6.QtCore import QRectF
+from PySide6.QtCore import QRectF, Qt
 from PySide6.QtWidgets import QApplication, QLabel, QPushButton
 
 from probeflow.gui.dialogs.adstat_workbench import AdStatWorkbenchDialog
@@ -28,6 +28,7 @@ from probeflow.gui.dialogs.particle_statistics import (
 LESSON_ORDER = [
     "welcome",
     "point_pattern",
+    "describe_data",
     "model_baseline_observed",
     "model_baseline_model",
     "model_baseline_overlay",
@@ -1081,7 +1082,9 @@ def test_particle_statistics_tutorial_marks_next_action_green(qapp):
     assert dlg._next_tutorial_btn.text().strip().endswith("▸")
     assert dlg._next_tutorial_btn.isEnabled()
     assert "Look for:" in dlg._tutorial_step_lbl.text()
-    assert not dlg._tutorial_why_frame.isVisibleTo(dlg)
+    # The takeaway bar carries this lesson's "why it matters" line.
+    assert dlg._tutorial_why_frame.isVisibleTo(dlg)
+    assert "Why it matters" in dlg._tutorial_why_lbl.text()
 
     dlg.next_tutorial_step()
 
@@ -1246,7 +1249,10 @@ def test_particle_statistics_clear_real_view(qapp):
     )
 
     dlg.clear_real_view()
-    assert dlg.focus_has_plot is False
+    # Comparison results are gone; focus returns to the instant data summary,
+    # which still describes the selected point source (histogram plot).
+    assert dlg.focused_statistic == "quick_summary"
+    assert _panel_for_statistic(dlg._last_view_spec, "pair_correlation_g_r") is None
     assert dlg._result_view.data_mode == "real"
 
     dlg.close()
@@ -1612,3 +1618,278 @@ def test_exit_tutorial_and_landing_keep_dialog_in_front(qapp):
     assert calls, "return_to_landing_page should re-raise the dialog to the front"
     assert dlg.current_mode == "landing"
     dlg.close()
+
+
+# --------------------------------------------------------------------------- #
+# Quick data summary (summary-first workflow)
+# --------------------------------------------------------------------------- #
+def _quick_summary_dialog(qapp_unused=None, **kwargs):
+    scan = SimpleNamespace(scan_range_m=(8e-9, 6e-9), dims=(8, 6))
+    defaults = dict(
+        point_sources=[_point_source()],
+        scan=scan,
+        image_shape=(6, 8),
+        initial_mode="landing",
+    )
+    defaults.update(kwargs)
+    return ParticleStatisticsDialog(**defaults)
+
+
+def test_particle_statistics_opens_in_real_mode_when_points_available(qapp):
+    dlg = _quick_summary_dialog()
+
+    assert dlg.current_mode == "real"
+    assert dlg._landing_panel.isHidden()
+    assert dlg.focused_statistic == "quick_summary"
+
+    dlg.close()
+    dlg.deleteLater()
+
+
+def test_particle_statistics_landing_still_default_when_empty(qapp):
+    dlg = ParticleStatisticsDialog(initial_mode="landing")
+
+    assert dlg.current_mode == "landing"
+    assert not dlg._landing_panel.isHidden()
+
+    dlg.close()
+    dlg.deleteLater()
+
+
+def test_particle_statistics_quick_summary_without_any_run(qapp):
+    dlg = _quick_summary_dialog()
+
+    assert dlg.focus_has_plot  # NN histogram rendered with no comparison run
+    label = dlg.findChild(QLabel, "particleStatisticsFocusSummary")
+    assert label is not None and not label.isHidden()
+    text = label.text()
+    assert "Points: <b>3</b>" in text
+    # 3 points on the full 8 x 6 nm image -> 48 nm^2, 0.0625 nm^-2.
+    assert "48 nm²" in text
+    assert "0.0625 nm⁻²" in text
+    assert "nm⁻²" in dlg._info_lbl.text()
+
+    button = dlg.findChild(QPushButton, "particleStatisticsFocus_quick_summary")
+    assert button is not None and button.isChecked()
+
+    dlg.close()
+    dlg.deleteLater()
+
+
+def test_particle_statistics_quick_summary_updates_on_region_change(qapp):
+    mask = np.zeros((6, 8), dtype=bool)
+    mask[:, :5] = True  # x < 5 nm keeps the points at x = 1 and 4 nm
+    dlg = _quick_summary_dialog(active_mask=mask)
+
+    index = dlg._region_cb.findData("mask")
+    assert index >= 0
+    dlg._region_cb.setCurrentIndex(index)
+
+    label = dlg.findChild(QLabel, "particleStatisticsFocusSummary")
+    text = label.text()
+    assert "of 3" in text and "Active mask" in text
+    assert "<b>2</b>" in text
+    assert "30 nm²" in text  # 30 px * 1 nm^2
+
+    dlg.close()
+    dlg.deleteLater()
+
+
+def test_particle_statistics_run_completion_hands_focus_to_statistic(qapp):
+    dlg = _quick_summary_dialog()
+    assert dlg.focused_statistic == "quick_summary"
+
+    spec = SimpleNamespace(
+        panels=(_curve_panel(),),
+        verdict_rows=(("poisson", "pair_correlation_g_r", "consistent_with_null"),),
+        status_lines=(),
+        metadata={"has_result": True},
+    )
+    context = SimpleNamespace(ready=True, view_spec=spec, point_source_label="Feature maxima")
+    dlg._on_real_worker_finished(dlg._generation, context)
+
+    assert dlg.focused_statistic == "pair_correlation_g_r"
+
+    dlg.close()
+    dlg.deleteLater()
+
+
+def test_particle_statistics_quick_summary_follows_single_ticked_set(qapp):
+    from probeflow.measurements.feature_sets import FeatureSet
+
+    def _set(name: str) -> FeatureSet:
+        points_px = np.array([[1.0, 1.0], [3.0, 3.0]], dtype=float)
+        return FeatureSet.from_points(
+            name=name,
+            points_px=points_px,
+            points_m=points_px * 1e-9,
+            scan_range_m=(10e-9, 10e-9),
+            image_shape=(10, 10),
+        )
+
+    sets = [_set("set A"), _set("set B")]
+    dlg = ParticleStatisticsDialog(
+        initial_mode="landing", point_sources=[], feature_sets=sets
+    )
+    assert dlg.current_mode == "real"  # saved sets count as point data
+
+    dlg.select_feature_set(sets[0].set_id)
+    label = dlg.findChild(QLabel, "particleStatisticsFocusSummary")
+    assert "set A" in label.text()
+    assert "Points: <b>2</b>" in label.text()
+
+    # Tick the second set as well: the summary explains instead of guessing.
+    for index in range(dlg._feature_sets_list.count()):
+        dlg._feature_sets_list.item(index).setCheckState(Qt.Checked)
+    assert not dlg.focus_has_plot
+    assert label.isHidden()
+
+    dlg.close()
+    dlg.deleteLater()
+
+
+def test_particle_statistics_quick_summary_hidden_in_sandbox(qapp):
+    dlg = _quick_summary_dialog()
+    button = dlg.findChild(QPushButton, "particleStatisticsFocus_quick_summary")
+    assert button.isVisible() or not dlg.isVisible()  # visible flag once shown
+
+    dlg.set_current_mode("model_simulations")
+    if dlg._sandbox_state is None:
+        dlg.close()
+        dlg.deleteLater()
+        pytest.skip("AdStat sandbox unavailable")
+    assert dlg.focused_statistic != "quick_summary"
+    assert button.isHidden()
+
+    dlg.close()
+    dlg.deleteLater()
+
+
+def test_import_points_dialog_preview_table_notes_and_units(qapp, tmp_path):
+    from PySide6.QtWidgets import QComboBox, QTableWidget
+
+    from probeflow.gui.dialogs.import_points import ImportPointsDialog
+    from probeflow.measurements.point_table_io import sniff_point_table
+
+    path = tmp_path / "ij.csv"
+    path.write_text(" ,Area,XM,YM\n1,5,1.0,2.0\n2,6,3.0,4.0\n", encoding="utf-8")
+    preview = sniff_point_table(path)
+
+    dlg = ImportPointsDialog(preview)
+    table = dlg.findChild(QTableWidget, "importPointsSample")
+    assert table is not None
+    assert table.rowCount() == 2
+    # The chosen x/y columns (XM/YM) are highlighted for the user to verify.
+    assert table.item(0, preview.x_col).background().style() != Qt.NoBrush
+    assert table.item(0, 1).background().style() == Qt.NoBrush
+
+    notes = dlg.findChild(QLabel, "importPointsNotes")
+    assert notes is not None and "ImageJ" in notes.text()
+
+    units_cb = dlg.findChild(QComboBox, "importPointsUnits")
+    unit_values = {units_cb.itemData(i) for i in range(units_cb.count())}
+    assert {"angstrom", "pm", "px", "nm", "um", "m"} <= unit_values
+
+    dlg.close()
+    dlg.deleteLater()
+
+
+def test_import_points_dialog_prefills_derived_pixel_size(qapp, tmp_path):
+    from probeflow.gui.dialogs.import_points import ImportPointsDialog
+    from probeflow.measurements.point_table_io import sniff_point_table
+
+    path = tmp_path / "ff.csv"
+    path.write_text(
+        "index,x_px,y_px,x_nm,y_nm,value\n"
+        "0,10.0,20.0,5.0,15.0,1.2\n"
+        "1,30.0,40.0,15.0,30.0,3.4\n",
+        encoding="utf-8",
+    )
+    preview = sniff_point_table(path)
+    dlg = ImportPointsDialog(preview)
+    units, scan_range_m, image_shape = dlg.result_calibration()
+    assert units == "nm"
+    ny, nx = image_shape
+    # The proposed calibration reproduces the derived pixel size exactly.
+    assert scan_range_m[0] / nx == pytest.approx(0.5e-9)
+    assert scan_range_m[1] / ny == pytest.approx(0.75e-9)
+
+    dlg.close()
+    dlg.deleteLater()
+
+
+# --------------------------------------------------------------------------- #
+# Tutorial content pass: takeaways, predictions, describe-data lesson
+# --------------------------------------------------------------------------- #
+def test_tutorial_every_step_has_why_takeaway():
+    missing = [
+        f"{example.key}[{index}]"
+        for example in _TUTORIALS
+        for index, step in enumerate(example.steps)
+        if not str(step.why or "").strip()
+    ]
+    assert missing == []
+
+
+def test_tutorial_no_stale_custom_action_labels():
+    # A custom call-to-action label is only meaningful on steps whose button is
+    # actually shown (run/load/restart); anywhere else it is dead, misleading text.
+    stale = [
+        f"{example.key}[{index}]: {step.primary_action!r}"
+        for example in _TUTORIALS
+        for index, step in enumerate(example.steps)
+        if step.primary_action not in ("", "Next")
+        and step.action_kind not in ("run", "load", "restart")
+    ]
+    assert stale == []
+
+
+def test_tutorial_why_bar_and_predict_block_render(qapp):
+    dlg = ParticleStatisticsDialog(initial_mode="learn")
+    if dlg._sandbox_state is None:
+        dlg.close()
+        dlg.deleteLater()
+        pytest.skip("AdStat sandbox is not installed")
+
+    # "clustered" carries a full predict-observe scaffold and a takeaway.
+    dlg.load_tutorial_example("clustered")
+    why_text = dlg._tutorial_why_lbl.text()
+    assert "Why it matters" in why_text
+    assert not dlg._tutorial_why_frame.isHidden()
+    body = dlg._tutorial_step_lbl.text()
+    assert "Predict first:" in body
+    assert "Then check:" in body
+
+    # The welcome lesson has a takeaway but no prediction scaffold.
+    dlg.load_tutorial_example("welcome")
+    assert "Why it matters" in dlg._tutorial_why_lbl.text()
+    assert "Predict first:" not in dlg._tutorial_step_lbl.text()
+
+    dlg.close()
+    dlg.deleteLater()
+
+
+def test_tutorial_describe_data_lesson_shows_quick_summary(qapp):
+    dlg = ParticleStatisticsDialog(initial_mode="learn")
+    if dlg._sandbox_state is None:
+        dlg.close()
+        dlg.deleteLater()
+        pytest.skip("AdStat sandbox is not installed")
+
+    dlg.load_tutorial_example("describe_data")
+
+    assert dlg.focused_statistic == "quick_summary"
+    # The summary is computed from the generated field: histogram + numbers,
+    # no comparison run and no real scan required.
+    assert dlg.focus_has_plot
+    label = dlg.findChild(QLabel, "particleStatisticsFocusSummary")
+    assert label is not None and not label.isHidden()
+    assert "nm⁻²" in label.text()
+    assert "Generated pattern" in label.text()
+
+    # Moving on to a model lesson refocuses the comparison statistic.
+    dlg.load_tutorial_example("clustered")
+    assert dlg.focused_statistic == "pair_correlation_g_r"
+
+    dlg.close()
+    dlg.deleteLater()

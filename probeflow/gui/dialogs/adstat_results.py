@@ -421,10 +421,15 @@ class AdStatPlotWidget(QWidget):
         band_high = _float_array_or_none(_field(self._panel, "band_high", None))
         central = _float_array_or_none(_field(self._panel, "central", None))
         ref = _finite_float(_field(self._panel, "reference_line", None))
+        ref_x = _finite_float(_field(self._panel, "reference_line_x", None))
         comparison_mode = self._curve_mode == "comparison" and self._show_model_curves
         has_observed = bool(self._show_observed_curve)
 
-        x_range = _range_for_arrays(x)
+        x_range = (
+            _range_for_arrays(x, np.asarray([ref_x], dtype=float))
+            if ref_x is not None
+            else _range_for_arrays(x)
+        )
         if str(_field(self._panel, "statistic", "")) == "cluster_size_counts":
             # Random/most real patterns put all counts at small cluster sizes, leaving a
             # long empty tail out to N. Zoom x to the populated support so the curve reads.
@@ -465,6 +470,7 @@ class AdStatPlotWidget(QWidget):
         if has_central:
             _draw_polyline(painter, transform, x, central, _CURVE_MODEL_COLOR, width=1.7)
         _draw_reference_line(painter, transform, ref, plot_rect, fg)
+        _draw_reference_line_x(painter, transform, ref_x, plot_rect, fg)
         if has_observed:
             _draw_polyline(painter, transform, x, observed, _CURVE_OBSERVED_COLOR, width=2.5)
         legend = _curve_legend_entries(
@@ -1105,6 +1111,25 @@ def _draw_reference_line(
     pen.setColor(QColor(color.red(), color.green(), color.blue(), 130))
     painter.setPen(pen)
     painter.drawLine(QPointF(plot_rect.left(), y.y()), QPointF(plot_rect.right(), y.y()))
+
+
+def _draw_reference_line_x(
+    painter: QPainter,
+    transform: _PlotTransform,
+    value: float | None,
+    plot_rect: QRectF,
+    color: QColor,
+) -> None:
+    if value is None:
+        return
+    point = transform.point(value, transform.y_min)
+    if point is None:
+        return
+    pen = QPen(color, 1.0)
+    pen.setStyle(Qt.DashLine)
+    pen.setColor(QColor(color.red(), color.green(), color.blue(), 130))
+    painter.setPen(pen)
+    painter.drawLine(QPointF(point.x(), plot_rect.top()), QPointF(point.x(), plot_rect.bottom()))
 
 
 def _draw_marker_series(

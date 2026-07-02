@@ -45,7 +45,10 @@ entry point and also accepts independent feature layers.
    intent is an unlabelled merged population.
 3. Choose the analysis region from an active area ROI, mask, or the full image.
    The same region must be used for observed statistics and every null
-   simulation.
+   simulation, so the adapter restricts the tested points to the region before
+   analysis: points outside the ROI/mask are excluded from both the observed
+   statistics and the simulated point counts, and the result reports how many
+   points were kept.
 4. Convert through AdStat `ImageCalibration`, preserving anisotropic pixel
    sizes from `Scan.scan_range_m` and `Scan.dims`.
 5. Open **Measurements -> Features -> Particle Statistics...** and use
