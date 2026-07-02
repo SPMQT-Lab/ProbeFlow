@@ -37,6 +37,11 @@ from PySide6.QtWidgets import (
     QStatusBar, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 from probeflow.gui.utils import _open_url
+from probeflow.gui.features import (
+    FeaturesPanel,
+    FeaturesSidebar,
+)
+from probeflow.gui.features.controller import FeatureCountingController
 from probeflow.gui.features.tv import (
     TVPanel,
     TVSidebar,
@@ -89,6 +94,7 @@ from probeflow.gui.workers import (
 )
 from probeflow.gui.browse import ThumbnailGrid, BrowseInfoPanel, BrowseToolPanel
 from probeflow.gui.convert import ConvertPanel, ConvertSidebar
+from probeflow.gui.dataset_builder import DatasetBuilderPanel, DatasetBuilderSidebar
 from probeflow.gui.dialogs.definitions import _DefinitionsDialog
 from probeflow.gui.terminal import _DevSidebar
 from probeflow.gui.dialogs.image_viewer import ImageViewerDialog
@@ -308,8 +314,10 @@ class ProbeFlowWindow(QMainWindow):
         self._browse_splitter.setStretchFactor(1, 1)
 
         self._conv_panel    = ConvertPanel(t, self._cfg)
+        self._features_panel = FeaturesPanel(t)
         self._tv_panel       = TVPanel(t)
         self._dev_terminal   = DeveloperTerminalWidget(t)
+        self._dataset_builder_panel = DatasetBuilderPanel(t, self._cfg)
         # Survey integration is optional — when ``probeflow.gui.survey``
         # cannot be imported (e.g. scanflow not installed in this venv) we
         # show a placeholder label at the Survey content stack index instead
@@ -328,9 +336,11 @@ class ProbeFlowWindow(QMainWindow):
         # FeatureCountingWindow (see _open_fc_window) so Browse stays visible.
         self._content_stack.addWidget(self._browse_splitter)        # idx 0 browse
         self._content_stack.addWidget(self._conv_panel)             # idx 1 convert
-        self._content_stack.addWidget(self._tv_panel)               # idx 2 tv
-        self._content_stack.addWidget(self._dev_terminal)           # idx 3 dev
-        self._content_stack.addWidget(self._survey_panel)           # idx 4 survey
+        self._content_stack.addWidget(self._features_panel)         # idx 2 features
+        self._content_stack.addWidget(self._tv_panel)               # idx 3 tv
+        self._content_stack.addWidget(self._dev_terminal)           # idx 4 dev
+        self._content_stack.addWidget(self._survey_panel)           # idx 5 survey
+        self._content_stack.addWidget(self._dataset_builder_panel)  # idx 6 dataset_builder
         self._splitter.addWidget(self._content_stack)
 
         # ── Right: sidebar stack ───────────────────────────────────────────────
@@ -339,12 +349,15 @@ class ProbeFlowWindow(QMainWindow):
         self._sidebar_stack.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
         self._browse_info      = BrowseInfoPanel(t, self._cfg)
         self._convert_sidebar  = ConvertSidebar(t, self._cfg)
+        self._features_sidebar = FeaturesSidebar(t)
         self._tv_sidebar       = TVSidebar(t)
         self._dev_sidebar      = _DevSidebar(t)
+        self._dataset_builder_sidebar = DatasetBuilderSidebar(t)
         self._sidebar_stack.addWidget(self._browse_info)        # idx 0
         self._sidebar_stack.addWidget(self._convert_sidebar)    # idx 1
-        self._sidebar_stack.addWidget(self._tv_sidebar)         # idx 2
-        self._sidebar_stack.addWidget(self._dev_sidebar)        # idx 3
+        self._sidebar_stack.addWidget(self._features_sidebar)   # idx 2
+        self._sidebar_stack.addWidget(self._tv_sidebar)         # idx 3
+        self._sidebar_stack.addWidget(self._dev_sidebar)        # idx 4
         # Placeholder sidebar for Survey mode — metadata is shown in the main
         # panel itself, so the right column is just a small hint label.
         _survey_sidebar_placeholder = QWidget()
@@ -358,12 +371,18 @@ class ProbeFlowWindow(QMainWindow):
         ))
         _ssp_lay.itemAt(0).widget().setWordWrap(True)
         _ssp_lay.addStretch(1)
-        self._sidebar_stack.addWidget(_survey_sidebar_placeholder)  # idx 4
+        self._sidebar_stack.addWidget(_survey_sidebar_placeholder)  # idx 5
+        self._sidebar_stack.addWidget(self._dataset_builder_sidebar)  # idx 6
         self._splitter.addWidget(self._sidebar_stack)
         self._splitter.setChildrenCollapsible(False)
         self._splitter.setStretchFactor(0, 1)
         self._splitter.setStretchFactor(1, 0)
         self._apply_default_splitter_sizes()
+
+        # Features tab plumbing — worker dispatch is owned by the controller.
+        self._features_pool = QThreadPool.globalInstance()
+        self._features_preview_pool = QThreadPool()
+        self._features_preview_pool.setMaxThreadCount(1)
 
         # Floating Feature Counting window (lazy-created on first open)
         self._fc_window = None
@@ -409,10 +428,28 @@ class ProbeFlowWindow(QMainWindow):
         self._convert_sidebar.run_btn.clicked.connect(self._run)
         self._conv_panel.input_entry.textChanged.connect(self._update_count)
 
+        self._features_panel.go_to_browse_requested.connect(
+            lambda: self._switch_mode("browse"))
+        self._features_sidebar.load_from_browse_requested.connect(
+            self._on_features_load_from_browse)
+        # All other sidebar signals are wired by the controller.
+        self._features_ctrl = FeatureCountingController(
+            self._features_panel, self._features_sidebar,
+            self._features_pool,
+            status_cb=lambda msg: self._status_bar.showMessage(msg),
+            preview_pool=self._features_preview_pool,
+            parent_widget=self,
+            feature_set_store=self._feature_set_store,
+        )
+        self._features_ctrl.open_particle_statistics_requested.connect(
+            self._on_open_particle_statistics_from_features)
+        self._dataset_builder_panel.counts_changed.connect(
+            self._dataset_builder_sidebar.set_counts)
         # Status bar
         self._status_bar = QStatusBar()
         self._status_bar.setFont(ui_font(10))
         self.setStatusBar(self._status_bar)
+        self._dataset_builder_panel.status_message.connect(self._status_bar.showMessage)
         self._status_bar.showMessage("Open a folder to browse scans")
 
     def _build_menu_bar(self) -> None:
@@ -483,6 +520,7 @@ class ProbeFlowWindow(QMainWindow):
         workspace_menu = menu_bar.addMenu("Workspace")
         _mode_action(workspace_menu, "Browse", "browse", "Ctrl+1")
         _mode_action(workspace_menu, "Convert Createc .dat to .sxm", "convert", "Ctrl+2")
+        _mode_action(workspace_menu, "Feature Counting", "features")
         _mode_action(workspace_menu, "TV denoise", "tv", "Ctrl+4")
         survey_action = _mode_action(
             workspace_menu, "Survey (ScanFlow campaign)", "survey", "Ctrl+Shift+S"
@@ -572,6 +610,24 @@ class ProbeFlowWindow(QMainWindow):
         map_action = QAction("Map Spectra to Images...", self)
         map_action.triggered.connect(self._on_map_spectra)
         tools_menu.addAction(map_action)
+        tools_menu.addSeparator()
+        _mode_action(tools_menu, "Feature Counting…", "features")
+        _mode_action(tools_menu, "TV denoise", "tv", "Ctrl+4")
+        _mode_action(tools_menu, "Dataset Builder", "dataset_builder", "Ctrl+Shift+D")
+        tools_menu.addSeparator()
+        survey_action = _mode_action(
+            tools_menu, "Survey (ScanFlow campaign)", "survey", "Ctrl+Shift+S"
+        )
+        if not self._survey_available:
+            survey_action.setEnabled(False)
+            survey_action.setToolTip(
+                "Survey mode requires the optional `scanflow` dependency."
+            )
+        tools_menu.addSeparator()
+        _mode_action(tools_menu, "Developer tools", "dev", "Ctrl+5")
+        prefs_action = QAction("Preferences...", self)
+        prefs_action.setEnabled(False)
+        tools_menu.addAction(prefs_action)
 
         help_menu = menu_bar.addMenu("Help")
         definitions_action = QAction("Definitions", self)
@@ -792,24 +848,34 @@ class ProbeFlowWindow(QMainWindow):
             n = len(self._grid.get_entries())
             self._status_bar.showMessage(
                 f"{n} scan(s) loaded" if n else "Open a folder to browse scans")
-        elif mode == "tv":
+        elif mode == "features":
             self._content_stack.setCurrentIndex(2)
             self._sidebar_stack.setCurrentIndex(2)
+            self._status_bar.showMessage(
+                "Feature Counting — open a scan from Browse or use the floating window")
+        elif mode == "tv":
+            self._content_stack.setCurrentIndex(3)
+            self._sidebar_stack.setCurrentIndex(3)
             if self._tv_panel.current_array() is None:
                 self._status_bar.showMessage(
                     "Pick a scan in Browse, then 'Load primary scan from Browse'")
             else:
                 self._status_bar.showMessage("TV-denoise — adjust parameters and Run")
         elif mode == "dev":
-            self._content_stack.setCurrentIndex(3)
-            self._sidebar_stack.setCurrentIndex(3)
-            self._status_bar.showMessage(
-                "Developer terminal — run shell commands and Python scripts")
-        elif mode == "survey":
             self._content_stack.setCurrentIndex(4)
             self._sidebar_stack.setCurrentIndex(4)
             self._status_bar.showMessage(
+                "Developer terminal — run shell commands and Python scripts")
+        elif mode == "survey":
+            self._content_stack.setCurrentIndex(5)
+            self._sidebar_stack.setCurrentIndex(5)
+            self._status_bar.showMessage(
                 "Survey mode — open a ScanFlow survey.json, polish each feature, then Export PPTX")
+        elif mode == "dataset_builder":
+            self._content_stack.setCurrentIndex(6)
+            self._sidebar_stack.setCurrentIndex(6)
+            self._status_bar.showMessage(
+                "Dataset Builder - queue, propose, correct, save, export")
         else:
             self._content_stack.setCurrentIndex(1)
             self._sidebar_stack.setCurrentIndex(1)
@@ -1596,6 +1662,8 @@ class ProbeFlowWindow(QMainWindow):
         self._browse_tools.apply_theme(t)
         self._browse_info.apply_theme(t)
         self._conv_panel.apply_theme(t)
+        self._dataset_builder_panel.apply_theme(t)
+        self._dataset_builder_sidebar.apply_theme(t)
         if self._fc_window is not None:
             self._fc_window.apply_theme(t)
         self._update_tab_styles()
