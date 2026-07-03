@@ -11,7 +11,9 @@ class FolderFilterState:
     """Session-local browse folder filters."""
 
     size_enabled: bool = False
+    min_width_nm: Optional[float] = 0.0
     max_width_nm: Optional[float] = None
+    min_height_nm: Optional[float] = 0.0
     max_height_nm: Optional[float] = None
     completion_enabled: bool = False
     min_completion_pct: Optional[float] = None
@@ -93,11 +95,17 @@ def scan_matches_folder_filters(
         if (
             width_nm is None
             or height_nm is None
+            or state.min_width_nm is None
             or state.max_width_nm is None
+            or state.min_height_nm is None
             or state.max_height_nm is None
         ):
             return False
+        if float(width_nm) < float(state.min_width_nm):
+            return False
         if float(width_nm) > float(state.max_width_nm):
+            return False
+        if float(height_nm) < float(state.min_height_nm):
             return False
         if float(height_nm) > float(state.max_height_nm):
             return False

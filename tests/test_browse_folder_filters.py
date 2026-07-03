@@ -48,7 +48,9 @@ def test_missing_metadata_excludes_scan_when_filter_active():
 def test_size_and_bias_boundaries_are_inclusive():
     state = FolderFilterState(
         size_enabled=True,
+        min_width_nm=25.0,
         max_width_nm=100.0,
+        min_height_nm=20.0,
         max_height_nm=80.0,
         bias_enabled=True,
         min_bias_mv=-250.0,
@@ -66,6 +68,20 @@ def test_size_and_bias_boundaries_are_inclusive():
         height_nm=80.0,
         completion_pct=None,
         bias_mv=250.0,
+        state=state,
+    )
+    assert not scan_matches_folder_filters(
+        width_nm=24.9,
+        height_nm=80.0,
+        completion_pct=None,
+        bias_mv=0.0,
+        state=state,
+    )
+    assert not scan_matches_folder_filters(
+        width_nm=100.0,
+        height_nm=19.9,
+        completion_pct=None,
+        bias_mv=0.0,
         state=state,
     )
 

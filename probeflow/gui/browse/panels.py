@@ -112,10 +112,16 @@ class BrowseToolPanel(QWidget):
 
         self._size_filter_btn = self._make_filter_toggle("Size (nm)")
         filter_box_lay.addWidget(self._size_filter_btn)
-        self._size_width_nm = self._make_filter_spinbox(0.0, 1_000_000.0, 1.0, " nm")
-        self._size_height_nm = self._make_filter_spinbox(0.0, 1_000_000.0, 1.0, " nm")
-        filter_box_lay.addWidget(self._labeled_spin_row("Max width", self._size_width_nm))
-        filter_box_lay.addWidget(self._labeled_spin_row("Max height", self._size_height_nm))
+        self._size_min_width_nm = self._make_filter_spinbox(0.0, 1_000_000.0, 1.0, " nm")
+        self._size_max_width_nm = self._make_filter_spinbox(0.0, 1_000_000.0, 1.0, " nm")
+        self._size_min_height_nm = self._make_filter_spinbox(0.0, 1_000_000.0, 1.0, " nm")
+        self._size_max_height_nm = self._make_filter_spinbox(0.0, 1_000_000.0, 1.0, " nm")
+        self._size_max_width_nm.setValue(1_000_000.0)
+        self._size_max_height_nm.setValue(1_000_000.0)
+        filter_box_lay.addWidget(self._labeled_spin_row("Min width", self._size_min_width_nm))
+        filter_box_lay.addWidget(self._labeled_spin_row("Max width", self._size_max_width_nm))
+        filter_box_lay.addWidget(self._labeled_spin_row("Min height", self._size_min_height_nm))
+        filter_box_lay.addWidget(self._labeled_spin_row("Max height", self._size_max_height_nm))
 
         self._completion_filter_btn = self._make_filter_toggle("Completion (%)")
         filter_box_lay.addWidget(self._completion_filter_btn)
@@ -345,8 +351,10 @@ class BrowseToolPanel(QWidget):
                 "_size_filter_btn",
                 "_completion_filter_btn",
                 "_bias_filter_btn",
-                "_size_width_nm",
-                "_size_height_nm",
+                "_size_min_width_nm",
+                "_size_max_width_nm",
+                "_size_min_height_nm",
+                "_size_max_height_nm",
                 "_completion_min_pct",
                 "_bias_min_mv",
                 "_bias_max_mv",
@@ -362,8 +370,10 @@ class BrowseToolPanel(QWidget):
     def get_folder_filter_state(self) -> FolderFilterState:
         return FolderFilterState(
             size_enabled=self._size_filter_btn.isChecked(),
-            max_width_nm=float(self._size_width_nm.value()),
-            max_height_nm=float(self._size_height_nm.value()),
+            min_width_nm=float(self._size_min_width_nm.value()),
+            max_width_nm=float(self._size_max_width_nm.value()),
+            min_height_nm=float(self._size_min_height_nm.value()),
+            max_height_nm=float(self._size_max_height_nm.value()),
             completion_enabled=self._completion_filter_btn.isChecked(),
             min_completion_pct=float(self._completion_min_pct.value()),
             bias_enabled=self._bias_filter_btn.isChecked(),
