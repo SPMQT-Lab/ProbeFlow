@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from probeflow.gui.dataset_builder.display import flatten_display_array
-from probeflow.gui.dataset_builder.tab import DatasetBuilderPanel
+from probeflow.gui.dataset_builder.tab import DatasetBuilderPanel, DatasetBuilderSidebar
 from probeflow.gui.dataset_builder.view_tray import DatasetBuilderViewTray
 from probeflow.gui.styling import THEMES
 
@@ -45,6 +45,7 @@ def test_view_tray_expands_and_toggles_flatten(qapp):
     qapp.processEvents()
     assert tray.is_flatten_enabled() is True
     assert seen == [True]
+    assert tray._hist_panel is not None
 
 
 def test_flatten_display_array_is_display_only_and_removes_plane():
@@ -73,3 +74,13 @@ def test_dataset_builder_panel_refresh_uses_display_only_flatten(qapp):
     assert panel._display_arr is not None
     assert panel._display_arr.shape == arr.shape
     assert np.ptp(panel._display_arr) < np.ptp(panel._arr) * 0.1
+
+
+def test_dataset_builder_sidebar_places_view_tray_above_counts(qapp):
+    sidebar = DatasetBuilderSidebar(THEMES["dark"])
+    tray = DatasetBuilderViewTray(THEMES["dark"])
+    sidebar.set_view_tray(tray)
+
+    assert sidebar._view_host_lay.itemAt(0).widget() is tray
+    assert sidebar._counts.text() == "Queue not loaded"
+    assert tray.is_expanded() is False

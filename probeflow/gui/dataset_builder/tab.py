@@ -124,6 +124,7 @@ class DatasetBuilderPanel(QWidget):
         right_lay.setSpacing(8)
 
         self._view_tray = DatasetBuilderViewTray(theme, self)
+        self._view_tray.set_expanded(True)
         self._view_slider_ctrl = DisplaySliderController(
             self._display_drs,
             self._view_tray.hist_panel,
@@ -139,7 +140,6 @@ class DatasetBuilderPanel(QWidget):
         self._view_tray.hist_panel.contrastReleased.connect(self._view_slider_ctrl.on_contrast_changed)
         self._view_tray.flatten_toggled.connect(self._on_flatten_toggled)
         self._display_drs.rangeChanged.connect(self._refresh_display_preview)
-        right_lay.addWidget(self._view_tray)
 
         form = QFormLayout()
         self._task_combo = QComboBox()
@@ -427,6 +427,9 @@ class DatasetBuilderPanel(QWidget):
     def toggle_view_tray(self) -> None:
         self._view_tray.set_expanded(not self._view_tray.is_expanded())
 
+    def view_tray_widget(self) -> DatasetBuilderViewTray:
+        return self._view_tray
+
     def _load_existing_mask(self, item: DatasetQueueItem) -> None:
         try:
             mask_set, _path = load_mask_set_sidecar(item.source_path, missing_ok=True)
@@ -672,19 +675,35 @@ class DatasetBuilderSidebar(QWidget):
     def __init__(self, theme: dict, parent=None):
         super().__init__(parent)
         self._theme = dict(theme)
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(8, 8, 8, 8)
-        lay.setSpacing(6)
+        self._lay = QVBoxLayout(self)
+        self._lay.setContentsMargins(8, 8, 8, 8)
+        self._lay.setSpacing(6)
         self._title = QLabel("<b>Dataset Builder</b>")
         self._counts = QLabel("Queue not loaded")
         self._counts.setWordWrap(True)
-        lay.addWidget(self._title)
-        lay.addWidget(self._counts)
-        lay.addStretch(1)
+        self._view_host = QWidget()
+        self._view_host_lay = QVBoxLayout(self._view_host)
+        self._view_host_lay.setContentsMargins(0, 0, 0, 0)
+        self._view_host_lay.setSpacing(0)
+        self._view_tray = None
+        self._lay.addWidget(self._title)
+        self._lay.addWidget(self._view_host)
+        self._lay.addWidget(self._counts)
+        self._lay.addStretch(1)
         self.apply_theme(theme)
 
     def apply_theme(self, theme: dict) -> None:
         self._theme = dict(theme)
+
+    def set_view_tray(self, tray: QWidget) -> None:
+        if self._view_tray is tray:
+            return
+        if self._view_tray is not None:
+            self._view_host_lay.removeWidget(self._view_tray)
+            self._view_tray.setParent(None)
+        self._view_tray = tray
+        if tray is not None:
+            self._view_host_lay.addWidget(tray)
 
     def set_counts(self, counts: dict) -> None:
         self._counts.setText(
