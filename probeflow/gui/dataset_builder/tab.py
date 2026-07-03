@@ -186,9 +186,9 @@ class DatasetBuilderPanel(QWidget):
         body.setSizes([240, 760, 260])
 
         self._shortcut_lbl = QLabel(
-            "A prev | D next | F save+next | Q overlay | W proposal | "
-            "E eraser | R brush | Z undo | X reject | C clear | V global view | "
-            "1 accept | 2 uncertain | 3 reject | [ / ] brush"
+            "A prev | F save+accept+next | D save+uncertain+next | S save+reject+next | "
+            "Q overlay | W proposal | E eraser | R brush | Z undo | X reject | "
+            "C clear | V global view | 1 accept | 2 uncertain | 3 reject | [ / ] brush"
         )
         self._shortcut_lbl.setAlignment(Qt.AlignCenter)
         root.addWidget(self._shortcut_lbl)
@@ -238,8 +238,9 @@ class DatasetBuilderPanel(QWidget):
     def _install_shortcuts(self) -> None:
         bindings = {
             "A": self.previous_item,
-            "D": self.next_item,
-            "F": self.save_and_next,
+            "F": lambda: self._save_status_and_next("accepted"),
+            "D": lambda: self._save_status_and_next("uncertain"),
+            "S": lambda: self._save_status_and_next("rejected"),
             "Q": self.toggle_overlay,
             "W": self.generate_proposal,
             "C": self.clear_overlay,
@@ -667,7 +668,11 @@ class DatasetBuilderPanel(QWidget):
         if self.save_current():
             self.next_item()
 
-    def _set_status(self, status: str) -> None:
+    def _save_status_and_next(self, status: str) -> None:
+        if self._set_status(status):
+            self.next_item()
+
+    def _set_status(self, status: str) -> bool:
         self._status_combo.setCurrentText(status)
         if status == "rejected" and self._current_mask is None and 0 <= self._current_index < len(self._queue):
             item = self._queue[self._current_index]
@@ -693,8 +698,8 @@ class DatasetBuilderPanel(QWidget):
             )
             self._refresh_queue_list()
             self.status_message.emit(f"Marked {item.display_id} rejected")
-            return
-        self.save_current()
+            return True
+        return self.save_current()
 
     def clear_overlay(self) -> None:
         self._current_mask = None

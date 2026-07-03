@@ -157,3 +157,31 @@ def test_dataset_builder_panel_three_point_flatten_is_display_only(qapp):
     assert panel._display_arr is not None
     assert not np.array_equal(panel._display_arr, base)
     assert np.ptp(panel._display_arr) < np.ptp(base) or np.ptp(panel._display_arr) < np.ptp(raw)
+
+
+def test_dataset_builder_status_shortcut_helper_advances_only_on_success(qapp):
+    panel = DatasetBuilderPanel(THEMES["dark"], {})
+    panel.show()
+    qapp.processEvents()
+
+    calls: list[str] = []
+
+    def ok_set_status(status: str) -> bool:
+        calls.append(status)
+        return True
+
+    panel._set_status = ok_set_status  # type: ignore[method-assign]
+    panel.next_item = lambda: calls.append("next")  # type: ignore[method-assign]
+
+    panel._save_status_and_next("accepted")
+    assert calls == ["accepted", "next"]
+
+    calls.clear()
+
+    def fail_set_status(status: str) -> bool:
+        calls.append(status)
+        return False
+
+    panel._set_status = fail_set_status  # type: ignore[method-assign]
+    panel._save_status_and_next("uncertain")
+    assert calls == ["uncertain"]
