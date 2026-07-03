@@ -235,6 +235,8 @@ class DatasetBuilderPanel(QWidget):
             "D": lambda: self._save_status_and_next("uncertain"),
             "S": lambda: self._save_status_and_next("rejected"),
             "Q": self.toggle_overlay,
+            "E": lambda: self.set_paint_mode("eraser"),
+            "R": lambda: self.set_paint_mode("brush"),
             "Z": self.clear_overlay,
             "V": lambda: self._brush_spin.setValue(self._brush_spin.value() + 1),
             "C": lambda: self._brush_spin.setValue(max(1, self._brush_spin.value() - 1)),

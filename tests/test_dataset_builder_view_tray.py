@@ -199,6 +199,8 @@ def test_dataset_builder_shortcuts_cover_clear_undo_and_brush_size(qapp):
     assert "Z" in keys
     assert "V" in keys
     assert "C" in keys
+    assert "E" in keys
+    assert "R" in keys
     assert QKeySequence(QKeySequence.Undo).toString() in keys
     assert "W" not in keys
 
