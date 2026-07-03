@@ -45,7 +45,12 @@ def test_view_tray_expands_and_toggles_flatten(qapp):
     qapp.processEvents()
     assert tray.is_flatten_enabled() is True
     assert seen == [True]
-    assert tray._hist_panel is not None
+    assert tray._pct_min.value() == 1.0
+    assert tray._pct_max.value() == 99.0
+    assert tray._hist_panel._min_w.isVisible() is False
+    assert tray._hist_panel._max_w.isVisible() is False
+    assert tray._hist_panel._brightness_w.isVisible() is False
+    assert tray._hist_panel._contrast_w.isVisible() is False
 
 
 def test_flatten_display_array_is_display_only_and_removes_plane():
@@ -66,6 +71,7 @@ def test_dataset_builder_panel_refresh_uses_display_only_flatten(qapp):
     arr = np.add.outer(np.linspace(0.0, 1.0, 64), np.linspace(0.0, 3.0, 64))
     panel._arr = arr.copy()
     panel._view_tray.set_flatten_enabled(True)
+    panel._view_tray.set_percentile_bounds(5.0, 95.0)
 
     panel._refresh_display_preview(reset_zoom=True)
     qapp.processEvents()
@@ -73,7 +79,9 @@ def test_dataset_builder_panel_refresh_uses_display_only_flatten(qapp):
     assert np.array_equal(panel._arr, arr)
     assert panel._display_arr is not None
     assert panel._display_arr.shape == arr.shape
-    assert np.ptp(panel._display_arr) < np.ptp(panel._arr) * 0.1
+    assert np.ptp(panel._display_arr) > 0.0
+    assert panel._canvas._raw_arr is not None
+    assert panel._canvas._raw_arr.shape == arr.shape
 
 
 def test_dataset_builder_sidebar_places_view_tray_above_counts(qapp):

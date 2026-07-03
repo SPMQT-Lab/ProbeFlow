@@ -337,6 +337,11 @@ class HistogramPanel(QWidget):
         self._auto_btn.setVisible(visible)
         self._reset_btn.setVisible(visible)
 
+    def set_clip_controls_visible(self, visible: bool) -> None:
+        """Show or hide the min/max clip sliders."""
+        self._min_w.setVisible(visible)
+        self._max_w.setVisible(visible)
+
     # ── Slider value accessors ─────────────────────────────────────────────────
 
     @property

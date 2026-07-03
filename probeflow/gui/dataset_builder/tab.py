@@ -36,13 +36,14 @@ from probeflow.dataset_builder.models import DatasetExportSpec, DatasetQueueItem
 from probeflow.dataset_builder.painting import paint_mask
 from probeflow.dataset_builder.proposals import generate_proposal
 from probeflow.dataset_builder.queue import build_queue, queue_counts
-from probeflow.gui.dataset_builder.display import dataset_builder_display_array
+from probeflow.gui.dataset_builder.display import (
+    dataset_builder_display_array,
+    percentile_value,
+)
 from probeflow.gui.dataset_builder.canvas import DatasetBuilderCanvas
 from probeflow.gui.dataset_builder.view_tray import DatasetBuilderViewTray
 from probeflow.io.mask_sidecar import load_mask_set_sidecar
 from probeflow.processing.display import array_to_uint8
-from probeflow.gui.viewer.display_range import DisplayRangeController
-from probeflow.gui.viewer.display_sliders import DisplaySliderController
 
 
 class DatasetBuilderPanel(QWidget):
@@ -66,8 +67,6 @@ class DatasetBuilderPanel(QWidget):
         self._paint_mode = "brush"
         self._undo_stack: list[np.ndarray] = []
         self._display_arr: np.ndarray | None = None
-        self._display_drs = DisplayRangeController(clip_low=1.0, clip_high=99.0, parent=self)
-        self._view_auto_clip_idx = -1
 
         root = QVBoxLayout(self)
         root.setContentsMargins(8, 8, 8, 8)
@@ -125,21 +124,8 @@ class DatasetBuilderPanel(QWidget):
 
         self._view_tray = DatasetBuilderViewTray(theme, self)
         self._view_tray.set_expanded(True)
-        self._view_slider_ctrl = DisplaySliderController(
-            self._display_drs,
-            self._view_tray.hist_panel,
-            self._current_display_array,
-            lambda: (1.0, "a.u.", "Value"),
-        )
-        self._view_tray.hist_panel.rangeReleased.connect(self._on_view_hist_range_released)
-        self._view_tray.hist_panel.autoClipRequested.connect(self._on_view_auto_clip)
-        self._view_tray.hist_panel.resetRequested.connect(self._on_view_reset)
-        self._view_tray.hist_panel.minReleased.connect(self._view_slider_ctrl.on_min_changed)
-        self._view_tray.hist_panel.maxReleased.connect(self._view_slider_ctrl.on_max_changed)
-        self._view_tray.hist_panel.brightnessReleased.connect(self._view_slider_ctrl.on_brightness_changed)
-        self._view_tray.hist_panel.contrastReleased.connect(self._view_slider_ctrl.on_contrast_changed)
+        self._view_tray.percentiles_changed.connect(self._on_view_percentiles_changed)
         self._view_tray.flatten_toggled.connect(self._on_flatten_toggled)
-        self._display_drs.rangeChanged.connect(self._refresh_display_preview)
 
         form = QFormLayout()
         self._task_combo = QComboBox()
@@ -391,38 +377,33 @@ class DatasetBuilderPanel(QWidget):
             self._canvas.set_source(QPixmap(), reset_zoom=reset_zoom)
             self._canvas.setText("No scan")
             return
-        vmin, vmax = self._display_drs.resolve(display_arr)
-        if vmin is None or vmax is None:
+        self._view_tray.set_array(display_arr)
+        lo_pct, hi_pct = self._view_tray.percentile_bounds()
+        try:
+            vmin = percentile_value(display_arr, lo_pct)
+            vmax = percentile_value(display_arr, hi_pct)
+        except Exception:
             self._view_tray.clear_histogram(self._theme)
             self._canvas.set_raw_array(display_arr)
             self._canvas.set_source(QPixmap(), reset_zoom=reset_zoom)
             return
-        self._view_tray.update_histogram(display_arr, vmin, vmax, self._theme)
-        self._view_slider_ctrl.update()
+        if not np.isfinite(vmin) or not np.isfinite(vmax) or vmax <= vmin:
+            center = float(vmin if np.isfinite(vmin) else 0.0)
+            vmin = center - 1.0
+            vmax = center + 1.0
         self._canvas.set_raw_array(display_arr)
         self._canvas.set_source(_array_pixmap(display_arr, vmin=vmin, vmax=vmax), reset_zoom=reset_zoom)
-
-    def _on_view_hist_range_released(self, lo_phys: float, hi_phys: float) -> None:
-        self._display_drs.set_manual(lo_phys, hi_phys)
-
-    def _on_view_auto_clip(self) -> None:
-        presets = (
-            (1.0, 99.0),
-            (16.0, 84.0),
-            (33.5, 66.5),
-        )
-        self._view_auto_clip_idx = (self._view_auto_clip_idx + 1) % len(presets)
-        low, high = presets[self._view_auto_clip_idx]
-        self._display_drs.set_percentile(low, high)
-
-    def _on_view_reset(self) -> None:
-        self._display_drs.reset()
-        self._view_auto_clip_idx = -1
 
     def _on_flatten_toggled(self, checked: bool) -> None:
         self._display_arr = None
         if self._arr is not None:
             self._refresh_display_preview()
+
+    def _on_view_percentiles_changed(self, lo: float, hi: float) -> None:
+        if self._arr is None:
+            return
+        self._display_arr = None
+        self._refresh_display_preview()
 
     def toggle_view_tray(self) -> None:
         self._view_tray.set_expanded(not self._view_tray.is_expanded())
