@@ -10,6 +10,8 @@ from probeflow.gui.image_canvas import ImageCanvas
 class DatasetBuilderCanvas(ImageCanvas):
     """Image canvas that can emit mask-paint stamps without changing ImageCanvas."""
 
+    paint_stroke_started = Signal()
+    paint_stroke_finished = Signal()
     mask_painted = Signal(int, int)
 
     def __init__(self, parent=None):
@@ -25,6 +27,7 @@ class DatasetBuilderCanvas(ImageCanvas):
             super().mousePressEvent(event)
             return
         if self._paint_enabled and event.button() == Qt.LeftButton:
+            self.paint_stroke_started.emit()
             self._emit_paint(event)
             event.accept()
             return
@@ -39,6 +42,16 @@ class DatasetBuilderCanvas(ImageCanvas):
             event.accept()
             return
         super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if getattr(self, "_set_zero_mode", False):
+            super().mouseReleaseEvent(event)
+            return
+        if self._paint_enabled and event.button() == Qt.LeftButton:
+            self.paint_stroke_finished.emit()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
     def _emit_paint(self, event) -> None:
         image_size = getattr(self, "_image_size", None)

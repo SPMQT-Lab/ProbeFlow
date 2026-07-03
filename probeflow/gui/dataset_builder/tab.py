@@ -68,6 +68,8 @@ class DatasetBuilderPanel(QWidget):
         self._overlay_visible = True
         self._paint_mode = "brush"
         self._undo_stack: list[np.ndarray] = []
+        self._stroke_snapshot: np.ndarray | None = None
+        self._stroke_dirty = False
         self._base_display_arr: np.ndarray | None = None
         self._display_arr: np.ndarray | None = None
         self._current_view_points: list[tuple[int, int]] = []
@@ -199,6 +201,8 @@ class DatasetBuilderPanel(QWidget):
         clear_btn.clicked.connect(self.clear_overlay)
         self._brush_btn = brush_btn
         self._eraser_btn = eraser_btn
+        self._canvas.paint_stroke_started.connect(self._begin_paint_stroke)
+        self._canvas.paint_stroke_finished.connect(self._end_paint_stroke)
         self._canvas.mask_painted.connect(self._paint_at)
         self._canvas.pixel_clicked.connect(self._on_current_view_point_clicked)
         self.set_paint_mode("brush")
@@ -323,6 +327,8 @@ class DatasetBuilderPanel(QWidget):
         self._current_mask = None
         self._overlay_visible = True
         self._undo_stack.clear()
+        self._stroke_snapshot = None
+        self._stroke_dirty = False
         self._canvas.clear_mask_overlay()
         self._current_view_points = []
         self._cancel_current_image_flatten(refresh=False)
@@ -530,7 +536,6 @@ class DatasetBuilderPanel(QWidget):
                 },
                 name="step_edge",
             )
-        before = self._current_mask.data.copy()
         edited, changed = paint_mask(
             self._current_mask.data,
             x=x,
@@ -540,14 +545,35 @@ class DatasetBuilderPanel(QWidget):
         )
         if not changed:
             return
-        self._undo_stack.append(before)
-        if len(self._undo_stack) > 25:
-            self._undo_stack.pop(0)
         self._current_mask.data = edited
+        self._stroke_dirty = True
         self._mark_mask_edited()
         self._overlay_visible = True
         self._show_mask(edited)
         self._update_canvas_status()
+
+    def _begin_paint_stroke(self) -> None:
+        if self._arr is None or not (0 <= self._current_index < len(self._queue)):
+            self._stroke_snapshot = None
+            self._stroke_dirty = False
+            return
+        if self._current_mask is None:
+            self._stroke_snapshot = np.zeros(self._arr.shape, dtype=bool)
+        else:
+            self._stroke_snapshot = self._current_mask.data.copy()
+        self._stroke_dirty = False
+
+    def _end_paint_stroke(self) -> None:
+        if self._stroke_snapshot is None:
+            self._stroke_dirty = False
+            return
+        if self._stroke_dirty and self._current_mask is not None:
+            if not np.array_equal(self._current_mask.data, self._stroke_snapshot):
+                self._undo_stack.append(self._stroke_snapshot)
+                if len(self._undo_stack) > 25:
+                    self._undo_stack.pop(0)
+        self._stroke_snapshot = None
+        self._stroke_dirty = False
 
     def _mark_mask_edited(self) -> None:
         if self._current_mask is None:

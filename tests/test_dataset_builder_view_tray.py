@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import os
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 from PySide6.QtGui import QKeySequence, QShortcut
 
+from probeflow.core.mask import ImageMask
 from probeflow.gui.dataset_builder.display import flatten_display_array
 from probeflow.gui.dataset_builder.tab import DatasetBuilderPanel, DatasetBuilderSidebar
 from probeflow.gui.dataset_builder.view_tray import (
@@ -218,3 +220,34 @@ def test_dataset_builder_load_current_does_not_return_early(qapp):
     qapp.processEvents()
 
     assert panel._arr is not None or panel._canvas_status.text() != "No scan loaded"
+
+
+def test_dataset_builder_ctrl_z_undos_one_brush_stroke(qapp):
+    panel = DatasetBuilderPanel(THEMES["dark"], {})
+    panel.show()
+    qapp.processEvents()
+
+    arr = np.zeros((24, 24), dtype=float)
+    panel._arr = arr.copy()
+    panel._queue = [SimpleNamespace(display_id="sample_plane0", status="blank")]
+    panel._current_index = 0
+    panel._current_mask = ImageMask.new(
+        np.zeros(arr.shape, dtype=bool),
+        method="manual",
+        parameters={},
+        name="step_edge",
+    )
+
+    panel._begin_paint_stroke()
+    panel._paint_at(4, 4)
+    panel._paint_at(8, 8)
+    panel._end_paint_stroke()
+
+    painted = panel._current_mask.data.copy()
+    assert painted.sum() > 0
+    assert len(panel._undo_stack) == 1
+
+    panel.undo_paint()
+
+    assert panel._current_mask is not None
+    assert panel._current_mask.data.sum() == 0
