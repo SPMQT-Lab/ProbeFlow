@@ -11,6 +11,7 @@ from PySide6.QtGui import QColor, QCursor, QFont, QImage, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QButtonGroup,
+    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFrame,
@@ -109,20 +110,20 @@ class BrowseToolPanel(QWidget):
         filter_box_lay.setContentsMargins(0, 0, 0, 0)
         filter_box_lay.setSpacing(6)
 
-        self._size_filter_btn = self._make_filter_chip("Size (nm)")
+        self._size_filter_btn = self._make_filter_toggle("Size (nm)")
         filter_box_lay.addWidget(self._size_filter_btn)
         self._size_width_nm = self._make_filter_spinbox(0.0, 1_000_000.0, 1.0, " nm")
         self._size_height_nm = self._make_filter_spinbox(0.0, 1_000_000.0, 1.0, " nm")
         filter_box_lay.addWidget(self._labeled_spin_row("Max width", self._size_width_nm))
         filter_box_lay.addWidget(self._labeled_spin_row("Max height", self._size_height_nm))
 
-        self._completion_filter_btn = self._make_filter_chip("Completion (%)")
+        self._completion_filter_btn = self._make_filter_toggle("Completion (%)")
         filter_box_lay.addWidget(self._completion_filter_btn)
         self._completion_min_pct = self._make_filter_spinbox(0.0, 100.0, 1.0, " %")
         self._completion_min_pct.setValue(50.0)
         filter_box_lay.addWidget(self._labeled_spin_row("Min completion", self._completion_min_pct))
 
-        self._bias_filter_btn = self._make_filter_chip("Bias (mV)")
+        self._bias_filter_btn = self._make_filter_toggle("Bias (mV)")
         filter_box_lay.addWidget(self._bias_filter_btn)
         self._bias_min_mv = self._make_filter_spinbox(-10000.0, 10000.0, 1.0, " mV")
         self._bias_max_mv = self._make_filter_spinbox(-10000.0, 10000.0, 1.0, " mV")
@@ -288,15 +289,13 @@ class BrowseToolPanel(QWidget):
         self._filter_mode = mode
         self.filter_changed.emit(mode)
 
-    def _make_filter_chip(self, text: str) -> QPushButton:
-        btn = QPushButton(text)
-        btn.setCheckable(True)
+    def _make_filter_toggle(self, text: str) -> QCheckBox:
+        btn = QCheckBox(text)
         btn.setFont(ui_font(9, weight=QFont.Bold))
-        btn.setFixedHeight(26)
         btn.setCursor(QCursor(Qt.PointingHandCursor))
-        btn.setObjectName("folderFilterChip")
-        btn.clicked.connect(self._sync_folder_filter_inputs)
-        btn.clicked.connect(self._emit_folder_filter_state)
+        btn.setObjectName("folderFilterToggle")
+        btn.toggled.connect(self._sync_folder_filter_inputs)
+        btn.toggled.connect(self._emit_folder_filter_state)
         return btn
 
     def _make_filter_spinbox(
@@ -391,20 +390,26 @@ class BrowseToolPanel(QWidget):
 
     def apply_theme(self, t: dict):
         self._t = t
-        panel_bg = t.get("panel_bg", t.get("bg", t.get("card_bg", "#2a2f3a")))
-        chip_style = (
-            f"QPushButton#folderFilterChip {{"
-            f"background-color: {panel_bg};"
-            f"color: {t['fg']};"
-            f"border: 1px solid {t['sep']};"
-            f"border-radius: 6px;"
-            f"padding: 4px 8px;"
-            f"text-align: left;"
+        toggle_style = (
+            f"QCheckBox#folderFilterToggle {{"
+            f"color: {t['sub_fg']};"
+            f"spacing: 8px;"
+            f"padding: 2px 0px;"
             f"}}"
-            f"QPushButton#folderFilterChip:hover {{ background-color: {t['hover']}; }}"
-            f"QPushButton#folderFilterChip:checked {{"
+            f"QCheckBox#folderFilterToggle:hover {{ color: {t['fg']}; }}"
+            f"QCheckBox#folderFilterToggle:checked {{ color: {t['accent_bg']}; }}"
+            f"QCheckBox#folderFilterToggle::indicator {{"
+            f"width: 14px;"
+            f"height: 14px;"
+            f"border: 1px solid {t['sep']};"
+            f"border-radius: 3px;"
+            f"background-color: {t.get('bg', '#1e2128')};"
+            f"}}"
+            f"QCheckBox#folderFilterToggle::indicator:hover {{"
+            f"border-color: {t['accent_bg']};"
+            f"}}"
+            f"QCheckBox#folderFilterToggle::indicator:checked {{"
             f"background-color: {t['accent_bg']};"
-            f"color: {t['accent_fg']};"
             f"border-color: {t['accent_bg']};"
             f"}}"
         )
@@ -414,7 +419,7 @@ class BrowseToolPanel(QWidget):
             getattr(self, "_bias_filter_btn", None),
         ):
             if btn is not None:
-                btn.setStyleSheet(chip_style)
+                btn.setStyleSheet(toggle_style)
 
 
 # ── Browse info panel (RIGHT) ─────────────────────────────────────────────────
