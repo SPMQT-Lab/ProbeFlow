@@ -354,7 +354,8 @@ class ProbeFlowWindow(QMainWindow):
         self._tv_sidebar       = TVSidebar(t)
         self._dev_sidebar      = _DevSidebar(t)
         self._dataset_builder_sidebar = DatasetBuilderSidebar(t)
-        self._dataset_builder_sidebar.set_view_tray(self._dataset_builder_panel.view_tray_widget())
+        self._dataset_builder_sidebar.set_global_view_tray(self._dataset_builder_panel.view_tray_widget())
+        self._dataset_builder_sidebar.set_current_view_tray(self._dataset_builder_panel.current_view_tray_widget())
         self._sidebar_stack.addWidget(self._browse_info)        # idx 0
         self._sidebar_stack.addWidget(self._convert_sidebar)    # idx 1
         self._sidebar_stack.addWidget(self._features_sidebar)   # idx 2

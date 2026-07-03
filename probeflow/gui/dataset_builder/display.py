@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 
 from probeflow.processing.background import subtract_background
+from probeflow.processing.geometry import set_zero_plane
 from probeflow.processing.display import finite_values
 
 
@@ -24,6 +25,17 @@ def dataset_builder_display_array(arr: np.ndarray, *, flatten: bool) -> np.ndarr
     if flatten:
         return flatten_display_array(arr)
     return np.asarray(arr, dtype=np.float64)
+
+
+def current_image_view_array(
+    arr: np.ndarray,
+    points_px: list[tuple[int, int]] | tuple[tuple[int, int], ...] | None,
+) -> np.ndarray:
+    """Return a display-only copy with a manual 3-point plane removed."""
+    base = np.asarray(arr, dtype=np.float64)
+    if not points_px:
+        return base
+    return set_zero_plane(base, list(points_px))
 
 
 def percentile_value(arr: np.ndarray, pct: float) -> float:

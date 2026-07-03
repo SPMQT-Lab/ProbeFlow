@@ -38,10 +38,14 @@ from probeflow.dataset_builder.proposals import generate_proposal
 from probeflow.dataset_builder.queue import build_queue, queue_counts
 from probeflow.gui.dataset_builder.display import (
     dataset_builder_display_array,
+    current_image_view_array,
     percentile_value,
 )
 from probeflow.gui.dataset_builder.canvas import DatasetBuilderCanvas
-from probeflow.gui.dataset_builder.view_tray import DatasetBuilderViewTray
+from probeflow.gui.dataset_builder.view_tray import (
+    DatasetBuilderCurrentViewTray,
+    DatasetBuilderViewTray,
+)
 from probeflow.io.mask_sidecar import load_mask_set_sidecar
 from probeflow.processing.display import array_to_uint8
 
@@ -66,7 +70,10 @@ class DatasetBuilderPanel(QWidget):
         self._overlay_visible = True
         self._paint_mode = "brush"
         self._undo_stack: list[np.ndarray] = []
+        self._base_display_arr: np.ndarray | None = None
         self._display_arr: np.ndarray | None = None
+        self._current_view_points: list[tuple[int, int]] = []
+        self._current_view_capture: list[tuple[int, int]] = []
 
         root = QVBoxLayout(self)
         root.setContentsMargins(8, 8, 8, 8)
@@ -122,10 +129,15 @@ class DatasetBuilderPanel(QWidget):
         right_lay.setContentsMargins(0, 0, 0, 0)
         right_lay.setSpacing(8)
 
-        self._view_tray = DatasetBuilderViewTray(theme, self)
-        self._view_tray.set_expanded(True)
-        self._view_tray.percentiles_changed.connect(self._on_view_percentiles_changed)
-        self._view_tray.flatten_toggled.connect(self._on_flatten_toggled)
+        self._global_view_tray = DatasetBuilderViewTray(theme, self)
+        self._global_view_tray.set_expanded(True)
+        self._global_view_tray.percentiles_changed.connect(self._on_view_percentiles_changed)
+        self._global_view_tray.flatten_toggled.connect(self._on_flatten_toggled)
+
+        self._current_view_tray = DatasetBuilderCurrentViewTray(theme, self)
+        self._current_view_tray.set_expanded(True)
+        self._current_view_tray.flatten_requested.connect(self._on_current_flatten_toggled)
+        self._current_view_tray.clear_requested.connect(self.clear_current_image_flatten)
 
         form = QFormLayout()
         self._task_combo = QComboBox()
@@ -175,7 +187,7 @@ class DatasetBuilderPanel(QWidget):
 
         self._shortcut_lbl = QLabel(
             "A prev | D next | F save+next | Q overlay | W proposal | "
-            "E eraser | R brush | Z undo | X reject | C clear | V view | "
+            "E eraser | R brush | Z undo | X reject | C clear | V global view | "
             "1 accept | 2 uncertain | 3 reject | [ / ] brush"
         )
         self._shortcut_lbl.setAlignment(Qt.AlignCenter)
@@ -199,6 +211,7 @@ class DatasetBuilderPanel(QWidget):
         self._brush_btn = brush_btn
         self._eraser_btn = eraser_btn
         self._canvas.mask_painted.connect(self._paint_at)
+        self._canvas.pixel_clicked.connect(self._on_current_view_point_clicked)
         self.set_paint_mode("brush")
 
         self._install_shortcuts()
@@ -213,7 +226,8 @@ class DatasetBuilderPanel(QWidget):
             f"background: {theme.get('status_bg', bg)}; color: {theme.get('status_fg', '#9aa1ab')};"
             f"border: 1px solid {border}; border-radius: 4px; padding: 5px;"
         )
-        self._view_tray.apply_theme(theme)
+        self._global_view_tray.apply_theme(theme)
+        self._current_view_tray.apply_theme(theme)
         if self._arr is not None:
             self._refresh_display_preview()
 
@@ -333,10 +347,13 @@ class DatasetBuilderPanel(QWidget):
         self._overlay_visible = True
         self._undo_stack.clear()
         self._canvas.clear_mask_overlay()
+        self._current_view_points = []
+        self._cancel_current_image_flatten(refresh=False)
         if not (0 <= self._current_index < len(self._queue)):
             self._arr = None
+            self._base_display_arr = None
             self._display_arr = None
-            self._view_tray.clear_histogram(self._theme)
+            self._global_view_tray.clear_histogram(self._theme)
             self._canvas.setText("No scan")
             self._canvas_status.setText("No scan loaded")
             return
@@ -349,6 +366,7 @@ class DatasetBuilderPanel(QWidget):
         except Exception as exc:
             self.status_message.emit(f"Could not load {item.source_path.name}: {exc}")
             return
+        self._base_display_arr = None
         self._display_arr = None
         self._refresh_display_preview(reset_zoom=True)
         self._load_existing_mask(item)
@@ -358,32 +376,37 @@ class DatasetBuilderPanel(QWidget):
             f"mask coverage: {coverage:.2f}%"
         )
 
-    def _current_display_array(self) -> np.ndarray | None:
+    def _base_display_array(self) -> np.ndarray | None:
         if self._arr is None:
             return None
-        if self._display_arr is not None:
-            return self._display_arr
-        self._display_arr = dataset_builder_display_array(
+        if self._base_display_arr is not None:
+            return self._base_display_arr
+        self._base_display_arr = dataset_builder_display_array(
             self._arr,
-            flatten=self._view_tray.is_flatten_enabled(),
+            flatten=self._global_view_tray.is_flatten_enabled(),
         )
-        return self._display_arr
+        return self._base_display_arr
 
     def _refresh_display_preview(self, *_, reset_zoom: bool = False) -> None:
-        display_arr = self._current_display_array()
-        if display_arr is None:
-            self._view_tray.clear_histogram(self._theme)
+        base_arr = self._base_display_array()
+        if base_arr is None:
+            self._global_view_tray.clear_histogram(self._theme)
             self._canvas.set_raw_array(None)
             self._canvas.set_source(QPixmap(), reset_zoom=reset_zoom)
             self._canvas.setText("No scan")
             return
-        self._view_tray.set_array(display_arr)
-        lo_pct, hi_pct = self._view_tray.percentile_bounds()
+        try:
+            display_arr = current_image_view_array(base_arr, self._current_view_points)
+        except Exception:
+            display_arr = np.asarray(base_arr, dtype=np.float64)
+        self._display_arr = display_arr
+        self._global_view_tray.set_array(display_arr)
+        lo_pct, hi_pct = self._global_view_tray.percentile_bounds()
         try:
             vmin = percentile_value(display_arr, lo_pct)
             vmax = percentile_value(display_arr, hi_pct)
         except Exception:
-            self._view_tray.clear_histogram(self._theme)
+            self._global_view_tray.clear_histogram(self._theme)
             self._canvas.set_raw_array(display_arr)
             self._canvas.set_source(QPixmap(), reset_zoom=reset_zoom)
             return
@@ -395,6 +418,7 @@ class DatasetBuilderPanel(QWidget):
         self._canvas.set_source(_array_pixmap(display_arr, vmin=vmin, vmax=vmax), reset_zoom=reset_zoom)
 
     def _on_flatten_toggled(self, checked: bool) -> None:
+        self._base_display_arr = None
         self._display_arr = None
         if self._arr is not None:
             self._refresh_display_preview()
@@ -405,11 +429,84 @@ class DatasetBuilderPanel(QWidget):
         self._display_arr = None
         self._refresh_display_preview()
 
+    def _on_current_flatten_toggled(self, checked: bool) -> None:
+        if checked:
+            self._start_current_image_flatten()
+        else:
+            self._cancel_current_image_flatten()
+
+    def _start_current_image_flatten(self) -> None:
+        if self._arr is None:
+            self._current_view_tray.set_flatten_armed(False)
+            return
+        self._current_view_points = []
+        self._current_view_capture = []
+        self._canvas.set_zero_markers([])
+        self._canvas.set_set_zero_mode(True)
+        self._refresh_display_preview()
+        self.status_message.emit("3 point flatten armed")
+
+    def _cancel_current_image_flatten(self, *, refresh: bool = True) -> None:
+        self._current_view_capture = []
+        self._canvas.set_zero_markers([])
+        self._canvas.set_set_zero_mode(False)
+        self._current_view_tray.set_flatten_armed(False)
+        if refresh and self._arr is not None:
+            self._refresh_display_preview()
+
+    def clear_current_image_flatten(self) -> None:
+        self._current_view_points = []
+        self._cancel_current_image_flatten(refresh=False)
+        if self._arr is not None:
+            self._refresh_display_preview()
+        self.status_message.emit("Current image flatten cleared")
+
+    def _on_current_view_point_clicked(self, frac_x: float, frac_y: float) -> None:
+        if self._arr is None or not self._current_view_tray.is_flatten_armed():
+            return
+        base_arr = self._base_display_array()
+        if base_arr is None:
+            return
+        width = int(base_arr.shape[1])
+        height = int(base_arr.shape[0])
+        x_px = max(0, min(width - 1, int(round(float(frac_x) * width))))
+        y_px = max(0, min(height - 1, int(round(float(frac_y) * height))))
+        self._current_view_capture.append((x_px, y_px))
+        markers = [
+            {"label": str(i + 1), "frac_x": px / max(width, 1), "frac_y": py / max(height, 1)}
+            for i, (px, py) in enumerate(self._current_view_capture)
+        ]
+        self._canvas.set_zero_markers(markers)
+        if len(self._current_view_capture) < 3:
+            self.status_message.emit(f"3 point flatten: point {len(self._current_view_capture)} / 3")
+            return
+        candidate_points = self._current_view_capture[:3]
+        try:
+            corrected = current_image_view_array(base_arr, candidate_points)
+        except Exception as exc:
+            self._current_view_capture = []
+            self._canvas.set_zero_markers([])
+            self._canvas.set_set_zero_mode(False)
+            self._current_view_tray.set_flatten_armed(False)
+            self.status_message.emit(f"3 point flatten failed: {exc}")
+            return
+        self._current_view_points = candidate_points
+        self._current_view_capture = []
+        self._canvas.set_zero_markers([])
+        self._canvas.set_set_zero_mode(False)
+        self._current_view_tray.set_flatten_armed(False)
+        self._display_arr = corrected
+        self._refresh_display_preview()
+        self.status_message.emit("Current image display flattened")
+
     def toggle_view_tray(self) -> None:
-        self._view_tray.set_expanded(not self._view_tray.is_expanded())
+        self._global_view_tray.set_expanded(not self._global_view_tray.is_expanded())
 
     def view_tray_widget(self) -> DatasetBuilderViewTray:
-        return self._view_tray
+        return self._global_view_tray
+
+    def current_view_tray_widget(self) -> DatasetBuilderCurrentViewTray:
+        return self._current_view_tray
 
     def _load_existing_mask(self, item: DatasetQueueItem) -> None:
         try:
@@ -662,13 +759,19 @@ class DatasetBuilderSidebar(QWidget):
         self._title = QLabel("<b>Dataset Builder</b>")
         self._counts = QLabel("Queue not loaded")
         self._counts.setWordWrap(True)
-        self._view_host = QWidget()
-        self._view_host_lay = QVBoxLayout(self._view_host)
-        self._view_host_lay.setContentsMargins(0, 0, 0, 0)
-        self._view_host_lay.setSpacing(0)
-        self._view_tray = None
+        self._global_view_host = QWidget()
+        self._global_view_host_lay = QVBoxLayout(self._global_view_host)
+        self._global_view_host_lay.setContentsMargins(0, 0, 0, 0)
+        self._global_view_host_lay.setSpacing(0)
+        self._current_view_host = QWidget()
+        self._current_view_host_lay = QVBoxLayout(self._current_view_host)
+        self._current_view_host_lay.setContentsMargins(0, 0, 0, 0)
+        self._current_view_host_lay.setSpacing(0)
+        self._global_view_tray = None
+        self._current_view_tray = None
         self._lay.addWidget(self._title)
-        self._lay.addWidget(self._view_host)
+        self._lay.addWidget(self._global_view_host)
+        self._lay.addWidget(self._current_view_host)
         self._lay.addWidget(self._counts)
         self._lay.addStretch(1)
         self.apply_theme(theme)
@@ -676,15 +779,28 @@ class DatasetBuilderSidebar(QWidget):
     def apply_theme(self, theme: dict) -> None:
         self._theme = dict(theme)
 
-    def set_view_tray(self, tray: QWidget) -> None:
-        if self._view_tray is tray:
+    def set_global_view_tray(self, tray: QWidget) -> None:
+        if self._global_view_tray is tray:
             return
-        if self._view_tray is not None:
-            self._view_host_lay.removeWidget(self._view_tray)
-            self._view_tray.setParent(None)
-        self._view_tray = tray
+        if self._global_view_tray is not None:
+            self._global_view_host_lay.removeWidget(self._global_view_tray)
+            self._global_view_tray.setParent(None)
+        self._global_view_tray = tray
         if tray is not None:
-            self._view_host_lay.addWidget(tray)
+            self._global_view_host_lay.addWidget(tray)
+
+    def set_current_view_tray(self, tray: QWidget) -> None:
+        if self._current_view_tray is tray:
+            return
+        if self._current_view_tray is not None:
+            self._current_view_host_lay.removeWidget(self._current_view_tray)
+            self._current_view_tray.setParent(None)
+        self._current_view_tray = tray
+        if tray is not None:
+            self._current_view_host_lay.addWidget(tray)
+
+    def set_view_tray(self, tray: QWidget) -> None:
+        self.set_global_view_tray(tray)
 
     def set_counts(self, counts: dict) -> None:
         self._counts.setText(

@@ -21,6 +21,9 @@ class DatasetBuilderCanvas(ImageCanvas):
         self.setCursor(Qt.CrossCursor if self._paint_enabled else Qt.ArrowCursor)
 
     def mousePressEvent(self, event) -> None:
+        if getattr(self, "_set_zero_mode", False):
+            super().mousePressEvent(event)
+            return
         if self._paint_enabled and event.button() == Qt.LeftButton:
             self._emit_paint(event)
             event.accept()
@@ -28,6 +31,9 @@ class DatasetBuilderCanvas(ImageCanvas):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event) -> None:
+        if getattr(self, "_set_zero_mode", False):
+            super().mouseMoveEvent(event)
+            return
         if self._paint_enabled and event.buttons() & Qt.LeftButton:
             self._emit_paint(event)
             event.accept()
