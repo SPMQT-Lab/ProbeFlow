@@ -209,7 +209,7 @@ fix), the feature bank Phases 1–2, the CLIP classify encoder, and the
 viewer-black contrast fix (8a2950d). Particle Statistics (#45) was itself a
 review and was not re-reviewed.
 
-### Fixed in this pass (uncommitted, suite green: 2508 passed / 3 skipped)
+### Fixed in this pass (committed and merged to main in PR #48, suite green: 2508 passed / 3 skipped)
 
 1. **Feature-bank silent data loss (the one real find)** —
    `analysis/feature_bank.py`: a corrupt/unparseable bank file made
