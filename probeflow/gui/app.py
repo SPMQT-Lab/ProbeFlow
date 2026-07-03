@@ -91,6 +91,7 @@ from probeflow.gui.rendering import (
 )
 from probeflow.gui.workers import (
     ConversionWorker,
+    FilteredFolderExportWorker,
 )
 from probeflow.gui.browse import ThumbnailGrid, BrowseInfoPanel, BrowseToolPanel
 from probeflow.gui.convert import ConvertPanel, ConvertSidebar
@@ -410,11 +411,15 @@ class ProbeFlowWindow(QMainWindow):
         self._grid.view_requested.connect(self._open_viewer)
         self._grid.card_context_action.connect(self._on_card_context_action)
         self._grid.folder_changed.connect(self._on_grid_folder_changed)
+        self._grid.folder_filter_started.connect(self._on_folder_filter_started)
+        self._grid.folder_filter_finished.connect(self._on_folder_filter_finished)
         self._browse_tools.colormap_changed.connect(self._on_thumbnail_colormap_changed)
         self._browse_tools.thumbnail_align_changed.connect(self._on_thumbnail_align_changed)
         self._browse_tools.map_spectra_requested.connect(self._on_map_spectra)
         self._browse_tools.overlay_spectra_requested.connect(self._on_overlay_selected_spectra)
         self._browse_tools.filter_changed.connect(self._on_filter_changed)
+        self._browse_tools.folder_filter_changed.connect(self._on_folder_filter_changed)
+        self._browse_tools.export_filtered_requested.connect(self._on_export_filtered_folder)
         self._browse_tools.thumbnail_channel_changed.connect(self._on_thumbnail_channel_changed)
         self._browse_tools.thumbnail_size_changed.connect(self._on_thumbnail_size_changed)
         self._browse_tools.open_fc_window_requested.connect(self._open_fc_window)
@@ -425,6 +430,7 @@ class ProbeFlowWindow(QMainWindow):
         # Sync initial filter state from the toolbar into the grid so the
         # two agree even before the first folder is opened.
         self._grid.apply_filter(self._browse_tools.get_filter_mode())
+        self._grid.set_folder_filter_state(self._browse_tools.get_folder_filter_state())
         self._convert_sidebar.run_btn.clicked.connect(self._run)
         self._conv_panel.input_entry.textChanged.connect(self._update_count)
 
@@ -958,6 +964,26 @@ class ProbeFlowWindow(QMainWindow):
         self._browse_info.clear()
         self._update_browse_status()
 
+    def _format_browse_counts(self, counts) -> str:
+        parts: list[str] = []
+        if counts.visible_folders:
+            parts.append(
+                f"{counts.visible_folders} folder{'s' if counts.visible_folders != 1 else ''}"
+            )
+        if counts.visible_scans:
+            parts.append(
+                f"{counts.visible_scans} scan{'s' if counts.visible_scans != 1 else ''}"
+            )
+        if counts.visible_spectra:
+            parts.append(
+                f"{counts.visible_spectra} spec{'s' if counts.visible_spectra != 1 else ''}"
+            )
+        if not parts:
+            parts.append("0 items")
+        if counts.hidden_items:
+            parts.append(f"{counts.hidden_items} hidden")
+        return ", ".join(parts)
+
     def _update_browse_status(self):
         entries = self._grid.get_entries()
         n_folders = sum(1 for e in entries if isinstance(e, FolderEntry))
@@ -1010,6 +1036,88 @@ class ProbeFlowWindow(QMainWindow):
         else:
             msg = f"{n_sxm} {img_word}, {n_vert} {spec_word}"
         self._status_bar.showMessage(msg)
+
+    # Updated browse-filter/status handlers for metadata folder filtering.
+    def _update_browse_status(self):
+        counts = self._grid.get_filter_counts()
+        self._n_loaded = counts.visible_scans + counts.visible_spectra
+        cur = self._grid.current_dir()
+        desc = self._format_browse_counts(counts)
+        loc = cur.name if cur else "?"
+        self._status_bar.showMessage(
+            f"{loc}: {desc} â€” Double-click a folder to navigate, a scan to view")
+
+    def _on_entry_select(self, entry):
+        if entry is None:
+            self._browse_info.clear()
+            self._update_browse_status()
+            return
+        if isinstance(entry, VertFile):
+            self._browse_info.show_vert_entry(entry)
+            n_sel = len(self._grid.get_selected())
+            sweep = entry.sweep_type.replace("_", " ")
+            self._status_bar.showMessage(
+                f"{entry.stem}  |  {sweep}  |  {entry.n_points} pts  |  "
+                f"{n_sel} selected / {self._n_loaded} total  |  Double-click to view")
+            return
+        cmap_key, _, proc = self._grid.get_card_state(entry)
+        self._browse_info.show_entry(entry, cmap_key, proc)
+        n_sel = len(self._grid.get_selected())
+        self._status_bar.showMessage(
+            f"{entry.stem}  |  {entry.Nx}Ã—{entry.Ny} px  |  "
+            f"{n_sel} selected / {self._n_loaded} total  |  Double-click to view full size")
+
+    def _on_filter_changed(self, mode: str):
+        self._grid.apply_filter(mode)
+        self._update_browse_status()
+
+    def _on_folder_filter_changed(self, state) -> None:
+        self._grid.set_folder_filter_state(state)
+
+    def _on_folder_filter_started(self, folder_name: str) -> None:
+        self._status_bar.showMessage(f"Filtering {folder_name}...")
+
+    def _on_folder_filter_finished(self, counts) -> None:
+        cur = self._grid.current_dir()
+        loc = cur.name if cur else "?"
+        self._n_loaded = counts.visible_scans + counts.visible_spectra
+        self._status_bar.showMessage(f"{loc}: {self._format_browse_counts(counts)}")
+
+    def _on_export_filtered_folder(self) -> None:
+        current_dir = self._grid.current_dir()
+        if current_dir is None:
+            self._status_bar.showMessage("Open a browse folder first.")
+            return
+        entries = self._grid.get_visible_scan_entries()
+        if not entries:
+            self._status_bar.showMessage("No matching scan files to export.")
+            return
+        dest = QFileDialog.getExistingDirectory(
+            self,
+            "Export filtered folder",
+            str(Path.home()),
+        )
+        if not dest:
+            return
+        worker = FilteredFolderExportWorker(
+            [entry.path for entry in entries],
+            dest,
+        )
+        worker.signals.finished.connect(self._on_export_filtered_finished)
+        worker.signals.failed.connect(self._on_export_filtered_failed)
+        self._status_bar.showMessage(
+            f"Exporting {len(entries)} filtered scan file{'s' if len(entries) != 1 else ''}..."
+        )
+        self._pool.start(worker)
+
+    def _on_export_filtered_finished(self, result) -> None:
+        self._status_bar.showMessage(
+            f"Exported {result.copied} scan file{'s' if result.copied != 1 else ''} "
+            f"to {result.destination.name} ({result.collisions} skipped, {result.errors} errors)"
+        )
+
+    def _on_export_filtered_failed(self, message: str) -> None:
+        self._status_bar.showMessage(f"Filtered export failed: {message}")
 
     def _on_thumbnail_channel_changed(self, channel: str):
         n = self._grid.set_thumbnail_channel(channel)

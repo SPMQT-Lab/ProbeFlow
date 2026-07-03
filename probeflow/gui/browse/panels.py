@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 
+from probeflow.core.browse_filters import FolderFilterState
 from probeflow.gui.typography import ui_font
 from PySide6.QtCore import Qt, QThreadPool, Signal, Slot
 from PySide6.QtGui import QColor, QCursor, QFont, QImage, QPixmap
@@ -11,6 +12,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QButtonGroup,
     QComboBox,
+    QDoubleSpinBox,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -58,6 +60,8 @@ class BrowseToolPanel(QWidget):
     map_spectra_requested      = Signal()
     overlay_spectra_requested  = Signal()
     filter_changed             = Signal(str)   # "all" | "images" | "spectra"
+    folder_filter_changed      = Signal(object)
+    export_filtered_requested  = Signal()
     thumbnail_channel_changed  = Signal(str)
     thumbnail_size_changed     = Signal(str)   # "large" | "small"
     open_fc_window_requested   = Signal()      # floating Feature Counting window
@@ -92,6 +96,50 @@ class BrowseToolPanel(QWidget):
         open_btn.setObjectName("accentBtn")
         open_btn.clicked.connect(self.open_folder_requested.emit)
         lay.addWidget(open_btn)
+
+        self._filter_toggle_btn = QPushButton("[+] Filter folder")
+        self._filter_toggle_btn.setFont(ui_font(9, weight=QFont.Bold))
+        self._filter_toggle_btn.setFixedHeight(26)
+        self._filter_toggle_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self._filter_toggle_btn.clicked.connect(self._toggle_folder_filters)
+        lay.addWidget(self._filter_toggle_btn)
+
+        self._folder_filter_box = QWidget()
+        filter_box_lay = QVBoxLayout(self._folder_filter_box)
+        filter_box_lay.setContentsMargins(0, 0, 0, 0)
+        filter_box_lay.setSpacing(6)
+
+        self._size_filter_btn = self._make_filter_chip("Size (nm)")
+        filter_box_lay.addWidget(self._size_filter_btn)
+        self._size_width_nm = self._make_filter_spinbox(0.0, 1_000_000.0, 1.0, " nm")
+        self._size_height_nm = self._make_filter_spinbox(0.0, 1_000_000.0, 1.0, " nm")
+        filter_box_lay.addWidget(self._labeled_spin_row("Max width", self._size_width_nm))
+        filter_box_lay.addWidget(self._labeled_spin_row("Max height", self._size_height_nm))
+
+        self._completion_filter_btn = self._make_filter_chip("Completion (%)")
+        filter_box_lay.addWidget(self._completion_filter_btn)
+        self._completion_min_pct = self._make_filter_spinbox(0.0, 100.0, 1.0, " %")
+        self._completion_min_pct.setValue(50.0)
+        filter_box_lay.addWidget(self._labeled_spin_row("Min completion", self._completion_min_pct))
+
+        self._bias_filter_btn = self._make_filter_chip("Bias (mV)")
+        filter_box_lay.addWidget(self._bias_filter_btn)
+        self._bias_min_mv = self._make_filter_spinbox(-10000.0, 10000.0, 1.0, " mV")
+        self._bias_max_mv = self._make_filter_spinbox(-10000.0, 10000.0, 1.0, " mV")
+        self._bias_min_mv.setValue(-500.0)
+        self._bias_max_mv.setValue(500.0)
+        filter_box_lay.addWidget(self._labeled_spin_row("Min bias", self._bias_min_mv))
+        filter_box_lay.addWidget(self._labeled_spin_row("Max bias", self._bias_max_mv))
+
+        self._export_filtered_btn = QPushButton("Export filtered folder")
+        self._export_filtered_btn.setFont(ui_font(9))
+        self._export_filtered_btn.setFixedHeight(28)
+        self._export_filtered_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self._export_filtered_btn.clicked.connect(self.export_filtered_requested.emit)
+        filter_box_lay.addWidget(self._export_filtered_btn)
+
+        self._folder_filter_box.setVisible(False)
+        lay.addWidget(self._folder_filter_box)
 
         # ── Filter toggle (All / Images / Spectra) ─────────────────────────────
         filter_row = QWidget()
@@ -225,6 +273,8 @@ class BrowseToolPanel(QWidget):
         lay.addStretch()
         scroll.setWidget(inner)
         outer.addWidget(scroll)
+        self._sync_folder_filter_inputs()
+        self.apply_theme(self._t)
 
     # ── Slots ──────────────────────────────────────────────────────────────────
     def _on_colormap_changed(self):
@@ -238,9 +288,90 @@ class BrowseToolPanel(QWidget):
         self._filter_mode = mode
         self.filter_changed.emit(mode)
 
+    def _make_filter_chip(self, text: str) -> QPushButton:
+        btn = QPushButton(text)
+        btn.setCheckable(True)
+        btn.setFont(ui_font(9, weight=QFont.Bold))
+        btn.setFixedHeight(26)
+        btn.setCursor(QCursor(Qt.PointingHandCursor))
+        btn.setObjectName("folderFilterChip")
+        btn.clicked.connect(self._sync_folder_filter_inputs)
+        btn.clicked.connect(self._emit_folder_filter_state)
+        return btn
+
+    def _make_filter_spinbox(
+        self,
+        minimum: float,
+        maximum: float,
+        step: float,
+        suffix: str,
+    ) -> QDoubleSpinBox:
+        box = QDoubleSpinBox()
+        box.setDecimals(1)
+        box.setRange(minimum, maximum)
+        box.setSingleStep(step)
+        box.setSuffix(suffix)
+        box.setFont(ui_font(9))
+        box.valueChanged.connect(self._emit_folder_filter_state)
+        return box
+
+    def _labeled_spin_row(self, label: str, box: QDoubleSpinBox) -> QWidget:
+        row = QWidget()
+        row_lay = QHBoxLayout(row)
+        row_lay.setContentsMargins(0, 0, 0, 0)
+        row_lay.setSpacing(6)
+        lbl = QLabel(label)
+        lbl.setFont(ui_font(8))
+        row_lay.addWidget(lbl)
+        row_lay.addWidget(box, 1)
+        return row
+
+    def _toggle_folder_filters(self) -> None:
+        visible = not self._folder_filter_box.isVisible()
+        self._folder_filter_box.setVisible(visible)
+        self._filter_toggle_btn.setText(
+            "[-] Filter folder" if visible else "[+] Filter folder"
+        )
+
+    def _sync_folder_filter_inputs(self) -> None:
+        self._size_width_nm.setEnabled(self._size_filter_btn.isChecked())
+        self._size_height_nm.setEnabled(self._size_filter_btn.isChecked())
+        self._completion_min_pct.setEnabled(self._completion_filter_btn.isChecked())
+        self._bias_min_mv.setEnabled(self._bias_filter_btn.isChecked())
+        self._bias_max_mv.setEnabled(self._bias_filter_btn.isChecked())
+
+    def _emit_folder_filter_state(self, *_args) -> None:
+        if not all(
+            hasattr(self, name)
+            for name in (
+                "_size_filter_btn",
+                "_completion_filter_btn",
+                "_bias_filter_btn",
+                "_size_width_nm",
+                "_size_height_nm",
+                "_completion_min_pct",
+                "_bias_min_mv",
+                "_bias_max_mv",
+            )
+        ):
+            return
+        self.folder_filter_changed.emit(self.get_folder_filter_state())
+
     # ── Public API ─────────────────────────────────────────────────────────────
     def get_filter_mode(self) -> str:
         return self._filter_mode
+
+    def get_folder_filter_state(self) -> FolderFilterState:
+        return FolderFilterState(
+            size_enabled=self._size_filter_btn.isChecked(),
+            max_width_nm=float(self._size_width_nm.value()),
+            max_height_nm=float(self._size_height_nm.value()),
+            completion_enabled=self._completion_filter_btn.isChecked(),
+            min_completion_pct=float(self._completion_min_pct.value()),
+            bias_enabled=self._bias_filter_btn.isChecked(),
+            min_bias_mv=float(self._bias_min_mv.value()),
+            max_bias_mv=float(self._bias_max_mv.value()),
+        )
 
     def set_filter_mode(self, mode: str) -> None:
         if mode not in self._filter_btns:
@@ -260,6 +391,30 @@ class BrowseToolPanel(QWidget):
 
     def apply_theme(self, t: dict):
         self._t = t
+        panel_bg = t.get("panel_bg", t.get("bg", t.get("card_bg", "#2a2f3a")))
+        chip_style = (
+            f"QPushButton#folderFilterChip {{"
+            f"background-color: {panel_bg};"
+            f"color: {t['fg']};"
+            f"border: 1px solid {t['sep']};"
+            f"border-radius: 6px;"
+            f"padding: 4px 8px;"
+            f"text-align: left;"
+            f"}}"
+            f"QPushButton#folderFilterChip:hover {{ background-color: {t['hover']}; }}"
+            f"QPushButton#folderFilterChip:checked {{"
+            f"background-color: {t['accent_bg']};"
+            f"color: {t['accent_fg']};"
+            f"border-color: {t['accent_bg']};"
+            f"}}"
+        )
+        for btn in (
+            getattr(self, "_size_filter_btn", None),
+            getattr(self, "_completion_filter_btn", None),
+            getattr(self, "_bias_filter_btn", None),
+        ):
+            if btn is not None:
+                btn.setStyleSheet(chip_style)
 
 
 # ── Browse info panel (RIGHT) ─────────────────────────────────────────────────

@@ -5,6 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional, Union
 
+from probeflow.core.browse_filters import (
+    FilterMatchCounts,
+    FolderFilterState,
+    scan_matches_folder_filters,
+)
 from probeflow.gui.typography import ui_font
 from PySide6.QtCore import Qt, QThreadPool, QTimer, Signal, Slot
 from PySide6.QtGui import QCursor, QImage, QPixmap
@@ -18,6 +23,7 @@ from probeflow.gui.rendering import (
     resolve_thumbnail_plane_index,
 )
 from probeflow.gui.workers import (
+    FolderFilterLoader,
     FolderIndexLoader,
     FolderThumbnailLoader,
     SpecThumbnailLoader,
@@ -51,6 +57,8 @@ class ThumbnailGrid(QWidget):
     card_context_action = Signal(object, str)  # entry, action key — re-emitted from cards
     folder_changed    = Signal(object)   # current folder Path (after navigation)
     root_changed      = Signal(object)   # root folder Path (after open-folder dialog)
+    folder_filter_started = Signal(str)
+    folder_filter_finished = Signal(object)
 
     GAP = 10
 
@@ -123,6 +131,10 @@ class ThumbnailGrid(QWidget):
         self._nav_token                                        = object()
         self._current_cols: int                                = 1
         self._filter_mode: str                                 = "all"
+        self._folder_filter_state: FolderFilterState           = FolderFilterState()
+        self._folder_visibility: dict[Path, bool]             = {}
+        self._folder_filter_token                              = object()
+        self._folder_filter_pending: bool                      = False
         self._thumbnail_size_name: str                         = "large"
         self._thumbnail_pending: dict[str, Union[SxmFile, VertFile, FolderEntry]] = {}
         self._background_thumbnail_batch_size: int             = 2
@@ -306,21 +318,13 @@ class ThumbnailGrid(QWidget):
         if had_selection:
             self.selection_changed.emit(0)
 
-        n_folders = sum(1 for e in entries if isinstance(e, FolderEntry))
-        n_sxm     = sum(1 for e in entries if isinstance(e, SxmFile))
-        n_vert    = sum(1 for e in entries if isinstance(e, VertFile))
-        if self._current_dir is not None:
-            parts = []
-            if n_folders:
-                parts.append(f"{n_folders} folder{'s' if n_folders != 1 else ''}")
-            if n_sxm:
-                parts.append(f"{n_sxm} scan{'s' if n_sxm != 1 else ''}")
-            if n_vert:
-                parts.append(f"{n_vert} spec{'s' if n_vert != 1 else ''}")
-            self._path_lbl.setText(
-                f"{self._current_dir.name}  "
-                f"({', '.join(parts) if parts else '0 items'})"
-            )
+        self._folder_visibility = {
+            Path(entry.path): True
+            for entry in entries
+            if isinstance(entry, FolderEntry)
+        }
+        self._folder_filter_pending = False
+        self._update_path_summary()
 
         # clear grid (gridded widgets), then any filtered-out cards that were
         # never re-added to the layout — those are parentless and would
@@ -357,6 +361,87 @@ class ThumbnailGrid(QWidget):
         # Queue all thumbnails now; scheduling skips entries whose cards are
         # not built yet and picks them up on later refresh ticks.
         self._prepare_thumbnail_queue(entries)
+        self._refresh_folder_filtering()
+
+    def _scan_matches_folder_filters(self, entry: SxmFile) -> bool:
+        return scan_matches_folder_filters(
+            width_nm=entry.scan_width_nm,
+            height_nm=entry.scan_height_nm,
+            completion_pct=entry.completion_pct,
+            bias_mv=entry.bias_mv,
+            state=self._folder_filter_state,
+        )
+
+    def _visible_entries(self) -> list[Union[SxmFile, VertFile, FolderEntry]]:
+        return [entry for entry in self._entries if self._is_entry_visible(entry)]
+
+    def _filter_counts(self) -> FilterMatchCounts:
+        total_folders = sum(1 for e in self._entries if isinstance(e, FolderEntry))
+        total_scans = sum(1 for e in self._entries if isinstance(e, SxmFile))
+        total_spectra = sum(1 for e in self._entries if isinstance(e, VertFile))
+        visible_entries = self._visible_entries()
+        return FilterMatchCounts(
+            total_folders=total_folders,
+            visible_folders=sum(1 for e in visible_entries if isinstance(e, FolderEntry)),
+            total_scans=total_scans,
+            visible_scans=sum(1 for e in visible_entries if isinstance(e, SxmFile)),
+            total_spectra=total_spectra,
+            visible_spectra=sum(1 for e in visible_entries if isinstance(e, VertFile)),
+        )
+
+    def _update_path_summary(self) -> None:
+        if self._current_dir is None:
+            return
+        counts = self._filter_counts()
+        parts = []
+        if counts.visible_folders:
+            parts.append(
+                f"{counts.visible_folders} folder{'s' if counts.visible_folders != 1 else ''}"
+            )
+        if counts.visible_scans:
+            parts.append(
+                f"{counts.visible_scans} scan{'s' if counts.visible_scans != 1 else ''}"
+            )
+        if counts.visible_spectra:
+            parts.append(
+                f"{counts.visible_spectra} spec{'s' if counts.visible_spectra != 1 else ''}"
+            )
+        hidden = counts.hidden_items
+        hidden_str = f", {hidden} hidden" if hidden else ""
+        self._path_lbl.setText(
+            f"{self._current_dir.name}  "
+            f"({', '.join(parts) if parts else '0 items'}{hidden_str})"
+        )
+
+    def _refresh_folder_filtering(self) -> None:
+        folders = [entry for entry in self._entries if isinstance(entry, FolderEntry)]
+        if not self._folder_filter_state.has_metadata_filters():
+            self._folder_visibility = {Path(entry.path): True for entry in folders}
+            self._folder_filter_pending = False
+            self._update_path_summary()
+            self.folder_filter_finished.emit(self._filter_counts())
+            return
+        if not folders:
+            self._folder_visibility = {}
+            self._folder_filter_pending = False
+            self._update_path_summary()
+            self.folder_filter_finished.emit(self._filter_counts())
+            return
+        if self._current_dir is None:
+            return
+        self._folder_filter_pending = True
+        self._path_lbl.setText(f"Filtering {self._current_dir.name}...")
+        self.folder_filter_started.emit(self._current_dir.name)
+        self._folder_filter_token = object()
+        loader = FolderFilterLoader(
+            self._current_dir,
+            [entry.path for entry in folders],
+            self._folder_filter_state,
+            self._folder_filter_token,
+        )
+        loader.signals.finished.connect(self._on_folder_filter_finished)
+        loader.signals.failed.connect(self._on_folder_filter_failed)
+        self._pool.start(loader)
 
     # How many cards to construct per slice. ~120 keeps each slice well under
     # a frame budget on typical hardware while finishing 1000 entries in <10
@@ -660,8 +745,14 @@ class ThumbnailGrid(QWidget):
         """
         return self._thumbnail_colormap, self._thumbnail_clip, {}
 
-    def get_entries(self) -> list[Union[SxmFile, VertFile]]:
+    def get_entries(self) -> list[Union[SxmFile, VertFile, FolderEntry]]:
         return self._entries
+
+    def get_visible_scan_entries(self) -> list[SxmFile]:
+        return [entry for entry in self._entries if isinstance(entry, SxmFile) and self._is_entry_visible(entry)]
+
+    def get_filter_counts(self) -> FilterMatchCounts:
+        return self._filter_counts()
 
     def get_selected(self) -> set[str]:
         return self._selected.copy()
@@ -771,6 +862,24 @@ class ThumbnailGrid(QWidget):
             return
         self.view_requested.emit(entry)
 
+    @Slot(object, object, object)
+    def _on_folder_filter_finished(self, folder, visibility, token):
+        if token is not self._folder_filter_token or Path(folder) != self._current_dir:
+            return
+        self._folder_filter_pending = False
+        self._folder_visibility = {Path(path): bool(show) for path, show in visibility.items()}
+        self._relayout_filtered()
+        self._update_path_summary()
+        self.folder_filter_finished.emit(self._filter_counts())
+
+    @Slot(object, str, object)
+    def _on_folder_filter_failed(self, folder, _message, token):
+        if token is not self._folder_filter_token or Path(folder) != self._current_dir:
+            return
+        self._folder_filter_pending = False
+        self._update_path_summary()
+        self.folder_filter_finished.emit(self._filter_counts())
+
     # ── Layout helpers ─────────────────────────────────────────────────────────
     def _calc_cols(self) -> int:
         vw = self._scroll.viewport().width()
@@ -805,18 +914,27 @@ class ThumbnailGrid(QWidget):
             mode = "all"
         self._filter_mode = mode
         self._relayout_filtered()
+        self._update_path_summary()
+        self._schedule_visible_thumbnail_refresh(delay_ms=0)
+
+    def set_folder_filter_state(self, state: FolderFilterState) -> None:
+        self._folder_filter_state = state
+        self._relayout_filtered()
+        self._refresh_folder_filtering()
         self._schedule_visible_thumbnail_refresh(delay_ms=0)
 
     def _is_entry_visible(self, entry) -> bool:
-        # Folders are navigation aids; never hide them based on a file filter.
         if isinstance(entry, FolderEntry):
-            return True
+            return self._folder_visibility.get(Path(entry.path), True)
         mode = self._filter_mode
         if mode == "images":
-            return isinstance(entry, SxmFile)
+            if not isinstance(entry, SxmFile):
+                return False
         if mode == "spectra":
             return isinstance(entry, VertFile)
-        return True  # "all"
+        if isinstance(entry, SxmFile):
+            return self._scan_matches_folder_filters(entry)
+        return True
 
     def _relayout_filtered(self):
         """Re-populate the grid with only cards matching the current filter.
@@ -847,6 +965,29 @@ class ThumbnailGrid(QWidget):
         # Keep incremental (timer-sliced) card placement appending after the
         # cards this full pass just laid out.
         self._next_grid_index = i
+        self._sync_selection_after_filter()
+
+    def _sync_selection_after_filter(self) -> None:
+        visible_keys = {
+            self._key_for(entry)
+            for entry in self._entries
+            if not isinstance(entry, FolderEntry) and self._is_entry_visible(entry)
+        }
+        new_selected = {key for key in self._selected if key in visible_keys}
+        if new_selected == self._selected:
+            return
+        for key in list(self._selected):
+            card = self._cards.get(key)
+            if card is not None and key not in new_selected:
+                card.set_selected(False)
+        self._selected = new_selected
+        self._primary = self._primary if self._primary in new_selected else next(iter(new_selected), None)
+        self.selection_changed.emit(len(self._selected))
+        if self._primary is None:
+            self.entry_selected.emit(None)
+            return
+        primary_entry = self.get_primary_entry()
+        self.entry_selected.emit(primary_entry)
 
     def set_thumbnail_size(self, name: str) -> None:
         """Switch all cards to a size preset ("large" or "small")."""

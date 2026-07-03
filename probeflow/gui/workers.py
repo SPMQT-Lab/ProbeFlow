@@ -5,6 +5,8 @@ from __future__ import annotations
 import io
 import logging
 import os
+import shutil
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
@@ -482,6 +484,91 @@ class FolderIndexLoader(_PooledWorker):
             self.signals.failed.emit(self.path, str(exc), self.token)
             return
         self.signals.indexed.emit(self.path, index, self.token)
+
+
+class FolderFilterSignals(QObject):
+    finished = Signal(object, object, object)  # folder, visibility_map, token
+    failed = Signal(object, str, object)       # folder, message, token
+
+
+class FolderFilterLoader(_PooledWorker):
+    """Resolve subfolder visibility for an active metadata filter off-thread."""
+
+    def __init__(self, folder, subfolders, state, token) -> None:
+        super().__init__(FolderFilterSignals())
+        self.folder = Path(folder)
+        self.subfolders = [Path(path) for path in subfolders]
+        self.state = state
+        self.token = token
+
+    def work(self):
+        from probeflow.core.indexing import subfolder_matches_filters
+
+        try:
+            visibility = {
+                path: subfolder_matches_filters(path, self.state)
+                for path in self.subfolders
+            }
+        except Exception as exc:
+            _log.warning("FolderFilterLoader: failed to filter %s (%s)", self.folder, exc)
+            self.signals.failed.emit(self.folder, str(exc), self.token)
+            return
+        self.signals.finished.emit(self.folder, visibility, self.token)
+
+
+@dataclass(frozen=True)
+class FilteredFolderExportResult:
+    destination: Path
+    copied: int = 0
+    collisions: int = 0
+    errors: int = 0
+    exported_paths: tuple[Path, ...] = ()
+
+
+class FilteredFolderExportSignals(QObject):
+    finished = Signal(object)
+    failed = Signal(str)
+
+
+class FilteredFolderExportWorker(_PooledWorker):
+    """Copy the visible scan files from one browse folder into a flat folder."""
+
+    def __init__(self, source_paths, destination) -> None:
+        super().__init__(FilteredFolderExportSignals())
+        self.source_paths = [Path(path) for path in source_paths]
+        self.destination = Path(destination)
+
+    def work(self):
+        copied = 0
+        collisions = 0
+        errors = 0
+        exported: list[Path] = []
+        try:
+            self.destination.mkdir(parents=True, exist_ok=True)
+        except Exception as exc:
+            self.signals.failed.emit(str(exc))
+            return
+        for source in self.source_paths:
+            dest = self.destination / source.name
+            if dest.exists():
+                collisions += 1
+                continue
+            try:
+                shutil.copy2(source, dest)
+            except Exception:
+                errors += 1
+                continue
+            copied += 1
+            exported.append(dest)
+        self.signals.finished.emit(
+            FilteredFolderExportResult(
+                destination=self.destination,
+                copied=copied,
+                collisions=collisions,
+                errors=errors,
+                exported_paths=tuple(exported),
+            )
+        )
 
 
 # ── Worker: conversion ────────────────────────────────────────────────────────
