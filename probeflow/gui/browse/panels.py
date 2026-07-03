@@ -333,11 +333,10 @@ class BrowseToolPanel(QWidget):
         )
 
     def _sync_folder_filter_inputs(self) -> None:
-        self._size_width_nm.setEnabled(self._size_filter_btn.isChecked())
-        self._size_height_nm.setEnabled(self._size_filter_btn.isChecked())
-        self._completion_min_pct.setEnabled(self._completion_filter_btn.isChecked())
-        self._bias_min_mv.setEnabled(self._bias_filter_btn.isChecked())
-        self._bias_max_mv.setEnabled(self._bias_filter_btn.isChecked())
+        # Filters are gated by their checkbox state, but their numeric values
+        # stay editable at all times so users can prepare thresholds before
+        # turning a filter on.
+        return
 
     def _emit_folder_filter_state(self, *_args) -> None:
         if not all(
