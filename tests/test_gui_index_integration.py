@@ -44,6 +44,8 @@ def _make_item(
     bias: float | None = None,
     setpoint: float | None = None,
     scan_range=None,
+    visible_scan_range=None,
+    completion_pct: float | None = None,
     metadata: dict | None = None,
 ) -> ProbeFlowItem:
     return ProbeFlowItem(
@@ -53,6 +55,8 @@ def _make_item(
         item_type=item_type,
         shape=shape,
         scan_range=scan_range,
+        visible_scan_range=visible_scan_range,
+        completion_pct=completion_pct,
         bias=bias,
         setpoint=setpoint,
         load_error=load_error,
@@ -855,6 +859,8 @@ class TestBrowserIndexContracts:
                 source_format="nanonis_sxm",
                 shape=(4, 4),
                 scan_range=(10e-9, 10e-9),
+                visible_scan_range=(10e-9, 6e-9),
+                completion_pct=60.0,
             ),
             _make_item("spec.VERT", item_type="spectrum", source_format="createc_vert"),
         ]
@@ -870,6 +876,9 @@ class TestBrowserIndexContracts:
         assert dat.acquisition_label == "AFM df topography"
         assert "AFM df topography" in _card_meta_str(dat)
         assert sxm.scan_nm == pytest.approx(10.0)
+        assert sxm.scan_width_nm == pytest.approx(10.0)
+        assert sxm.scan_height_nm == pytest.approx(6.0)
+        assert sxm.completion_pct == pytest.approx(60.0)
         assert sxm.source_format == "sxm"
 
     def test_scan_items_keep_error_stub_unknown_current_and_dedupe_stems(self):

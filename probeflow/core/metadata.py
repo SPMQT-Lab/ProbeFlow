@@ -20,6 +20,10 @@ from pathlib import Path
 import re
 from typing import Any
 
+from probeflow.core.browse_filters import (
+    completion_pct_from_visible_range,
+    createc_visible_height_m,
+)
 from probeflow.core.common import _f, _i
 
 
@@ -41,6 +45,8 @@ class ScanMetadata:
     plane_names: tuple[str, ...] = ()
     units: tuple[str, ...] = ()                 # parallel to plane_names
     scan_range: tuple[float, float] | None = None  # (total_width_m, total_height_m) in metres
+    visible_scan_range: tuple[float, float] | None = None
+    completion_pct: float | None = None
     bias: float | None = None                   # V
     setpoint: float | None = None               # A (tunnel current setpoint)
     # Active feedback setpoint when the Z loop does not run on the tunnel
@@ -70,6 +76,7 @@ def metadata_from_scan(scan) -> ScanMetadata:
     plane_names = tuple(scan.plane_names)
     units = tuple(scan.plane_units)
     scan_range = tuple(scan.scan_range_m) if scan.scan_range_m else None
+    visible_scan_range = scan_range
     hdr = dict(scan.header)
 
     display_name = Path(scan.source_path).stem if scan.source_path else ""
@@ -102,6 +109,10 @@ def metadata_from_scan(scan) -> ScanMetadata:
         plane_names=plane_names,
         units=units,
         scan_range=scan_range,
+        visible_scan_range=visible_scan_range,
+        completion_pct=completion_pct_from_visible_range(
+            *(visible_scan_range or (None, None))
+        ),
         bias=bias,
         setpoint=setpoint,
         feedback_setpoint=feedback_setpoint,
@@ -127,12 +138,16 @@ def metadata_from_createc_dat_report(report) -> ScanMetadata:
     plane_names, units = _createc_report_plane_metadata(report)
     from probeflow.io.createc_interpretation import createc_dat_experiment_metadata
     experiment_metadata = createc_dat_experiment_metadata(hdr)
-
     from probeflow.io.readers.createc_dat import decoded_scan_range_m
-
-    # Extent of the decoded planes, consistent with ``shape`` below — pairing
-    # the full programmed frame with the decoded shape skews pixel sizes.
     scan_range = decoded_scan_range_m(report)
+    visible_scan_range = (
+        scan_range[0],
+        createc_visible_height_m(
+            scan_range[1],
+            getattr(report, "original_Ny", None),
+            getattr(report, "decoded_Ny", None),
+        ),
+    )
 
     return ScanMetadata(
         path=Path(report.path),
@@ -143,6 +158,8 @@ def metadata_from_createc_dat_report(report) -> ScanMetadata:
         plane_names=plane_names,
         units=units,
         scan_range=scan_range,
+        visible_scan_range=visible_scan_range,
+        completion_pct=completion_pct_from_visible_range(*visible_scan_range),
         bias=bias,
         setpoint=setpoint,
         feedback_setpoint=feedback_setpoint,
@@ -164,6 +181,7 @@ def metadata_from_sxm_header(path, hdr: dict, n_planes: int) -> ScanMetadata:
     Nx, Ny = sxm_dims(hdr)
     plane_names, units = sxm_plane_metadata(hdr, n_planes)
     bias, setpoint, comment, acq_dt = _extract_nanonis_fields(hdr)
+    scan_range = sxm_scan_range(hdr)
 
     return ScanMetadata(
         path=path,
@@ -173,7 +191,9 @@ def metadata_from_sxm_header(path, hdr: dict, n_planes: int) -> ScanMetadata:
         shape=(Ny, Nx),
         plane_names=tuple(plane_names),
         units=tuple(units),
-        scan_range=sxm_scan_range(hdr),
+        scan_range=scan_range,
+        visible_scan_range=scan_range,
+        completion_pct=completion_pct_from_visible_range(*scan_range),
         bias=bias,
         setpoint=setpoint,
         comment=comment,
@@ -228,6 +248,8 @@ def metadata_from_rhk_sm4(sm4) -> ScanMetadata:
         plane_names=plane_names,
         units=plane_units,
         scan_range=scan_range,
+        visible_scan_range=scan_range,
+        completion_pct=completion_pct_from_visible_range(*scan_range),
         bias=bias,
         setpoint=setpoint,
         comment=comment,

@@ -107,6 +107,11 @@ class TestScanMetadataContract:
         assert meta.scan_range is not None
         w, h = meta.scan_range
         assert w > 0 and h > 0
+        assert meta.visible_scan_range is not None
+        vw, vh = meta.visible_scan_range
+        assert vw > 0 and vh > 0
+        assert meta.completion_pct is not None
+        assert 0.0 < meta.completion_pct <= 100.0
         assert isinstance(meta.bias, float)
         assert isinstance(meta.setpoint, float)
         assert meta.display_name == _CREATEC_STEP.stem

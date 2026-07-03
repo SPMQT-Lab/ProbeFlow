@@ -36,10 +36,19 @@ class SxmFile:
     feedback_setpoint_unit:  Optional[str] = None
     feedback_setpoint_label: Optional[str] = None
     scan_nm:       Optional[float] = None
+    scan_width_nm: Optional[float] = None
+    scan_height_nm: Optional[float] = None
+    completion_pct: Optional[float] = None
     source_format: str            = "sxm"
     acquisition_label: Optional[str] = None
     experiment_metadata: dict     = field(default_factory=dict)
     scanflow_acquisition: dict    = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.scan_width_nm is None and self.scan_nm is not None:
+            self.scan_width_nm = self.scan_nm
+        if self.scan_nm is None and self.scan_width_nm is not None:
+            self.scan_nm = self.scan_width_nm
 
     @classmethod
     def from_index_item(cls, item) -> "SxmFile":
@@ -59,6 +68,9 @@ class SxmFile:
                 scanflow_acquisition=scanflow,
             )
         Ny, Nx = item.shape
+        visible_range = item.visible_scan_range or item.scan_range
+        width_nm = visible_range[0] * 1e9 if visible_range else None
+        height_nm = visible_range[1] * 1e9 if visible_range else None
         return cls(
             path=item.path,
             stem=item.path.stem,
@@ -69,7 +81,10 @@ class SxmFile:
             feedback_setpoint=item.feedback_setpoint,
             feedback_setpoint_unit=item.feedback_setpoint_unit,
             feedback_setpoint_label=item.feedback_setpoint_label,
-            scan_nm=item.scan_range[0] * 1e9 if item.scan_range else None,
+            scan_nm=width_nm,
+            scan_width_nm=width_nm,
+            scan_height_nm=height_nm,
+            completion_pct=item.completion_pct,
             source_format=fmt,
             acquisition_label=label,
             experiment_metadata=experiment,
@@ -142,9 +157,14 @@ def _card_meta_str(entry: SxmFile) -> str:
     than silently disappearing — that ambiguity confused users who couldn't
     tell whether a low-current value was missing or just zero.
     """
+    size_str = ""
+    if entry.scan_width_nm is not None and entry.scan_height_nm is not None:
+        size_str = f"{entry.scan_width_nm:.1f}×{entry.scan_height_nm:.1f} nm"
+    elif entry.scan_nm is not None:
+        size_str = f"{entry.scan_nm:.1f} nm"
     line1 = "  |  ".join(filter(None, [
         f"{entry.Nx}×{entry.Ny}" if entry.Nx > 0 else "",
-        f"{entry.scan_nm:.1f} nm" if entry.scan_nm is not None else "",
+        size_str,
     ]))
     v_str = f"V: {entry.bias_mv:.0f} mV"    if entry.bias_mv    is not None else "V: ?"
     line2 = f"{v_str}  |  {_card_feedback_str(entry)}"

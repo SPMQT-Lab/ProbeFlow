@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
+from probeflow.core.browse_filters import FolderFilterState, scan_matches_folder_filters
 from probeflow.core.common import _f
 from probeflow.core.file_type import FileType, sniff_file_type
 
@@ -52,6 +53,8 @@ class ProbeFlowItem:
     channels: tuple[str, ...] = ()              # plane / channel names
     units: tuple[str, ...] = ()
     scan_range: Optional[tuple[float, float]] = None  # (width_m, height_m)
+    visible_scan_range: Optional[tuple[float, float]] = None
+    completion_pct: Optional[float] = None
     bias: Optional[float] = None               # V
     setpoint: Optional[float] = None           # A
     # Non-current feedback setpoint (e.g. constant-Δf AFM Δf in Hz); None for
@@ -214,6 +217,8 @@ def _item_from_scan(
         channels=meta.plane_names,
         units=meta.units,
         scan_range=meta.scan_range,
+        visible_scan_range=meta.visible_scan_range,
+        completion_pct=meta.completion_pct,
         bias=meta.bias,
         setpoint=meta.setpoint,
         feedback_setpoint=meta.feedback_setpoint,
@@ -383,6 +388,81 @@ def _peek_subfolder(
         sample_scan_paths=tuple(samples),
         counts_capped=capped,
     )
+
+
+def subfolder_matches_filters(
+    folder: Path,
+    state: FolderFilterState,
+    *,
+    peek_depth: int = 2,
+    max_files: int = 400,
+) -> bool:
+    """Return True when a subfolder tree contains one matching scan."""
+    if not state.has_metadata_filters():
+        return True
+
+    from probeflow.core import browse_cache
+
+    queue: list[tuple[Path, int]] = [(Path(folder), 0)]
+    files_examined = 0
+    while queue:
+        current, depth = queue.pop(0)
+        try:
+            with os.scandir(current) as it:
+                entries = sorted(it, key=lambda e: e.name)
+        except (OSError, PermissionError):
+            continue
+        for entry in entries:
+            if entry.name.startswith(".") or entry.name in _SKIP_DIRS:
+                continue
+            try:
+                is_file = entry.is_file()
+                is_dir = entry.is_dir()
+            except OSError:
+                continue
+            if is_dir and depth < peek_depth:
+                queue.append((Path(entry.path), depth + 1))
+                continue
+            if not is_file:
+                continue
+            if files_examined >= max_files:
+                return False
+            files_examined += 1
+            path = Path(entry.path)
+            try:
+                st = entry.stat()
+                mtime_ns, size_bytes = st.st_mtime_ns, st.st_size
+            except OSError:
+                mtime_ns, size_bytes = None, None
+            hit, cached = browse_cache.get_metadata(path, mtime_ns, size_bytes)
+            if hit:
+                item = cached
+            else:
+                ft = sniff_file_type(path)
+                if ft not in _FORMAT_MAP:
+                    browse_cache.put_metadata(path, mtime_ns, size_bytes, None)
+                    continue
+                source_format, item_type = _FORMAT_MAP[ft]
+                item = _build_item(
+                    path, ft, source_format, item_type, stat=(mtime_ns, size_bytes)
+                )
+                if item.load_error is None:
+                    browse_cache.put_metadata(path, mtime_ns, size_bytes, item)
+            if item is None or item.item_type != "scan" or item.load_error is not None:
+                continue
+            visible_range = item.visible_scan_range or item.scan_range
+            width_nm = visible_range[0] * 1e9 if visible_range else None
+            height_nm = visible_range[1] * 1e9 if visible_range else None
+            bias_mv = item.bias * 1000.0 if item.bias is not None else None
+            if scan_matches_folder_filters(
+                width_nm=width_nm,
+                height_nm=height_nm,
+                completion_pct=item.completion_pct,
+                bias_mv=bias_mv,
+                state=state,
+            ):
+                return True
+    return False
 
 
 def index_folder_shallow(
