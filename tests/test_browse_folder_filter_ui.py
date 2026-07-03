@@ -131,3 +131,51 @@ def test_filtered_export_worker_copies_only_available_files(tmp_path, qapp):
     assert result.collisions == 1
     assert (dest / "a.sxm").read_text(encoding="utf-8") == "a"
     assert (dest / "b.sxm").read_text(encoding="utf-8") == "existing"
+
+
+def test_app_export_uses_global_thread_pool(monkeypatch, tmp_path, qapp):
+    from probeflow.gui.app import ProbeFlowWindow
+
+    entry = SimpleNamespace(path=tmp_path / "scan.sxm")
+    started = {}
+
+    class _Signals:
+        def __init__(self):
+            self.finished = SimpleNamespace(connect=lambda fn: None)
+            self.failed = SimpleNamespace(connect=lambda fn: None)
+
+    class _Worker:
+        def __init__(self, paths, destination):
+            started["paths"] = list(paths)
+            started["destination"] = destination
+            self.signals = _Signals()
+
+    class _Pool:
+        def start(self, worker):
+            started["worker"] = worker
+
+    fake = SimpleNamespace(
+        _grid=SimpleNamespace(
+            current_dir=lambda: tmp_path,
+            get_visible_scan_entries=lambda: [entry],
+        ),
+        _status_bar=SimpleNamespace(showMessage=lambda msg: started.setdefault("msg", msg)),
+        _on_export_filtered_finished=lambda result: None,
+        _on_export_filtered_failed=lambda message: None,
+    )
+
+    monkeypatch.setattr("probeflow.gui.app.FilteredFolderExportWorker", _Worker)
+    monkeypatch.setattr(
+        "probeflow.gui.app.QFileDialog.getExistingDirectory",
+        lambda *args, **kwargs: str(tmp_path / "out"),
+    )
+    monkeypatch.setattr(
+        "probeflow.gui.app.QThreadPool.globalInstance",
+        lambda: _Pool(),
+    )
+
+    ProbeFlowWindow._on_export_filtered_folder(fake)
+
+    assert started["paths"] == [entry.path]
+    assert started["destination"] == str(tmp_path / "out")
+    assert "worker" in started

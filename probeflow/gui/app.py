@@ -1108,7 +1108,7 @@ class ProbeFlowWindow(QMainWindow):
         self._status_bar.showMessage(
             f"Exporting {len(entries)} filtered scan file{'s' if len(entries) != 1 else ''}..."
         )
-        self._pool.start(worker)
+        QThreadPool.globalInstance().start(worker)
 
     def _on_export_filtered_finished(self, result) -> None:
         self._status_bar.showMessage(
