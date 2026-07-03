@@ -330,10 +330,10 @@ class DatasetBuilderPanel(QWidget):
             self._arr = None
             self._base_display_arr = None
             self._display_arr = None
-        self._global_view_tray.clear_histogram(self._theme)
-        self._canvas.setText("No scan")
-        self._canvas_status.setText("No scan loaded")
-        return
+            self._global_view_tray.clear_histogram(self._theme)
+            self._canvas.setText("No scan")
+            self._canvas_status.setText("No scan loaded")
+            return
         item = self._queue[self._current_index]
         try:
             self._scan, self._arr, self._px_x_m, self._px_y_m = load_scan_plane(

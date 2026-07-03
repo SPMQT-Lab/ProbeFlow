@@ -199,3 +199,22 @@ def test_dataset_builder_shortcuts_cover_clear_undo_and_brush_size(qapp):
     assert "C" in keys
     assert QKeySequence(QKeySequence.Undo).toString() in keys
     assert "W" not in keys
+
+
+def test_dataset_builder_load_current_does_not_return_early(qapp):
+    panel = DatasetBuilderPanel(THEMES["dark"], {})
+    panel.show()
+    qapp.processEvents()
+
+    class DummyItem:
+        source_path = os.path.join(os.path.dirname(__file__), "..", "test_data", "createc_scan_close_100nm.dat")
+        plane_index = 0
+        display_id = "dummy_plane0"
+        status = "blank"
+
+    panel._queue = [DummyItem()]
+    panel._current_index = 0
+    panel._load_current()
+    qapp.processEvents()
+
+    assert panel._arr is not None or panel._canvas_status.text() != "No scan loaded"
