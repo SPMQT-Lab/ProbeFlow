@@ -4,6 +4,7 @@ import os
 
 import numpy as np
 import pytest
+from PySide6.QtGui import QKeySequence, QShortcut
 
 from probeflow.gui.dataset_builder.display import flatten_display_array
 from probeflow.gui.dataset_builder.tab import DatasetBuilderPanel, DatasetBuilderSidebar
@@ -185,3 +186,16 @@ def test_dataset_builder_status_shortcut_helper_advances_only_on_success(qapp):
     panel._set_status = fail_set_status  # type: ignore[method-assign]
     panel._save_status_and_next("uncertain")
     assert calls == ["uncertain"]
+
+
+def test_dataset_builder_shortcuts_cover_clear_undo_and_brush_size(qapp):
+    panel = DatasetBuilderPanel(THEMES["dark"], {})
+    panel.show()
+    qapp.processEvents()
+
+    keys = {sc.key().toString() for sc in panel.findChildren(QShortcut)}
+    assert "Z" in keys
+    assert "V" in keys
+    assert "C" in keys
+    assert QKeySequence(QKeySequence.Undo).toString() in keys
+    assert "W" not in keys

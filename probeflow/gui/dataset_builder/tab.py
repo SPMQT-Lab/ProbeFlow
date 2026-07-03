@@ -26,7 +26,6 @@ from PySide6.QtWidgets import (
 
 from probeflow.core.mask import ImageMask
 from probeflow.dataset_builder.annotations import (
-    proposal_to_mask,
     save_mask_annotation,
     save_review_annotation,
 )
@@ -34,7 +33,6 @@ from probeflow.dataset_builder.export import export_dataset
 from probeflow.dataset_builder.loading import load_scan_plane
 from probeflow.dataset_builder.models import DatasetExportSpec, DatasetQueueItem, DatasetTaskConfig
 from probeflow.dataset_builder.painting import paint_mask
-from probeflow.dataset_builder.proposals import generate_proposal
 from probeflow.dataset_builder.queue import build_queue, queue_counts
 from probeflow.gui.dataset_builder.display import (
     dataset_builder_display_array,
@@ -142,8 +140,6 @@ class DatasetBuilderPanel(QWidget):
         form = QFormLayout()
         self._task_combo = QComboBox()
         self._task_combo.addItem("Step-edge / ignore-mask", "step_edge_mask")
-        self._method_combo = QComboBox()
-        self._method_combo.addItems(["step_edge", "canny"])
         self._plane_spin = QSpinBox()
         self._plane_spin.setRange(0, 64)
         self._status_combo = QComboBox()
@@ -152,13 +148,11 @@ class DatasetBuilderPanel(QWidget):
         self._brush_spin.setRange(1, 128)
         self._brush_spin.setValue(8)
         form.addRow("Preset", self._task_combo)
-        form.addRow("Proposal", self._method_combo)
         form.addRow("Plane", self._plane_spin)
         form.addRow("Status", self._status_combo)
         form.addRow("Brush px", self._brush_spin)
         right_lay.addLayout(form)
 
-        propose_btn = QPushButton("Generate Proposal")
         brush_btn = QPushButton("Brush")
         brush_btn.setCheckable(True)
         eraser_btn = QPushButton("Eraser")
@@ -170,7 +164,6 @@ class DatasetBuilderPanel(QWidget):
         reject_btn = QPushButton("Reject")
         clear_btn = QPushButton("Clear Overlay")
         for btn in (
-            propose_btn,
             brush_btn,
             eraser_btn,
             save_btn,
@@ -187,8 +180,8 @@ class DatasetBuilderPanel(QWidget):
 
         self._shortcut_lbl = QLabel(
             "A prev | F save+accept+next | D save+uncertain+next | S save+reject+next | "
-            "Q overlay | W proposal | E eraser | R brush | Z undo | X reject | "
-            "C clear | V global view | 1 accept | 2 uncertain | 3 reject | [ / ] brush"
+            "Q overlay | E eraser | R brush | Z clear | Ctrl+Z undo | "
+            "V brush+ | C brush-"
         )
         self._shortcut_lbl.setAlignment(Qt.AlignCenter)
         root.addWidget(self._shortcut_lbl)
@@ -199,14 +192,10 @@ class DatasetBuilderPanel(QWidget):
         self._queue_list.currentRowChanged.connect(self._on_queue_row_changed)
         self._filter_combo.currentTextChanged.connect(lambda _text: self._refresh_queue_list())
         self._plane_spin.valueChanged.connect(lambda _v: self.load_queue() if self._source_entry.text() else None)
-        propose_btn.clicked.connect(self.generate_proposal)
         brush_btn.clicked.connect(lambda: self.set_paint_mode("brush"))
         eraser_btn.clicked.connect(lambda: self.set_paint_mode("eraser"))
         save_btn.clicked.connect(self.save_current)
         save_next_btn.clicked.connect(self.save_and_next)
-        accept_btn.clicked.connect(lambda: self._set_status("accepted"))
-        uncertain_btn.clicked.connect(lambda: self._set_status("uncertain"))
-        reject_btn.clicked.connect(lambda: self._set_status("rejected"))
         clear_btn.clicked.connect(self.clear_overlay)
         self._brush_btn = brush_btn
         self._eraser_btn = eraser_btn
@@ -242,29 +231,17 @@ class DatasetBuilderPanel(QWidget):
             "D": lambda: self._save_status_and_next("uncertain"),
             "S": lambda: self._save_status_and_next("rejected"),
             "Q": self.toggle_overlay,
-            "W": self.generate_proposal,
-            "C": self.clear_overlay,
-            "X": lambda: self._set_status("rejected"),
-            "1": lambda: self._set_status("accepted"),
-            "2": lambda: self._set_status("uncertain"),
-            "3": lambda: self._set_status("rejected"),
-            "[": lambda: self._brush_spin.setValue(max(1, self._brush_spin.value() - 1)),
-            "]": lambda: self._brush_spin.setValue(self._brush_spin.value() + 1),
+            "Z": self.clear_overlay,
+            "V": lambda: self._brush_spin.setValue(self._brush_spin.value() + 1),
+            "C": lambda: self._brush_spin.setValue(max(1, self._brush_spin.value() - 1)),
         }
         for key, slot in bindings.items():
             sc = QShortcut(QKeySequence(key), self)
             sc.setContext(Qt.WidgetWithChildrenShortcut)
             sc.activated.connect(slot)
-        extra = {
-            "E": lambda: self.set_paint_mode("eraser"),
-            "R": lambda: self.set_paint_mode("brush"),
-            "Z": self.undo_paint,
-            "V": self.toggle_view_tray,
-        }
-        for key, slot in extra.items():
-            sc = QShortcut(QKeySequence(key), self)
-            sc.setContext(Qt.WidgetWithChildrenShortcut)
-            sc.activated.connect(slot)
+        undo = QShortcut(QKeySequence.Undo, self)
+        undo.setContext(Qt.WidgetWithChildrenShortcut)
+        undo.activated.connect(self.undo_paint)
 
     def _browse_source(self) -> None:
         path = QFileDialog.getExistingDirectory(self, "Dataset Builder source folder")
@@ -298,7 +275,6 @@ class DatasetBuilderPanel(QWidget):
             task=self._task(),
             label_name="step_edge",
             label_type="mask",
-            proposal_method=self._method_combo.currentText(),
             plane_index=self._plane_spin.value(),
         )
 
@@ -354,10 +330,10 @@ class DatasetBuilderPanel(QWidget):
             self._arr = None
             self._base_display_arr = None
             self._display_arr = None
-            self._global_view_tray.clear_histogram(self._theme)
-            self._canvas.setText("No scan")
-            self._canvas_status.setText("No scan loaded")
-            return
+        self._global_view_tray.clear_histogram(self._theme)
+        self._canvas.setText("No scan")
+        self._canvas_status.setText("No scan loaded")
+        return
         item = self._queue[self._current_index]
         try:
             self._scan, self._arr, self._px_x_m, self._px_y_m = load_scan_plane(
@@ -597,41 +573,6 @@ class DatasetBuilderPanel(QWidget):
     def _show_mask(self, data: np.ndarray) -> None:
         if self._overlay_visible:
             self._canvas.set_mask_overlay(data)
-
-    def generate_proposal(self) -> None:
-        if self._arr is None or not (0 <= self._current_index < len(self._queue)):
-            return
-        item = self._queue[self._current_index]
-        channel = (
-            self._scan.plane_names[item.plane_index]
-            if self._scan is not None and item.plane_index < len(self._scan.plane_names)
-            else f"plane {item.plane_index}"
-        )
-        try:
-            config = self._config()
-            proposal = generate_proposal(
-                self._arr,
-                px_x_m=self._px_x_m,
-                px_y_m=self._px_y_m,
-                config=config,
-                source_channel=channel,
-            )
-            self._current_mask = proposal_to_mask(
-                proposal,
-                config=config,
-                source_path=item.source_path,
-                source_channel=channel,
-            )
-        except Exception as exc:
-            self.status_message.emit(f"Proposal failed: {exc}")
-            return
-        self._overlay_visible = True
-        self._show_mask(self._current_mask.data)
-        self._canvas_status.setText(
-            f"{item.display_id} | proposal: {self._current_mask.method} | "
-            f"mask coverage: {100.0 * float(self._current_mask.data.mean()):.2f}%"
-        )
-        self.status_message.emit(f"Proposal generated for {item.display_id}")
 
     def save_current(self) -> bool:
         if self._current_mask is None or not (0 <= self._current_index < len(self._queue)):
