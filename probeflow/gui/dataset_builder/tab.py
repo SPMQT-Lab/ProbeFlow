@@ -36,9 +36,13 @@ from probeflow.dataset_builder.models import DatasetExportSpec, DatasetQueueItem
 from probeflow.dataset_builder.painting import paint_mask
 from probeflow.dataset_builder.proposals import generate_proposal
 from probeflow.dataset_builder.queue import build_queue, queue_counts
+from probeflow.gui.dataset_builder.display import dataset_builder_display_array
 from probeflow.gui.dataset_builder.canvas import DatasetBuilderCanvas
+from probeflow.gui.dataset_builder.view_tray import DatasetBuilderViewTray
 from probeflow.io.mask_sidecar import load_mask_set_sidecar
 from probeflow.processing.display import array_to_uint8
+from probeflow.gui.viewer.display_range import DisplayRangeController
+from probeflow.gui.viewer.display_sliders import DisplaySliderController
 
 
 class DatasetBuilderPanel(QWidget):
@@ -61,6 +65,9 @@ class DatasetBuilderPanel(QWidget):
         self._overlay_visible = True
         self._paint_mode = "brush"
         self._undo_stack: list[np.ndarray] = []
+        self._display_arr: np.ndarray | None = None
+        self._display_drs = DisplayRangeController(clip_low=1.0, clip_high=99.0, parent=self)
+        self._view_auto_clip_idx = -1
 
         root = QVBoxLayout(self)
         root.setContentsMargins(8, 8, 8, 8)
@@ -115,6 +122,25 @@ class DatasetBuilderPanel(QWidget):
         right_lay = QVBoxLayout(right)
         right_lay.setContentsMargins(0, 0, 0, 0)
         right_lay.setSpacing(8)
+
+        self._view_tray = DatasetBuilderViewTray(theme, self)
+        self._view_slider_ctrl = DisplaySliderController(
+            self._display_drs,
+            self._view_tray.hist_panel,
+            self._current_display_array,
+            lambda: (1.0, "a.u.", "Value"),
+        )
+        self._view_tray.hist_panel.rangeReleased.connect(self._on_view_hist_range_released)
+        self._view_tray.hist_panel.autoClipRequested.connect(self._on_view_auto_clip)
+        self._view_tray.hist_panel.resetRequested.connect(self._on_view_reset)
+        self._view_tray.hist_panel.minReleased.connect(self._view_slider_ctrl.on_min_changed)
+        self._view_tray.hist_panel.maxReleased.connect(self._view_slider_ctrl.on_max_changed)
+        self._view_tray.hist_panel.brightnessReleased.connect(self._view_slider_ctrl.on_brightness_changed)
+        self._view_tray.hist_panel.contrastReleased.connect(self._view_slider_ctrl.on_contrast_changed)
+        self._view_tray.flatten_toggled.connect(self._on_flatten_toggled)
+        self._display_drs.rangeChanged.connect(self._refresh_display_preview)
+        right_lay.addWidget(self._view_tray)
+
         form = QFormLayout()
         self._task_combo = QComboBox()
         self._task_combo.addItem("Step-edge / ignore-mask", "step_edge_mask")
@@ -201,6 +227,9 @@ class DatasetBuilderPanel(QWidget):
             f"background: {theme.get('status_bg', bg)}; color: {theme.get('status_fg', '#9aa1ab')};"
             f"border: 1px solid {border}; border-radius: 4px; padding: 5px;"
         )
+        self._view_tray.apply_theme(theme)
+        if self._arr is not None:
+            self._refresh_display_preview()
 
     def set_source(self, source: str | Path) -> None:
         self._source_entry.setText(str(source))
@@ -229,7 +258,7 @@ class DatasetBuilderPanel(QWidget):
             "E": lambda: self.set_paint_mode("eraser"),
             "R": lambda: self.set_paint_mode("brush"),
             "Z": self.undo_paint,
-            "V": self.toggle_overlay,
+            "V": self.toggle_view_tray,
         }
         for key, slot in extra.items():
             sc = QShortcut(QKeySequence(key), self)
@@ -320,6 +349,8 @@ class DatasetBuilderPanel(QWidget):
         self._canvas.clear_mask_overlay()
         if not (0 <= self._current_index < len(self._queue)):
             self._arr = None
+            self._display_arr = None
+            self._view_tray.clear_histogram(self._theme)
             self._canvas.setText("No scan")
             self._canvas_status.setText("No scan loaded")
             return
@@ -332,14 +363,69 @@ class DatasetBuilderPanel(QWidget):
         except Exception as exc:
             self.status_message.emit(f"Could not load {item.source_path.name}: {exc}")
             return
-        self._canvas.set_raw_array(self._arr)
-        self._canvas.set_source(_array_pixmap(self._arr), reset_zoom=True)
+        self._display_arr = None
+        self._refresh_display_preview(reset_zoom=True)
         self._load_existing_mask(item)
         coverage = 100.0 * float(self._current_mask.data.mean()) if self._current_mask else 0.0
         self._canvas_status.setText(
             f"{item.display_id} | task: {self._task()} | status: {item.status} | "
             f"mask coverage: {coverage:.2f}%"
         )
+
+    def _current_display_array(self) -> np.ndarray | None:
+        if self._arr is None:
+            return None
+        if self._display_arr is not None:
+            return self._display_arr
+        self._display_arr = dataset_builder_display_array(
+            self._arr,
+            flatten=self._view_tray.is_flatten_enabled(),
+        )
+        return self._display_arr
+
+    def _refresh_display_preview(self, *_, reset_zoom: bool = False) -> None:
+        display_arr = self._current_display_array()
+        if display_arr is None:
+            self._view_tray.clear_histogram(self._theme)
+            self._canvas.set_raw_array(None)
+            self._canvas.set_source(QPixmap(), reset_zoom=reset_zoom)
+            self._canvas.setText("No scan")
+            return
+        vmin, vmax = self._display_drs.resolve(display_arr)
+        if vmin is None or vmax is None:
+            self._view_tray.clear_histogram(self._theme)
+            self._canvas.set_raw_array(display_arr)
+            self._canvas.set_source(QPixmap(), reset_zoom=reset_zoom)
+            return
+        self._view_tray.update_histogram(display_arr, vmin, vmax, self._theme)
+        self._view_slider_ctrl.update()
+        self._canvas.set_raw_array(display_arr)
+        self._canvas.set_source(_array_pixmap(display_arr, vmin=vmin, vmax=vmax), reset_zoom=reset_zoom)
+
+    def _on_view_hist_range_released(self, lo_phys: float, hi_phys: float) -> None:
+        self._display_drs.set_manual(lo_phys, hi_phys)
+
+    def _on_view_auto_clip(self) -> None:
+        presets = (
+            (1.0, 99.0),
+            (16.0, 84.0),
+            (33.5, 66.5),
+        )
+        self._view_auto_clip_idx = (self._view_auto_clip_idx + 1) % len(presets)
+        low, high = presets[self._view_auto_clip_idx]
+        self._display_drs.set_percentile(low, high)
+
+    def _on_view_reset(self) -> None:
+        self._display_drs.reset()
+        self._view_auto_clip_idx = -1
+
+    def _on_flatten_toggled(self, checked: bool) -> None:
+        self._display_arr = None
+        if self._arr is not None:
+            self._refresh_display_preview()
+
+    def toggle_view_tray(self) -> None:
+        self._view_tray.set_expanded(not self._view_tray.is_expanded())
 
     def _load_existing_mask(self, item: DatasetQueueItem) -> None:
         try:
@@ -614,8 +700,8 @@ class DatasetBuilderSidebar(QWidget):
         )
 
 
-def _array_pixmap(arr: np.ndarray) -> QPixmap:
-    u8 = array_to_uint8(arr)
+def _array_pixmap(arr: np.ndarray, *, vmin: float | None = None, vmax: float | None = None) -> QPixmap:
+    u8 = array_to_uint8(arr, vmin=vmin, vmax=vmax)
     h, w = u8.shape
     qimg = QImage(u8.data, w, h, u8.strides[0], QImage.Format_Grayscale8).copy()
     return QPixmap.fromImage(qimg)
