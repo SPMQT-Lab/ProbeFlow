@@ -369,3 +369,81 @@ def test_dataset_builder_canvas_right_drag_pans(qapp):
         scroll.horizontalScrollBar().value() != h0
         or scroll.verticalScrollBar().value() != v0
     )
+
+
+def test_dataset_builder_canvas_small_image_still_has_pan_room(qapp):
+    canvas = DatasetBuilderCanvas()
+    pixmap = QPixmap(64, 64)
+    pixmap.fill(QColor("white"))
+    canvas.setMinimumSize(420, 360)
+    canvas.set_source(pixmap, reset_zoom=True)
+    canvas.set_raw_array(np.zeros((64, 64), dtype=float))
+    canvas.show()
+
+    scroll = QScrollArea()
+    scroll.setWidget(canvas)
+    scroll.resize(250, 250)
+    scroll.show()
+    qapp.processEvents()
+
+    h0 = scroll.horizontalScrollBar().value()
+    v0 = scroll.verticalScrollBar().value()
+
+    press = QMouseEvent(
+        QEvent.Type.MouseButtonPress,
+        QPointF(120, 120),
+        QPointF(120, 120),
+        QPointF(120, 120),
+        Qt.RightButton,
+        Qt.RightButton,
+        Qt.NoModifier,
+    )
+    move = QMouseEvent(
+        QEvent.Type.MouseMove,
+        QPointF(50, 50),
+        QPointF(50, 50),
+        QPointF(50, 50),
+        Qt.NoButton,
+        Qt.RightButton,
+        Qt.NoModifier,
+    )
+    release = QMouseEvent(
+        QEvent.Type.MouseButtonRelease,
+        QPointF(50, 50),
+        QPointF(50, 50),
+        QPointF(50, 50),
+        Qt.RightButton,
+        Qt.NoButton,
+        Qt.NoModifier,
+    )
+    QApplication.sendEvent(canvas.viewport(), press)
+    QApplication.sendEvent(canvas.viewport(), move)
+    QApplication.sendEvent(canvas.viewport(), release)
+    qapp.processEvents()
+
+    assert (
+        scroll.horizontalScrollBar().value() != h0
+        or scroll.verticalScrollBar().value() != v0
+    )
+
+
+def test_dataset_builder_quickseg_modifier_enums_do_not_crash(qapp):
+    panel = DatasetBuilderPanel(THEMES["dark"], {})
+    idx = panel._task_combo.findData("terrace_segmentation")
+    assert idx >= 0
+    panel._task_combo.setCurrentIndex(idx)
+    panel._arr = np.zeros((16, 16), dtype=float)
+
+    calls: list[tuple[str, int, int]] = []
+    panel._quickseg_add_seed = lambda x, y, *, new_terrace=False: calls.append(("add", x, y, int(new_terrace)))  # type: ignore[method-assign]
+    panel._quickseg_delete_seed_at = lambda x, y: calls.append(("delete", x, y))  # type: ignore[method-assign]
+
+    panel._quickseg_canvas_clicked(3, 4, Qt.ControlModifier)
+    panel._quickseg_canvas_clicked(5, 6, Qt.AltModifier)
+    panel._quickseg_canvas_clicked(7, 8, Qt.NoModifier)
+
+    assert calls == [
+        ("add", 3, 4, 1),
+        ("delete", 5, 6),
+        ("add", 7, 8, 0),
+    ]

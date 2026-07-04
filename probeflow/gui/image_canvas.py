@@ -340,8 +340,8 @@ class ImageCanvas(QGraphicsView):
         if self._image_pixmap is None or self._image_pixmap.isNull():
             return
         Nx, Ny = self._image_size
-        w = max(1, int(Nx * self._zoom))
-        h = max(1, int(Ny * self._zoom))
+        w = max(1, int(Nx * self._zoom), self.minimumWidth())
+        h = max(1, int(Ny * self._zoom), self.minimumHeight())
         self.scene().setSceneRect(0, 0, Nx, Ny)
         self.setTransform(QTransform().scale(self._zoom, self._zoom))
         self.setFixedSize(w, h)

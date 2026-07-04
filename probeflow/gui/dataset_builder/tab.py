@@ -802,11 +802,14 @@ class DatasetBuilderPanel(QWidget):
     def _quickseg_canvas_clicked(self, x: int, y: int, modifiers: int) -> None:
         if self._task() != "terrace_segmentation":
             return
-        mods = int(modifiers)
-        if mods & int(Qt.AltModifier):
+        mods = int(getattr(modifiers, "value", modifiers))
+        alt_mod = int(getattr(Qt.AltModifier, "value", Qt.AltModifier))
+        ctrl_mod = int(getattr(Qt.ControlModifier, "value", Qt.ControlModifier))
+        meta_mod = int(getattr(Qt.MetaModifier, "value", Qt.MetaModifier))
+        if mods & alt_mod:
             self._quickseg_delete_seed_at(x, y)
             return
-        if mods & (int(Qt.ControlModifier) | int(Qt.MetaModifier)):
+        if mods & (ctrl_mod | meta_mod):
             self._quickseg_add_seed(x, y, new_terrace=True)
             return
         self._quickseg_add_seed(x, y, new_terrace=False)
