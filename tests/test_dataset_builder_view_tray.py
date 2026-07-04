@@ -5,10 +5,14 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
+from PySide6.QtGui import QKeySequence, QMouseEvent, QShortcut, QWheelEvent, QPixmap, QColor
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication, QScrollArea
 
 from probeflow.core.mask import ImageMask
 from probeflow.gui.dataset_builder.display import flatten_display_array
+from probeflow.gui.dataset_builder.canvas import DatasetBuilderCanvas
 from probeflow.gui.dataset_builder.tab import DatasetBuilderPanel, DatasetBuilderSidebar
 from probeflow.gui.dataset_builder.view_tray import (
     DatasetBuilderCurrentViewTray,
@@ -277,3 +281,91 @@ def test_dataset_builder_ctrl_z_undos_one_brush_stroke(qapp):
 
     assert panel._current_mask is not None
     assert panel._current_mask.data.sum() == 0
+
+
+def test_dataset_builder_canvas_emits_quickseg_click_and_zooms_on_wheel(qapp):
+    canvas = DatasetBuilderCanvas()
+    pixmap = QPixmap(128, 128)
+    pixmap.fill(QColor("white"))
+    canvas.set_source(pixmap, reset_zoom=True)
+    canvas.set_raw_array(np.zeros((128, 128), dtype=float))
+    canvas.set_quickseg_enabled(True)
+    canvas.show()
+    qapp.processEvents()
+
+    clicks: list[tuple[int, int, int]] = []
+    canvas.quickseg_click_requested.connect(lambda x, y, mods: clicks.append((x, y, mods)))
+
+    QTest.mouseClick(canvas.viewport(), Qt.LeftButton, Qt.NoModifier, QPoint(20, 30))
+    qapp.processEvents()
+    assert clicks == [(20, 30, 0)]
+
+    zoom_before = canvas.zoom()
+    wheel = QWheelEvent(
+        QPointF(20, 30),
+        QPointF(20, 30),
+        QPoint(0, 0),
+        QPoint(0, 120),
+        Qt.NoButton,
+        Qt.NoModifier,
+        Qt.ScrollUpdate,
+        False,
+    )
+    QApplication.sendEvent(canvas.viewport(), wheel)
+    qapp.processEvents()
+    assert canvas.zoom() > zoom_before
+
+
+def test_dataset_builder_canvas_right_drag_pans(qapp):
+    canvas = DatasetBuilderCanvas()
+    pixmap = QPixmap(900, 900)
+    pixmap.fill(QColor("white"))
+    canvas.set_source(pixmap, reset_zoom=True)
+    canvas.set_raw_array(np.zeros((900, 900), dtype=float))
+    canvas.show()
+
+    scroll = QScrollArea()
+    scroll.setWidget(canvas)
+    scroll.resize(250, 250)
+    scroll.show()
+    qapp.processEvents()
+
+    h0 = scroll.horizontalScrollBar().value()
+    v0 = scroll.verticalScrollBar().value()
+
+    press = QMouseEvent(
+        QEvent.Type.MouseButtonPress,
+        QPointF(100, 100),
+        QPointF(100, 100),
+        QPointF(100, 100),
+        Qt.RightButton,
+        Qt.RightButton,
+        Qt.NoModifier,
+    )
+    move = QMouseEvent(
+        QEvent.Type.MouseMove,
+        QPointF(40, 40),
+        QPointF(40, 40),
+        QPointF(40, 40),
+        Qt.NoButton,
+        Qt.RightButton,
+        Qt.NoModifier,
+    )
+    release = QMouseEvent(
+        QEvent.Type.MouseButtonRelease,
+        QPointF(40, 40),
+        QPointF(40, 40),
+        QPointF(40, 40),
+        Qt.RightButton,
+        Qt.NoButton,
+        Qt.NoModifier,
+    )
+    QApplication.sendEvent(canvas.viewport(), press)
+    QApplication.sendEvent(canvas.viewport(), move)
+    QApplication.sendEvent(canvas.viewport(), release)
+    qapp.processEvents()
+
+    assert (
+        scroll.horizontalScrollBar().value() != h0
+        or scroll.verticalScrollBar().value() != v0
+    )

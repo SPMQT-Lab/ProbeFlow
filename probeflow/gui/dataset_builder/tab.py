@@ -236,8 +236,9 @@ class DatasetBuilderPanel(QWidget):
 
         right_lay.addWidget(self._task_stack)
         right_lay.addStretch(1)
+        right.setMinimumWidth(360)
         body.addWidget(right)
-        body.setSizes([240, 760, 260])
+        body.setSizes([240, 760, 360])
 
         self._shortcut_lbl = QLabel(
             "A prev | F save+accept+next | D save+uncertain+next | S save+reject+next | "

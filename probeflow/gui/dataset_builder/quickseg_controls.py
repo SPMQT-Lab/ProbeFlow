@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QSizePolicy,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -35,9 +36,10 @@ class _Section(QWidget):
 
         self._body = QFrame()
         self._body.setVisible(False)
+        self._body.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
         self._body_lay = QVBoxLayout(self._body)
-        self._body_lay.setContentsMargins(0, 4, 0, 0)
-        self._body_lay.setSpacing(6)
+        self._body_lay.setContentsMargins(0, 6, 0, 0)
+        self._body_lay.setSpacing(8)
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -152,12 +154,16 @@ class QuickSegControlsWidget(QWidget):
         root.addWidget(self._advanced)
         adv_form = QFormLayout()
         adv_form.setContentsMargins(0, 0, 0, 0)
-        adv_form.setSpacing(4)
+        adv_form.setSpacing(6)
+        adv_form.setHorizontalSpacing(10)
+        adv_form.setVerticalSpacing(6)
+        adv_form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
         self._background_mode = QComboBox()
         self._background_mode.addItem("None", "none")
         self._background_mode.addItem("subtract_background(order=1)", "subtract_background_order1")
         self._background_mode.addItem("Old plane fit", "plane_fit")
         self._background_mode.addItem("Facet level", "facet_level")
+        self._background_mode.setMinimumWidth(220)
         self._plane_lo = self._make_percent_spinbox(1.0)
         self._plane_hi = self._make_percent_spinbox(99.0)
         self._tv_weight = self._make_float_spinbox(0.25, 0.0, 10.0, 0.05)
@@ -171,6 +177,7 @@ class QuickSegControlsWidget(QWidget):
         self._gaussian_order.setValue(0)
         self._gaussian_mode = QComboBox()
         self._gaussian_mode.addItems(["reflect", "nearest", "mirror", "wrap", "constant"])
+        self._gaussian_mode.setMinimumWidth(120)
         self._watershed_connectivity = QSpinBox()
         self._watershed_connectivity.setRange(1, 5)
         self._watershed_connectivity.setValue(1)
@@ -213,6 +220,7 @@ class QuickSegControlsWidget(QWidget):
         sb.setDecimals(6)
         sb.setSingleStep(step)
         sb.setValue(value)
+        sb.setMinimumWidth(120)
         return sb
 
     def _make_percent_spinbox(self, value: float) -> QDoubleSpinBox:
@@ -222,6 +230,7 @@ class QuickSegControlsWidget(QWidget):
         sb.setSingleStep(1.0)
         sb.setSuffix(" %")
         sb.setValue(value)
+        sb.setMinimumWidth(120)
         return sb
 
     def _connect_changes(self) -> None:
