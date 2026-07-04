@@ -31,10 +31,13 @@ MANIFEST_COLUMNS = (
     "reviewed_at",
     "proposal_method",
     "proposal_parameters_json",
+    "task_data_json",
     "processing_state_hash",
     "array_path",
     "preview_path",
     "mask_paths_json",
+    "seed_path",
+    "quickseg_result_path",
     "roi_path",
     "objects_path",
     "provenance_path",
@@ -87,4 +90,3 @@ def write_manifest(output_dir: str | Path, rows: list[dict[str, Any]]) -> tuple[
         raise
 
     return csv_path, json_path
-

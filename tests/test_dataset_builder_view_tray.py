@@ -14,6 +14,7 @@ from probeflow.gui.dataset_builder.view_tray import (
     DatasetBuilderCurrentViewTray,
     DatasetBuilderViewTray,
 )
+from probeflow.gui.dataset_builder.quickseg_controls import QuickSegControlsWidget
 from probeflow.gui.styling import THEMES
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -203,6 +204,29 @@ def test_dataset_builder_shortcuts_cover_clear_undo_and_brush_size(qapp):
     assert "R" in keys
     assert QKeySequence(QKeySequence.Undo).toString() in keys
     assert "W" not in keys
+
+
+def test_quickseg_controls_expose_basic_state_and_buttons(qapp):
+    controls = QuickSegControlsWidget(THEMES["dark"])
+    controls.show()
+    qapp.processEvents()
+
+    seen: list[str] = []
+    controls.apply_requested.connect(lambda: seen.append("apply"))
+    controls.save_next_requested.connect(lambda: seen.append("save_next"))
+
+    controls.set_current_label(7)
+    controls.set_seed_mode_status("Add seed mode")
+    controls.set_result_status("Watershed ready")
+
+    controls._apply_btn.click()
+    controls._save_next_btn.click()
+    qapp.processEvents()
+
+    assert controls.current_label() == 7
+    assert controls._seed_mode_lbl.text() == "Add seed mode"
+    assert controls._result_lbl.text() == "Watershed ready"
+    assert seen == ["apply", "save_next"]
 
 
 def test_dataset_builder_load_current_does_not_return_early(qapp):

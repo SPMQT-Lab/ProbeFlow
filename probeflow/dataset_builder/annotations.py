@@ -41,6 +41,7 @@ def save_mask_annotation(
     config: DatasetTaskConfig,
     status: str = "draft",
     notes: str = "",
+    task_data: dict | None = None,
 ) -> tuple[Path, Path]:
     """Upsert one Dataset Builder mask and save review metadata."""
 
@@ -71,6 +72,7 @@ def save_mask_annotation(
         notes=notes,
         proposal_method=image_mask.method,
         proposal_parameters=dict(image_mask.parameters),
+        task_data=dict(task_data or {}),
         updated_at=utc_now(),
     )
     state_path = save_review_record(scan_path, record)
@@ -83,6 +85,7 @@ def save_review_annotation(
     config: DatasetTaskConfig,
     status: str,
     notes: str = "",
+    task_data: dict | None = None,
 ) -> Path:
     """Save review metadata for labels that have no raster/object artifact."""
 
@@ -98,6 +101,7 @@ def save_review_annotation(
         notes=notes,
         proposal_method=None,
         proposal_parameters={},
+        task_data=dict(task_data or {}),
         updated_at=utc_now(),
     )
     return save_review_record(scan_path, record)

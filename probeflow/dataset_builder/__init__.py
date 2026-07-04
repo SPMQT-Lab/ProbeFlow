@@ -12,6 +12,7 @@ from probeflow.dataset_builder.models import (
     ProposalResult,
     ReviewRecord,
 )
+from probeflow.dataset_builder.quickseg import QuickSegParams, QuickSegSeed, QuickSegState
 
 __all__ = [
     "DatasetExportSpec",
@@ -19,5 +20,7 @@ __all__ = [
     "DatasetTaskConfig",
     "ProposalResult",
     "ReviewRecord",
+    "QuickSegParams",
+    "QuickSegSeed",
+    "QuickSegState",
 ]
-

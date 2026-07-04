@@ -14,7 +14,14 @@ from PIL import Image
 from probeflow.core.mask import MaskSet
 from probeflow.dataset_builder.loading import load_scan_plane, plane_sample_id
 from probeflow.dataset_builder.manifest import write_manifest
-from probeflow.dataset_builder.models import DatasetExportSpec
+from probeflow.dataset_builder.models import DatasetExportSpec, DatasetTaskConfig
+from probeflow.dataset_builder.quickseg import (
+    colorize_labels,
+    load_quickseg_state,
+    prepare_quickseg_inputs,
+    quickseg_state_to_review_payload,
+    watershed_labels,
+)
 from probeflow.dataset_builder.queue import build_queue
 from probeflow.dataset_builder.sidecar_state import (
     default_state_sidecar_path,
@@ -69,7 +76,7 @@ def export_dataset(spec: DatasetExportSpec) -> dict[str, Any]:
     """Export a frozen ML-ready dataset snapshot and return a summary."""
 
     out = Path(spec.output_dir)
-    for name in ("arrays", "previews", "masks", "rois", "objects", "provenance"):
+    for name in ("arrays", "previews", "masks", "rois", "seeds", "objects", "provenance"):
         (out / name).mkdir(parents=True, exist_ok=True)
 
     rows: list[dict[str, Any]] = []
@@ -132,6 +139,49 @@ def export_dataset(spec: DatasetExportSpec) -> dict[str, Any]:
                 _mask_png(mask.data, mask_png, overwrite=spec.overwrite)
                 mask_paths[mask.name] = _rel(mask_npy, out)
                 mask_paths[f"{mask.name}_png"] = _rel(mask_png, out)
+
+        seed_path_value = ""
+        quickseg_result_export_path = ""
+        if record.task == "terrace_segmentation" or record.label_name == "quickseg_terraces":
+            quick_state, _quick_record, _result_path = load_quickseg_state(
+                item.source_path,
+                config=DatasetTaskConfig(
+                    task=record.task,
+                    label_name=record.label_name,
+                    label_type=record.label_type,
+                    proposal_method=record.proposal_method or "quickseg",
+                    plane_index=spec.plane_index,
+                    annotator=record.annotator,
+                    proposal_params=dict(record.proposal_parameters),
+                ),
+            )
+            if quick_state.result is None and quick_state.seeds:
+                prepared = prepare_quickseg_inputs(
+                    arr,
+                    quick_state.params,
+                    pixel_size_x_m=px_x_m,
+                    pixel_size_y_m=px_y_m,
+                )
+                quick_state.result = watershed_labels(prepared, quick_state.seeds, quick_state.params)
+            seed_export = out / "seeds" / f"{sample_id}.json"
+            _check_available(seed_export, spec.overwrite)
+            seed_export.parent.mkdir(parents=True, exist_ok=True)
+            with seed_export.open("w", encoding="utf-8") as fh:
+                json.dump(quickseg_state_to_review_payload(quick_state), fh, indent=2, default=str)
+            seed_path_value = _rel(seed_export, out)
+            if quick_state.result is not None:
+                quickseg_mask_dir = out / "masks" / "quickseg_terraces"
+                quickseg_mask_dir.mkdir(parents=True, exist_ok=True)
+                quickseg_npy = quickseg_mask_dir / f"{sample_id}.npy"
+                quickseg_png = quickseg_mask_dir / f"{sample_id}.png"
+                _check_available(quickseg_npy, spec.overwrite)
+                with quickseg_npy.open("wb") as fh:
+                    np.save(fh, np.asarray(quick_state.result, dtype=np.int32), allow_pickle=False)
+                _check_available(quickseg_png, spec.overwrite)
+                Image.fromarray(colorize_labels(np.asarray(quick_state.result, dtype=np.int32))).save(quickseg_png)
+                mask_paths["quickseg_terraces"] = _rel(quickseg_npy, out)
+                mask_paths["quickseg_terraces_png"] = _rel(quickseg_png, out)
+                quickseg_result_export_path = _rel(quickseg_npy, out)
 
         native_roi_sidecar = default_roi_sidecar_path(item.source_path)
         roi_export_path = out / "rois" / f"{sample_id}.rois.json"
@@ -198,10 +248,13 @@ def export_dataset(spec: DatasetExportSpec) -> dict[str, Any]:
                 "reviewed_at": record.updated_at or "",
                 "proposal_method": record.proposal_method or "",
                 "proposal_parameters_json": json.dumps(record.proposal_parameters, default=str),
+                "task_data_json": json.dumps(record.task_data, default=str),
                 "processing_state_hash": export_prov.processing_state_hash or "",
                 "array_path": _rel(array_path, out),
                 "preview_path": _rel(preview_path, out),
                 "mask_paths_json": json.dumps(mask_paths, sort_keys=True),
+                "seed_path": seed_path_value,
+                "quickseg_result_path": quickseg_result_export_path,
                 "roi_path": _rel(Path(roi_path_value), out) if roi_path_value else "",
                 "objects_path": "",
                 "provenance_path": _rel(written_prov_path, out),

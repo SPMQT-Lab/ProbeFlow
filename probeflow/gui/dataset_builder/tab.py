@@ -9,6 +9,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QImage, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QComboBox,
+    QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
@@ -32,6 +33,16 @@ from probeflow.dataset_builder.annotations import (
 from probeflow.dataset_builder.export import export_dataset
 from probeflow.dataset_builder.loading import load_scan_plane
 from probeflow.dataset_builder.models import DatasetExportSpec, DatasetQueueItem, DatasetTaskConfig
+from probeflow.dataset_builder.quickseg import (
+    QuickSegParams,
+    QuickSegSeed,
+    QuickSegState,
+    load_quickseg_state,
+    prepare_quickseg_inputs,
+    quickseg_overlay_rgba,
+    save_quickseg_state,
+    watershed_labels,
+)
 from probeflow.dataset_builder.painting import paint_mask
 from probeflow.dataset_builder.queue import build_queue, queue_counts
 from probeflow.gui.dataset_builder.display import (
@@ -44,6 +55,7 @@ from probeflow.gui.dataset_builder.view_tray import (
     DatasetBuilderCurrentViewTray,
     DatasetBuilderViewTray,
 )
+from probeflow.gui.dataset_builder.quickseg_controls import QuickSegControlsWidget
 from probeflow.io.mask_sidecar import load_mask_set_sidecar
 from probeflow.processing.display import array_to_uint8
 
@@ -74,6 +86,18 @@ class DatasetBuilderPanel(QWidget):
         self._display_arr: np.ndarray | None = None
         self._current_view_points: list[tuple[int, int]] = []
         self._current_view_capture: list[tuple[int, int]] = []
+        self._task_widgets: dict[str, list[QWidget]] = {}
+        self._quickseg_state = QuickSegState()
+        self._quickseg_cache = None
+        self._quickseg_controls: QuickSegControlsWidget | None = None
+        self._quickseg_overlay_visible = True
+        self._quickseg_overlay_dirty = False
+        self._quickseg_seed_history: list[dict[str, object]] = []
+        self._quickseg_seed_points: list[QuickSegSeed] = []
+        self._quickseg_result: np.ndarray | None = None
+        self._quickseg_result_path: Path | None = None
+        self._quickseg_review_record = None
+        self._quickseg_seed_mode = "add"
 
         root = QVBoxLayout(self)
         root.setContentsMargins(8, 8, 8, 8)
@@ -139,9 +163,9 @@ class DatasetBuilderPanel(QWidget):
         self._current_view_tray.flatten_requested.connect(self._on_current_flatten_toggled)
         self._current_view_tray.clear_requested.connect(self.clear_current_image_flatten)
 
-        form = QFormLayout()
         self._task_combo = QComboBox()
         self._task_combo.addItem("Step-edge / ignore-mask", "step_edge_mask")
+        self._task_combo.addItem("QuickSeg terrace segmentation", "terrace_segmentation")
         self._plane_spin = QSpinBox()
         self._plane_spin.setRange(0, 64)
         self._status_combo = QComboBox()
@@ -149,11 +173,20 @@ class DatasetBuilderPanel(QWidget):
         self._brush_spin = QSpinBox()
         self._brush_spin.setRange(1, 128)
         self._brush_spin.setValue(8)
-        form.addRow("Preset", self._task_combo)
-        form.addRow("Plane", self._plane_spin)
-        form.addRow("Status", self._status_combo)
+
+        shared_form = QFormLayout()
+        shared_form.addRow("Preset", self._task_combo)
+        shared_form.addRow("Plane", self._plane_spin)
+        shared_form.addRow("Status", self._status_combo)
+        right_lay.addLayout(shared_form)
+
+        step_panel = QWidget()
+        step_lay = QVBoxLayout(step_panel)
+        step_lay.setContentsMargins(0, 0, 0, 0)
+        step_lay.setSpacing(8)
+        form = QFormLayout()
         form.addRow("Brush px", self._brush_spin)
-        right_lay.addLayout(form)
+        step_lay.addLayout(form)
 
         brush_btn = QPushButton("Brush")
         brush_btn.setCheckable(True)
@@ -175,7 +208,33 @@ class DatasetBuilderPanel(QWidget):
             reject_btn,
             clear_btn,
         ):
-            right_lay.addWidget(btn)
+            step_lay.addWidget(btn)
+        step_lay.addStretch(1)
+        self._step_panel = step_panel
+
+        self._quickseg_controls = QuickSegControlsWidget(theme, self)
+        self._quickseg_controls.apply_theme(theme)
+        self._quickseg_controls.apply_requested.connect(self._apply_quickseg_params)
+        self._quickseg_controls.new_label_requested.connect(self._quickseg_new_label)
+        self._quickseg_controls.undo_seed_requested.connect(self._quickseg_undo_last_seed)
+        self._quickseg_controls.clear_seeds_requested.connect(self._quickseg_clear_seeds)
+        self._quickseg_controls.refresh_requested.connect(self._quickseg_refresh_watershed)
+        self._quickseg_controls.clear_result_requested.connect(self._quickseg_clear_result)
+        self._quickseg_controls.save_requested.connect(self.save_current)
+        self._quickseg_controls.save_next_requested.connect(self.save_and_next)
+        self._quickseg_controls.accept_requested.connect(lambda: self._save_status_and_next("accepted"))
+        self._quickseg_controls.uncertain_requested.connect(lambda: self._save_status_and_next("uncertain"))
+        self._quickseg_controls.reject_requested.connect(lambda: self._save_status_and_next("rejected"))
+        self._quickseg_controls.parameters_changed.connect(self._quickseg_update_overlay)
+
+        self._task_stack = QWidget()
+        task_stack_lay = QVBoxLayout(self._task_stack)
+        task_stack_lay.setContentsMargins(0, 0, 0, 0)
+        task_stack_lay.setSpacing(0)
+        task_stack_lay.addWidget(step_panel)
+        task_stack_lay.addWidget(self._quickseg_controls)
+
+        right_lay.addWidget(self._task_stack)
         right_lay.addStretch(1)
         body.addWidget(right)
         body.setSizes([240, 760, 260])
@@ -193,6 +252,7 @@ class DatasetBuilderPanel(QWidget):
         export_btn.clicked.connect(self._export_dataset)
         self._queue_list.currentRowChanged.connect(self._on_queue_row_changed)
         self._filter_combo.currentTextChanged.connect(lambda _text: self._refresh_queue_list())
+        self._task_combo.currentIndexChanged.connect(self._on_task_changed)
         self._plane_spin.valueChanged.connect(lambda _v: self.load_queue() if self._source_entry.text() else None)
         brush_btn.clicked.connect(lambda: self.set_paint_mode("brush"))
         eraser_btn.clicked.connect(lambda: self.set_paint_mode("eraser"))
@@ -205,6 +265,7 @@ class DatasetBuilderPanel(QWidget):
         self._canvas.paint_stroke_finished.connect(self._end_paint_stroke)
         self._canvas.mask_painted.connect(self._paint_at)
         self._canvas.pixel_clicked.connect(self._on_current_view_point_clicked)
+        self._canvas.quickseg_click_requested.connect(self._quickseg_canvas_clicked)
         self.set_paint_mode("brush")
 
         self._install_shortcuts()
@@ -221,6 +282,9 @@ class DatasetBuilderPanel(QWidget):
         )
         self._global_view_tray.apply_theme(theme)
         self._current_view_tray.apply_theme(theme)
+        if self._quickseg_controls is not None:
+            self._quickseg_controls.apply_theme(theme)
+        self._sync_task_ui()
         if self._arr is not None:
             self._refresh_display_preview()
 
@@ -229,25 +293,85 @@ class DatasetBuilderPanel(QWidget):
         self.load_queue()
 
     def _install_shortcuts(self) -> None:
-        bindings = {
-            "A": self.previous_item,
-            "F": lambda: self._save_status_and_next("accepted"),
-            "D": lambda: self._save_status_and_next("uncertain"),
-            "S": lambda: self._save_status_and_next("rejected"),
-            "Q": self.toggle_overlay,
-            "E": lambda: self.set_paint_mode("eraser"),
-            "R": lambda: self.set_paint_mode("brush"),
-            "Z": self.clear_overlay,
-            "V": lambda: self._brush_spin.setValue(self._brush_spin.value() + 1),
-            "C": lambda: self._brush_spin.setValue(max(1, self._brush_spin.value() - 1)),
-        }
-        for key, slot in bindings.items():
+        self._shortcuts: dict[str, QShortcut] = {}
+
+        def _make(key: str, slot) -> None:
             sc = QShortcut(QKeySequence(key), self)
             sc.setContext(Qt.WidgetWithChildrenShortcut)
             sc.activated.connect(slot)
+            self._shortcuts[key] = sc
+
+        _make("A", self.previous_item)
+        _make("F", lambda: self._shortcut_save_status("accepted"))
+        _make("D", lambda: self._shortcut_save_status("uncertain"))
+        _make("S", lambda: self._shortcut_save_status("rejected"))
+        _make("Q", self._shortcut_toggle_overlay)
+        _make("E", self._shortcut_eraser)
+        _make("R", self._shortcut_r)
+        _make("Z", self._shortcut_z)
+        _make("V", self._shortcut_brush_plus)
+        _make("C", self._shortcut_brush_minus)
+        undo_key = QKeySequence(QKeySequence.Undo).toString()
         undo = QShortcut(QKeySequence.Undo, self)
         undo.setContext(Qt.WidgetWithChildrenShortcut)
-        undo.activated.connect(self.undo_paint)
+        undo.activated.connect(self._shortcut_undo)
+        self._shortcuts[undo_key] = undo
+        self._sync_shortcuts_for_task()
+
+    def _sync_shortcuts_for_task(self) -> None:
+        is_step_edge = self._task() == "step_edge_mask"
+        is_quickseg = self._task() == "terrace_segmentation"
+        for key in ("E", "V", "C", "Z"):
+            if key in self._shortcuts:
+                self._shortcuts[key].setEnabled(is_step_edge)
+        if "R" in self._shortcuts:
+            self._shortcuts["R"].setEnabled(True)
+        for key in ("A", "F", "D", "S", "Q"):
+            if key in self._shortcuts:
+                self._shortcuts[key].setEnabled(True)
+        undo_key = QKeySequence(QKeySequence.Undo).toString()
+        if undo_key in self._shortcuts:
+            self._shortcuts[undo_key].setEnabled(True)
+
+    def _shortcut_save_status(self, status: str) -> None:
+        if self._task() == "terrace_segmentation":
+            self._save_status_and_next(status)
+            return
+        self._save_status_and_next(status)
+
+    def _shortcut_toggle_overlay(self) -> None:
+        if self._task() == "terrace_segmentation":
+            self.toggle_quickseg_overlay()
+        else:
+            self.toggle_overlay()
+
+    def _shortcut_eraser(self) -> None:
+        if self._task() == "step_edge_mask":
+            self.set_paint_mode("eraser")
+
+    def _shortcut_r(self) -> None:
+        if self._task() == "terrace_segmentation":
+            self._quickseg_refresh_watershed()
+        else:
+            self.set_paint_mode("brush")
+
+    def _shortcut_z(self) -> None:
+        if self._task() == "step_edge_mask":
+            self.clear_overlay()
+
+    def _shortcut_brush_plus(self) -> None:
+        if self._task() == "step_edge_mask":
+            self._brush_spin.setValue(self._brush_spin.value() + 1)
+
+    def _shortcut_brush_minus(self) -> None:
+        if self._task() == "step_edge_mask":
+            self._brush_spin.setValue(max(1, self._brush_spin.value() - 1))
+
+    def _shortcut_undo(self) -> None:
+        if self._task() == "step_edge_mask":
+            self.undo_paint()
+        else:
+            self._quickseg_undo_last_seed()
 
     def _browse_source(self) -> None:
         path = QFileDialog.getExistingDirectory(self, "Dataset Builder source folder")
@@ -259,10 +383,11 @@ class DatasetBuilderPanel(QWidget):
         if not source:
             return
         try:
+            config = self._config()
             self._queue = build_queue(
                 source,
-                task=self._task(),
-                label_name="step_edge",
+                task=config.task,
+                label_name=config.label_name,
                 plane_index=self._plane_spin.value(),
             )
         except Exception as exc:
@@ -277,12 +402,61 @@ class DatasetBuilderPanel(QWidget):
         return str(self._task_combo.currentData() or "step_edge_mask")
 
     def _config(self, *, status: str | None = None) -> DatasetTaskConfig:
+        task = self._task()
         return DatasetTaskConfig(
-            task=self._task(),
-            label_name="step_edge",
-            label_type="mask",
+            task=task,
+            label_name="step_edge" if task == "step_edge_mask" else "quickseg_terraces",
+            label_type="mask" if task == "step_edge_mask" else "instances",
+            proposal_method="step_edge" if task == "step_edge_mask" else "quickseg",
             plane_index=self._plane_spin.value(),
+            proposal_params=self._quickseg_controls.parameters().to_dict() if task == "terrace_segmentation" and self._quickseg_controls else {},
         )
+
+    def _on_task_changed(self, *_args) -> None:
+        self._sync_task_ui()
+        if self._source_entry.text().strip():
+            self.load_queue()
+        else:
+            self._refresh_shortcut_help()
+
+    def _sync_task_ui(self) -> None:
+        task = self._task()
+        is_step = task == "step_edge_mask"
+        is_quickseg = task == "terrace_segmentation"
+        if hasattr(self, "_step_panel"):
+            self._step_panel.setVisible(is_step)
+        if self._quickseg_controls is not None:
+            self._quickseg_controls.setVisible(is_quickseg)
+            self._quickseg_controls.set_review_enabled(True)
+        self._canvas.set_paint_enabled(is_step)
+        self._canvas.set_quickseg_enabled(is_quickseg)
+        if self._quickseg_controls is not None:
+            self._quickseg_controls.set_seed_mode_status(
+                "Add seed mode" if self._quickseg_seed_mode == "add" else "Delete seed mode"
+            )
+            self._quickseg_controls.set_current_label(self._quickseg_state.current_label)
+            if is_quickseg:
+                if self._quickseg_result is None:
+                    result_text = "No watershed result"
+                else:
+                    result_text = f"Watershed ready ({self._quickseg_result.shape[0]}x{self._quickseg_result.shape[1]})"
+                self._quickseg_controls.set_result_status(result_text)
+        self._refresh_shortcut_help()
+
+    def _refresh_shortcut_help(self) -> None:
+        if self._task() == "terrace_segmentation":
+            text = (
+                "A prev | F save+accept+next | D save+uncertain+next | S save+reject+next | "
+                "Q overlay | Ctrl/Cmd+LMB new terrace | LMB seed | Alt+LMB delete nearest | "
+                "Ctrl+Z undo seed | R refresh watershed"
+            )
+        else:
+            text = (
+                "A prev | F save+accept+next | D save+uncertain+next | S save+reject+next | "
+                "Q overlay | E eraser | R brush | Z clear | Ctrl+Z undo | "
+                "V brush+ | C brush-"
+            )
+        self._shortcut_lbl.setText(text)
 
     def _refresh_queue_list(self) -> None:
         current_path = (
@@ -332,8 +506,16 @@ class DatasetBuilderPanel(QWidget):
         self._stroke_snapshot = None
         self._stroke_dirty = False
         self._canvas.clear_mask_overlay()
+        self._canvas.clear_rgba_overlay()
         self._current_view_points = []
         self._cancel_current_image_flatten(refresh=False)
+        self._quickseg_seed_history.clear()
+        self._quickseg_seed_points = []
+        self._quickseg_result = None
+        self._quickseg_result_path = None
+        self._quickseg_review_record = None
+        self._quickseg_cache = None
+        self._quickseg_state = QuickSegState()
         if not (0 <= self._current_index < len(self._queue)):
             self._arr = None
             self._base_display_arr = None
@@ -353,13 +535,17 @@ class DatasetBuilderPanel(QWidget):
             return
         self._base_display_arr = None
         self._display_arr = None
+        self._sync_task_ui()
         self._refresh_display_preview(reset_zoom=True)
-        self._load_existing_mask(item)
-        coverage = 100.0 * float(self._current_mask.data.mean()) if self._current_mask else 0.0
-        self._canvas_status.setText(
-            f"{item.display_id} | task: {self._task()} | status: {item.status} | "
-            f"mask coverage: {coverage:.2f}%"
-        )
+        if self._task() == "terrace_segmentation":
+            self._load_existing_quickseg(item)
+        else:
+            self._load_existing_mask(item)
+            coverage = 100.0 * float(self._current_mask.data.mean()) if self._current_mask else 0.0
+            self._canvas_status.setText(
+                f"{item.display_id} | task: {self._task()} | status: {item.status} | "
+                f"mask coverage: {coverage:.2f}%"
+            )
 
     def _base_display_array(self) -> np.ndarray | None:
         if self._arr is None:
@@ -506,6 +692,239 @@ class DatasetBuilderPanel(QWidget):
             self._current_mask = mask
             self._show_mask(mask.data)
 
+    def _quickseg_prepare_cache(self) -> None:
+        if self._arr is None or self._quickseg_controls is None:
+            return
+        self._quickseg_state.params = self._quickseg_controls.parameters()
+        self._quickseg_cache = prepare_quickseg_inputs(
+            self._arr,
+            self._quickseg_state.params,
+            pixel_size_x_m=self._px_x_m,
+            pixel_size_y_m=self._px_y_m,
+        )
+
+    def _quickseg_mark_dirty(self) -> None:
+        self._quickseg_result = None
+        self._quickseg_state.result = None
+        self._quickseg_overlay_dirty = True
+        self._quickseg_update_overlay()
+        self._quickseg_update_status("Watershed pending")
+
+    def _quickseg_update_overlay(self) -> None:
+        if self._task() != "terrace_segmentation" or self._arr is None:
+            self._canvas.clear_rgba_overlay()
+            return
+        if not self._quickseg_overlay_visible:
+            self._canvas.clear_rgba_overlay()
+            return
+        labels = self._quickseg_result
+        if labels is None:
+            labels = np.zeros(self._arr.shape, dtype=np.int32)
+        rgba = quickseg_overlay_rgba(
+            labels,
+            self._quickseg_state.seeds,
+            show_seeds=self._quickseg_controls.show_seeds() if self._quickseg_controls else True,
+            show_boundaries=self._quickseg_controls.show_boundaries() if self._quickseg_controls else True,
+            show_filled_regions=self._quickseg_controls.show_filled_regions() if self._quickseg_controls else True,
+            opacity=self._quickseg_controls.overlay_opacity() if self._quickseg_controls else 0.55,
+        )
+        self._canvas.set_rgba_overlay(rgba)
+
+    def _quickseg_update_status(self, prefix: str | None = None) -> None:
+        if self._current_index < 0 or self._current_index >= len(self._queue):
+            return
+        item = self._queue[self._current_index]
+        seed_count = len(self._quickseg_state.seeds)
+        result_state = "ready" if self._quickseg_result is not None else "pending"
+        text = prefix or "QuickSeg ready"
+        self._canvas_status.setText(
+            f"{item.display_id} | task: {self._task()} | status: {item.status} | "
+            f"seeds: {seed_count} | result: {result_state}"
+        )
+        if self._quickseg_controls is not None:
+            self._quickseg_controls.set_current_label(self._quickseg_state.current_label)
+            self._quickseg_controls.set_seed_mode_status(
+                f"Add seed mode (label {self._quickseg_state.current_label})"
+            )
+            if self._quickseg_result is None:
+                self._quickseg_controls.set_result_status(text or "Watershed pending")
+            else:
+                self._quickseg_controls.set_result_status(
+                    f"Watershed ready ({self._quickseg_result.shape[0]}x{self._quickseg_result.shape[1]})"
+                )
+
+    def _quickseg_new_label(self) -> None:
+        self._quickseg_state.current_label = max(1, self._quickseg_state.current_label + 1)
+        self._quickseg_update_status("New terrace label")
+
+    def _quickseg_add_seed(self, x: int, y: int, *, new_terrace: bool = False) -> None:
+        if self._arr is None:
+            return
+        if new_terrace:
+            prev_label = self._quickseg_state.current_label
+            self._quickseg_state.current_label = max(1, prev_label + 1)
+            label = self._quickseg_state.current_label
+        else:
+            prev_label = self._quickseg_state.current_label
+            label = prev_label
+        seed = QuickSegSeed(
+            x=int(x),
+            y=int(y),
+            terrace_label_id=int(label),
+            order=int(self._quickseg_state.next_order),
+        )
+        self._quickseg_state.next_order += 1
+        self._quickseg_state.seeds.append(seed)
+        action = {"action": "new_seed" if new_terrace else "add_seed", "seed": seed, "previous_label": prev_label}
+        self._quickseg_seed_history.append(action)
+        self._quickseg_mark_dirty()
+        self._quickseg_update_status("Seed added")
+
+    def _quickseg_delete_seed_at(self, x: int, y: int) -> None:
+        if not self._quickseg_state.seeds:
+            return
+        best_idx = None
+        best_dist = None
+        for idx, seed in enumerate(self._quickseg_state.seeds):
+            dist = (int(seed.x) - int(x)) ** 2 + (int(seed.y) - int(y)) ** 2
+            if best_dist is None or dist < best_dist:
+                best_idx = idx
+                best_dist = dist
+        if best_idx is None:
+            return
+        removed = self._quickseg_state.seeds.pop(best_idx)
+        self._quickseg_seed_history.append({"action": "delete_seed", "seed": removed, "index": best_idx})
+        self._quickseg_state.current_label = max((s.terrace_label_id for s in self._quickseg_state.seeds), default=1)
+        self._quickseg_mark_dirty()
+        self._quickseg_update_status("Seed deleted")
+
+    def _quickseg_canvas_clicked(self, x: int, y: int, modifiers: int) -> None:
+        if self._task() != "terrace_segmentation":
+            return
+        mods = int(modifiers)
+        if mods & int(Qt.AltModifier):
+            self._quickseg_delete_seed_at(x, y)
+            return
+        if mods & (int(Qt.ControlModifier) | int(Qt.MetaModifier)):
+            self._quickseg_add_seed(x, y, new_terrace=True)
+            return
+        self._quickseg_add_seed(x, y, new_terrace=False)
+
+    def _quickseg_undo_last_seed(self) -> None:
+        if not self._quickseg_seed_history:
+            self.status_message.emit("QuickSeg undo stack is empty")
+            return
+        action = self._quickseg_seed_history.pop()
+        kind = str(action.get("action"))
+        if kind in {"add_seed", "new_seed"}:
+            seed = action["seed"]
+            self._quickseg_state.seeds = [
+                s for s in self._quickseg_state.seeds
+                if not (s.order == seed.order and s.terrace_label_id == seed.terrace_label_id and s.x == seed.x and s.y == seed.y)
+            ]
+            if kind == "new_seed":
+                self._quickseg_state.current_label = int(action.get("previous_label", 1))
+            else:
+                self._quickseg_state.current_label = max((s.terrace_label_id for s in self._quickseg_state.seeds), default=1)
+        elif kind == "delete_seed":
+            seed = action["seed"]
+            index = int(action.get("index", len(self._quickseg_state.seeds)))
+            self._quickseg_state.seeds.insert(min(max(index, 0), len(self._quickseg_state.seeds)), seed)
+            self._quickseg_state.current_label = max((s.terrace_label_id for s in self._quickseg_state.seeds), default=1)
+        self._quickseg_mark_dirty()
+        self.status_message.emit("Undid QuickSeg seed action")
+
+    def _quickseg_clear_seeds(self) -> None:
+        self._quickseg_state.seeds = []
+        self._quickseg_state.current_label = 1
+        self._quickseg_state.next_order = 1
+        self._quickseg_seed_history.clear()
+        self._quickseg_mark_dirty()
+        self.status_message.emit("QuickSeg seeds cleared")
+
+    def _quickseg_clear_result(self) -> None:
+        self._quickseg_result = None
+        self._quickseg_state.result = None
+        self._quickseg_overlay_dirty = True
+        self._quickseg_update_overlay()
+        self._quickseg_update_status("QuickSeg result cleared")
+
+    def _quickseg_refresh_watershed(self) -> None:
+        if self._task() != "terrace_segmentation":
+            return
+        if self._arr is None:
+            self.status_message.emit("No scan loaded")
+            return
+        if self._quickseg_controls is None:
+            return
+        self._quickseg_prepare_cache()
+        if self._quickseg_cache is None:
+            self.status_message.emit("QuickSeg preprocessing unavailable")
+            return
+        if not self._quickseg_state.seeds:
+            self._quickseg_result = None
+        else:
+            self._quickseg_result = watershed_labels(
+                self._quickseg_cache,
+                self._quickseg_state.seeds,
+                self._quickseg_state.params,
+            )
+        self._quickseg_state.result = self._quickseg_result
+        self._quickseg_state.result_path = str(self._quickseg_result_path) if self._quickseg_result_path else None
+        self._quickseg_overlay_dirty = False
+        self._quickseg_update_overlay()
+        self._quickseg_update_status("QuickSeg watershed refreshed")
+        self.status_message.emit("QuickSeg watershed refreshed")
+
+    def _apply_quickseg_params(self) -> None:
+        if self._task() != "terrace_segmentation":
+            return
+        if self._quickseg_controls is None:
+            return
+        self._quickseg_state.params = self._quickseg_controls.parameters()
+        self._quickseg_cache = None
+        self._quickseg_mark_dirty()
+        self._quickseg_prepare_cache()
+        if self._quickseg_controls.auto_refresh_after_apply() and self._quickseg_state.seeds:
+            self._quickseg_refresh_watershed()
+        else:
+            self.status_message.emit("QuickSeg parameters applied")
+
+    def _quickseg_clear_result_only(self) -> None:
+        self._quickseg_result = None
+        self._quickseg_state.result = None
+        self._quickseg_overlay_dirty = True
+        self._quickseg_update_overlay()
+
+    def _load_existing_quickseg(self, item: DatasetQueueItem) -> None:
+        if self._quickseg_controls is None:
+            return
+        try:
+            self._quickseg_state, self._quickseg_review_record, self._quickseg_result_path = load_quickseg_state(
+                item.source_path,
+                config=self._config(),
+            )
+        except Exception as exc:
+            self.status_message.emit(f"Could not load QuickSeg sidecar: {exc}")
+            self._quickseg_state = QuickSegState()
+            self._quickseg_result = None
+            self._quickseg_result_path = None
+            self._quickseg_prepare_cache()
+            self._quickseg_update_overlay()
+            self._quickseg_update_status("QuickSeg ready")
+            return
+        self._quickseg_controls.set_parameters(self._quickseg_state.params)
+        self._quickseg_controls.set_current_label(self._quickseg_state.current_label)
+        self._quickseg_seed_points = list(self._quickseg_state.seeds)
+        self._quickseg_seed_history.clear()
+        self._quickseg_prepare_cache()
+        self._quickseg_result = self._quickseg_state.result
+        if self._quickseg_result is None and self._quickseg_state.seeds:
+            self._quickseg_refresh_watershed()
+        else:
+            self._quickseg_update_overlay()
+            self._quickseg_update_status("QuickSeg ready")
+
     def set_paint_mode(self, mode: str) -> None:
         if mode not in {"brush", "eraser"}:
             return
@@ -603,18 +1022,40 @@ class DatasetBuilderPanel(QWidget):
             self._canvas.set_mask_overlay(data)
 
     def save_current(self) -> bool:
-        if self._current_mask is None or not (0 <= self._current_index < len(self._queue)):
-            self.status_message.emit("Generate or load a mask before saving")
+        if not (0 <= self._current_index < len(self._queue)):
+            self.status_message.emit("No scan loaded")
             return False
         item = self._queue[self._current_index]
         status = self._status_combo.currentText()
+        config = self._config()
         try:
-            save_mask_annotation(
-                item.source_path,
-                self._current_mask,
-                config=self._config(),
-                status=status,
-            )
+            if self._task() == "terrace_segmentation":
+                if self._quickseg_controls is None:
+                    self.status_message.emit("QuickSeg controls unavailable")
+                    return False
+                if self._quickseg_cache is None and self._arr is not None:
+                    self._quickseg_prepare_cache()
+                if self._quickseg_result is None and self._quickseg_state.seeds:
+                    self._quickseg_refresh_watershed()
+                self._quickseg_state.result = self._quickseg_result
+                result_path, state_path = save_quickseg_state(
+                    item.source_path,
+                    self._quickseg_state,
+                    config=config,
+                    status=status,
+                )
+                self._quickseg_result_path = result_path
+                self._quickseg_review_record = state_path
+            else:
+                if self._current_mask is None:
+                    self.status_message.emit("Generate or load a mask before saving")
+                    return False
+                save_mask_annotation(
+                    item.source_path,
+                    self._current_mask,
+                    config=config,
+                    status=status,
+                )
         except Exception as exc:
             self.status_message.emit(f"Save failed: {exc}")
             return False
@@ -623,7 +1064,7 @@ class DatasetBuilderPanel(QWidget):
             plane_index=item.plane_index,
             display_id=item.display_id,
             status=status,
-            has_mask_sidecar=True,
+            has_mask_sidecar=item.has_mask_sidecar or self._task() == "step_edge_mask",
             has_roi_sidecar=item.has_roi_sidecar,
             reviewed_at=item.reviewed_at,
             exported_at=item.exported_at,
@@ -643,6 +1084,8 @@ class DatasetBuilderPanel(QWidget):
 
     def _set_status(self, status: str) -> bool:
         self._status_combo.setCurrentText(status)
+        if self._task() == "terrace_segmentation":
+            return self.save_current()
         if status == "rejected" and self._current_mask is None and 0 <= self._current_index < len(self._queue):
             item = self._queue[self._current_index]
             try:
@@ -671,16 +1114,29 @@ class DatasetBuilderPanel(QWidget):
         return self.save_current()
 
     def clear_overlay(self) -> None:
+        if self._task() == "terrace_segmentation":
+            self._quickseg_clear_result()
+            return
         self._current_mask = None
         self._canvas.clear_mask_overlay()
         self.status_message.emit("Current proposal cleared")
 
     def toggle_overlay(self) -> None:
+        if self._task() == "terrace_segmentation":
+            self.toggle_quickseg_overlay()
+            return
         self._overlay_visible = not self._overlay_visible
         if not self._overlay_visible:
             self._canvas.clear_mask_overlay()
         elif self._current_mask is not None:
             self._show_mask(self._current_mask.data)
+
+    def toggle_quickseg_overlay(self) -> None:
+        self._quickseg_overlay_visible = not self._quickseg_overlay_visible
+        self._quickseg_update_overlay()
+        self.status_message.emit(
+            "QuickSeg overlay shown" if self._quickseg_overlay_visible else "QuickSeg overlay hidden"
+        )
 
     def previous_item(self) -> None:
         if self._queue:

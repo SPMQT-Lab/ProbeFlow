@@ -107,9 +107,9 @@ def mark_exported(scan_path: str | Path, record: ReviewRecord) -> ReviewRecord:
         notes=record.notes,
         proposal_method=record.proposal_method,
         proposal_parameters=record.proposal_parameters,
+        task_data=record.task_data,
         updated_at=utc_now(),
         exported_at=utc_now(),
     )
     save_review_record(scan_path, exported)
     return exported
-

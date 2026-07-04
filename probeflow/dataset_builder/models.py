@@ -20,6 +20,19 @@ TASK_PRESETS = (
     "custom",
 )
 
+TASK_DEFAULTS: dict[str, dict[str, str]] = {
+    "step_edge_mask": {
+        "label_name": "step_edge",
+        "label_type": "mask",
+        "proposal_method": "step_edge",
+    },
+    "terrace_segmentation": {
+        "label_name": "quickseg_terraces",
+        "label_type": "instances",
+        "proposal_method": "quickseg",
+    },
+}
+
 
 @dataclass(frozen=True)
 class DatasetTaskConfig:
@@ -36,6 +49,15 @@ class DatasetTaskConfig:
     def __post_init__(self) -> None:
         if self.task not in TASK_PRESETS:
             raise ValueError(f"Unknown Dataset Builder task {self.task!r}")
+        defaults = TASK_DEFAULTS.get(self.task)
+        if defaults is None:
+            return
+        if self.label_name == "step_edge" and defaults.get("label_name"):
+            object.__setattr__(self, "label_name", defaults["label_name"])
+        if self.label_type == "mask" and defaults.get("label_type"):
+            object.__setattr__(self, "label_type", defaults["label_type"])
+        if self.proposal_method == "step_edge" and defaults.get("proposal_method"):
+            object.__setattr__(self, "proposal_method", defaults["proposal_method"])
 
 
 @dataclass(frozen=True)
@@ -84,6 +106,7 @@ class ReviewRecord:
     notes: str = ""
     proposal_method: str | None = None
     proposal_parameters: dict[str, Any] = field(default_factory=dict)
+    task_data: dict[str, Any] = field(default_factory=dict)
     updated_at: str | None = None
     exported_at: str | None = None
 
@@ -107,6 +130,7 @@ class ReviewRecord:
             "notes": self.notes,
             "proposal_method": self.proposal_method,
             "proposal_parameters": dict(self.proposal_parameters),
+            "task_data": dict(self.task_data),
             "updated_at": self.updated_at,
             "exported_at": self.exported_at,
         }
@@ -124,6 +148,7 @@ class ReviewRecord:
             notes=str(data.get("notes") or ""),
             proposal_method=data.get("proposal_method"),
             proposal_parameters=dict(data.get("proposal_parameters") or {}),
+            task_data=dict(data.get("task_data") or {}),
             updated_at=data.get("updated_at"),
             exported_at=data.get("exported_at"),
         )
@@ -148,4 +173,3 @@ class DatasetExportSpec:
 
 def record_key(task: str, plane_index: int, label_name: str) -> str:
     return f"{task}:plane{int(plane_index)}:{label_name}"
-

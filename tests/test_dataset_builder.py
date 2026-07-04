@@ -13,9 +13,19 @@ from probeflow.dataset_builder.annotations import save_mask_annotation, save_rev
 from probeflow.dataset_builder.export import export_dataset
 from probeflow.dataset_builder.loading import load_scan_plane
 from probeflow.dataset_builder.models import DatasetExportSpec, DatasetTaskConfig
+from probeflow.dataset_builder.quickseg import (
+    QuickSegParams,
+    QuickSegSeed,
+    QuickSegState,
+    load_quickseg_state,
+    prepare_quickseg_inputs,
+    save_quickseg_state,
+    watershed_labels,
+)
 from probeflow.dataset_builder.painting import paint_mask
 from probeflow.dataset_builder.proposals import generate_proposal
 from probeflow.dataset_builder.queue import build_queue
+from probeflow.dataset_builder.sidecar_state import load_review_record
 
 
 def _sample_scan(tmp_path: Path) -> Path:
@@ -64,6 +74,49 @@ def test_dataset_builder_review_status_can_be_saved_without_mask(tmp_path):
     assert len(queue) == 1
     assert queue[0].status == "rejected"
     assert queue[0].has_mask_sidecar is False
+
+
+def test_dataset_builder_task_defaults_include_quickseg_labels():
+    config = DatasetTaskConfig(task="terrace_segmentation")
+
+    assert config.label_name == "quickseg_terraces"
+    assert config.label_type == "instances"
+    assert config.proposal_method == "quickseg"
+
+
+def test_dataset_builder_quickseg_state_round_trip(tmp_path):
+    scan_path = _sample_scan(tmp_path)
+    _scan, arr, px_x, px_y = load_scan_plane(scan_path, 0)
+    params = QuickSegParams()
+    prepared = prepare_quickseg_inputs(arr, params, pixel_size_x_m=px_x, pixel_size_y_m=px_y)
+    seeds = [
+        QuickSegSeed(x=10, y=10, terrace_label_id=1, order=1),
+        QuickSegSeed(x=30, y=30, terrace_label_id=2, order=2),
+    ]
+    result = watershed_labels(prepared, seeds, params)
+    state = QuickSegState(seeds=seeds, current_label=2, next_order=3, params=params, result=result)
+    config = DatasetTaskConfig(task="terrace_segmentation", plane_index=0)
+
+    result_path, state_path = save_quickseg_state(
+        scan_path,
+        state,
+        config=config,
+        status="accepted",
+    )
+
+    assert state_path.exists()
+    assert result_path is not None and result_path.exists()
+    record = load_review_record(scan_path, task=config.task, plane_index=0, label_name=config.label_name)
+    assert record is not None
+    assert record.status == "accepted"
+    assert record.task_data["quickseg"]["seeds"][0]["terrace_label_id"] == 1
+
+    loaded_state, loaded_record, loaded_result_path = load_quickseg_state(scan_path, config=config)
+    assert loaded_record is not None
+    assert loaded_result_path.exists()
+    assert loaded_state.result is not None
+    assert loaded_state.result.shape == arr.shape
+    assert loaded_state.seeds[1].terrace_label_id == 2
 
 
 def test_dataset_builder_paint_mask_brush_and_eraser():
