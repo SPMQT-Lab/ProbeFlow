@@ -252,6 +252,21 @@ def test_dataset_builder_load_current_does_not_return_early(qapp):
     assert panel._arr is not None or panel._canvas_status.text() != "No scan loaded"
 
 
+def test_dataset_builder_plane_change_reuses_cached_indexed_items(qapp):
+    panel = DatasetBuilderPanel(THEMES["dark"], {})
+    panel.show()
+    qapp.processEvents()
+
+    calls: list[str] = []
+    panel._hydrate_queue_from_indexed_items = lambda: calls.append("hydrate")  # type: ignore[method-assign]
+    panel._source_entry.setText("C:/tmp/dataset")
+    panel._indexed_items = [SimpleNamespace(path="dummy", item_type="scan")]
+
+    panel._on_plane_changed()
+
+    assert calls == ["hydrate"]
+
+
 def test_dataset_builder_ctrl_z_undos_one_brush_stroke(qapp):
     panel = DatasetBuilderPanel(THEMES["dark"], {})
     panel.show()

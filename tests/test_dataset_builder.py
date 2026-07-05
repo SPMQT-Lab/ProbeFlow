@@ -13,6 +13,16 @@ from probeflow.dataset_builder.annotations import save_mask_annotation, save_rev
 from probeflow.dataset_builder.export import export_dataset
 from probeflow.dataset_builder.loading import load_scan_plane
 from probeflow.dataset_builder.models import DatasetExportSpec, DatasetTaskConfig
+from probeflow.dataset_builder.cache import (
+    DatasetBuilderCache,
+    LoadedSampleRaw,
+    QuickSegPreprocKey,
+    QuickSegWatershedKey,
+    SampleCacheKey,
+    quickseg_params_fingerprint,
+    quickseg_seed_fingerprint,
+    sample_cache_key,
+)
 from probeflow.dataset_builder.quickseg import (
     QuickSegParams,
     QuickSegSeed,
@@ -24,8 +34,9 @@ from probeflow.dataset_builder.quickseg import (
 )
 from probeflow.dataset_builder.painting import paint_mask
 from probeflow.dataset_builder.proposals import generate_proposal
-from probeflow.dataset_builder.queue import build_queue
+from probeflow.dataset_builder.queue import build_queue, build_queue_from_indexed_items
 from probeflow.dataset_builder.sidecar_state import load_review_record
+from probeflow.core.indexing import ProbeFlowItem
 
 
 def _sample_scan(tmp_path: Path) -> Path:
@@ -117,6 +128,59 @@ def test_dataset_builder_quickseg_state_round_trip(tmp_path):
     assert loaded_state.result is not None
     assert loaded_state.result.shape == arr.shape
     assert loaded_state.seeds[1].terrace_label_id == 2
+
+
+def test_dataset_builder_cache_separates_preproc_and_watershed_layers(tmp_path):
+    scan_path = _sample_scan(tmp_path)
+    key = sample_cache_key(scan_path, 0)
+    params = QuickSegParams()
+    preproc_key = QuickSegPreprocKey(key, quickseg_params_fingerprint(params))
+    seeds_a = [
+        QuickSegSeed(x=1, y=2, terrace_label_id=1, order=1),
+        QuickSegSeed(x=3, y=4, terrace_label_id=2, order=2),
+    ]
+    seeds_b = [
+        QuickSegSeed(x=5, y=6, terrace_label_id=1, order=1),
+    ]
+    ws_key_a = QuickSegWatershedKey(preproc_key, quickseg_seed_fingerprint(seeds_a))
+    ws_key_b = QuickSegWatershedKey(preproc_key, quickseg_seed_fingerprint(seeds_b))
+    cache = DatasetBuilderCache()
+    prepared = object()
+    labels_a = np.ones((4, 4), dtype=np.int32)
+    labels_b = np.full((4, 4), 2, dtype=np.int32)
+
+    cache.put_preproc(preproc_key, prepared)  # type: ignore[arg-type]
+    cache.put_watershed(ws_key_a, labels_a)
+
+    assert cache.get_preproc(preproc_key) is prepared
+    assert np.array_equal(cache.get_watershed(ws_key_a), labels_a)
+    assert cache.get_watershed(ws_key_b) is None
+
+
+def test_dataset_builder_build_queue_from_indexed_items_skips_spectra(tmp_path):
+    scan_path = _sample_scan(tmp_path)
+    spectrum_path = tmp_path / "spec.vert"
+    spectrum_path.write_text("dummy", encoding="utf-8")
+    items = [
+        ProbeFlowItem(
+            path=scan_path,
+            display_name=scan_path.name,
+            source_format="createc_dat",
+            item_type="scan",
+        ),
+        ProbeFlowItem(
+            path=spectrum_path,
+            display_name=spectrum_path.name,
+            source_format="createc_vert",
+            item_type="spectrum",
+        ),
+    ]
+
+    queue = build_queue_from_indexed_items(items, plane_index=0)
+
+    assert len(queue) == 1
+    assert queue[0].source_path == scan_path.resolve()
+    assert queue[0].display_id.endswith("_plane0")
 
 
 def test_dataset_builder_paint_mask_brush_and_eraser():

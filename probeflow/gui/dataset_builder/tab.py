@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QThreadPool
 from PySide6.QtGui import QImage, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QComboBox,
@@ -30,9 +30,17 @@ from probeflow.dataset_builder.annotations import (
     save_mask_annotation,
     save_review_annotation,
 )
-from probeflow.dataset_builder.export import export_dataset
 from probeflow.dataset_builder.loading import load_scan_plane
 from probeflow.dataset_builder.models import DatasetExportSpec, DatasetQueueItem, DatasetTaskConfig
+from probeflow.dataset_builder.cache import (
+    DatasetBuilderCache,
+    LoadedSampleRaw,
+    QuickSegPreprocKey,
+    QuickSegWatershedKey,
+    quickseg_params_fingerprint,
+    quickseg_seed_fingerprint,
+    sample_cache_key,
+)
 from probeflow.dataset_builder.quickseg import (
     QuickSegParams,
     QuickSegSeed,
@@ -56,6 +64,14 @@ from probeflow.gui.dataset_builder.view_tray import (
     DatasetBuilderViewTray,
 )
 from probeflow.gui.dataset_builder.quickseg_controls import QuickSegControlsWidget
+from probeflow.gui.workers import (
+    DatasetBuilderExportWorker,
+    DatasetBuilderFolderIndexLoader,
+    DatasetBuilderQueueHydrateWorker,
+    DatasetBuilderSampleLoadWorker,
+    QuickSegPrepWorker,
+    QuickSegWatershedWorker,
+)
 from probeflow.io.mask_sidecar import load_mask_set_sidecar
 from probeflow.processing.display import array_to_uint8
 
@@ -98,6 +114,19 @@ class DatasetBuilderPanel(QWidget):
         self._quickseg_result_path: Path | None = None
         self._quickseg_review_record = None
         self._quickseg_seed_mode = "add"
+        self._indexed_items: list | None = None
+        self._folder_source: Path | None = None
+        self._sample_cache = DatasetBuilderCache()
+        self._interactive_pool = QThreadPool(self)
+        self._interactive_pool.setMaxThreadCount(2)
+        self._export_pool = QThreadPool(self)
+        self._export_pool.setMaxThreadCount(1)
+        self._queue_index_token = object()
+        self._queue_hydrate_token = object()
+        self._sample_load_token = object()
+        self._quickseg_prep_token = object()
+        self._quickseg_ws_token = object()
+        self._export_token = object()
 
         root = QVBoxLayout(self)
         root.setContentsMargins(8, 8, 8, 8)
@@ -254,7 +283,7 @@ class DatasetBuilderPanel(QWidget):
         self._queue_list.currentRowChanged.connect(self._on_queue_row_changed)
         self._filter_combo.currentTextChanged.connect(lambda _text: self._refresh_queue_list())
         self._task_combo.currentIndexChanged.connect(self._on_task_changed)
-        self._plane_spin.valueChanged.connect(lambda _v: self.load_queue() if self._source_entry.text() else None)
+        self._plane_spin.valueChanged.connect(self._on_plane_changed)
         brush_btn.clicked.connect(lambda: self.set_paint_mode("brush"))
         eraser_btn.clicked.connect(lambda: self.set_paint_mode("eraser"))
         save_btn.clicked.connect(self.save_current)
@@ -380,21 +409,92 @@ class DatasetBuilderPanel(QWidget):
             self.set_source(path)
 
     def load_queue(self) -> None:
-        source = self._source_entry.text().strip()
-        if not source:
+        source_text = self._source_entry.text().strip()
+        if not source_text:
             return
+        source = Path(source_text)
+        self._folder_source = source
+        self._indexed_items = None
+        self._queue = []
+        self._current_index = -1
+        self._queue_list.clear()
         try:
-            config = self._config()
-            self._queue = build_queue(
-                source,
-                task=config.task,
-                label_name=config.label_name,
-                plane_index=self._plane_spin.value(),
-            )
+            if source.is_file():
+                config = self._config()
+                self._queue = build_queue(
+                    source,
+                    task=config.task,
+                    label_name=config.label_name,
+                    plane_index=self._plane_spin.value(),
+                )
+                self._current_index = 0 if self._queue else -1
+                self._refresh_queue_list()
+                self._load_current()
+                self.status_message.emit(f"Dataset Builder queue loaded: {len(self._queue)} scan(s)")
+                return
         except Exception as exc:
             self.status_message.emit(f"Dataset Builder queue failed: {exc}")
             return
-        self._current_index = 0 if self._queue else -1
+        self._start_folder_index(source)
+
+    def _start_folder_index(self, source: Path) -> None:
+        self._queue_index_token = object()
+        self._canvas_status.setText(f"Indexing {source.name}...")
+        self.status_message.emit(f"Indexing {source.name}...")
+        worker = DatasetBuilderFolderIndexLoader(source, self._queue_index_token)
+        worker.signals.indexed.connect(self._on_folder_indexed)
+        worker.signals.failed.connect(self._on_folder_index_failed)
+        self._interactive_pool.start(worker)
+
+    def _on_folder_indexed(self, source, indexed_items, token) -> None:
+        if token is not self._queue_index_token or Path(source) != self._folder_source:
+            return
+        self._indexed_items = list(indexed_items or [])
+        self._hydrate_queue_from_indexed_items()
+
+    def _on_folder_index_failed(self, source, message: str, token) -> None:
+        if token is not self._queue_index_token or Path(source) != self._folder_source:
+            return
+        self.status_message.emit(f"Dataset Builder indexing failed: {message}")
+
+    def _hydrate_queue_from_indexed_items(self) -> None:
+        if self._folder_source is None:
+            return
+        if not self._indexed_items:
+            self._queue = []
+            self._current_index = -1
+            self._refresh_queue_list()
+            self._load_current()
+            self.status_message.emit("Dataset Builder queue loaded: 0 scan(s)")
+            return
+        config = self._config()
+        self._queue_hydrate_token = object()
+        worker = DatasetBuilderQueueHydrateWorker(
+            self._folder_source,
+            self._indexed_items,
+            config.task,
+            config.label_name,
+            config.plane_index,
+            self._queue_hydrate_token,
+        )
+        worker.signals.loaded.connect(self._on_queue_hydrated)
+        worker.signals.failed.connect(self._on_queue_hydrate_failed)
+        self._interactive_pool.start(worker)
+
+    def _on_queue_hydrate_failed(self, source, message: str, token) -> None:
+        if token is not self._queue_hydrate_token or Path(source) != self._folder_source:
+            return
+        self.status_message.emit(f"Dataset Builder queue failed: {message}")
+
+    def _on_queue_hydrated(self, source, queue_items, token) -> None:
+        if token is not self._queue_hydrate_token or Path(source) != self._folder_source:
+            return
+        previous_path = self._queue[self._current_index].source_path if 0 <= self._current_index < len(self._queue) else None
+        self._queue = list(queue_items or [])
+        if previous_path is not None:
+            self._current_index = next((i for i, item in enumerate(self._queue) if item.source_path == previous_path), 0 if self._queue else -1)
+        else:
+            self._current_index = 0 if self._queue else -1
         self._refresh_queue_list()
         self._load_current()
         self.status_message.emit(f"Dataset Builder queue loaded: {len(self._queue)} scan(s)")
@@ -416,9 +516,22 @@ class DatasetBuilderPanel(QWidget):
     def _on_task_changed(self, *_args) -> None:
         self._sync_task_ui()
         if self._source_entry.text().strip():
-            self.load_queue()
+            if self._indexed_items is not None:
+                self._hydrate_queue_from_indexed_items()
+            else:
+                self.load_queue()
         else:
             self._refresh_shortcut_help()
+
+    def _on_plane_changed(self, *_args) -> None:
+        source_text = self._source_entry.text().strip()
+        if not source_text:
+            return
+        source = Path(source_text)
+        if source.is_file():
+            self.load_queue()
+        elif self._indexed_items is not None:
+            self._hydrate_queue_from_indexed_items()
 
     def _sync_task_ui(self) -> None:
         task = self._task()
@@ -500,6 +613,17 @@ class DatasetBuilderPanel(QWidget):
             self._current_index = index
             self._load_current()
 
+    def _current_item(self) -> DatasetQueueItem | None:
+        if 0 <= self._current_index < len(self._queue):
+            return self._queue[self._current_index]
+        return None
+
+    def _current_sample_key(self) -> SampleCacheKey | None:
+        item = self._current_item()
+        if item is None:
+            return None
+        return sample_cache_key(item.source_path, item.plane_index)
+
     def _load_current(self) -> None:
         self._current_mask = None
         self._overlay_visible = True
@@ -517,27 +641,85 @@ class DatasetBuilderPanel(QWidget):
         self._quickseg_review_record = None
         self._quickseg_cache = None
         self._quickseg_state = QuickSegState()
-        if not (0 <= self._current_index < len(self._queue)):
+
+        item = self._current_item()
+        if item is None:
             self._arr = None
+            self._scan = None
             self._base_display_arr = None
             self._display_arr = None
             self._global_view_tray.clear_histogram(self._theme)
             self._canvas.setText("No scan")
             self._canvas_status.setText("No scan loaded")
             return
-        item = self._queue[self._current_index]
-        try:
-            self._scan, self._arr, self._px_x_m, self._px_y_m = load_scan_plane(
-                item.source_path,
-                item.plane_index,
-            )
-        except Exception as exc:
-            self.status_message.emit(f"Could not load {item.source_path.name}: {exc}")
+
+        key = self._current_sample_key()
+        flatten_enabled = self._global_view_tray.is_flatten_enabled()
+        cached = self._sample_cache.get_sample(key) if key is not None else None
+        if cached is not None:
+            self._apply_loaded_sample(cached, reset_zoom=True)
+            self._post_sample_load(item)
             return
-        self._base_display_arr = None
+
+        self._canvas_status.setText(f"Loading {item.display_id}...")
+        self.status_message.emit(f"Loading {item.display_id}...")
+        self._sample_load_token = object()
+        worker = DatasetBuilderSampleLoadWorker(
+            item.source_path,
+            item.plane_index,
+            flatten_enabled,
+            self._sample_load_token,
+        )
+        worker.signals.loaded.connect(self._on_sample_loaded)
+        worker.signals.failed.connect(self._on_sample_load_failed)
+        self._interactive_pool.start(worker)
+
+    def _on_sample_load_failed(self, key, message: str, token) -> None:
+        if token is not self._sample_load_token:
+            return
+        self.status_message.emit(f"Could not load {Path(key.path).name}: {message}")
+
+    def _on_sample_loaded(self, key, result: LoadedSampleRaw, token) -> None:
+        if result is not None:
+            self._sample_cache.put_sample(result)
+            if result.display_arr is not None:
+                self._sample_cache.put_display(result.key, bool(result.flatten_enabled), result.display_arr)
+        if token is not self._sample_load_token or key != self._current_sample_key():
+            return
+        self._apply_loaded_sample(result, reset_zoom=True)
+        self._post_sample_load(self._current_item())
+
+    def _prefetch_next_sample(self) -> None:
+        if self._current_index < 0 or self._current_index + 1 >= len(self._queue):
+            return
+        next_item = self._queue[self._current_index + 1]
+        next_key = sample_cache_key(next_item.source_path, next_item.plane_index)
+        if self._sample_cache.get_sample(next_key) is not None:
+            return
+        token = object()
+        worker = DatasetBuilderSampleLoadWorker(
+            next_item.source_path,
+            next_item.plane_index,
+            self._global_view_tray.is_flatten_enabled(),
+            token,
+        )
+        worker.signals.loaded.connect(self._on_sample_loaded)
+        worker.signals.failed.connect(self._on_sample_load_failed)
+        self._interactive_pool.start(worker)
+
+    def _apply_loaded_sample(self, sample: LoadedSampleRaw, *, reset_zoom: bool = False) -> None:
+        self._scan = sample.scan
+        self._arr = sample.arr
+        self._px_x_m = float(sample.px_x_m)
+        self._px_y_m = float(sample.px_y_m)
+        self._base_display_arr = sample.display_arr if sample.display_arr is not None and bool(sample.flatten_enabled) == self._global_view_tray.is_flatten_enabled() else None
         self._display_arr = None
         self._sync_task_ui()
-        self._refresh_display_preview(reset_zoom=True)
+        self._refresh_display_preview(reset_zoom=reset_zoom)
+
+    def _post_sample_load(self, item: DatasetQueueItem | None) -> None:
+        if item is None:
+            return
         if self._task() == "terrace_segmentation":
             self._load_existing_quickseg(item)
         else:
@@ -547,16 +729,25 @@ class DatasetBuilderPanel(QWidget):
                 f"{item.display_id} | task: {self._task()} | status: {item.status} | "
                 f"mask coverage: {coverage:.2f}%"
             )
+        self._prefetch_next_sample()
 
     def _base_display_array(self) -> np.ndarray | None:
         if self._arr is None:
             return None
+        key = self._current_sample_key()
+        if key is not None:
+            cached = self._sample_cache.get_display(key, self._global_view_tray.is_flatten_enabled())
+            if cached is not None:
+                self._base_display_arr = cached
+                return cached
         if self._base_display_arr is not None:
             return self._base_display_arr
         self._base_display_arr = dataset_builder_display_array(
             self._arr,
             flatten=self._global_view_tray.is_flatten_enabled(),
         )
+        if key is not None:
+            self._sample_cache.put_display(key, self._global_view_tray.is_flatten_enabled(), self._base_display_arr)
         return self._base_display_arr
 
     def _refresh_display_preview(self, *_, reset_zoom: bool = False) -> None:
@@ -693,16 +884,83 @@ class DatasetBuilderPanel(QWidget):
             self._current_mask = mask
             self._show_mask(mask.data)
 
+    def _quickseg_preproc_key(self) -> QuickSegPreprocKey | None:
+        if self._arr is None or self._quickseg_controls is None or self._current_sample_key() is None:
+            return None
+        params = self._quickseg_controls.parameters()
+        self._quickseg_state.params = params
+        return QuickSegPreprocKey(
+            self._current_sample_key(),
+            quickseg_params_fingerprint(params),
+        )
+
     def _quickseg_prepare_cache(self) -> None:
+        """Synchronously ensure the current QuickSeg preprocessing cache exists."""
+
         if self._arr is None or self._quickseg_controls is None:
             return
-        self._quickseg_state.params = self._quickseg_controls.parameters()
+        key = self._quickseg_preproc_key()
+        if key is None:
+            return
+        cached = self._sample_cache.get_preproc(key)
+        if cached is not None:
+            self._quickseg_cache = cached
+            return
         self._quickseg_cache = prepare_quickseg_inputs(
             self._arr,
             self._quickseg_state.params,
             pixel_size_x_m=self._px_x_m,
             pixel_size_y_m=self._px_y_m,
         )
+        self._sample_cache.put_preproc(key, self._quickseg_cache)
+
+    def _quickseg_prepare_async(self) -> None:
+        if self._task() != "terrace_segmentation" or self._arr is None or self._quickseg_controls is None:
+            return
+        key = self._quickseg_preproc_key()
+        if key is None:
+            return
+        cached = self._sample_cache.get_preproc(key)
+        if cached is not None:
+            self._quickseg_cache = cached
+            self._quickseg_update_status("QuickSeg preprocessing ready")
+            if self._quickseg_state.seeds:
+                self._quickseg_refresh_watershed(force_sync=True)
+            return
+        self._quickseg_prep_token = object()
+        self._quickseg_cache = None
+        self._quickseg_update_status("QuickSeg preprocessing...")
+        worker = QuickSegPrepWorker(
+            key,
+            self._arr,
+            self._quickseg_state.params,
+            self._px_x_m,
+            self._px_y_m,
+            self._quickseg_prep_token,
+        )
+        worker.signals.finished.connect(self._on_quickseg_prepared)
+        worker.signals.failed.connect(self._on_quickseg_prep_failed)
+        self._interactive_pool.start(worker)
+
+    def _on_quickseg_prepared(self, key, prepared, token) -> None:
+        self._sample_cache.put_preproc(key, prepared)
+        if token is not self._quickseg_prep_token or key != self._quickseg_preproc_key():
+            return
+        self._quickseg_cache = prepared
+        self._quickseg_update_status("QuickSeg preprocessing ready")
+        if self._quickseg_state.seeds:
+            self._quickseg_refresh_watershed()
+
+    def _on_quickseg_prep_failed(self, key, message: str, token) -> None:
+        if token is not self._quickseg_prep_token or key != self._quickseg_preproc_key():
+            return
+        self.status_message.emit(f"QuickSeg preprocessing failed: {message}")
+
+    def _quickseg_watershed_key(self) -> QuickSegWatershedKey | None:
+        preproc_key = self._quickseg_preproc_key()
+        if preproc_key is None:
+            return None
+        return QuickSegWatershedKey(preproc_key, quickseg_seed_fingerprint(self._quickseg_state.seeds))
 
     def _quickseg_mark_dirty(self) -> None:
         self._quickseg_result = None
@@ -779,6 +1037,7 @@ class DatasetBuilderPanel(QWidget):
         action = {"action": "new_seed" if new_terrace else "add_seed", "seed": seed, "previous_label": prev_label}
         self._quickseg_seed_history.append(action)
         self._quickseg_mark_dirty()
+        self._quickseg_refresh_watershed()
         self._quickseg_update_status("Seed added")
 
     def _quickseg_delete_seed_at(self, x: int, y: int) -> None:
@@ -797,6 +1056,7 @@ class DatasetBuilderPanel(QWidget):
         self._quickseg_seed_history.append({"action": "delete_seed", "seed": removed, "index": best_idx})
         self._quickseg_state.current_label = max((s.terrace_label_id for s in self._quickseg_state.seeds), default=1)
         self._quickseg_mark_dirty()
+        self._quickseg_refresh_watershed()
         self._quickseg_update_status("Seed deleted")
 
     def _quickseg_canvas_clicked(self, x: int, y: int, modifiers: int) -> None:
@@ -836,6 +1096,7 @@ class DatasetBuilderPanel(QWidget):
             self._quickseg_state.seeds.insert(min(max(index, 0), len(self._quickseg_state.seeds)), seed)
             self._quickseg_state.current_label = max((s.terrace_label_id for s in self._quickseg_state.seeds), default=1)
         self._quickseg_mark_dirty()
+        self._quickseg_refresh_watershed()
         self.status_message.emit("Undid QuickSeg seed action")
 
     def _quickseg_clear_seeds(self) -> None:
@@ -844,6 +1105,7 @@ class DatasetBuilderPanel(QWidget):
         self._quickseg_state.next_order = 1
         self._quickseg_seed_history.clear()
         self._quickseg_mark_dirty()
+        self._quickseg_refresh_watershed()
         self.status_message.emit("QuickSeg seeds cleared")
 
     def _quickseg_clear_result(self) -> None:
@@ -853,7 +1115,7 @@ class DatasetBuilderPanel(QWidget):
         self._quickseg_update_overlay()
         self._quickseg_update_status("QuickSeg result cleared")
 
-    def _quickseg_refresh_watershed(self) -> None:
+    def _quickseg_refresh_watershed(self, *, force_sync: bool = False) -> None:
         if self._task() != "terrace_segmentation":
             return
         if self._arr is None:
@@ -861,24 +1123,79 @@ class DatasetBuilderPanel(QWidget):
             return
         if self._quickseg_controls is None:
             return
-        self._quickseg_prepare_cache()
+        if self._quickseg_cache is None:
+            if force_sync:
+                self._quickseg_prepare_cache()
+            else:
+                self._quickseg_prepare_async()
+                return
         if self._quickseg_cache is None:
             self.status_message.emit("QuickSeg preprocessing unavailable")
             return
+        w_key = self._quickseg_watershed_key()
+        if w_key is None:
+            self.status_message.emit("QuickSeg preprocessing unavailable")
+            return
+        cached = self._sample_cache.get_watershed(w_key)
+        if cached is not None:
+            self._quickseg_result = cached
+            self._quickseg_state.result = cached
+            self._quickseg_state.result_path = str(self._quickseg_result_path) if self._quickseg_result_path else None
+            self._quickseg_overlay_dirty = False
+            self._quickseg_update_overlay()
+            self._quickseg_update_status("QuickSeg watershed refreshed")
+            self.status_message.emit("QuickSeg watershed refreshed")
+            return
         if not self._quickseg_state.seeds:
             self._quickseg_result = None
-        else:
-            self._quickseg_result = watershed_labels(
+            self._quickseg_state.result = None
+            self._quickseg_overlay_dirty = False
+            self._quickseg_update_overlay()
+            self._quickseg_update_status("QuickSeg seeds required")
+            return
+        if not force_sync:
+            self._quickseg_ws_token = object()
+            worker = QuickSegWatershedWorker(
+                w_key,
                 self._quickseg_cache,
                 self._quickseg_state.seeds,
                 self._quickseg_state.params,
+                self._quickseg_ws_token,
             )
+            worker.signals.finished.connect(self._on_quickseg_watershed_ready)
+            worker.signals.failed.connect(self._on_quickseg_watershed_failed)
+            self._quickseg_update_status("QuickSeg watershed running...")
+            self._interactive_pool.start(worker)
+            return
+        self._quickseg_result = watershed_labels(
+            self._quickseg_cache,
+            self._quickseg_state.seeds,
+            self._quickseg_state.params,
+        )
+        self._sample_cache.put_watershed(w_key, self._quickseg_result)
         self._quickseg_state.result = self._quickseg_result
         self._quickseg_state.result_path = str(self._quickseg_result_path) if self._quickseg_result_path else None
         self._quickseg_overlay_dirty = False
         self._quickseg_update_overlay()
         self._quickseg_update_status("QuickSeg watershed refreshed")
         self.status_message.emit("QuickSeg watershed refreshed")
+
+    def _on_quickseg_watershed_ready(self, key, labels, token) -> None:
+        self._sample_cache.put_watershed(key, labels)
+        if token is not self._quickseg_ws_token or key != self._quickseg_watershed_key():
+            return
+        self._quickseg_result = labels
+        self._quickseg_state.result = labels
+        self._quickseg_state.result_path = str(self._quickseg_result_path) if self._quickseg_result_path else None
+        self._quickseg_overlay_dirty = False
+        self._quickseg_update_overlay()
+        self._quickseg_update_status("QuickSeg watershed refreshed")
+        self.status_message.emit("QuickSeg watershed refreshed")
+
+    def _on_quickseg_watershed_failed(self, key, message: str, token) -> None:
+        if token is not self._quickseg_ws_token or key != self._quickseg_watershed_key():
+            return
+        self.status_message.emit(f"QuickSeg watershed failed: {message}")
 
     def _apply_quickseg_params(self) -> None:
         if self._task() != "terrace_segmentation":
@@ -888,10 +1205,8 @@ class DatasetBuilderPanel(QWidget):
         self._quickseg_state.params = self._quickseg_controls.parameters()
         self._quickseg_cache = None
         self._quickseg_mark_dirty()
-        self._quickseg_prepare_cache()
-        if self._quickseg_controls.auto_refresh_after_apply() and self._quickseg_state.seeds:
-            self._quickseg_refresh_watershed()
-        else:
+        self._quickseg_prepare_async()
+        if not self._quickseg_controls.auto_refresh_after_apply() or not self._quickseg_state.seeds:
             self.status_message.emit("QuickSeg parameters applied")
 
     def _quickseg_clear_result_only(self) -> None:
@@ -921,11 +1236,10 @@ class DatasetBuilderPanel(QWidget):
         self._quickseg_controls.set_current_label(self._quickseg_state.current_label)
         self._quickseg_seed_points = list(self._quickseg_state.seeds)
         self._quickseg_seed_history.clear()
-        self._quickseg_prepare_cache()
+        self._quickseg_cache = None
         self._quickseg_result = self._quickseg_state.result
-        if self._quickseg_result is None and self._quickseg_state.seeds:
-            self._quickseg_refresh_watershed()
-        else:
+        self._quickseg_prepare_async()
+        if self._quickseg_result is not None:
             self._quickseg_update_overlay()
             self._quickseg_update_status("QuickSeg ready")
 
@@ -1040,7 +1354,7 @@ class DatasetBuilderPanel(QWidget):
                 if self._quickseg_cache is None and self._arr is not None:
                     self._quickseg_prepare_cache()
                 if self._quickseg_result is None and self._quickseg_state.seeds:
-                    self._quickseg_refresh_watershed()
+                    self._quickseg_refresh_watershed(force_sync=True)
                 self._quickseg_state.result = self._quickseg_result
                 result_path, state_path = save_quickseg_state(
                     item.source_path,
@@ -1161,24 +1475,31 @@ class DatasetBuilderPanel(QWidget):
         out = QFileDialog.getExistingDirectory(self, "Dataset export folder")
         if not out:
             return
-        try:
-            summary = export_dataset(
-                DatasetExportSpec(
-                    source=Path(source),
-                    output_dir=Path(out),
-                    task=self._task(),
-                    label_name="step_edge",
-                    plane_index=self._plane_spin.value(),
-                    include_statuses=("accepted", "uncertain"),
-                    overwrite=False,
-                )
-            )
-        except Exception as exc:
-            self.status_message.emit(f"Dataset export failed: {exc}")
+        self._export_token = object()
+        spec = DatasetExportSpec(
+            source=Path(source),
+            output_dir=Path(out),
+            task=self._task(),
+            label_name="step_edge" if self._task() == "step_edge_mask" else "quickseg_terraces",
+            plane_index=self._plane_spin.value(),
+            include_statuses=("accepted", "uncertain"),
+            overwrite=False,
+        )
+        worker = DatasetBuilderExportWorker(spec)
+        worker.signals.finished.connect(self._on_export_finished)
+        worker.signals.failed.connect(self._on_export_failed)
+        self.status_message.emit("Exporting dataset snapshot...")
+        self._export_pool.start(worker)
+
+    def _on_export_finished(self, summary) -> None:
+        if summary is None:
             return
         self.status_message.emit(
-            f"Exported {summary['n_exported']} sample(s) to {summary['output_dir']}"
+            f"Exported {summary.get('n_exported', 0)} sample(s) to {summary.get('output_dir', '')}"
         )
+
+    def _on_export_failed(self, message: str) -> None:
+        self.status_message.emit(f"Dataset export failed: {message}")
 
 
 class DatasetBuilderSidebar(QWidget):
