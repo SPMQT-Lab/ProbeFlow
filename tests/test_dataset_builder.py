@@ -29,6 +29,7 @@ from probeflow.dataset_builder.quickseg import (
     QuickSegSeed,
     QuickSegPrepared,
     QuickSegState,
+    detect_horizontal_artifact_mask,
     quickseg_gradient_sigmas,
     load_quickseg_state,
     prepare_quickseg_inputs,
@@ -204,6 +205,7 @@ def test_dataset_builder_quickseg_eight_knobs_affect_fingerprint():
         QuickSegParams(min_edge_size=80),
         QuickSegParams(edge_connect_strength=0.7),
         QuickSegParams(barrier_strength=0.35),
+        QuickSegParams(horizontal_defect_suppression=0.8),
     ]
 
     assert all(quickseg_params_fingerprint(params) != base for params in variants)
@@ -214,6 +216,45 @@ def test_dataset_builder_quickseg_edge_scale_presets():
     assert quickseg_gradient_sigmas(QuickSegParams(edge_scale="fine")) == (0.4, 0.8, 1.4)
     assert quickseg_gradient_sigmas(QuickSegParams(edge_scale="balanced")) == (0.6, 1.2, 2.4)
     assert quickseg_gradient_sigmas(QuickSegParams(edge_scale="broad")) == (1.0, 2.0, 3.5)
+
+
+def test_dataset_builder_quickseg_detects_full_width_horizontal_artifact():
+    mask = np.zeros((100, 100), dtype=bool)
+    mask[48:50, 4:96] = True
+
+    artifact = detect_horizontal_artifact_mask(mask)
+
+    assert artifact[48:50, 4:96].mean() > 0.9
+
+
+def test_dataset_builder_quickseg_does_not_mark_short_horizontal_edge():
+    mask = np.zeros((100, 100), dtype=bool)
+    mask[48:50, 10:40] = True
+
+    artifact = detect_horizontal_artifact_mask(mask)
+
+    assert artifact.sum() == 0
+
+
+def test_dataset_builder_quickseg_horizontal_suppression_lowers_elevation(monkeypatch):
+    arr = np.zeros((40, 40), dtype=float)
+    arr[:, 20:] = 1.0
+    artifact = np.zeros_like(arr, dtype=bool)
+    artifact[18:20, :] = True
+
+    monkeypatch.setattr(
+        "probeflow.dataset_builder.quickseg.detect_horizontal_artifact_mask",
+        lambda _edge_mask: artifact,
+    )
+
+    off = prepare_quickseg_inputs(arr, QuickSegParams(horizontal_defect_suppression=0.0))
+    on = prepare_quickseg_inputs(arr, QuickSegParams(horizontal_defect_suppression=1.0))
+
+    assert np.allclose(off.watershed_elevation, off.watershed_elevation_unsuppressed)
+    assert on.horizontal_artifact_mask[18:20, :].mean() > 0.9
+    assert float(np.mean(on.watershed_elevation[18:20, :])) < float(
+        np.mean(on.watershed_elevation_unsuppressed[18:20, :])
+    )
 
 
 def test_dataset_builder_cache_separates_preproc_and_watershed_layers(tmp_path):

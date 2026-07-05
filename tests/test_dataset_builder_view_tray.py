@@ -234,8 +234,15 @@ def test_quickseg_controls_expose_basic_state_and_buttons(qapp):
     assert hasattr(controls, "_denoise_strength")
     assert hasattr(controls, "_smooth_along_scan")
     assert hasattr(controls, "_barrier_strength")
+    assert hasattr(controls, "_horizontal_defect_suppression")
     assert not hasattr(controls, "_tv_iters")
     assert not hasattr(controls, "_gaussian_order")
+    preview_items = {
+        controls._preview_stage.itemData(i)
+        for i in range(controls._preview_stage.count())
+    }
+    assert "horizontal_artifact_mask" in preview_items
+    assert "watershed_elevation_unsuppressed" in preview_items
     assert seen == ["apply", "save_next"]
 
 
@@ -275,10 +282,12 @@ def test_dataset_builder_quickseg_params_persist_and_reset(qapp, monkeypatch):
     assert controls is not None
     controls._smooth_along_scan.setValue(2.5)
     controls._denoise_strength.setValue(0.08)
+    controls._horizontal_defect_suppression.setValue(0.65)
     panel._persist_quickseg_params()
 
     assert cfg["dataset_builder_quickseg_params"]["smooth_along_scan"] == 2.5
     assert cfg["dataset_builder_quickseg_params"]["denoise_strength"] == 0.08
+    assert cfg["dataset_builder_quickseg_params"]["horizontal_defect_suppression"] == 0.65
 
     panel2 = DatasetBuilderPanel(THEMES["dark"], cfg)
     idx2 = panel2._task_combo.findData("terrace_segmentation")
@@ -290,12 +299,14 @@ def test_dataset_builder_quickseg_params_persist_and_reset(qapp, monkeypatch):
     assert controls2 is not None
     assert controls2._smooth_along_scan.value() == 2.5
     assert controls2._denoise_strength.value() == 0.08
+    assert controls2._horizontal_defect_suppression.value() == 0.65
 
     controls2._reset_btn.click()
     qapp.processEvents()
 
     assert controls2._smooth_along_scan.value() == 1.2
     assert controls2._denoise_strength.value() == 0.04
+    assert controls2._horizontal_defect_suppression.value() == 0.0
 
 
 def test_dataset_builder_load_current_does_not_return_early(qapp):

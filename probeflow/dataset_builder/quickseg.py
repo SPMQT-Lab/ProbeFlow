@@ -20,7 +20,7 @@ from scipy.ndimage import convolve, gaussian_filter, median_filter
 from skimage import exposure
 from skimage.draw import line as draw_line
 from skimage.filters import apply_hysteresis_threshold, scharr, sobel
-from skimage.measure import regionprops
+from skimage.measure import label as measure_label, regionprops
 from skimage.morphology import closing, dilation, disk, remove_small_objects
 from skimage.restoration import denoise_bilateral, denoise_tv_chambolle
 from skimage.segmentation import watershed
@@ -59,6 +59,11 @@ ADVANCED_PARAMETERS: dict[str, Any] = {
     "close_radius": 1,
     "dilate_radius": 1,
     "barrier_blur_sigma": 0.8,
+    "horizontal_artifact_min_width_fraction": 0.65,
+    "horizontal_artifact_max_height_fraction": 0.04,
+    "horizontal_artifact_min_aspect_ratio": 8.0,
+    "horizontal_artifact_max_angle_deg": 8.0,
+    "horizontal_artifact_blur_sigma": 1.0,
     "compactness_watershed": 0.0,
     "watershed_connectivity": 1,
     "watershed_line": False,
@@ -132,6 +137,7 @@ class QuickSegParams:
     min_edge_size: int = 40
     edge_connect_strength: float = 0.45
     barrier_strength: float = 0.18
+    horizontal_defect_suppression: float = 0.0
     overlay_opacity: float = 0.55
 
     @classmethod
@@ -148,6 +154,9 @@ class QuickSegParams:
             min_edge_size=int(data.get("min_edge_size", cls.min_edge_size)),
             edge_connect_strength=float(data.get("edge_connect_strength", cls.edge_connect_strength)),
             barrier_strength=float(data.get("barrier_strength", cls.barrier_strength)),
+            horizontal_defect_suppression=float(
+                data.get("horizontal_defect_suppression", cls.horizontal_defect_suppression)
+            ),
             overlay_opacity=float(data.get("overlay_opacity", cls.overlay_opacity)),
         )
 
@@ -209,6 +218,8 @@ class QuickSegPrepared:
     anisotropic_blur: np.ndarray | None = None
     gradient_contrast: np.ndarray | None = None
     connected_edge_mask: np.ndarray | None = None
+    horizontal_artifact_mask: np.ndarray | None = None
+    watershed_elevation_unsuppressed: np.ndarray | None = None
     watershed_elevation: np.ndarray | None = None
 
     def __post_init__(self) -> None:
@@ -220,6 +231,10 @@ class QuickSegPrepared:
             self.gradient_contrast = self.gradient
         if self.connected_edge_mask is None:
             self.connected_edge_mask = np.zeros_like(self.raw, dtype=bool)
+        if self.horizontal_artifact_mask is None:
+            self.horizontal_artifact_mask = np.zeros_like(self.raw, dtype=bool)
+        if self.watershed_elevation_unsuppressed is None:
+            self.watershed_elevation_unsuppressed = self.gradient
         if self.watershed_elevation is None:
             self.watershed_elevation = self.gradient
 
@@ -404,6 +419,48 @@ def remove_small_edge_objects(mask: np.ndarray, threshold: int) -> np.ndarray:
     return remove_small_objects(np.asarray(mask, dtype=bool), min_size=min_size)
 
 
+def _component_horizontal_angle_deg(coords: np.ndarray) -> float:
+    if coords.shape[0] < 2:
+        return 90.0
+    xy = np.column_stack([coords[:, 1].astype(np.float64), coords[:, 0].astype(np.float64)])
+    xy -= np.mean(xy, axis=0, keepdims=True)
+    cov = np.cov(xy, rowvar=False)
+    if not np.all(np.isfinite(cov)):
+        return 90.0
+    eigvals, eigvecs = np.linalg.eigh(cov)
+    vec = eigvecs[:, int(np.argmax(eigvals))]
+    angle = abs(math.degrees(math.atan2(float(vec[1]), float(vec[0]))))
+    return min(angle, abs(180.0 - angle))
+
+
+def detect_horizontal_artifact_mask(edge_mask: np.ndarray) -> np.ndarray:
+    mask = np.asarray(edge_mask, dtype=bool)
+    if mask.ndim != 2 or not mask.any():
+        return np.zeros(mask.shape, dtype=bool)
+    height, width = mask.shape
+    min_width = float(ADVANCED_PARAMETERS["horizontal_artifact_min_width_fraction"]) * max(width, 1)
+    max_height = float(ADVANCED_PARAMETERS["horizontal_artifact_max_height_fraction"]) * max(height, 1)
+    min_aspect = float(ADVANCED_PARAMETERS["horizontal_artifact_min_aspect_ratio"])
+    max_angle = float(ADVANCED_PARAMETERS["horizontal_artifact_max_angle_deg"])
+    labels = measure_label(mask, connectivity=2)
+    artifact = np.zeros(mask.shape, dtype=bool)
+    for region in regionprops(labels):
+        min_row, min_col, max_row, max_col = region.bbox
+        comp_width = max_col - min_col
+        comp_height = max_row - min_row
+        if comp_width < min_width:
+            continue
+        if comp_height > max(1.0, max_height):
+            continue
+        if comp_width / max(comp_height, 1) < min_aspect:
+            continue
+        if _component_horizontal_angle_deg(region.coords) > max_angle:
+            continue
+        coords = region.coords
+        artifact[coords[:, 0], coords[:, 1]] = True
+    return artifact
+
+
 def quickseg_stage(prepared: QuickSegPrepared, stage: str) -> np.ndarray:
     key = str(stage or "watershed_elevation")
     mapping = {
@@ -412,6 +469,8 @@ def quickseg_stage(prepared: QuickSegPrepared, stage: str) -> np.ndarray:
         "anisotropic_blur": prepared.anisotropic_blur,
         "gradient_contrast": prepared.gradient_contrast,
         "connected_edge_mask": prepared.connected_edge_mask,
+        "horizontal_artifact_mask": prepared.horizontal_artifact_mask,
+        "watershed_elevation_unsuppressed": prepared.watershed_elevation_unsuppressed,
         "watershed_elevation": prepared.watershed_elevation,
     }
     arr = mapping.get(key, prepared.watershed_elevation)
@@ -653,6 +712,8 @@ def prepare_quickseg_inputs(
     if dilate_radius > 0:
         edge_mask = dilation(edge_mask, footprint=disk(dilate_radius))
     edge_mask &= valid
+    horizontal_artifact_mask = detect_horizontal_artifact_mask(edge_mask)
+    horizontal_artifact_mask &= valid
 
     line_smoothed = oriented_line_smooth(
         gradient_contrast,
@@ -668,10 +729,38 @@ def prepare_quickseg_inputs(
     )
     connected_edge = robust_rescale(connected_edge, (0.5, 99.7), valid)
 
-    elevation = np.clip(connected_edge, 0.0, 1.0) ** float(ADVANCED_PARAMETERS["elevation_gamma"])
+    suppression = float(np.clip(params.horizontal_defect_suppression, 0.0, 1.0))
+    artifact_weight = np.zeros(raw.shape, dtype=np.float64)
+    if suppression > 0 and horizontal_artifact_mask.any():
+        blur_sigma = float(ADVANCED_PARAMETERS["horizontal_artifact_blur_sigma"])
+        artifact_weight = gaussian_filter(
+            horizontal_artifact_mask.astype(np.float64),
+            sigma=max(0.0, blur_sigma),
+            mode="reflect",
+        )
+        artifact_weight = np.clip(artifact_weight, 0.0, 1.0)
+
+    elevation_base = np.clip(connected_edge, 0.0, 1.0) ** float(ADVANCED_PARAMETERS["elevation_gamma"])
     barrier = gaussian_filter(edge_mask.astype(np.float64), sigma=barrier_blur_sigma, mode="reflect")
-    elevation = robust_rescale(elevation + float(params.barrier_strength) * barrier, (0.5, 99.7), valid)
+    unsuppressed_elevation = robust_rescale(
+        elevation_base + float(params.barrier_strength) * barrier,
+        (0.5, 99.7),
+        valid,
+    )
+    if suppression > 0 and horizontal_artifact_mask.any():
+        barrier_source = edge_mask.astype(np.float64) * (1.0 - suppression * artifact_weight)
+        suppressed_barrier = gaussian_filter(barrier_source, sigma=barrier_blur_sigma, mode="reflect")
+        elevation = robust_rescale(
+            elevation_base + float(params.barrier_strength) * suppressed_barrier,
+            (0.5, 99.7),
+            valid,
+        )
+        elevation = elevation * (1.0 - suppression * artifact_weight)
+        elevation = np.clip(elevation, 0.0, 1.0)
+    else:
+        elevation = unsuppressed_elevation.copy()
     elevation[~valid] = 0.0
+    unsuppressed_elevation[~valid] = 0.0
 
     return QuickSegPrepared(
         raw=raw,
@@ -684,6 +773,8 @@ def prepare_quickseg_inputs(
         anisotropic_blur=anisotropic_blur,
         gradient_contrast=gradient_contrast,
         connected_edge_mask=edge_mask.astype(np.float64),
+        horizontal_artifact_mask=horizontal_artifact_mask.astype(np.float64),
+        watershed_elevation_unsuppressed=unsuppressed_elevation,
         watershed_elevation=elevation,
     )
 

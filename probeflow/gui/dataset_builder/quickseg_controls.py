@@ -165,8 +165,10 @@ class QuickSegControlsWidget(QWidget):
         self._show_preprocessing_preview = QCheckBox("Show preprocessing preview")
         self._preview_stage = QComboBox()
         self._preview_stage.addItem("Watershed elevation", "watershed_elevation")
+        self._preview_stage.addItem("Watershed elevation unsuppressed", "watershed_elevation_unsuppressed")
         self._preview_stage.addItem("Gradient contrast", "gradient_contrast")
         self._preview_stage.addItem("Connected edge mask", "connected_edge_mask")
+        self._preview_stage.addItem("Horizontal artifact mask", "horizontal_artifact_mask")
         self._preview_stage.addItem("Anisotropic blur", "anisotropic_blur")
         self._preview_stage.addItem("Denoised", "denoised")
         self._preview_stage.addItem("Flattened display", "flat_display")
@@ -195,6 +197,7 @@ class QuickSegControlsWidget(QWidget):
         self._min_edge_size.setMinimumWidth(120)
         self._edge_connect_strength = self._make_float_spinbox(0.45, 0.25, 0.75, 0.05, decimals=2)
         self._barrier_strength = self._make_float_spinbox(0.18, 0.10, 0.45, 0.02, decimals=2)
+        self._horizontal_defect_suppression = self._make_float_spinbox(0.0, 0.0, 1.0, 0.05, decimals=2)
         adv_form.addRow("Denoise strength", self._denoise_strength)
         adv_form.addRow("Smooth along scan", self._smooth_along_scan)
         adv_form.addRow("Smooth across scan", self._smooth_across_scan)
@@ -203,6 +206,7 @@ class QuickSegControlsWidget(QWidget):
         adv_form.addRow("Min edge size", self._min_edge_size)
         adv_form.addRow("Edge connect strength", self._edge_connect_strength)
         adv_form.addRow("Barrier strength", self._barrier_strength)
+        adv_form.addRow("Horizontal defect suppression", self._horizontal_defect_suppression)
         self._advanced.body_layout.addLayout(adv_form)
 
         review_row = QHBoxLayout()
@@ -259,6 +263,7 @@ class QuickSegControlsWidget(QWidget):
             self._min_edge_size,
             self._edge_connect_strength,
             self._barrier_strength,
+            self._horizontal_defect_suppression,
         ):
             if hasattr(widget, "valueChanged"):
                 widget.valueChanged.connect(self.parameters_changed.emit)
@@ -304,6 +309,7 @@ class QuickSegControlsWidget(QWidget):
             min_edge_size=int(self._min_edge_size.value()),
             edge_connect_strength=float(self._edge_connect_strength.value()),
             barrier_strength=float(self._barrier_strength.value()),
+            horizontal_defect_suppression=float(self._horizontal_defect_suppression.value()),
             overlay_opacity=float(self._opacity.value()),
         )
 
@@ -317,6 +323,7 @@ class QuickSegControlsWidget(QWidget):
             self._min_edge_size,
             self._edge_connect_strength,
             self._barrier_strength,
+            self._horizontal_defect_suppression,
             self._show_seeds_chk,
             self._show_boundaries_chk,
             self._show_filled_chk,
@@ -335,6 +342,7 @@ class QuickSegControlsWidget(QWidget):
         self._min_edge_size.setValue(int(params.min_edge_size))
         self._edge_connect_strength.setValue(float(params.edge_connect_strength))
         self._barrier_strength.setValue(float(params.barrier_strength))
+        self._horizontal_defect_suppression.setValue(float(params.horizontal_defect_suppression))
         self._opacity.setValue(float(params.overlay_opacity))
         for widget in widgets:
             widget.blockSignals(False)
