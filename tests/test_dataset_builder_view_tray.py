@@ -256,6 +256,42 @@ def test_dataset_builder_right_pane_is_scrollable_and_advanced_expands(qapp):
     assert controls._advanced._body.isVisible() is True
 
 
+def test_dataset_builder_quickseg_params_persist_and_reset(qapp, monkeypatch):
+    monkeypatch.setattr("probeflow.gui.dataset_builder.tab.save_config", lambda cfg: None)
+    cfg: dict = {}
+    panel = DatasetBuilderPanel(THEMES["dark"], cfg)
+    idx = panel._task_combo.findData("terrace_segmentation")
+    assert idx >= 0
+    panel._task_combo.setCurrentIndex(idx)
+    qapp.processEvents()
+
+    controls = panel._quickseg_controls
+    assert controls is not None
+    controls._gaussian_sigma.setValue(7.5)
+    controls._tv_weight.setValue(1.75)
+    panel._persist_quickseg_params()
+
+    assert cfg["dataset_builder_quickseg_params"]["gaussian_sigma"] == 7.5
+    assert cfg["dataset_builder_quickseg_params"]["tv_weight"] == 1.75
+
+    panel2 = DatasetBuilderPanel(THEMES["dark"], cfg)
+    idx2 = panel2._task_combo.findData("terrace_segmentation")
+    assert idx2 >= 0
+    panel2._task_combo.setCurrentIndex(idx2)
+    qapp.processEvents()
+
+    controls2 = panel2._quickseg_controls
+    assert controls2 is not None
+    assert controls2._gaussian_sigma.value() == 7.5
+    assert controls2._tv_weight.value() == 1.75
+
+    controls2._reset_btn.click()
+    qapp.processEvents()
+
+    assert controls2._gaussian_sigma.value() == 4.0
+    assert controls2._tv_weight.value() == 0.25
+
+
 def test_dataset_builder_load_current_does_not_return_early(qapp):
     panel = DatasetBuilderPanel(THEMES["dark"], {})
     panel.show()

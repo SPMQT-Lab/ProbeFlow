@@ -62,6 +62,7 @@ class QuickSegControlsWidget(QWidget):
 
     parameters_changed = Signal()
     apply_requested = Signal()
+    reset_requested = Signal()
     new_label_requested = Signal()
     undo_seed_requested = Signal()
     clear_seeds_requested = Signal()
@@ -76,6 +77,7 @@ class QuickSegControlsWidget(QWidget):
     def __init__(self, theme: dict, parent=None):
         super().__init__(parent)
         self._theme = dict(theme)
+        self._default_params = QuickSegParams()
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -125,6 +127,7 @@ class QuickSegControlsWidget(QWidget):
 
         self._apply_btn = QPushButton("Apply")
         self._apply_btn.setObjectName("accentBtn")
+        self._reset_btn = QPushButton("Reset")
         self._auto_refresh_chk = QCheckBox("Auto-refresh after Apply")
         self._show_seeds_chk = QCheckBox("Show seeds")
         self._show_seeds_chk.setChecked(True)
@@ -134,6 +137,7 @@ class QuickSegControlsWidget(QWidget):
         self._show_filled_chk.setChecked(True)
 
         root.addWidget(self._apply_btn)
+        root.addWidget(self._reset_btn)
         root.addWidget(self._auto_refresh_chk)
         root.addWidget(self._show_seeds_chk)
         root.addWidget(self._show_boundaries_chk)
@@ -261,6 +265,7 @@ class QuickSegControlsWidget(QWidget):
                 widget.toggled.connect(self.parameters_changed.emit)
 
         self._apply_btn.clicked.connect(self.apply_requested.emit)
+        self._reset_btn.clicked.connect(self.reset_requested.emit)
         self._new_label_btn.clicked.connect(self.new_label_requested.emit)
         self._undo_btn.clicked.connect(self.undo_seed_requested.emit)
         self._clear_seeds_btn.clicked.connect(self.clear_seeds_requested.emit)
@@ -290,7 +295,28 @@ class QuickSegControlsWidget(QWidget):
             overlay_opacity=float(self._opacity.value()),
         )
 
-    def set_parameters(self, params: QuickSegParams) -> None:
+    def set_parameters(self, params: QuickSegParams, *, emit_changed: bool = False) -> None:
+        widgets = (
+            self._background_mode,
+            self._plane_lo,
+            self._plane_hi,
+            self._tv_weight,
+            self._tv_iters,
+            self._tv_eps,
+            self._gaussian_sigma,
+            self._gaussian_order,
+            self._gaussian_mode,
+            self._watershed_connectivity,
+            self._compactness,
+            self._watershed_line,
+            self._show_seeds_chk,
+            self._show_boundaries_chk,
+            self._show_filled_chk,
+            self._opacity,
+            self._auto_refresh_chk,
+        )
+        for widget in widgets:
+            widget.blockSignals(True)
         self._background_mode.setCurrentIndex(max(0, self._background_mode.findData(params.background_mode)))
         self._plane_lo.setValue(float(params.plane_percentile_low))
         self._plane_hi.setValue(float(params.plane_percentile_high))
@@ -306,6 +332,13 @@ class QuickSegControlsWidget(QWidget):
         self._compactness.setValue(float(params.watershed_compactness))
         self._watershed_line.setChecked(bool(params.watershed_line))
         self._opacity.setValue(float(params.overlay_opacity))
+        for widget in widgets:
+            widget.blockSignals(False)
+        if emit_changed:
+            self.parameters_changed.emit()
+
+    def reset_parameters(self) -> None:
+        self.set_parameters(self._default_params, emit_changed=False)
 
     def auto_refresh_after_apply(self) -> bool:
         return bool(self._auto_refresh_chk.isChecked())

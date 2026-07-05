@@ -64,6 +64,7 @@ from probeflow.gui.dataset_builder.view_tray import (
     DatasetBuilderViewTray,
 )
 from probeflow.gui.dataset_builder.quickseg_controls import QuickSegControlsWidget
+from probeflow.gui.config import save_config
 from probeflow.gui.workers import (
     DatasetBuilderExportWorker,
     DatasetBuilderFolderIndexLoader,
@@ -85,7 +86,7 @@ class DatasetBuilderPanel(QWidget):
     def __init__(self, theme: dict, cfg: dict | None = None, parent=None):
         super().__init__(parent)
         self._theme = dict(theme)
-        self._cfg = dict(cfg or {})
+        self._cfg = cfg if cfg is not None else {}
         self._queue: list[DatasetQueueItem] = []
         self._current_index = -1
         self._scan = None
@@ -244,6 +245,7 @@ class DatasetBuilderPanel(QWidget):
         self._quickseg_controls = QuickSegControlsWidget(theme, self)
         self._quickseg_controls.apply_theme(theme)
         self._quickseg_controls.apply_requested.connect(self._apply_quickseg_params)
+        self._quickseg_controls.reset_requested.connect(self._reset_quickseg_params)
         self._quickseg_controls.new_label_requested.connect(self._quickseg_new_label)
         self._quickseg_controls.undo_seed_requested.connect(self._quickseg_undo_last_seed)
         self._quickseg_controls.clear_seeds_requested.connect(self._quickseg_clear_seeds)
@@ -255,6 +257,7 @@ class DatasetBuilderPanel(QWidget):
         self._quickseg_controls.uncertain_requested.connect(lambda: self._save_status_and_next("uncertain"))
         self._quickseg_controls.reject_requested.connect(lambda: self._save_status_and_next("rejected"))
         self._quickseg_controls.parameters_changed.connect(self._quickseg_update_overlay)
+        self._quickseg_controls.parameters_changed.connect(self._persist_quickseg_params)
 
         self._task_stack = QWidget()
         task_stack_lay = QVBoxLayout(self._task_stack)
@@ -320,6 +323,7 @@ class DatasetBuilderPanel(QWidget):
         self._sync_task_ui()
         if self._arr is not None:
             self._refresh_display_preview()
+        self._load_quickseg_persistent_params()
 
     def set_source(self, source: str | Path) -> None:
         self._source_entry.setText(str(source))
@@ -515,6 +519,39 @@ class DatasetBuilderPanel(QWidget):
             plane_index=self._plane_spin.value(),
             proposal_params=self._quickseg_controls.parameters().to_dict() if task == "terrace_segmentation" and self._quickseg_controls else {},
         )
+
+    def _quickseg_saved_params(self) -> QuickSegParams | None:
+        payload = self._cfg.get("dataset_builder_quickseg_params")
+        if not isinstance(payload, dict):
+            return None
+        try:
+            return QuickSegParams.from_dict(payload)
+        except Exception:
+            return None
+
+    def _load_quickseg_persistent_params(self) -> None:
+        if self._quickseg_controls is None:
+            return
+        params = self._quickseg_saved_params()
+        if params is not None:
+            self._quickseg_controls.set_parameters(params, emit_changed=False)
+
+    def _persist_quickseg_params(self) -> None:
+        if self._quickseg_controls is None:
+            return
+        params = self._quickseg_controls.parameters()
+        self._cfg["dataset_builder_quickseg_params"] = params.to_dict()
+        save_config(self._cfg)
+
+    def _reset_quickseg_params(self) -> None:
+        if self._quickseg_controls is None:
+            return
+        self._quickseg_controls.reset_parameters()
+        self._persist_quickseg_params()
+        self._quickseg_state.params = self._quickseg_controls.parameters()
+        if self._task() == "terrace_segmentation":
+            self._quickseg_cache = None
+            self._quickseg_prepare_async()
 
     def _on_task_changed(self, *_args) -> None:
         self._sync_task_ui()
@@ -1235,7 +1272,9 @@ class DatasetBuilderPanel(QWidget):
             self._quickseg_update_overlay()
             self._quickseg_update_status("QuickSeg ready")
             return
-        self._quickseg_controls.set_parameters(self._quickseg_state.params)
+        params = self._quickseg_saved_params() or self._quickseg_state.params
+        self._quickseg_controls.set_parameters(params, emit_changed=False)
+        self._quickseg_state.params = params
         self._quickseg_controls.set_current_label(self._quickseg_state.current_label)
         self._quickseg_seed_points = list(self._quickseg_state.seeds)
         self._quickseg_seed_history.clear()
