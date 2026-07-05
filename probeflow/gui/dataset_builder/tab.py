@@ -177,8 +177,8 @@ class DatasetBuilderPanel(QWidget):
         canvas_lay.addWidget(self._scroll, 1)
         body.addWidget(canvas_host)
 
-        right = QWidget()
-        right_lay = QVBoxLayout(right)
+        right_content = QWidget()
+        right_lay = QVBoxLayout(right_content)
         right_lay.setContentsMargins(0, 0, 0, 0)
         right_lay.setSpacing(8)
 
@@ -265,8 +265,11 @@ class DatasetBuilderPanel(QWidget):
 
         right_lay.addWidget(self._task_stack)
         right_lay.addStretch(1)
-        right.setMinimumWidth(360)
-        body.addWidget(right)
+        right_content.setMinimumWidth(360)
+        right_scroll = QScrollArea()
+        right_scroll.setWidgetResizable(True)
+        right_scroll.setWidget(right_content)
+        body.addWidget(right_scroll)
         body.setSizes([240, 760, 360])
 
         self._shortcut_lbl = QLabel(

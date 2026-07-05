@@ -8,7 +8,7 @@ import pytest
 from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
 from PySide6.QtGui import QKeySequence, QMouseEvent, QShortcut, QWheelEvent, QPixmap, QColor
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QScrollArea
+from PySide6.QtWidgets import QApplication, QScrollArea, QSplitter
 
 from probeflow.core.mask import ImageMask
 from probeflow.gui.dataset_builder.display import flatten_display_array
@@ -231,6 +231,29 @@ def test_quickseg_controls_expose_basic_state_and_buttons(qapp):
     assert controls._seed_mode_lbl.text() == "Add seed mode"
     assert controls._result_lbl.text() == "Watershed ready"
     assert seen == ["apply", "save_next"]
+
+
+def test_dataset_builder_right_pane_is_scrollable_and_advanced_expands(qapp):
+    panel = DatasetBuilderPanel(THEMES["dark"], {})
+    panel.show()
+    qapp.processEvents()
+
+    splitter = panel.findChild(QSplitter)
+    assert splitter is not None
+    right_scroll = splitter.widget(2)
+    assert isinstance(right_scroll, QScrollArea)
+
+    idx = panel._task_combo.findData("terrace_segmentation")
+    assert idx >= 0
+    panel._task_combo.setCurrentIndex(idx)
+    qapp.processEvents()
+
+    controls = panel._quickseg_controls
+    assert controls is not None
+    controls._advanced._toggle.click()
+    qapp.processEvents()
+
+    assert controls._advanced._body.isVisible() is True
 
 
 def test_dataset_builder_load_current_does_not_return_early(qapp):

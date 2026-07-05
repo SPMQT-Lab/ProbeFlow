@@ -36,7 +36,7 @@ class _Section(QWidget):
 
         self._body = QFrame()
         self._body.setVisible(False)
-        self._body.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
+        self._body.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self._body_lay = QVBoxLayout(self._body)
         self._body_lay.setContentsMargins(0, 6, 0, 0)
         self._body_lay.setSpacing(8)
