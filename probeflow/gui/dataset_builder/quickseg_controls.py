@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from probeflow.dataset_builder.quickseg import QuickSegParams
+from probeflow.dataset_builder.quickseg import EDGE_SCALE_PRESETS, QuickSegParams
 from probeflow.gui.typography import ui_font
 
 
@@ -61,8 +61,11 @@ class QuickSegControlsWidget(QWidget):
     """Task-specific controls for terrace segmentation."""
 
     parameters_changed = Signal()
+    overlay_changed = Signal()
+    preview_changed = Signal()
     apply_requested = Signal()
     reset_requested = Signal()
+    set_default_requested = Signal()
     new_label_requested = Signal()
     undo_seed_requested = Signal()
     clear_seeds_requested = Signal()
@@ -128,6 +131,7 @@ class QuickSegControlsWidget(QWidget):
         self._apply_btn = QPushButton("Apply")
         self._apply_btn.setObjectName("accentBtn")
         self._reset_btn = QPushButton("Reset")
+        self._set_default_btn = QPushButton("Set current parameters as default")
         self._auto_refresh_chk = QCheckBox("Auto-refresh after Apply")
         self._show_seeds_chk = QCheckBox("Show seeds")
         self._show_seeds_chk.setChecked(True)
@@ -138,6 +142,7 @@ class QuickSegControlsWidget(QWidget):
 
         root.addWidget(self._apply_btn)
         root.addWidget(self._reset_btn)
+        root.addWidget(self._set_default_btn)
         root.addWidget(self._auto_refresh_chk)
         root.addWidget(self._show_seeds_chk)
         root.addWidget(self._show_boundaries_chk)
@@ -154,7 +159,22 @@ class QuickSegControlsWidget(QWidget):
         opacity_form.addRow("Overlay opacity", self._opacity)
         root.addLayout(opacity_form)
 
-        self._advanced = _Section("Advanced")
+        preview_form = QFormLayout()
+        preview_form.setContentsMargins(0, 0, 0, 0)
+        preview_form.setSpacing(4)
+        self._show_preprocessing_preview = QCheckBox("Show preprocessing preview")
+        self._preview_stage = QComboBox()
+        self._preview_stage.addItem("Watershed elevation", "watershed_elevation")
+        self._preview_stage.addItem("Gradient contrast", "gradient_contrast")
+        self._preview_stage.addItem("Connected edge mask", "connected_edge_mask")
+        self._preview_stage.addItem("Anisotropic blur", "anisotropic_blur")
+        self._preview_stage.addItem("Denoised", "denoised")
+        self._preview_stage.addItem("Flattened display", "flat_display")
+        preview_form.addRow("", self._show_preprocessing_preview)
+        preview_form.addRow("Preview stage", self._preview_stage)
+        root.addLayout(preview_form)
+
+        self._advanced = _Section("Tuning")
         root.addWidget(self._advanced)
         adv_form = QFormLayout()
         adv_form.setContentsMargins(0, 0, 0, 0)
@@ -162,43 +182,27 @@ class QuickSegControlsWidget(QWidget):
         adv_form.setHorizontalSpacing(10)
         adv_form.setVerticalSpacing(6)
         adv_form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
-        self._background_mode = QComboBox()
-        self._background_mode.addItem("None", "none")
-        self._background_mode.addItem("subtract_background(order=1)", "subtract_background_order1")
-        self._background_mode.addItem("Old plane fit", "plane_fit")
-        self._background_mode.addItem("Facet level", "facet_level")
-        self._background_mode.setMinimumWidth(220)
-        self._plane_lo = self._make_percent_spinbox(1.0)
-        self._plane_hi = self._make_percent_spinbox(99.0)
-        self._tv_weight = self._make_float_spinbox(0.25, 0.0, 10.0, 0.05)
-        self._tv_iters = QSpinBox()
-        self._tv_iters.setRange(1, 5000)
-        self._tv_iters.setValue(500)
-        self._tv_eps = self._make_float_spinbox(2.0e-5, 1.0e-8, 1.0, 1.0e-5)
-        self._gaussian_sigma = self._make_float_spinbox(4.0, 0.0, 100.0, 0.5)
-        self._gaussian_order = QSpinBox()
-        self._gaussian_order.setRange(0, 5)
-        self._gaussian_order.setValue(0)
-        self._gaussian_mode = QComboBox()
-        self._gaussian_mode.addItems(["reflect", "nearest", "mirror", "wrap", "constant"])
-        self._gaussian_mode.setMinimumWidth(120)
-        self._watershed_connectivity = QSpinBox()
-        self._watershed_connectivity.setRange(1, 5)
-        self._watershed_connectivity.setValue(1)
-        self._compactness = self._make_float_spinbox(0.0, 0.0, 1000.0, 0.05)
-        self._watershed_line = QCheckBox("Use watershed line")
-        adv_form.addRow("Plane/background mode", self._background_mode)
-        adv_form.addRow("Plane percentile min", self._plane_lo)
-        adv_form.addRow("Plane percentile max", self._plane_hi)
-        adv_form.addRow("TV denoise weight", self._tv_weight)
-        adv_form.addRow("TV iterations", self._tv_iters)
-        adv_form.addRow("TV eps", self._tv_eps)
-        adv_form.addRow("Gaussian sigma", self._gaussian_sigma)
-        adv_form.addRow("Gaussian order", self._gaussian_order)
-        adv_form.addRow("Gaussian mode", self._gaussian_mode)
-        adv_form.addRow("Watershed connectivity", self._watershed_connectivity)
-        adv_form.addRow("Watershed compactness", self._compactness)
-        adv_form.addRow("", self._watershed_line)
+        self._denoise_strength = self._make_float_spinbox(0.04, 0.02, 0.16, 0.005, decimals=3)
+        self._smooth_along_scan = self._make_float_spinbox(1.2, 0.8, 3.5, 0.1, decimals=2)
+        self._smooth_across_scan = self._make_float_spinbox(0.7, 0.4, 1.2, 0.05, decimals=2)
+        self._edge_scale = QComboBox()
+        for name in EDGE_SCALE_PRESETS:
+            self._edge_scale.addItem(name, name)
+        self._edge_sensitivity = self._make_float_spinbox(84.0, 80.0, 92.0, 0.5, decimals=1)
+        self._min_edge_size = QSpinBox()
+        self._min_edge_size.setRange(10, 120)
+        self._min_edge_size.setValue(40)
+        self._min_edge_size.setMinimumWidth(120)
+        self._edge_connect_strength = self._make_float_spinbox(0.45, 0.25, 0.75, 0.05, decimals=2)
+        self._barrier_strength = self._make_float_spinbox(0.18, 0.10, 0.45, 0.02, decimals=2)
+        adv_form.addRow("Denoise strength", self._denoise_strength)
+        adv_form.addRow("Smooth along scan", self._smooth_along_scan)
+        adv_form.addRow("Smooth across scan", self._smooth_across_scan)
+        adv_form.addRow("Edge scale", self._edge_scale)
+        adv_form.addRow("Edge sensitivity", self._edge_sensitivity)
+        adv_form.addRow("Min edge size", self._min_edge_size)
+        adv_form.addRow("Edge connect strength", self._edge_connect_strength)
+        adv_form.addRow("Barrier strength", self._barrier_strength)
         self._advanced.body_layout.addLayout(adv_form)
 
         review_row = QHBoxLayout()
@@ -218,10 +222,18 @@ class QuickSegControlsWidget(QWidget):
 
         self._connect_changes()
 
-    def _make_float_spinbox(self, value: float, lo: float, hi: float, step: float) -> QDoubleSpinBox:
+    def _make_float_spinbox(
+        self,
+        value: float,
+        lo: float,
+        hi: float,
+        step: float,
+        *,
+        decimals: int = 6,
+    ) -> QDoubleSpinBox:
         sb = QDoubleSpinBox()
         sb.setRange(lo, hi)
-        sb.setDecimals(6)
+        sb.setDecimals(decimals)
         sb.setSingleStep(step)
         sb.setValue(value)
         sb.setMinimumWidth(120)
@@ -239,23 +251,14 @@ class QuickSegControlsWidget(QWidget):
 
     def _connect_changes(self) -> None:
         for widget in (
-            self._background_mode,
-            self._plane_lo,
-            self._plane_hi,
-            self._tv_weight,
-            self._tv_iters,
-            self._tv_eps,
-            self._gaussian_sigma,
-            self._gaussian_order,
-            self._gaussian_mode,
-            self._watershed_connectivity,
-            self._compactness,
-            self._watershed_line,
-            self._show_seeds_chk,
-            self._show_boundaries_chk,
-            self._show_filled_chk,
-            self._opacity,
-            self._auto_refresh_chk,
+            self._denoise_strength,
+            self._smooth_along_scan,
+            self._smooth_across_scan,
+            self._edge_scale,
+            self._edge_sensitivity,
+            self._min_edge_size,
+            self._edge_connect_strength,
+            self._barrier_strength,
         ):
             if hasattr(widget, "valueChanged"):
                 widget.valueChanged.connect(self.parameters_changed.emit)
@@ -264,8 +267,20 @@ class QuickSegControlsWidget(QWidget):
             elif hasattr(widget, "toggled"):
                 widget.toggled.connect(self.parameters_changed.emit)
 
+        for widget in (
+            self._show_seeds_chk,
+            self._show_boundaries_chk,
+            self._show_filled_chk,
+            self._opacity,
+        ):
+            if hasattr(widget, "valueChanged"):
+                widget.valueChanged.connect(lambda _value: self.overlay_changed.emit())
+            elif hasattr(widget, "toggled"):
+                widget.toggled.connect(lambda _checked: self.overlay_changed.emit())
+
         self._apply_btn.clicked.connect(self.apply_requested.emit)
         self._reset_btn.clicked.connect(self.reset_requested.emit)
+        self._set_default_btn.clicked.connect(self.set_default_requested.emit)
         self._new_label_btn.clicked.connect(self.new_label_requested.emit)
         self._undo_btn.clicked.connect(self.undo_seed_requested.emit)
         self._clear_seeds_btn.clicked.connect(self.clear_seeds_requested.emit)
@@ -276,39 +291,32 @@ class QuickSegControlsWidget(QWidget):
         self._uncertain_btn.clicked.connect(self.uncertain_requested.emit)
         self._reject_btn.clicked.connect(self.reject_requested.emit)
         self._save_next_btn.clicked.connect(self.save_next_requested.emit)
+        self._show_preprocessing_preview.toggled.connect(lambda _checked: self.preview_changed.emit())
+        self._preview_stage.currentIndexChanged.connect(lambda _idx: self.preview_changed.emit())
 
     def parameters(self) -> QuickSegParams:
         return QuickSegParams(
-            background_mode=str(self._background_mode.currentData() or "none"),
-            plane_percentile_low=float(self._plane_lo.value()),
-            plane_percentile_high=float(self._plane_hi.value()),
-            tv_weight=float(self._tv_weight.value()),
-            tv_iterations=int(self._tv_iters.value()),
-            tv_eps=float(self._tv_eps.value()),
-            gaussian_sigma=float(self._gaussian_sigma.value()),
-            gaussian_order=int(self._gaussian_order.value()),
-            gaussian_mode=str(self._gaussian_mode.currentText()),
-            gaussian_axes=(1,),
-            watershed_connectivity=int(self._watershed_connectivity.value()),
-            watershed_compactness=float(self._compactness.value()),
-            watershed_line=bool(self._watershed_line.isChecked()),
+            denoise_strength=float(self._denoise_strength.value()),
+            smooth_along_scan=float(self._smooth_along_scan.value()),
+            smooth_across_scan=float(self._smooth_across_scan.value()),
+            edge_scale=str(self._edge_scale.currentData() or "balanced"),
+            edge_sensitivity=float(self._edge_sensitivity.value()),
+            min_edge_size=int(self._min_edge_size.value()),
+            edge_connect_strength=float(self._edge_connect_strength.value()),
+            barrier_strength=float(self._barrier_strength.value()),
             overlay_opacity=float(self._opacity.value()),
         )
 
     def set_parameters(self, params: QuickSegParams, *, emit_changed: bool = False) -> None:
         widgets = (
-            self._background_mode,
-            self._plane_lo,
-            self._plane_hi,
-            self._tv_weight,
-            self._tv_iters,
-            self._tv_eps,
-            self._gaussian_sigma,
-            self._gaussian_order,
-            self._gaussian_mode,
-            self._watershed_connectivity,
-            self._compactness,
-            self._watershed_line,
+            self._denoise_strength,
+            self._smooth_along_scan,
+            self._smooth_across_scan,
+            self._edge_scale,
+            self._edge_sensitivity,
+            self._min_edge_size,
+            self._edge_connect_strength,
+            self._barrier_strength,
             self._show_seeds_chk,
             self._show_boundaries_chk,
             self._show_filled_chk,
@@ -317,20 +325,16 @@ class QuickSegControlsWidget(QWidget):
         )
         for widget in widgets:
             widget.blockSignals(True)
-        self._background_mode.setCurrentIndex(max(0, self._background_mode.findData(params.background_mode)))
-        self._plane_lo.setValue(float(params.plane_percentile_low))
-        self._plane_hi.setValue(float(params.plane_percentile_high))
-        self._tv_weight.setValue(float(params.tv_weight))
-        self._tv_iters.setValue(int(params.tv_iterations))
-        self._tv_eps.setValue(float(params.tv_eps))
-        self._gaussian_sigma.setValue(float(params.gaussian_sigma))
-        self._gaussian_order.setValue(int(params.gaussian_order))
-        idx = self._gaussian_mode.findText(str(params.gaussian_mode))
+        self._denoise_strength.setValue(float(params.denoise_strength))
+        self._smooth_along_scan.setValue(float(params.smooth_along_scan))
+        self._smooth_across_scan.setValue(float(params.smooth_across_scan))
+        idx = self._edge_scale.findData(str(params.edge_scale))
         if idx >= 0:
-            self._gaussian_mode.setCurrentIndex(idx)
-        self._watershed_connectivity.setValue(int(params.watershed_connectivity))
-        self._compactness.setValue(float(params.watershed_compactness))
-        self._watershed_line.setChecked(bool(params.watershed_line))
+            self._edge_scale.setCurrentIndex(idx)
+        self._edge_sensitivity.setValue(float(params.edge_sensitivity))
+        self._min_edge_size.setValue(int(params.min_edge_size))
+        self._edge_connect_strength.setValue(float(params.edge_connect_strength))
+        self._barrier_strength.setValue(float(params.barrier_strength))
         self._opacity.setValue(float(params.overlay_opacity))
         for widget in widgets:
             widget.blockSignals(False)
@@ -355,6 +359,12 @@ class QuickSegControlsWidget(QWidget):
     def overlay_opacity(self) -> float:
         return float(self._opacity.value())
 
+    def show_preprocessing_preview(self) -> bool:
+        return bool(self._show_preprocessing_preview.isChecked())
+
+    def preview_stage(self) -> str:
+        return str(self._preview_stage.currentData() or "watershed_elevation")
+
     def set_current_label(self, label: int) -> None:
         self._current_label.setValue(int(label))
 
@@ -375,6 +385,8 @@ class QuickSegControlsWidget(QWidget):
             self._reject_btn,
             self._save_next_btn,
             self._apply_btn,
+            self._reset_btn,
+            self._set_default_btn,
             self._new_label_btn,
             self._undo_btn,
             self._clear_seeds_btn,
@@ -404,6 +416,8 @@ class QuickSegControlsWidget(QWidget):
             self._reject_btn,
             self._save_next_btn,
             self._apply_btn,
+            self._reset_btn,
+            self._set_default_btn,
         ):
             if btn is self._apply_btn:
                 btn.setStyleSheet(

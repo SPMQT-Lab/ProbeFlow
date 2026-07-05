@@ -6,7 +6,7 @@ from pathlib import Path
 
 import numpy as np
 from PySide6.QtCore import Qt, Signal, QThreadPool
-from PySide6.QtGui import QImage, QKeySequence, QPixmap, QShortcut
+from PySide6.QtGui import QImage, QKeySequence, QPainter, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
@@ -48,6 +48,7 @@ from probeflow.dataset_builder.quickseg import (
     load_quickseg_state,
     prepare_quickseg_inputs,
     quickseg_overlay_rgba,
+    quickseg_stage,
     save_quickseg_state,
     watershed_labels,
 )
@@ -246,6 +247,8 @@ class DatasetBuilderPanel(QWidget):
         self._quickseg_controls.apply_theme(theme)
         self._quickseg_controls.apply_requested.connect(self._apply_quickseg_params)
         self._quickseg_controls.reset_requested.connect(self._reset_quickseg_params)
+        self._quickseg_controls.set_default_requested.connect(self._set_quickseg_params_as_default)
+        self._quickseg_controls.preview_changed.connect(self._on_quickseg_preview_changed)
         self._quickseg_controls.new_label_requested.connect(self._quickseg_new_label)
         self._quickseg_controls.undo_seed_requested.connect(self._quickseg_undo_last_seed)
         self._quickseg_controls.clear_seeds_requested.connect(self._quickseg_clear_seeds)
@@ -256,8 +259,8 @@ class DatasetBuilderPanel(QWidget):
         self._quickseg_controls.accept_requested.connect(lambda: self._save_status_and_next("accepted"))
         self._quickseg_controls.uncertain_requested.connect(lambda: self._save_status_and_next("uncertain"))
         self._quickseg_controls.reject_requested.connect(lambda: self._save_status_and_next("rejected"))
-        self._quickseg_controls.parameters_changed.connect(self._quickseg_update_overlay)
-        self._quickseg_controls.parameters_changed.connect(self._persist_quickseg_params)
+        self._quickseg_controls.parameters_changed.connect(self._on_quickseg_parameters_changed)
+        self._quickseg_controls.overlay_changed.connect(self._on_quickseg_overlay_controls_changed)
 
         self._task_stack = QWidget()
         task_stack_lay = QVBoxLayout(self._task_stack)
@@ -543,6 +546,28 @@ class DatasetBuilderPanel(QWidget):
         self._cfg["dataset_builder_quickseg_params"] = params.to_dict()
         save_config(self._cfg)
 
+    def _set_quickseg_params_as_default(self) -> None:
+        self._persist_quickseg_params()
+        self.status_message.emit("QuickSeg parameters saved as default")
+
+    def _on_quickseg_preview_changed(self) -> None:
+        if self._arr is None:
+            return
+        self._refresh_display_preview()
+        self._quickseg_update_overlay()
+
+    def _on_quickseg_overlay_controls_changed(self) -> None:
+        self._persist_quickseg_params()
+        self._quickseg_update_overlay()
+
+    def _on_quickseg_parameters_changed(self) -> None:
+        self._persist_quickseg_params()
+        if self._task() != "terrace_segmentation":
+            return
+        self._quickseg_state.params = self._quickseg_controls.parameters() if self._quickseg_controls else QuickSegParams()
+        self._quickseg_cache = None
+        self._quickseg_mark_dirty()
+
     def _reset_quickseg_params(self) -> None:
         if self._quickseg_controls is None:
             return
@@ -790,6 +815,42 @@ class DatasetBuilderPanel(QWidget):
             self._sample_cache.put_display(key, self._global_view_tray.is_flatten_enabled(), self._base_display_arr)
         return self._base_display_arr
 
+    def _quickseg_preview_pixmap(self) -> QPixmap | None:
+        if (
+            self._task() != "terrace_segmentation"
+            or self._quickseg_controls is None
+            or not self._quickseg_controls.show_preprocessing_preview()
+            or self._quickseg_cache is None
+        ):
+            return None
+        arr = quickseg_stage(self._quickseg_cache, self._quickseg_controls.preview_stage())
+        if arr is None:
+            return None
+        stage = np.asarray(arr, dtype=np.float64)
+        finite = stage[np.isfinite(stage)]
+        if finite.size == 0:
+            return None
+        if np.nanmax(finite) <= 1.0 and np.nanmin(finite) >= 0.0:
+            return _array_pixmap(stage, vmin=0.0, vmax=1.0)
+        lo, hi = np.percentile(finite, [1.0, 99.0])
+        if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
+            lo = float(np.nanmin(finite)) - 1.0
+            hi = float(np.nanmax(finite)) + 1.0
+        return _array_pixmap(stage, vmin=float(lo), vmax=float(hi))
+
+    def _compose_quickseg_preview(self, left: QPixmap, right: QPixmap | None) -> QPixmap:
+        if right is None or left.isNull() or right.isNull():
+            return left
+        gap = 12
+        height = max(left.height(), right.height())
+        out = QPixmap(left.width() + gap + right.width(), height)
+        out.fill(Qt.black)
+        painter = QPainter(out)
+        painter.drawPixmap(0, 0, left)
+        painter.drawPixmap(left.width() + gap, 0, right)
+        painter.end()
+        return out
+
     def _refresh_display_preview(self, *_, reset_zoom: bool = False) -> None:
         base_arr = self._base_display_array()
         if base_arr is None:
@@ -817,8 +878,10 @@ class DatasetBuilderPanel(QWidget):
             center = float(vmin if np.isfinite(vmin) else 0.0)
             vmin = center - 1.0
             vmax = center + 1.0
+        left = _array_pixmap(display_arr, vmin=vmin, vmax=vmax)
+        pixmap = self._compose_quickseg_preview(left, self._quickseg_preview_pixmap())
         self._canvas.set_raw_array(display_arr)
-        self._canvas.set_source(_array_pixmap(display_arr, vmin=vmin, vmax=vmax), reset_zoom=reset_zoom)
+        self._canvas.set_source(pixmap, reset_zoom=reset_zoom)
 
     def _on_flatten_toggled(self, checked: bool) -> None:
         self._base_display_arr = None
@@ -964,6 +1027,7 @@ class DatasetBuilderPanel(QWidget):
         if cached is not None:
             self._quickseg_cache = cached
             self._quickseg_update_status("QuickSeg preprocessing ready")
+            self._refresh_display_preview()
             if self._quickseg_state.seeds:
                 self._quickseg_refresh_watershed(force_sync=True)
             return
@@ -988,6 +1052,7 @@ class DatasetBuilderPanel(QWidget):
             return
         self._quickseg_cache = prepared
         self._quickseg_update_status("QuickSeg preprocessing ready")
+        self._refresh_display_preview()
         if self._quickseg_state.seeds:
             self._quickseg_refresh_watershed()
 
@@ -1102,6 +1167,10 @@ class DatasetBuilderPanel(QWidget):
     def _quickseg_canvas_clicked(self, x: int, y: int, modifiers: int) -> None:
         if self._task() != "terrace_segmentation":
             return
+        if self._display_arr is not None:
+            h, w = self._display_arr.shape[:2]
+            if int(x) < 0 or int(y) < 0 or int(x) >= int(w) or int(y) >= int(h):
+                return
         mods = int(getattr(modifiers, "value", modifiers))
         alt_mod = int(getattr(Qt.AltModifier, "value", Qt.AltModifier))
         ctrl_mod = int(getattr(Qt.ControlModifier, "value", Qt.ControlModifier))

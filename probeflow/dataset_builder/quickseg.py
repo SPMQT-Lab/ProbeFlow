@@ -8,6 +8,7 @@ router.
 from __future__ import annotations
 
 import json
+import math
 import tempfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -15,16 +16,53 @@ from typing import Any
 
 import numpy as np
 from PIL import Image
-from scipy.ndimage import gaussian_filter
-from skimage.filters import sobel
+from scipy.ndimage import convolve, gaussian_filter, median_filter
+from skimage import exposure
+from skimage.draw import line as draw_line
+from skimage.filters import apply_hysteresis_threshold, scharr, sobel
 from skimage.measure import regionprops
-from skimage.restoration import denoise_tv_chambolle
+from skimage.morphology import closing, dilation, disk, remove_small_objects
+from skimage.restoration import denoise_bilateral, denoise_tv_chambolle
 from skimage.segmentation import watershed
 
 from probeflow.dataset_builder.models import DatasetTaskConfig, ReviewRecord
 from probeflow.dataset_builder.sidecar_state import load_review_record, save_review_record, utc_now
 from probeflow.processing.alignment import facet_level
 from probeflow.processing.background import subtract_background
+
+
+EDGE_SCALE_PRESETS: dict[str, tuple[float, float, float]] = {
+    "fine": (0.4, 0.8, 1.4),
+    "balanced": (0.6, 1.2, 2.4),
+    "broad": (1.0, 2.0, 3.5),
+}
+
+ADVANCED_PARAMETERS: dict[str, Any] = {
+    "version": 1,
+    "background_mode": "subtract_background_order1",
+    "plane_percentile_low": 1.0,
+    "plane_percentile_high": 99.0,
+    "plane_facet_threshold_deg": 3.0,
+    "tv_iterations": 300,
+    "tv_eps": 2.0e-5,
+    "median_size": 0,
+    "bilateral_sigma_color": 0.035,
+    "bilateral_sigma_spatial": 2.0,
+    "gradient_operator": "scharr",
+    "gradient_combine": "max",
+    "gradient_clip_percentiles": (2.0, 99.6),
+    "clahe_clip_limit": 0.015,
+    "elevation_gamma": 0.65,
+    "hysteresis_high_percentile": 96.8,
+    "line_angles_deg": (0, 30, 60, 90, 120, 150),
+    "line_lengths": (7, 11, 15),
+    "close_radius": 1,
+    "dilate_radius": 1,
+    "barrier_blur_sigma": 0.8,
+    "compactness_watershed": 0.0,
+    "watershed_connectivity": 1,
+    "watershed_line": False,
+}
 
 
 def _finite(arr: np.ndarray) -> np.ndarray:
@@ -78,64 +116,48 @@ def _normalize_key(value: str) -> str:
 
 @dataclass(frozen=True)
 class QuickSegParams:
-    """QuickSeg preprocessing and watershed parameters."""
+    """User-facing QuickSeg tuning parameters.
 
-    background_mode: str = "subtract_background_order1"
-    plane_percentile_low: float = 1.0
-    plane_percentile_high: float = 99.0
-    plane_facet_threshold_deg: float = 3.0
-    tv_weight: float = 0.25
-    tv_iterations: int = 500
-    tv_eps: float = 2.0e-5
-    gaussian_sigma: float = 4.0
-    gaussian_order: int = 0
-    gaussian_mode: str = "reflect"
-    gaussian_axes: tuple[int, ...] | None = (1,)
-    watershed_connectivity: int = 1
-    watershed_compactness: float = 0.0
-    watershed_line: bool = False
+    The preprocessing stack has many fixed implementation parameters, but the
+    labelling UI deliberately exposes only these eight knobs plus overlay
+    opacity.  Older sidecars/configs with the previous verbose parameter names
+    are migrated in :meth:`from_dict`.
+    """
+
+    denoise_strength: float = 0.04
+    smooth_along_scan: float = 1.2
+    smooth_across_scan: float = 0.7
+    edge_scale: str = "balanced"
+    edge_sensitivity: float = 84.0
+    min_edge_size: int = 40
+    edge_connect_strength: float = 0.45
+    barrier_strength: float = 0.18
     overlay_opacity: float = 0.55
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> "QuickSegParams":
         data = dict(data or {})
-        axes = data.get("gaussian_axes", (1,))
-        if axes is None:
-            parsed_axes = None
-        elif isinstance(axes, (list, tuple)):
-            parsed_axes = tuple(int(v) for v in axes)
-        else:
-            parsed_axes = (int(axes),)
         return cls(
-            background_mode=str(data.get("background_mode") or cls.background_mode),
-            plane_percentile_low=float(data.get("plane_percentile_low", cls.plane_percentile_low)),
-            plane_percentile_high=float(data.get("plane_percentile_high", cls.plane_percentile_high)),
-            plane_facet_threshold_deg=float(
-                data.get("plane_facet_threshold_deg", cls.plane_facet_threshold_deg)
-            ),
-            tv_weight=float(data.get("tv_weight", cls.tv_weight)),
-            tv_iterations=int(data.get("tv_iterations", cls.tv_iterations)),
-            tv_eps=float(data.get("tv_eps", cls.tv_eps)),
-            gaussian_sigma=float(data.get("gaussian_sigma", cls.gaussian_sigma)),
-            gaussian_order=int(data.get("gaussian_order", cls.gaussian_order)),
-            gaussian_mode=str(data.get("gaussian_mode") or cls.gaussian_mode),
-            gaussian_axes=parsed_axes,
-            watershed_connectivity=int(data.get("watershed_connectivity", cls.watershed_connectivity)),
-            watershed_compactness=float(data.get("watershed_compactness", cls.watershed_compactness)),
-            watershed_line=bool(data.get("watershed_line", cls.watershed_line)),
+            denoise_strength=float(data.get("denoise_strength", data.get("tv_weight", cls.denoise_strength))),
+            smooth_along_scan=float(data.get("smooth_along_scan", data.get("gaussian_sigma", cls.smooth_along_scan))),
+            smooth_across_scan=float(data.get("smooth_across_scan", cls.smooth_across_scan)),
+            edge_scale=str(data.get("edge_scale") or cls.edge_scale)
+            if str(data.get("edge_scale") or cls.edge_scale) in EDGE_SCALE_PRESETS
+            else cls.edge_scale,
+            edge_sensitivity=float(data.get("edge_sensitivity", cls.edge_sensitivity)),
+            min_edge_size=int(data.get("min_edge_size", cls.min_edge_size)),
+            edge_connect_strength=float(data.get("edge_connect_strength", cls.edge_connect_strength)),
+            barrier_strength=float(data.get("barrier_strength", cls.barrier_strength)),
             overlay_opacity=float(data.get("overlay_opacity", cls.overlay_opacity)),
         )
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
-        if self.gaussian_axes is None:
-            data["gaussian_axes"] = None
-        else:
-            data["gaussian_axes"] = list(self.gaussian_axes)
+        data["advanced_parameters_version"] = int(ADVANCED_PARAMETERS["version"])
         return data
 
     def normalized_background_mode(self) -> str:
-        key = _normalize_key(self.background_mode)
+        key = _normalize_key(ADVANCED_PARAMETERS["background_mode"])
         aliases = {
             "none": "none",
             "off": "none",
@@ -183,6 +205,23 @@ class QuickSegPrepared:
     denoised: np.ndarray
     gaussian: np.ndarray
     gradient: np.ndarray
+    flat_display: np.ndarray | None = None
+    anisotropic_blur: np.ndarray | None = None
+    gradient_contrast: np.ndarray | None = None
+    connected_edge_mask: np.ndarray | None = None
+    watershed_elevation: np.ndarray | None = None
+
+    def __post_init__(self) -> None:
+        if self.flat_display is None:
+            self.flat_display = self.equalized
+        if self.anisotropic_blur is None:
+            self.anisotropic_blur = self.gaussian
+        if self.gradient_contrast is None:
+            self.gradient_contrast = self.gradient
+        if self.connected_edge_mask is None:
+            self.connected_edge_mask = np.zeros_like(self.raw, dtype=bool)
+        if self.watershed_elevation is None:
+            self.watershed_elevation = self.gradient
 
 
 @dataclass
@@ -274,6 +313,111 @@ def equalise(data: np.ndarray) -> np.ndarray:
     out = arr.copy()
     out[finite] -= float(np.nanmin(out[finite]))
     return out
+
+
+def finite_valid_mask(img: np.ndarray) -> np.ndarray:
+    return np.isfinite(np.asarray(img, dtype=np.float64))
+
+
+def robust_rescale(
+    img: np.ndarray,
+    percentiles: tuple[float, float] = (1.0, 99.0),
+    mask: np.ndarray | None = None,
+) -> np.ndarray:
+    arr = np.asarray(img, dtype=np.float64)
+    valid = np.isfinite(arr) if mask is None else (np.asarray(mask, dtype=bool) & np.isfinite(arr))
+    out = np.zeros(arr.shape, dtype=np.float64)
+    if not valid.any():
+        return out
+    lo, hi = np.percentile(arr[valid], [float(percentiles[0]), float(percentiles[1])])
+    if not np.isfinite(lo):
+        lo = float(np.nanmin(arr[valid]))
+    if not np.isfinite(hi):
+        hi = float(np.nanmax(arr[valid]))
+    if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
+        out[valid] = 0.0
+        return out
+    out[valid] = np.clip((arr[valid] - lo) / (hi - lo), 0.0, 1.0)
+    return out
+
+
+def quickseg_gradient_sigmas(params: QuickSegParams) -> tuple[float, float, float]:
+    return EDGE_SCALE_PRESETS.get(str(params.edge_scale), EDGE_SCALE_PRESETS["balanced"])
+
+
+def _line_footprint(length: int, angle_deg: float) -> np.ndarray:
+    length = max(1, int(length))
+    size = length if length % 2 else length + 1
+    center = size // 2
+    theta = math.radians(float(angle_deg))
+    dx = math.cos(theta) * (length - 1) / 2.0
+    dy = math.sin(theta) * (length - 1) / 2.0
+    r0 = int(round(center - dy))
+    c0 = int(round(center - dx))
+    r1 = int(round(center + dy))
+    c1 = int(round(center + dx))
+    footprint = np.zeros((size, size), dtype=bool)
+    rr, cc = draw_line(r0, c0, r1, c1)
+    rr = np.clip(rr, 0, size - 1)
+    cc = np.clip(cc, 0, size - 1)
+    footprint[rr, cc] = True
+    return footprint
+
+
+def _line_kernel(length: int, angle_deg: float) -> np.ndarray:
+    fp = _line_footprint(length, angle_deg).astype(np.float64)
+    total = float(fp.sum())
+    return fp / total if total > 0 else fp
+
+
+def oriented_line_smooth(
+    edge: np.ndarray,
+    *,
+    angles: tuple[int, ...] | tuple[float, ...],
+    lengths: tuple[int, ...],
+) -> np.ndarray:
+    arr = np.asarray(edge, dtype=np.float64)
+    responses: list[np.ndarray] = []
+    for length in lengths:
+        for angle in angles:
+            responses.append(convolve(arr, _line_kernel(int(length), float(angle)), mode="reflect"))
+    if not responses:
+        return arr.copy()
+    return np.max(np.stack(responses, axis=0), axis=0)
+
+
+def oriented_binary_connect(
+    mask: np.ndarray,
+    *,
+    angles: tuple[int, ...] | tuple[float, ...],
+    lengths: tuple[int, ...],
+) -> np.ndarray:
+    out = np.asarray(mask, dtype=bool)
+    for length in lengths:
+        for angle in angles:
+            out = closing(out, footprint=_line_footprint(int(length), float(angle)))
+    return out
+
+
+def remove_small_edge_objects(mask: np.ndarray, threshold: int) -> np.ndarray:
+    min_size = max(1, int(threshold))
+    return remove_small_objects(np.asarray(mask, dtype=bool), min_size=min_size)
+
+
+def quickseg_stage(prepared: QuickSegPrepared, stage: str) -> np.ndarray:
+    key = str(stage or "watershed_elevation")
+    mapping = {
+        "flat_display": prepared.flat_display,
+        "denoised": prepared.denoised,
+        "anisotropic_blur": prepared.anisotropic_blur,
+        "gradient_contrast": prepared.gradient_contrast,
+        "connected_edge_mask": prepared.connected_edge_mask,
+        "watershed_elevation": prepared.watershed_elevation,
+    }
+    arr = mapping.get(key, prepared.watershed_elevation)
+    if arr is None:
+        arr = prepared.gradient
+    return np.asarray(arr)
 
 
 def reorder_labels_area(labels: np.ndarray) -> np.ndarray:
@@ -399,17 +543,17 @@ def apply_quickseg_background(
     if mode == "plane_fit":
         return _plane_fit_background(
             arr,
-            params.plane_percentile_low,
-            params.plane_percentile_high,
+            float(ADVANCED_PARAMETERS["plane_percentile_low"]),
+            float(ADVANCED_PARAMETERS["plane_percentile_high"]),
         )
     if mode == "facet_level":
         return facet_level(
             np.asarray(arr, dtype=np.float64),
-            threshold_deg=float(params.plane_facet_threshold_deg),
+            threshold_deg=float(ADVANCED_PARAMETERS["plane_facet_threshold_deg"]),
             pixel_size_x_m=float(pixel_size_x_m),
             pixel_size_y_m=float(pixel_size_y_m),
         )
-    raise ValueError(f"Unknown QuickSeg background mode {params.background_mode!r}")
+    raise ValueError(f"Unknown QuickSeg background mode {ADVANCED_PARAMETERS['background_mode']!r}")
 
 
 def prepare_quickseg_inputs(
@@ -420,36 +564,127 @@ def prepare_quickseg_inputs(
     pixel_size_y_m: float = 1.0,
 ) -> QuickSegPrepared:
     raw = np.asarray(arr, dtype=np.float64)
+    valid = finite_valid_mask(raw)
     corrected = apply_quickseg_background(
         raw,
         params,
         pixel_size_x_m=pixel_size_x_m,
         pixel_size_y_m=pixel_size_y_m,
     )
-    equalized = equalise(corrected)
+    flat_display = robust_rescale(corrected, (1.0, 99.0), valid)
+    equalized = flat_display
     denoised = denoise_tv_chambolle(
         equalized,
-        weight=float(params.tv_weight),
-        eps=float(params.tv_eps),
-        max_num_iter=int(params.tv_iterations),
+        weight=float(params.denoise_strength),
+        eps=float(ADVANCED_PARAMETERS["tv_eps"]),
+        max_num_iter=int(ADVANCED_PARAMETERS["tv_iterations"]),
     ).astype(np.float64, copy=False)
-    gaussian_kwargs: dict[str, Any] = {
-        "sigma": float(params.gaussian_sigma),
-        "order": int(params.gaussian_order),
-        "mode": str(params.gaussian_mode),
-        "cval": 0.05,
-    }
-    if params.gaussian_axes is not None:
-        gaussian_kwargs["axes"] = tuple(int(v) for v in params.gaussian_axes)
-    gaussian = gaussian_filter(denoised, **gaussian_kwargs).astype(np.float64, copy=False)
-    gradient = sobel(gaussian).astype(np.float64, copy=False)
+
+    median_size = int(ADVANCED_PARAMETERS["median_size"])
+    if median_size > 1:
+        denoised = median_filter(denoised, size=median_size, mode="reflect").astype(np.float64, copy=False)
+
+    sigma_color = float(ADVANCED_PARAMETERS["bilateral_sigma_color"])
+    if sigma_color > 0:
+        denoised = denoise_bilateral(
+            denoised,
+            sigma_color=sigma_color,
+            sigma_spatial=float(ADVANCED_PARAMETERS["bilateral_sigma_spatial"]),
+            channel_axis=None,
+        ).astype(np.float64, copy=False)
+
+    anisotropic_blur = gaussian_filter(
+        denoised,
+        sigma=(float(params.smooth_across_scan), float(params.smooth_along_scan)),
+        mode="reflect",
+    ).astype(np.float64, copy=False)
+
+    grad_maps: list[np.ndarray] = []
+    operator = str(ADVANCED_PARAMETERS["gradient_operator"]).lower()
+    for sigma in quickseg_gradient_sigmas(params):
+        work = anisotropic_blur
+        if float(sigma) > 0:
+            work = gaussian_filter(work, sigma=float(sigma), mode="reflect")
+        grad = scharr(work) if operator == "scharr" else sobel(work)
+        grad_maps.append(robust_rescale(grad, (1.0, 99.8), valid))
+    if grad_maps:
+        stack = np.stack(grad_maps, axis=0)
+        if str(ADVANCED_PARAMETERS["gradient_combine"]).lower() == "mean":
+            gradient_raw = np.mean(stack, axis=0)
+        else:
+            gradient_raw = np.max(stack, axis=0)
+    else:
+        gradient_raw = sobel(anisotropic_blur)
+
+    gradient_contrast = robust_rescale(
+        gradient_raw,
+        tuple(ADVANCED_PARAMETERS["gradient_clip_percentiles"]),
+        valid,
+    )
+    clahe_clip = float(ADVANCED_PARAMETERS["clahe_clip_limit"])
+    if clahe_clip > 0:
+        gradient_contrast = exposure.equalize_adapthist(
+            np.clip(gradient_contrast, 0.0, 1.0),
+            clip_limit=clahe_clip,
+        ).astype(np.float64, copy=False)
+        gradient_contrast = robust_rescale(gradient_contrast, (0.5, 99.5), valid)
+
+    edge_values = gradient_contrast[valid & np.isfinite(gradient_contrast)]
+    if edge_values.size:
+        low = float(np.percentile(edge_values, float(params.edge_sensitivity)))
+        high = float(np.percentile(edge_values, float(ADVANCED_PARAMETERS["hysteresis_high_percentile"])))
+        if high <= low:
+            high = low
+        edge_mask = apply_hysteresis_threshold(gradient_contrast, low, high)
+    else:
+        edge_mask = np.zeros(raw.shape, dtype=bool)
+    edge_mask &= valid
+    edge_mask = remove_small_edge_objects(edge_mask, int(params.min_edge_size))
+
+    close_radius = int(ADVANCED_PARAMETERS["close_radius"])
+    if close_radius > 0:
+        edge_mask = closing(edge_mask, footprint=disk(close_radius))
+    edge_mask = oriented_binary_connect(
+        edge_mask,
+        angles=tuple(ADVANCED_PARAMETERS["line_angles_deg"]),
+        lengths=tuple(ADVANCED_PARAMETERS["line_lengths"]),
+    )
+    dilate_radius = int(ADVANCED_PARAMETERS["dilate_radius"])
+    if dilate_radius > 0:
+        edge_mask = dilation(edge_mask, footprint=disk(dilate_radius))
+    edge_mask &= valid
+
+    line_smoothed = oriented_line_smooth(
+        gradient_contrast,
+        angles=tuple(ADVANCED_PARAMETERS["line_angles_deg"]),
+        lengths=tuple(ADVANCED_PARAMETERS["line_lengths"]),
+    )
+    barrier_blur_sigma = float(ADVANCED_PARAMETERS["barrier_blur_sigma"])
+    gate = gaussian_filter(edge_mask.astype(np.float64), sigma=max(0.1, barrier_blur_sigma), mode="reflect")
+    connect_strength = float(np.clip(params.edge_connect_strength, 0.0, 1.0))
+    connected_edge = (
+        (1.0 - connect_strength) * gradient_contrast
+        + connect_strength * (gate * line_smoothed + (1.0 - gate) * gradient_contrast)
+    )
+    connected_edge = robust_rescale(connected_edge, (0.5, 99.7), valid)
+
+    elevation = np.clip(connected_edge, 0.0, 1.0) ** float(ADVANCED_PARAMETERS["elevation_gamma"])
+    barrier = gaussian_filter(edge_mask.astype(np.float64), sigma=barrier_blur_sigma, mode="reflect")
+    elevation = robust_rescale(elevation + float(params.barrier_strength) * barrier, (0.5, 99.7), valid)
+    elevation[~valid] = 0.0
+
     return QuickSegPrepared(
         raw=raw,
         corrected=corrected,
         equalized=equalized,
         denoised=denoised,
-        gaussian=gaussian,
-        gradient=gradient,
+        gaussian=anisotropic_blur,
+        gradient=elevation,
+        flat_display=flat_display,
+        anisotropic_blur=anisotropic_blur,
+        gradient_contrast=gradient_contrast,
+        connected_edge_mask=edge_mask.astype(np.float64),
+        watershed_elevation=elevation,
     )
 
 
@@ -458,8 +693,9 @@ def watershed_labels(
     seeds: list[QuickSegSeed],
     params: QuickSegParams,
 ) -> np.ndarray:
-    if prepared.gradient.shape != prepared.raw.shape:
-        raise ValueError("Prepared gradient shape does not match raw image")
+    elevation = quickseg_stage(prepared, "watershed_elevation").astype(np.float64, copy=False)
+    if elevation.shape != prepared.raw.shape:
+        raise ValueError("Prepared watershed elevation shape does not match raw image")
     markers = np.zeros(prepared.raw.shape, dtype=np.int32)
     for seed in seeds:
         x = int(seed.x)
@@ -469,11 +705,11 @@ def watershed_labels(
     if int(markers.max()) < 1:
         return np.zeros(prepared.raw.shape, dtype=np.int32)
     labels = watershed(
-        prepared.gradient,
+        elevation,
         markers=markers,
-        connectivity=connectivity(int(params.watershed_connectivity)),
-        compactness=float(params.watershed_compactness),
-        watershed_line=bool(params.watershed_line),
+        connectivity=connectivity(int(ADVANCED_PARAMETERS["watershed_connectivity"])),
+        compactness=float(ADVANCED_PARAMETERS["compactness_watershed"]),
+        watershed_line=bool(ADVANCED_PARAMETERS["watershed_line"]),
     ).astype(np.int32, copy=False)
     return reorder_labels_area(labels)
 

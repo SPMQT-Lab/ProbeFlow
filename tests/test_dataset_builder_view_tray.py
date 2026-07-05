@@ -11,6 +11,7 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QScrollArea, QSplitter
 
 from probeflow.core.mask import ImageMask
+from probeflow.dataset_builder.quickseg import QuickSegPrepared
 from probeflow.gui.dataset_builder.display import flatten_display_array
 from probeflow.gui.dataset_builder.canvas import DatasetBuilderCanvas
 from probeflow.gui.dataset_builder.tab import DatasetBuilderPanel, DatasetBuilderSidebar
@@ -230,6 +231,11 @@ def test_quickseg_controls_expose_basic_state_and_buttons(qapp):
     assert controls.current_label() == 7
     assert controls._seed_mode_lbl.text() == "Add seed mode"
     assert controls._result_lbl.text() == "Watershed ready"
+    assert hasattr(controls, "_denoise_strength")
+    assert hasattr(controls, "_smooth_along_scan")
+    assert hasattr(controls, "_barrier_strength")
+    assert not hasattr(controls, "_tv_iters")
+    assert not hasattr(controls, "_gaussian_order")
     assert seen == ["apply", "save_next"]
 
 
@@ -267,12 +273,12 @@ def test_dataset_builder_quickseg_params_persist_and_reset(qapp, monkeypatch):
 
     controls = panel._quickseg_controls
     assert controls is not None
-    controls._gaussian_sigma.setValue(7.5)
-    controls._tv_weight.setValue(1.75)
+    controls._smooth_along_scan.setValue(2.5)
+    controls._denoise_strength.setValue(0.08)
     panel._persist_quickseg_params()
 
-    assert cfg["dataset_builder_quickseg_params"]["gaussian_sigma"] == 7.5
-    assert cfg["dataset_builder_quickseg_params"]["tv_weight"] == 1.75
+    assert cfg["dataset_builder_quickseg_params"]["smooth_along_scan"] == 2.5
+    assert cfg["dataset_builder_quickseg_params"]["denoise_strength"] == 0.08
 
     panel2 = DatasetBuilderPanel(THEMES["dark"], cfg)
     idx2 = panel2._task_combo.findData("terrace_segmentation")
@@ -282,14 +288,14 @@ def test_dataset_builder_quickseg_params_persist_and_reset(qapp, monkeypatch):
 
     controls2 = panel2._quickseg_controls
     assert controls2 is not None
-    assert controls2._gaussian_sigma.value() == 7.5
-    assert controls2._tv_weight.value() == 1.75
+    assert controls2._smooth_along_scan.value() == 2.5
+    assert controls2._denoise_strength.value() == 0.08
 
     controls2._reset_btn.click()
     qapp.processEvents()
 
-    assert controls2._gaussian_sigma.value() == 4.0
-    assert controls2._tv_weight.value() == 0.25
+    assert controls2._smooth_along_scan.value() == 1.2
+    assert controls2._denoise_strength.value() == 0.04
 
 
 def test_dataset_builder_load_current_does_not_return_early(qapp):
@@ -333,7 +339,14 @@ def test_dataset_builder_ctrl_z_undos_one_brush_stroke(qapp):
 
     arr = np.zeros((24, 24), dtype=float)
     panel._arr = arr.copy()
-    panel._queue = [SimpleNamespace(display_id="sample_plane0", status="blank")]
+    panel._queue = [
+        SimpleNamespace(
+            display_id="sample_plane0",
+            status="blank",
+            source_path=__file__,
+            plane_index=0,
+        )
+    ]
     panel._current_index = 0
     panel._current_mask = ImageMask.new(
         np.zeros(arr.shape, dtype=bool),
@@ -521,3 +534,47 @@ def test_dataset_builder_quickseg_modifier_enums_do_not_crash(qapp):
         ("delete", 5, 6),
         ("add", 7, 8, 0),
     ]
+
+
+def test_dataset_builder_quickseg_preview_ignores_right_side_clicks(qapp):
+    panel = DatasetBuilderPanel(THEMES["dark"], {})
+    idx = panel._task_combo.findData("terrace_segmentation")
+    assert idx >= 0
+    panel._task_combo.setCurrentIndex(idx)
+    arr = np.arange(256, dtype=float).reshape(16, 16)
+    panel._arr = arr
+    panel._base_display_arr = arr
+    panel._display_arr = arr
+    panel._queue = [
+        SimpleNamespace(
+            display_id="sample_plane0",
+            status="blank",
+            source_path=__file__,
+            plane_index=0,
+        )
+    ]
+    panel._current_index = 0
+    panel._quickseg_cache = QuickSegPrepared(
+        raw=arr,
+        corrected=arr,
+        equalized=arr,
+        denoised=arr / arr.max(),
+        gaussian=arr / arr.max(),
+        gradient=arr / arr.max(),
+        watershed_elevation=arr / arr.max(),
+    )
+    assert panel._quickseg_controls is not None
+    panel._quickseg_controls._show_preprocessing_preview.setChecked(True)
+    panel._refresh_display_preview()
+    qapp.processEvents()
+
+    assert panel._canvas.sceneRect().width() > 16
+
+    calls: list[tuple[str, int, int]] = []
+    panel._quickseg_add_seed = lambda x, y, *, new_terrace=False: calls.append(("add", x, y))  # type: ignore[method-assign]
+    panel._quickseg_delete_seed_at = lambda x, y: calls.append(("delete", x, y))  # type: ignore[method-assign]
+
+    panel._quickseg_canvas_clicked(20, 4, Qt.NoModifier)
+    panel._quickseg_canvas_clicked(5, 4, Qt.NoModifier)
+
+    assert calls == [("add", 5, 4)]

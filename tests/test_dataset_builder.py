@@ -24,10 +24,12 @@ from probeflow.dataset_builder.cache import (
     sample_cache_key,
 )
 from probeflow.dataset_builder.quickseg import (
+    ADVANCED_PARAMETERS,
     QuickSegParams,
     QuickSegSeed,
     QuickSegPrepared,
     QuickSegState,
+    quickseg_gradient_sigmas,
     load_quickseg_state,
     prepare_quickseg_inputs,
     save_quickseg_state,
@@ -133,7 +135,8 @@ def test_dataset_builder_quickseg_state_round_trip(tmp_path):
 
 def test_dataset_builder_quickseg_watershed_uses_prepared_gradient(monkeypatch):
     raw = np.zeros((8, 8), dtype=float)
-    gradient = np.arange(64, dtype=float).reshape(8, 8)
+    gradient = np.zeros((8, 8), dtype=float)
+    elevation = np.arange(64, dtype=float).reshape(8, 8)
     prepared = QuickSegPrepared(
         raw=raw,
         corrected=raw + 1.0,
@@ -141,6 +144,7 @@ def test_dataset_builder_quickseg_watershed_uses_prepared_gradient(monkeypatch):
         denoised=raw + 3.0,
         gaussian=raw + 4.0,
         gradient=gradient,
+        watershed_elevation=elevation,
     )
     params = QuickSegParams()
     seeds = [
@@ -161,10 +165,55 @@ def test_dataset_builder_quickseg_watershed_uses_prepared_gradient(monkeypatch):
 
     labels = watershed_labels(prepared, seeds, params)
 
-    assert np.array_equal(seen["image"], gradient)
+    assert np.array_equal(seen["image"], elevation)
     assert np.array_equal(labels, seen["markers"])
     assert seen["markers"][1, 1] == 1
     assert seen["markers"][6, 6] == 2
+
+
+def test_dataset_builder_quickseg_pipeline_returns_display_stages():
+    y, x = np.mgrid[:48, :64]
+    arr = 0.02 * x + 0.01 * y
+    arr[:, 30:] += 1.0
+    params = QuickSegParams()
+
+    prepared = prepare_quickseg_inputs(arr, params)
+
+    for stage in (
+        prepared.flat_display,
+        prepared.denoised,
+        prepared.anisotropic_blur,
+        prepared.gradient_contrast,
+        prepared.connected_edge_mask,
+        prepared.watershed_elevation,
+    ):
+        assert stage is not None
+        assert stage.shape == arr.shape
+    assert np.nanmax(prepared.watershed_elevation) <= 1.0
+    assert np.nanmin(prepared.watershed_elevation) >= 0.0
+
+
+def test_dataset_builder_quickseg_eight_knobs_affect_fingerprint():
+    base = quickseg_params_fingerprint(QuickSegParams())
+    variants = [
+        QuickSegParams(denoise_strength=0.08),
+        QuickSegParams(smooth_along_scan=2.0),
+        QuickSegParams(smooth_across_scan=1.0),
+        QuickSegParams(edge_scale="fine"),
+        QuickSegParams(edge_sensitivity=90.0),
+        QuickSegParams(min_edge_size=80),
+        QuickSegParams(edge_connect_strength=0.7),
+        QuickSegParams(barrier_strength=0.35),
+    ]
+
+    assert all(quickseg_params_fingerprint(params) != base for params in variants)
+    assert ("advanced_parameters_version", ADVANCED_PARAMETERS["version"]) in base
+
+
+def test_dataset_builder_quickseg_edge_scale_presets():
+    assert quickseg_gradient_sigmas(QuickSegParams(edge_scale="fine")) == (0.4, 0.8, 1.4)
+    assert quickseg_gradient_sigmas(QuickSegParams(edge_scale="balanced")) == (0.6, 1.2, 2.4)
+    assert quickseg_gradient_sigmas(QuickSegParams(edge_scale="broad")) == (1.0, 2.0, 3.5)
 
 
 def test_dataset_builder_cache_separates_preproc_and_watershed_layers(tmp_path):
