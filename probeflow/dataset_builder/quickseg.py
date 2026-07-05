@@ -63,6 +63,9 @@ ADVANCED_PARAMETERS: dict[str, Any] = {
     "horizontal_artifact_max_height_fraction": 0.04,
     "horizontal_artifact_min_aspect_ratio": 8.0,
     "horizontal_artifact_max_angle_deg": 8.0,
+    "horizontal_artifact_score_percentile": 94.0,
+    "horizontal_artifact_run_close_px": 9,
+    "horizontal_artifact_row_expand_px": 1,
     "horizontal_artifact_blur_sigma": 1.0,
     "compactness_watershed": 0.0,
     "watershed_connectivity": 1,
@@ -433,6 +436,34 @@ def _component_horizontal_angle_deg(coords: np.ndarray) -> float:
     return min(angle, abs(180.0 - angle))
 
 
+def _horizontal_run_artifact_mask(mask: np.ndarray) -> np.ndarray:
+    candidate = np.asarray(mask, dtype=bool)
+    if candidate.ndim != 2 or not candidate.any():
+        return np.zeros(candidate.shape, dtype=bool)
+    height, width = candidate.shape
+    close_px = max(1, int(ADVANCED_PARAMETERS["horizontal_artifact_run_close_px"]))
+    if close_px > 1:
+        candidate = closing(candidate, footprint=np.ones((1, close_px), dtype=bool))
+    min_width = int(math.ceil(float(ADVANCED_PARAMETERS["horizontal_artifact_min_width_fraction"]) * max(width, 1)))
+    expand = max(0, int(ADVANCED_PARAMETERS["horizontal_artifact_row_expand_px"]))
+    artifact = np.zeros(candidate.shape, dtype=bool)
+    for row_idx in range(height):
+        row = candidate[row_idx]
+        if int(row.sum()) < min_width:
+            continue
+        padded = np.concatenate(([False], row, [False]))
+        changes = np.flatnonzero(padded[1:] != padded[:-1])
+        starts = changes[0::2]
+        ends = changes[1::2]
+        for start, end in zip(starts, ends):
+            if int(end - start) < min_width:
+                continue
+            row0 = max(0, row_idx - expand)
+            row1 = min(height, row_idx + expand + 1)
+            artifact[row0:row1, int(start):int(end)] = True
+    return artifact
+
+
 def detect_horizontal_artifact_mask(edge_mask: np.ndarray) -> np.ndarray:
     mask = np.asarray(edge_mask, dtype=bool)
     if mask.ndim != 2 or not mask.any():
@@ -443,7 +474,7 @@ def detect_horizontal_artifact_mask(edge_mask: np.ndarray) -> np.ndarray:
     min_aspect = float(ADVANCED_PARAMETERS["horizontal_artifact_min_aspect_ratio"])
     max_angle = float(ADVANCED_PARAMETERS["horizontal_artifact_max_angle_deg"])
     labels = measure_label(mask, connectivity=2)
-    artifact = np.zeros(mask.shape, dtype=bool)
+    artifact = _horizontal_run_artifact_mask(mask)
     for region in regionprops(labels):
         min_row, min_col, max_row, max_col = region.bbox
         comp_width = max_col - min_col
@@ -712,8 +743,6 @@ def prepare_quickseg_inputs(
     if dilate_radius > 0:
         edge_mask = dilation(edge_mask, footprint=disk(dilate_radius))
     edge_mask &= valid
-    horizontal_artifact_mask = detect_horizontal_artifact_mask(edge_mask)
-    horizontal_artifact_mask &= valid
 
     line_smoothed = oriented_line_smooth(
         gradient_contrast,
@@ -728,6 +757,19 @@ def prepare_quickseg_inputs(
         + connect_strength * (gate * line_smoothed + (1.0 - gate) * gradient_contrast)
     )
     connected_edge = robust_rescale(connected_edge, (0.5, 99.7), valid)
+    artifact_candidate = edge_mask.copy()
+    connected_values = connected_edge[valid & np.isfinite(connected_edge)]
+    if connected_values.size:
+        score_threshold = float(
+            np.percentile(
+                connected_values,
+                float(ADVANCED_PARAMETERS["horizontal_artifact_score_percentile"]),
+            )
+        )
+        artifact_candidate |= connected_edge >= score_threshold
+    artifact_candidate &= valid
+    horizontal_artifact_mask = detect_horizontal_artifact_mask(artifact_candidate)
+    horizontal_artifact_mask &= valid
 
     suppression = float(np.clip(params.horizontal_defect_suppression, 0.0, 1.0))
     artifact_weight = np.zeros(raw.shape, dtype=np.float64)
@@ -738,6 +780,7 @@ def prepare_quickseg_inputs(
             sigma=max(0.0, blur_sigma),
             mode="reflect",
         )
+        artifact_weight = np.maximum(artifact_weight, horizontal_artifact_mask.astype(np.float64))
         artifact_weight = np.clip(artifact_weight, 0.0, 1.0)
 
     elevation_base = np.clip(connected_edge, 0.0, 1.0) ** float(ADVANCED_PARAMETERS["elevation_gamma"])

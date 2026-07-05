@@ -227,6 +227,17 @@ def test_dataset_builder_quickseg_detects_full_width_horizontal_artifact():
     assert artifact[48:50, 4:96].mean() > 0.9
 
 
+def test_dataset_builder_quickseg_detects_horizontal_artifact_attached_to_other_edges():
+    mask = np.zeros((100, 100), dtype=bool)
+    mask[48:50, 2:98] = True
+    mask[20:80, 50:52] = True
+    mask[25:55, 25:55] |= np.eye(30, dtype=bool)
+
+    artifact = detect_horizontal_artifact_mask(mask)
+
+    assert artifact[48:50, 2:98].mean() > 0.9
+
+
 def test_dataset_builder_quickseg_does_not_mark_short_horizontal_edge():
     mask = np.zeros((100, 100), dtype=bool)
     mask[48:50, 10:40] = True
@@ -255,6 +266,7 @@ def test_dataset_builder_quickseg_horizontal_suppression_lowers_elevation(monkey
     assert float(np.mean(on.watershed_elevation[18:20, :])) < float(
         np.mean(on.watershed_elevation_unsuppressed[18:20, :])
     )
+    assert float(np.max(on.watershed_elevation[18:20, :])) < 0.5
 
 
 def test_dataset_builder_cache_separates_preproc_and_watershed_layers(tmp_path):
