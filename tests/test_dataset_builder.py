@@ -26,6 +26,7 @@ from probeflow.dataset_builder.cache import (
 from probeflow.dataset_builder.quickseg import (
     QuickSegParams,
     QuickSegSeed,
+    QuickSegPrepared,
     QuickSegState,
     load_quickseg_state,
     prepare_quickseg_inputs,
@@ -128,6 +129,42 @@ def test_dataset_builder_quickseg_state_round_trip(tmp_path):
     assert loaded_state.result is not None
     assert loaded_state.result.shape == arr.shape
     assert loaded_state.seeds[1].terrace_label_id == 2
+
+
+def test_dataset_builder_quickseg_watershed_uses_prepared_gradient(monkeypatch):
+    raw = np.zeros((8, 8), dtype=float)
+    gradient = np.arange(64, dtype=float).reshape(8, 8)
+    prepared = QuickSegPrepared(
+        raw=raw,
+        corrected=raw + 1.0,
+        equalized=raw + 2.0,
+        denoised=raw + 3.0,
+        gaussian=raw + 4.0,
+        gradient=gradient,
+    )
+    params = QuickSegParams()
+    seeds = [
+        QuickSegSeed(x=1, y=1, terrace_label_id=1, order=1),
+        QuickSegSeed(x=6, y=6, terrace_label_id=2, order=2),
+    ]
+    seen = {}
+
+    def fake_watershed(image, *, markers, connectivity, compactness, watershed_line):
+        seen["image"] = image.copy()
+        seen["markers"] = markers.copy()
+        seen["connectivity"] = connectivity
+        seen["compactness"] = compactness
+        seen["watershed_line"] = watershed_line
+        return markers.copy()
+
+    monkeypatch.setattr("probeflow.dataset_builder.quickseg.watershed", fake_watershed)
+
+    labels = watershed_labels(prepared, seeds, params)
+
+    assert np.array_equal(seen["image"], gradient)
+    assert np.array_equal(labels, seen["markers"])
+    assert seen["markers"][1, 1] == 1
+    assert seen["markers"][6, 6] == 2
 
 
 def test_dataset_builder_cache_separates_preproc_and_watershed_layers(tmp_path):
