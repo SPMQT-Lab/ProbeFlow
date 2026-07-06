@@ -60,6 +60,7 @@ from .shared import (
     _derivative_enabled,
     _focus_in_parameter_inputs,
     _plain_button,
+    _shared_scale_values,
 )
 from .single import SpecViewerDialog
 
@@ -449,13 +450,24 @@ class SpecOverlayDialog(QDialog):
             },
         )
 
-    def _displayed(self, entry, spec, channel: str, vertical_offset: float) -> DisplayedSpectrum:
-        displayed = make_displayed_spectrum(
+    def _displayed_unscaled(self, entry, spec, channel: str) -> DisplayedSpectrum:
+        return make_displayed_spectrum(
             self._raw_trace(entry, spec, channel),
             self._display_options(vertical_offset=0.0),
             channel_lookup=spec.channels,
         )
-        scale, unit = self._scale(displayed.y_unit, displayed.y_display)
+
+    def _finalize_displayed(
+        self,
+        displayed: DisplayedSpectrum,
+        vertical_offset: float,
+        scale_values: np.ndarray | None = None,
+    ) -> DisplayedSpectrum:
+        # scale_values lets co-plotted traces share one prefix scale; a trace
+        # scaled from its own values alone would be rescaled relative to the
+        # others on the same axis.
+        values = displayed.y_display if scale_values is None else scale_values
+        scale, unit = self._scale(displayed.y_unit, values)
         metadata = dict(displayed.metadata)
         metadata.update({
             "display_scale": scale,
@@ -469,6 +481,39 @@ class SpecOverlayDialog(QDialog):
             options=replace(displayed.options, vertical_offset=float(vertical_offset)),
             metadata=metadata,
         )
+
+    def _displayed_rows(self) -> tuple[list[tuple[int, object, DisplayedSpectrum]], list[str]]:
+        """Displayed spectra for the current channel, sharing one unit scale.
+
+        Returns ``(rows, skipped)`` where each row is ``(spec_index, entry,
+        displayed)`` — the index keeps waterfall offsets and plot colours
+        stable when some spectra are skipped.
+        """
+        channel = self._channel_cb.currentText()
+        if not channel:
+            return [], []
+        offset = float(self._offset_spin.value())
+        _ref_entry, ref_spec = self._reference_for_channel(channel)
+        prelim: list[tuple[int, object, DisplayedSpectrum]] = []
+        skipped: list[str] = []
+        for i, (entry, spec) in enumerate(self._specs):
+            if channel not in spec.channels:
+                skipped.append(f"{entry.stem}: missing {channel}")
+                continue
+            issue = self._x_compatibility_issue(ref_spec, spec, channel)
+            if issue is not None:
+                skipped.append(f"{entry.stem}: {issue}")
+                continue
+            try:
+                prelim.append((i, entry, self._displayed_unscaled(entry, spec, channel)))
+            except Exception as exc:
+                skipped.append(f"{entry.stem}: {exc}")
+        scale_groups = _shared_scale_values([d for _i, _e, d in prelim])
+        rows = [
+            (i, entry, self._finalize_displayed(d, i * offset, scale_groups[d.y_unit]))
+            for i, entry, d in prelim
+        ]
+        return rows, skipped
 
     def _scale(self, unit: str, values: np.ndarray) -> tuple[float, str]:
         from probeflow.analysis.spec_plot import choose_display_unit
@@ -522,24 +567,10 @@ class SpecOverlayDialog(QDialog):
         fig.patch.set_facecolor(self._BG)
         ax = fig.subplots()
         ax.set_facecolor(self._BG)
-        channel = self._channel_cb.currentText()
-        offset = float(self._offset_spin.value())
-        _ref_entry, ref_spec = self._reference_for_channel(channel)
+        rows, skipped = self._displayed_rows()
         units = []
         plotted = 0
-        skipped = []
-        for i, (entry, spec) in enumerate(self._specs):
-            if not channel or channel not in spec.channels:
-                continue
-            issue = self._x_compatibility_issue(ref_spec, spec, channel)
-            if issue is not None:
-                skipped.append(f"{entry.stem}: {issue}")
-                continue
-            try:
-                displayed = self._displayed(entry, spec, channel, i * offset)
-            except Exception as exc:
-                self._status.setText(f"Plot error: {exc}")
-                continue
+        for i, entry, displayed in rows:
             self._displayed_traces.append(displayed)
             self._displayed_trace_axes.append((displayed, ax))
             units.append(displayed.y_unit)
@@ -576,28 +607,10 @@ class SpecOverlayDialog(QDialog):
         canvas.mpl_connect("button_press_event", self._on_canvas_click)
 
     def _current_displayed_spectra(self) -> list[DisplayedSpectrum]:
-        channel = self._channel_cb.currentText()
-        if not channel:
-            return []
-        offset = float(self._offset_spin.value())
-        _ref_entry, ref_spec = self._reference_for_channel(channel)
-        rows = []
-        skipped = []
-        for i, (entry, spec) in enumerate(self._specs):
-            if channel not in spec.channels:
-                skipped.append(f"{entry.stem}: missing {channel}")
-                continue
-            issue = self._x_compatibility_issue(ref_spec, spec, channel)
-            if issue is not None:
-                skipped.append(f"{entry.stem}: {issue}")
-                continue
-            try:
-                rows.append(self._displayed(entry, spec, channel, i * offset))
-            except Exception as exc:
-                skipped.append(f"{entry.stem}: {exc}")
+        rows, skipped = self._displayed_rows()
         if skipped:
             self._status.setText(f"Skipped {len(skipped)} spectra: {skipped[0]}")
-        return rows
+        return [displayed for _i, _entry, displayed in rows]
 
     def _current_csv_text(self) -> str:
         return displayed_spectra_to_csv_text(self._current_displayed_spectra())

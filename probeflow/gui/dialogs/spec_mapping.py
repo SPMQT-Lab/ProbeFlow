@@ -112,7 +112,7 @@ class SpecMappingDialog(QDialog):
         # We avoid importing this at module top because it pulls in scan I/O
         # — keeping the dialog responsive on large folders matters more
         # than saving the import here.
-        from probeflow.io.spectroscopy import read_spec_file
+        from probeflow.io.spectroscopy import read_spec_file, _position_from_createc_header
         from probeflow.analysis.spec_plot import spec_position_to_pixel, _parse_sxm_offset
 
         # Pre-load image headers once (slow if many files).
@@ -129,6 +129,15 @@ class SpecMappingDialog(QDialog):
                 if img.source_format == "sxm" and hdr:
                     offset_m = _parse_sxm_offset(hdr)
                     raw = hdr.get("SCAN_ANGLE", "0").strip()
+                    try:
+                        angle_deg = float(raw) if raw else 0.0
+                    except ValueError:
+                        angle_deg = 0.0
+                elif img.source_format == "dat" and hdr:
+                    # Createc scan-frame centre shares the OffsetX/OffsetY DAC
+                    # coordinate system with the .VERT spec positions.
+                    offset_m = _position_from_createc_header(hdr)
+                    raw = str(hdr.get("Rotation", "0")).strip()
                     try:
                         angle_deg = float(raw) if raw else 0.0
                     except ValueError:

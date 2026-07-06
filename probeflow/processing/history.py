@@ -33,25 +33,49 @@ def processing_history_entries_from_state(
     return entries
 
 
+# Provenance bookkeeping steps that are not data-processing operations; a
+# replayable ProcessingState must not contain them (mirrors the
+# ``_has_data_processing`` classification in provenance/records.py).
+_NON_DATA_OPS = {"file_load", "dat_to_sxm"}
+
+
 def processing_state_from_history(
     history: list[dict[str, Any]] | tuple[dict[str, Any], ...] | None,
 ) -> ProcessingState:
-    """Convert legacy history entries into canonical ``ProcessingState``."""
+    """Convert history entries into a canonical ``ProcessingState``.
+
+    Accepts both legacy ``Scan.processing_history`` entries
+    (``{"op", "params"}``) and provenance-record steps
+    (``{"operation_id", "parameters"}`` — the ``ProcessingHistory`` step
+    format stored in ``.probeflow.json`` sidecars).  Record bookkeeping steps
+    (``file_load``, ``export_*``, ``dat_to_sxm``) are skipped so the result
+    replays cleanly through ``apply_processing_state``.  Before this accepted
+    the record format, feeding it ``.probeflow.json`` steps silently produced
+    an *empty* state — a replay would reproduce the raw image while claiming
+    to be processed.
+    """
     steps: list[ProcessingStep] = []
     for entry in history or ():
         if not isinstance(entry, dict):
             continue
-        op = entry.get("op")
+        op = entry.get("op") or entry.get("operation_id")
         if not op:
             continue
-        params = entry.get("params")
-        if params is None:
-            params = {
-                key: value
-                for key, value in entry.items()
-                if key not in {"op", "timestamp"}
-            }
-        steps.append(ProcessingStep(str(op), deepcopy(dict(params))))
+        op = str(op)
+        if op in _NON_DATA_OPS or op.startswith("export_"):
+            continue
+        if "op" not in entry and "operation_id" in entry:
+            params = dict(entry.get("parameters") or {})
+        else:
+            params = entry.get("params")
+            if params is None:
+                params = {
+                    key: value
+                    for key, value in entry.items()
+                    if key not in {"op", "timestamp"}
+                }
+            params = dict(params)
+        steps.append(ProcessingStep(op, deepcopy(params)))
     return ProcessingState(steps=steps)
 
 

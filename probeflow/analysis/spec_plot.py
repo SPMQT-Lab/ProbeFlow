@@ -335,10 +335,15 @@ def _parse_sxm_offset(hdr: dict) -> tuple[float, float]:
 
 
 def _parse_sxm_angle_rad(hdr: dict) -> float:
-    """Extract the scan rotation angle from an .sxm header dict (radians)."""
+    """Extract the scan rotation angle from an .sxm header dict, in radians.
+
+    Nanonis stores SCAN_ANGLE in degrees; convert on read.  (This helper used
+    to return the raw header number as if it were radians, silently rotating
+    spec markers by a factor 180/π on angled scans.)
+    """
     raw = hdr.get("SCAN_ANGLE", "0").strip()
     nums = _FLOAT_RE.findall(raw)
     try:
-        return float(nums[0]) if nums else 0.0
+        return float(np.radians(float(nums[0]))) if nums else 0.0
     except (ValueError, IndexError):
         return 0.0
