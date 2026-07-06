@@ -21,6 +21,7 @@ class SpecOverlayController:
         self._spec_image_map = spec_image_map
         self._markers: list[dict] = []
         self._roi_set = None
+        self._out_of_frame: list[str] = []
 
     # ── Public read-only properties ───────────────────────────────────────────
 
@@ -31,6 +32,11 @@ class SpecOverlayController:
     @property
     def roi_set(self):
         return self._roi_set
+
+    @property
+    def out_of_frame(self) -> list[str]:
+        """Stems of mapped spectra whose recorded position lies outside the scan frame."""
+        return self._out_of_frame
 
     # ── Marker loading ────────────────────────────────────────────────────────
 
@@ -53,6 +59,7 @@ class SpecOverlayController:
         """
         self._markers = []
         self._roi_set = None
+        self._out_of_frame = []
         self._zoom_lbl.set_markers([])
 
         if scan_range_m is None or scan_shape is None:
@@ -88,11 +95,22 @@ class SpecOverlayController:
                     scan_angle_deg = float(raw_angle) if raw_angle else 0.0
                 except ValueError:
                     scan_angle_deg = 0.0
+            elif scan_format == "dat" and scan_header:
+                # Createc .dat: the scan-frame centre lives in the same
+                # OffsetX/OffsetY DAC coordinates the .VERT positions use.
+                from probeflow.io.spectroscopy import _position_from_createc_header
+                scan_offset_m = _position_from_createc_header(scan_header)
+                raw_angle = str(scan_header.get("Rotation", "0")).strip()
+                try:
+                    scan_angle_deg = float(raw_angle) if raw_angle else 0.0
+                except ValueError:
+                    scan_angle_deg = 0.0
             else:
                 scan_offset_m = (0.0, 0.0)
                 scan_angle_deg = 0.0
 
             markers: list[dict] = []
+            out_of_frame: list[str] = []
             for spec_path in candidates:
                 try:
                     spec = read_spec_file(spec_path)
@@ -104,7 +122,13 @@ class SpecOverlayController:
                         scan_offset_m=scan_offset_m,
                         scan_angle_deg=scan_angle_deg,
                     )
-                    frac_x, frac_y = result if result is not None else (0.5, 0.5)
+                    if result is None:
+                        # A fabricated marker (e.g. at the image centre) would
+                        # claim a tip position the file does not support; skip
+                        # and let the caller report the mismatch instead.
+                        out_of_frame.append(spec_path.stem)
+                        continue
+                    frac_x, frac_y = result
                     markers.append({
                         "frac_x": frac_x,
                         "frac_y": frac_y,
@@ -117,6 +141,8 @@ class SpecOverlayController:
                     })
                 except Exception:
                     continue
+
+            self._out_of_frame = out_of_frame
 
             self._roi_set = _build_spec_roi_set(entry, markers, scan_shape)
             self._markers = markers

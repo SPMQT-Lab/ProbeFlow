@@ -34,6 +34,8 @@ GUI_TEST_MODULES = {
     "test_scale_shear_geometry.py",
     "test_canvas_item_lifetime.py",
     "test_workflow_replay.py",
+    "test_spec_viewer_display.py",
+    "test_canvas_selection_interactions.py",
 }
 
 MIXED_QT_FIXTURE_MODULES = {

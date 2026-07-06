@@ -3,7 +3,6 @@
 import argparse
 import json
 import logging
-import math
 import re
 import sys
 from datetime import datetime
@@ -226,8 +225,11 @@ def construct_hdr(
     bias_str = sci(bias_mv * 1e-3, 3)
 
     scan_dir = "down" if str(dat_hdr.get("ScanYDirec", "1")).strip() == "1" else "up"
-    angle_rad = math.radians(_f(str(dat_hdr.get("Rotation", "0")).replace(",", "."), 0.0))
-    angle_str = sci(angle_rad, 3)
+    # Nanonis SCAN_ANGLE is in degrees; Createc Rotation is already degrees.
+    # (This used to emit radians, which every degree-reading consumer — including
+    # Nanonis itself and the spec-marker overlay — would misread by a factor 57.3.)
+    angle_deg = _f(str(dat_hdr.get("Rotation", "0")).replace(",", "."), 0.0)
+    angle_str = sci(angle_deg, 3)
 
     comment = (dat_hdr.get("Titel", "") or "Empty").strip()
 

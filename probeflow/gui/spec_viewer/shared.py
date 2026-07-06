@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import numpy as np
+
 from PySide6.QtCore import QEvent, QObject
 from PySide6.QtWidgets import QAbstractSpinBox, QPushButton, QWidget
 
@@ -50,6 +52,25 @@ def _shorten_filename(name: str, max_chars: int = 36) -> str:
 
 def _trace_key(trace: DisplayedSpectrum) -> tuple[str, str, str]:
     return (trace.source_file, trace.spectrum_id, trace.y_channel)
+
+
+def _shared_scale_values(displayed_list: list[DisplayedSpectrum]) -> dict[str, np.ndarray]:
+    """Concatenated finite y values per y_unit, for shared display scaling.
+
+    Traces co-plotted on one axis must share a single SI-prefix scale per
+    unit; picking the prefix per trace from its own values silently rescales
+    the traces relative to each other (a 50 pA and a 2 nA spectrum would plot
+    as 50 vs 2).  Feed the returned per-unit sample into the scale chooser so
+    every trace in the group gets the same factor.
+    """
+    groups: dict[str, list[np.ndarray]] = {}
+    for displayed in displayed_list:
+        arr = np.asarray(displayed.y_display, dtype=float)
+        groups.setdefault(displayed.y_unit, []).append(arr[np.isfinite(arr)])
+    return {
+        unit: np.concatenate(vals) if vals else np.array([], dtype=float)
+        for unit, vals in groups.items()
+    }
 
 
 def _displayed_trace_for_measurement(

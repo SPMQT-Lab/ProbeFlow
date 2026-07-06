@@ -74,6 +74,7 @@ from .shared import (
     _focus_in_parameter_inputs,
     _no_wheel_filter,
     _plain_button,
+    _shared_scale_values,
     _shorten_filename,
     _trace_key,
 )
@@ -652,18 +653,29 @@ class SpecViewerDialog(QDialog):
             },
         )
 
-    def _displayed_for_channel(self, ch: str, vertical_offset: float = 0.0):
+    def _displayed_unscaled(self, ch: str):
         if self._spec is None:
             return None
         raw = self._raw_trace_for_channel(ch)
         if raw is None:
             return None
-        displayed = make_displayed_spectrum(
+        return make_displayed_spectrum(
             raw,
             self._display_options(vertical_offset=0.0),
             channel_lookup=self._spec.channels,
         )
-        scale, disp_unit = self._display_scale(displayed.y_unit, displayed.y_display)
+
+    def _finalize_displayed(
+        self,
+        displayed: DisplayedSpectrum,
+        vertical_offset: float,
+        scale_values: np.ndarray | None = None,
+    ) -> DisplayedSpectrum:
+        # scale_values lets channels co-plotted on one axis share a prefix
+        # scale per unit; per-channel auto-scaling would silently rescale
+        # them relative to each other.
+        values = displayed.y_display if scale_values is None else scale_values
+        scale, disp_unit = self._display_scale(displayed.y_unit, values)
         metadata = dict(displayed.metadata)
         metadata.update({
             "display_scale": scale,
@@ -677,6 +689,41 @@ class SpecViewerDialog(QDialog):
             options=replace(displayed.options, vertical_offset=float(vertical_offset)),
             metadata=metadata,
         )
+
+    def _displayed_for_channel(self, ch: str, vertical_offset: float = 0.0):
+        displayed = self._displayed_unscaled(ch)
+        if displayed is None:
+            return None
+        return self._finalize_displayed(displayed, vertical_offset)
+
+    def _shared_axis_rows(self, selected: list[str]) -> list[tuple[int, "DisplayedSpectrum"]]:
+        """Displayed spectra for channels sharing one axis (Overlay/Waterfall).
+
+        Channels with the same post-pipeline unit share one display scale.
+        Returns ``(channel_index, displayed)`` pairs; failed channels are
+        reported on the status bar and skipped, keeping indices stable for
+        colours and waterfall offsets.
+        """
+        plot_mode = self._plot_mode_cb.currentText()
+        base_offset = float(self._offset_spin.value())
+        prelim: list[tuple[int, DisplayedSpectrum]] = []
+        for i, ch in enumerate(selected):
+            try:
+                displayed = self._displayed_unscaled(ch)
+            except Exception as exc:
+                self._status.setText(f"Plot error for {ch}: {exc}")
+                continue
+            if displayed is not None:
+                prelim.append((i, displayed))
+        scale_groups = _shared_scale_values([d for _i, d in prelim])
+        return [
+            (i, self._finalize_displayed(
+                d,
+                i * base_offset if plot_mode == "Waterfall" else base_offset,
+                scale_groups[d.y_unit],
+            ))
+            for i, d in prelim
+        ]
 
     def _display_scale(self, unit: str, values: np.ndarray) -> tuple[float, str]:
         from probeflow.analysis.spec_plot import choose_display_unit, lookup_unit_scale
@@ -692,12 +739,6 @@ class SpecViewerDialog(QDialog):
         if override is not None:
             return override
         return choose_display_unit(unit, values)
-
-    def _display_values_for_channel(self, ch: str) -> tuple[np.ndarray, str]:
-        displayed = self._displayed_for_channel(ch)
-        if displayed is None:
-            return np.array([], dtype=float), ""
-        return displayed.y_display, displayed.y_unit
 
     def _channel_display_label(self, ch: str) -> str:
         try:
@@ -768,15 +809,7 @@ class SpecViewerDialog(QDialog):
             ax = axes[0]
             ax.set_facecolor(self._BG)
             units = []
-            for i, ch in enumerate(selected):
-                offset = i * base_offset if plot_mode == "Waterfall" else base_offset
-                try:
-                    displayed = self._displayed_for_channel(ch, offset)
-                    if displayed is None:
-                        continue
-                except Exception as exc:
-                    self._status.setText(f"Plot error for {ch}: {exc}")
-                    continue
+            for i, displayed in self._shared_axis_rows(selected):
                 self._displayed_traces.append(displayed)
                 self._displayed_trace_axes.append((displayed, ax))
                 y_disp, disp_unit = displayed.y_display, displayed.y_unit
@@ -834,16 +867,19 @@ class SpecViewerDialog(QDialog):
         spec = self._spec
         if spec is None:
             return []
-        selected = [ch for ch, cb in self._checkboxes.items() if cb.isChecked()]
+        selected = [
+            ch for ch, cb in self._checkboxes.items()
+            if cb.isChecked() and ch in spec.channels
+        ]
         plot_mode = self._plot_mode_cb.currentText()
+        if plot_mode in {"Overlay", "Waterfall"}:
+            # Match the plot: shared-axis channels share one unit scale.
+            return [displayed for _i, displayed in self._shared_axis_rows(selected)]
         base_offset = float(self._offset_spin.value())
         rows = []
-        for i, ch in enumerate(selected):
-            if ch not in spec.channels:
-                continue
-            offset = i * base_offset if plot_mode == "Waterfall" else base_offset
+        for ch in selected:
             try:
-                displayed = self._displayed_for_channel(ch, offset)
+                displayed = self._displayed_for_channel(ch, base_offset)
             except Exception as exc:
                 self._status.setText(f"Display option unavailable for {ch}: {exc}")
                 continue
@@ -1056,10 +1092,6 @@ class SpecViewerDialog(QDialog):
             except ValueError:
                 pass
         self._measurement_artists = []
-
-    def _selected_channels_in_display_units(self):
-        for displayed in self._current_displayed_spectra():
-            yield displayed.y_channel, displayed.y_label, displayed.y_display, displayed.y_unit
 
     def _current_csv_text(self) -> str:
         return displayed_spectra_to_csv_text(self._current_displayed_spectra())

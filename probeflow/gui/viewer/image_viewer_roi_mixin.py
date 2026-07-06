@@ -39,6 +39,13 @@ class ImageViewerRoiMixin:
             self._scan_header,
             show=self._spec_show_cb.isChecked(),
         )
+        missing = self._spec_overlay.out_of_frame
+        if missing and hasattr(self, "_status_lbl"):
+            names = ", ".join(missing[:3]) + ("…" if len(missing) > 3 else "")
+            self._status_lbl.setText(
+                f"{len(missing)} mapped spectrum position(s) outside this scan frame "
+                f"(no marker shown): {names}"
+            )
 
     def _on_spec_show_toggled(self, checked: bool):
         self._spec_overlay.apply_visibility(checked)
