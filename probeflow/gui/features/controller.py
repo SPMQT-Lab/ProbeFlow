@@ -27,7 +27,7 @@ _os.environ.setdefault("QT_API", "pyside6")
 
 from PySide6.QtCore import QObject, QThreadPool, Signal
 
-from probeflow.gui.features import FeaturesPanel, FeaturesSidebar, _FeaturesWorker
+from probeflow.gui.features.panel import FeaturesPanel, FeaturesSidebar, _FeaturesWorker
 
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QWidget
