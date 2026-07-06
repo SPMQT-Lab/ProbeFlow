@@ -40,10 +40,18 @@ from probeflow.gui.roi_items import (
 
 # ── Preview-item styling ──────────────────────────────────────────────────────
 
-_PEN_PREVIEW   = QPen(QColor("#fab387"), 1.5, Qt.DashLine)
+def _cosmetic_pen(color: str, width: float = 1.0,
+                  style: Qt.PenStyle = Qt.SolidLine) -> QPen:
+    """A pen with constant on-screen width — outlines must not fatten with zoom."""
+    pen = QPen(QColor(color), width, style)
+    pen.setCosmetic(True)
+    return pen
+
+
+_PEN_PREVIEW   = _cosmetic_pen("#fab387", 1.0, Qt.DashLine)
 # Persistent quick-selection marquee — distinct from the transient draw preview
 # and deliberately label-free (the absence of a name is the ROI-vs-selection cue).
-_PEN_SELECTION = QPen(QColor("#FFD700"), 1.5, Qt.DashLine)
+_PEN_SELECTION = _cosmetic_pen("#FFD700", 1.0, Qt.DashLine)
 _BRUSH_PREVIEW = QBrush(QColor(250, 179, 135, 40))
 _PEN_VERTEX    = QPen(QColor("#fab387"), 1.0)
 _BRUSH_VERTEX  = QBrush(QColor("#fab387"))
@@ -58,6 +66,7 @@ _SCENE_ITEM_ATTRS: tuple[str, ...] = (
     "_text_overlay_item",
     "_mask_overlay_item",
     "_selection_item",
+    "_selection_handle_items",
     "_preview_item",
     "_roi_group",
     "_marker_items",
@@ -228,6 +237,11 @@ class ImageCanvas(QGraphicsView):
         # rendered as an unlabeled dashed marquee and never added to the ROISet.
         self._selection: dict | None = None
         self._selection_item: QGraphicsItem | None = None
+        self._selection_handle_items: list[QGraphicsItem] = []
+        # Quick-selection drag state (resize via handles / move via outline)
+        self._sel_handle_name: Optional[str] = None
+        self._sel_base_roi = None  # ROI-shaped snapshot of the selection at press
+        self._sel_move_start: Optional[QPointF] = None
 
         self._image_roi_set = None
         self._roi_items: dict[str, QGraphicsItemGroup] = {}
@@ -369,7 +383,9 @@ class ImageCanvas(QGraphicsView):
         if Nx <= 0 or Ny <= 0 or avail_w <= 0 or avail_h <= 0:
             return
         zoom = min(avail_w / Nx, avail_h / Ny)
-        self._zoom = max(0.25, min(8.0, zoom))
+        # Fit may shrink well below the manual-zoom floor (0.25) — clamping to
+        # it left images larger than 4x the viewport unable to fit at all.
+        self._zoom = max(0.01, min(8.0, zoom))
 
     def fit_to_view(self) -> None:
         self._view_scale_mode = "fit"
@@ -928,6 +944,9 @@ class ImageCanvas(QGraphicsView):
         had = self._selection is not None
         self._remove_selection_item()
         self._selection = None
+        self._sel_handle_name = None
+        self._sel_base_roi = None
+        self._sel_move_start = None
         if had and emit:
             self.selection_cleared.emit()
 
@@ -939,14 +958,21 @@ class ImageCanvas(QGraphicsView):
                 "geometry": dict(self._selection["geometry"])}
 
     def _remove_selection_item(self) -> None:
+        scene = self.scene()
         if self._selection_item is not None:
-            scene = self.scene()
             if scene is not None:
                 try:
                     scene.removeItem(self._selection_item)
                 except (RuntimeError, ValueError):
                     pass
             self._selection_item = None
+        for handle in self._selection_handle_items:
+            if scene is not None:
+                try:
+                    scene.removeItem(handle)
+                except (RuntimeError, ValueError):
+                    pass
+        self._selection_handle_items.clear()
 
     def _rebuild_selection_item(self) -> None:
         """(Re)create the dashed marquee item from ``self._selection`` data.
@@ -984,6 +1010,93 @@ class ImageCanvas(QGraphicsView):
         item.setZValue(60)
         scene.addItem(item)
         self._selection_item = item
+        # Resize handles (rectangle/ellipse — same handle geometry the active
+        # ROI uses; polygon/freehand selections are move-only, matching ROIs).
+        sel_roi = self._selection_as_roi()
+        if sel_roi is not None:
+            from probeflow.core.roi import resize_handles
+            for h in resize_handles(sel_roi):
+                handle = QGraphicsEllipseItem(-5, -5, 10, 10)
+                handle.setPos(QPointF(float(h.x), float(h.y)))
+                handle.setPen(QPen(QColor("black"), 1.0))
+                handle.setBrush(QBrush(QColor("#FFD700")))
+                handle.setFlag(QGraphicsItem.ItemIgnoresTransformations, True)
+                handle.setZValue(61)
+                handle.setToolTip("Drag to resize the selection")
+                scene.addItem(handle)
+                self._selection_handle_items.append(handle)
+
+    # ── Quick-selection interaction helpers ────────────────────────────────────
+
+    def _selection_as_roi(self):
+        """ROI-shaped view of the quick selection for the geometry helpers."""
+        if self._selection is None:
+            return None
+        from probeflow.core.roi import ROI
+        try:
+            return ROI.new(self._selection["kind"], dict(self._selection["geometry"]))
+        except Exception:
+            return None
+
+    def _selection_handle_at(self, view_pos: QPoint) -> "str | None":
+        """Name of the nearest selection resize handle within 12 px, or None."""
+        sel_roi = self._selection_as_roi()
+        if sel_roi is None:
+            return None
+        from probeflow.core.roi import resize_handles
+        best_name = None
+        best_d2 = None
+        for h in resize_handles(sel_roi):
+            vp = self.mapFromScene(QPointF(float(h.x), float(h.y)))
+            dx, dy = vp.x() - view_pos.x(), vp.y() - view_pos.y()
+            if abs(dx) <= 12 and abs(dy) <= 12:
+                d2 = dx * dx + dy * dy
+                if best_d2 is None or d2 < best_d2:
+                    best_d2 = d2
+                    best_name = h.name
+        return best_name
+
+    def _selection_outline_path(self) -> "QPainterPath | None":
+        if self._selection is None:
+            return None
+        kind = self._selection["kind"]
+        g = self._selection["geometry"]
+        path = QPainterPath()
+        try:
+            if kind == "rectangle":
+                path.addRect(QRectF(float(g["x"]), float(g["y"]),
+                                    float(g["width"]), float(g["height"])))
+            elif kind == "ellipse":
+                cx, cy = float(g["cx"]), float(g["cy"])
+                rx, ry = float(g["rx"]), float(g["ry"])
+                path.addEllipse(QRectF(cx - rx, cy - ry, 2 * rx, 2 * ry))
+            elif kind in ("polygon", "freehand"):
+                poly = QPolygonF([QPointF(float(v[0]), float(v[1]))
+                                  for v in g.get("vertices", [])])
+                if poly.isEmpty():
+                    return None
+                path.addPolygon(poly)
+                path.closeSubpath()
+            else:
+                return None
+        except (KeyError, TypeError, ValueError):
+            return None
+        return path
+
+    def _selection_outline_hit(self, view_pos: QPoint) -> bool:
+        """True when *view_pos* lies on the marquee outline (±6 px band).
+
+        Only the outline moves the selection — a press in the interior must
+        keep panning, or a large selection would make the canvas un-pannable.
+        """
+        path = self._selection_outline_path()
+        if path is None:
+            return False
+        from PySide6.QtGui import QPainterPathStroker
+        scene_pos = self.mapToScene(view_pos)
+        stroker = QPainterPathStroker()
+        stroker.setWidth(max(12.0 / max(self._zoom, 1e-6), 1e-3))
+        return stroker.createStroke(path).contains(scene_pos)
 
     def _finish_polygon(self) -> None:
         pts = self._draw_pts[:]
@@ -1028,6 +1141,13 @@ class ImageCanvas(QGraphicsView):
             update_roi_item_style(self._roi_items[roi_id], active=False, hover=True)
 
     def _hover_message_at(self, view_pos: QPoint) -> tuple[str, str]:
+        if self._selection is not None and (
+            self._selection_handle_at(view_pos) is not None
+            or self._selection_outline_hit(view_pos)
+        ):
+            return ("selection",
+                    "Quick selection: drag a handle to resize, drag the outline "
+                    "to move, Esc to clear.")
         roi_id = self._roi_at_pos(view_pos)
         if roi_id and self._image_roi_set:
             roi = self._image_roi_set.get(roi_id)
@@ -1051,6 +1171,8 @@ class ImageCanvas(QGraphicsView):
         self.object_hovered.emit(*message)
 
     def _active_handle_hovered(self, view_pos: QPoint) -> bool:
+        if not self._rois_visible:
+            return False
         active_id = self._image_roi_set.active_roi_id if self._image_roi_set else None
         if not active_id or not self._image_roi_set:
             return False
@@ -1069,8 +1191,18 @@ class ImageCanvas(QGraphicsView):
             self.setCursor(self._cursor_for_tool(self._tool))
             return
 
-        if self._handle_roi_id is not None or self._move_roi_id is not None:
+        if (self._handle_roi_id is not None or self._move_roi_id is not None
+                or self._sel_handle_name is not None
+                or self._sel_move_start is not None):
             return
+
+        if self._selection is not None:
+            if self._selection_handle_at(view_pos) is not None:
+                self.setCursor(Qt.CrossCursor)
+                return
+            if self._selection_outline_hit(view_pos):
+                self.setCursor(Qt.SizeAllCursor)
+                return
 
         if self._active_handle_hovered(view_pos):
             self.setCursor(Qt.CrossCursor)
@@ -1109,8 +1241,10 @@ class ImageCanvas(QGraphicsView):
             self.pixel_clicked.emit(fx, fy)
             return
 
-        # ── spec marker click ─────────────────────────────────────────────────
-        if self._show_markers and self._marker_items:
+        # ── spec marker click (pan mode only — a drawing tool owns the click,
+        # otherwise starting an ROI near a marker opens the spectrum dialog
+        # instead of drawing) ─────────────────────────────────────────────────
+        if self._tool == "pan" and self._show_markers and self._marker_items:
             for item in self._marker_items:
                 sp = self.mapFromScene(item.pos())
                 if (abs(sp.x() - event.pos().x()) <= 12
@@ -1123,6 +1257,23 @@ class ImageCanvas(QGraphicsView):
 
         # ── pan tool ──────────────────────────────────────────────────────────
         if tool == "pan":
+            # Quick-selection interactions first: the marquee is the topmost
+            # overlay, so its handles/outline win over ROIs beneath it.
+            if self._selection is not None:
+                sel_handle = self._selection_handle_at(event.pos())
+                if sel_handle is not None:
+                    self._sel_handle_name = sel_handle
+                    self._sel_base_roi = self._selection_as_roi()
+                    self.setCursor(Qt.CrossCursor)
+                    event.accept()
+                    return
+                if self._selection_outline_hit(event.pos()):
+                    self._sel_move_start = self.mapToScene(event.pos())
+                    self._sel_base_roi = self._selection_as_roi()
+                    self.setCursor(Qt.SizeAllCursor)
+                    event.accept()
+                    return
+
             # Selection target follows the *visible* hover highlight so a click
             # always acts on the ROI the user sees lit up. Fall back to a fresh
             # hit test when nothing is currently hovered (e.g. click without a
@@ -1139,7 +1290,10 @@ class ImageCanvas(QGraphicsView):
             # resize_handles(); 12px view-space (Chebyshev) test.
             from probeflow.core.roi import resize_handles
             handle_candidate_id = active_id if (roi_id is None or roi_id == active_id) else None
-            if self._image_roi_set and handle_candidate_id:
+            # Handles are pure data-model geometry (not scene items), so this
+            # hit test must honour overlay visibility itself — otherwise a pan
+            # click near an *invisible* handle silently starts a resize.
+            if self._image_roi_set and handle_candidate_id and self._rois_visible:
                 cand_roi = self._image_roi_set.get(handle_candidate_id)
                 if cand_roi is not None:
                     vpos = event.pos()
@@ -1242,6 +1396,35 @@ class ImageCanvas(QGraphicsView):
             self._scroll_by(-delta.x(), -delta.y())
             event.accept()
             # fall through to update pixel readout below (don't return early)
+
+        # ── quick-selection resize-handle drag ────────────────────────────────
+        elif self._sel_handle_name is not None and event.buttons() & Qt.LeftButton:
+            from probeflow.core.roi import resize_roi
+            scene_pos = self.mapToScene(event.pos())
+            keep_aspect = bool(event.modifiers() & Qt.ShiftModifier)
+            new_roi = resize_roi(
+                self._sel_base_roi, self._sel_handle_name,
+                scene_pos.x(), scene_pos.y(),
+                keep_aspect=keep_aspect,
+            )
+            self._selection = {"kind": new_roi.kind, "geometry": dict(new_roi.geometry)}
+            self._rebuild_selection_item()
+            event.accept()
+            return
+
+        # ── quick-selection outline drag-move ─────────────────────────────────
+        elif self._sel_move_start is not None and event.buttons() & Qt.LeftButton:
+            from probeflow.core.roi import translate
+            scene_pos = self.mapToScene(event.pos())
+            new_roi = translate(
+                self._sel_base_roi,
+                scene_pos.x() - self._sel_move_start.x(),
+                scene_pos.y() - self._sel_move_start.y(),
+            )
+            self._selection = {"kind": new_roi.kind, "geometry": dict(new_roi.geometry)}
+            self._rebuild_selection_item()
+            event.accept()
+            return
 
         # ── ROI resize-handle drag ────────────────────────────────────────────
         elif self._handle_roi_id is not None and event.buttons() & Qt.LeftButton:
@@ -1360,6 +1543,34 @@ class ImageCanvas(QGraphicsView):
 
         if event.button() != Qt.LeftButton:
             super().mouseReleaseEvent(event)
+            return
+
+        # ── finish quick-selection resize / move ──────────────────────────────
+        if self._sel_handle_name is not None or self._sel_move_start is not None:
+            from probeflow.core.roi import resize_roi, translate
+            scene_pos = self.mapToScene(event.pos())
+            if self._sel_handle_name is not None:
+                keep_aspect = bool(event.modifiers() & Qt.ShiftModifier)
+                new_roi = resize_roi(
+                    self._sel_base_roi, self._sel_handle_name,
+                    scene_pos.x(), scene_pos.y(),
+                    keep_aspect=keep_aspect,
+                )
+            else:
+                new_roi = translate(
+                    self._sel_base_roi,
+                    scene_pos.x() - self._sel_move_start.x(),
+                    scene_pos.y() - self._sel_move_start.y(),
+                )
+            self._sel_handle_name = None
+            self._sel_base_roi = None
+            self._sel_move_start = None
+            self.setCursor(Qt.ArrowCursor)
+            self.set_selection(new_roi.kind, dict(new_roi.geometry))
+            # Re-emit so the viewer sees the edited geometry through the same
+            # pipeline as a freshly drawn selection.
+            self.selection_drawn.emit(new_roi.kind, dict(new_roi.geometry))
+            event.accept()
             return
 
         # ── finish resize-handle drag ─────────────────────────────────────────

@@ -27,6 +27,11 @@ if TYPE_CHECKING:
 _PEN_INACTIVE   = QPen(QColor("#89b4fa"), 1.0)
 _PEN_ACTIVE     = QPen(QColor("#22D3EE"), 1.5, Qt.DashLine)
 _PEN_HOVER      = QPen(QColor("#f9e2af"), 1.5)
+# Constant on-screen width: without this, ROI outlines fatten with zoom and
+# obscure the image beneath them (same treatment as the lattice-grid overlay).
+for _pen in (_PEN_INACTIVE, _PEN_ACTIVE, _PEN_HOVER):
+    _pen.setCosmetic(True)
+del _pen
 _BRUSH_INACTIVE = QBrush(QColor(137, 180, 250, 30))
 _BRUSH_ACTIVE   = QBrush(QColor(34, 211, 238, 50))
 _BRUSH_HOVER    = QBrush(QColor(249, 226, 175, 45))

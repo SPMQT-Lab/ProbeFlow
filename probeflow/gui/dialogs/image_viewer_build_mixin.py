@@ -791,7 +791,9 @@ class ImageViewerBuildMixin:
         self._line_profile_panel.export_csv_clicked.connect(self._on_export_line_profile_csv)
 
         roi_hint_lbl = QLabel(
-            "Choose a drawing tool above to create an ROI. Click an ROI to select "
+            "Drawing tools make a quick selection (gold dashes) — drag its "
+            "handles to resize, drag its outline to move, Esc to clear, or "
+            "promote it to a named ROI via right-click. Click an ROI to select "
             "it, then drag the active ROI (or its handles) to edit. For a split "
             "scan, set the View tab's “Contrast scope” to “Active ROI” to give "
             "each region its own brightness/contrast, and use “Hide ROI "
