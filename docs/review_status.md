@@ -1,6 +1,6 @@
 # ProbeFlow Review Status
 
-**Updated**: 2026-07-06
+**Updated**: 2026-07-06 (spectroscopy display wiring pass added)
 
 This is the single, consolidated record of ProbeFlow's code-review history. The
 detailed per-angle review files (`docs/reviews/2026-05-27-*.md`) and the earlier
@@ -283,8 +283,8 @@ review and was not re-reviewed.
 - `processed_export.py` / provenance replay **without** canonical sidecars, and
   a CLI replay smoke test of new-format sidecars.
 - `image_canvas.py` selection internals (~1500 lines, only ever grepped).
-- Spectroscopy display wiring (`gui/spec_viewer/`), `io/readers/createc_vert.py`
-  + `nanonis_spec.py` decoders, `analysis/spec_plot.py`.
+- ~~Spectroscopy display wiring (`gui/spec_viewer/`), `analysis/spec_plot.py`~~ —
+  done 2026-07-06, see the dedicated section below.
 - Partial `.sxm`/`.dat` thumbnail decode in browse (open since the browse
   loading review).
 - Feature-bank GUI flows under Qt (add-to-bank dialog, `refresh_bank_status`)
@@ -362,6 +362,156 @@ LOC (dialog + tutorial flow); the viewer's `_build()` (~980-line method) and
 `_build_viewer_menu_bar` (~475 lines) would benefit from a
 method-per-tab/menu pass; `_build_fft_column` still builds three tabs inline
 while the other three have `_build_*_tab()` methods.
+
+## Spectroscopy display wiring review, 2026-07-06 (fixes applied, uncommitted)
+
+The twice-carried-forward "spectroscopy display wiring" target from the
+adversarial campaign: `gui/spec_viewer/` (single + overlay dialogs, shared
+helpers), `analysis/spec_plot.py`, `gui/viewer/spec_overlay.py` (marker
+controller), `gui/dialogs/spec_mapping.py`. The decoders (`createc_vert.py`,
+`nanonis_spec.py`) were already covered by the parser adversarial pass (#32)
+and `io/spectroscopy.py` by the physics pass (#27); they were not re-reviewed.
+
+### Fixed in this pass (all with regression tests)
+
+1. **Per-trace display-unit scaling on shared axes (the big one)** — both
+   spectroscopy dialogs chose the SI display prefix per trace from that
+   trace's *own* values (`choose_display_unit`), then plotted the rescaled
+   traces on one axis. A 50 pA and a 2 nA spectrum overlaid as "50 vs 2" —
+   relative magnitudes silently distorted up to 1000×, with only the y-label
+   quietly degrading to "value". Fixed in `SpecOverlayDialog` (same channel
+   across files) and `SpecViewerDialog` Overlay/Waterfall modes (channels
+   sharing a base unit): traces co-plotted on one axis now share one scale
+   per unit group (`_shared_scale_values` in `spec_viewer/shared.py`), and
+   the CSV/JSON/TXT export paths reuse the same rows so display == export.
+   Separate-mode per-axis auto units are unchanged (pinned by test).
+   Tests: `tests/test_spec_viewer_display.py` (GUI module).
+2. **SCAN_ANGLE unit inconsistency (three-way)** — Nanonis stores SCAN_ANGLE
+   in degrees. The Createc→SXM converter wrote **radians**
+   (`createc_dat_to_sxm.py`), `spec_plot._parse_sxm_angle_rad` read the value
+   as radians (wrong for real Nanonis files), while the marker controller and
+   mapping dialog read degrees (wrong for ProbeFlow-converted files). All
+   sides now agree on degrees in the header; `_parse_sxm_angle_rad` converts
+   deg→rad on read. Angled-scan spec markers were off by 180/π before.
+3. **Spec markers fabricated at image centre** — `SpecOverlayController.load`
+   placed a confident, ordinary-looking marker at (0.5, 0.5) whenever the
+   spectrum's recorded position fell outside the scan frame. Out-of-frame
+   specs are now skipped, collected in `controller.out_of_frame`, and
+   reported on the viewer status bar ("N mapped spectrum position(s) outside
+   this scan frame").
+4. **Createc `.dat` scans never applied their frame offset** — the marker
+   controller and the mapping dialog's "Suggest all" assumed origin-centred
+   frames for non-sxm scans, but Createc `.VERT` positions and `.dat`
+   OffsetX/OffsetY share one DAC coordinate system. Both now derive the frame
+   centre via `_position_from_createc_header` (and parse the `Rotation`
+   header). Before, every Createc marker was mislocated or (with the old
+   centre fallback) pinned to the middle of the image.
+   Tests: `tests/test_spec_marker_positions.py` (Qt-free).
+
+Also removed two dead helpers in `spec_viewer/single.py`
+(`_display_values_for_channel`, `_selected_channels_in_display_units`).
+
+### Verified sound (no change)
+
+- `make_displayed_spectrum` pipeline order + derivative unit propagation
+  (matches the #27 conventions); vertical offset applied last in displayed
+  units, consistently in plot and export.
+- Measurement machinery reuse between the two dialogs (unbound-method
+  delegation is odd but correct); measurement state reset on every redraw;
+  second measurement point correctly pinned to the first point's trace.
+- `spec_position_to_pixel` frame math and y-inversion (readers normalise
+  planes to top-left origin); mapping dialogs' one-to-one map semantics.
+- Overlay x-compatibility gate (label/unit/length/allclose) before mixing
+  files on one axis.
+
+### Noted, unchanged
+
+- Checkbox labels in the single viewer show per-channel auto units even in
+  Overlay mode where the axis shares a scale (cosmetic).
+- `SpecMappingDialog._on_suggest` loads full scan data per image just for
+  header/shape (slow on big folders; acknowledged in a comment there).
+- Createc `Rotation` sign convention vs the sxm SCAN_ANGLE rotation sense is
+  applied symmetrically but not verified against an angled fixture — no
+  angled scans in `test_data`.
+
+## Provenance replay + canvas selection review, 2026-07-06 (same session, uncommitted)
+
+Second half of the session: the remaining carried-forward targets —
+``processed_export.py`` / replay-without-canonical-sidecars, and the
+``image_canvas.py`` selection internals (full read; previously "only ever
+grepped").
+
+### Fixed (with regression tests)
+
+1. **New-format provenance sidecars were not replayable (the one real find
+   in the export chain)** — the ``.probeflow.json`` ExportRecord is the
+   declared "reliable current record", but its ``processing_history.steps``
+   use ``operation_id``/``parameters`` keys and
+   ``processing_state_from_history`` silently returned an **empty** state
+   for them — a replay would reproduce the raw image while claiming to be
+   processed. The helper now accepts both formats and skips provenance
+   bookkeeping steps (``file_load``, ``export_*``, ``dat_to_sxm``).
+   ``tests/test_provenance_replay.py`` pins the reconstruction and a full
+   end-to-end round trip: export with an ROI-scoped step → recover the state
+   AND the ROI set from the exported ``.probeflow.json`` alone (no
+   ``.rois.json``, legacy ``.provenance.json`` deleted) → replay equals the
+   exported array bit-for-bit.
+2. **Hidden-overlay handle hijack** — resize handles are data-model
+   geometry, not scene items, so with ``set_rois_visible(False)`` a pan
+   click near an *invisible* active-ROI handle still started a resize and
+   committed a geometry change (plus sidecar write) the user could not see.
+   Handle hit test and hover cursor now honour overlay visibility.
+3. **Marker clicks stole drawing clicks** — the spec-marker click intercept
+   ran before the drawing-tool dispatch, so starting a rectangle near a
+   visible marker opened the spectrum dialog instead. Markers now only
+   intercept clicks in pan mode.
+4. **Fit-to-view could not fit large images** — ``_compute_fit_zoom``
+   clamped to the manual-zoom floor (0.25), so images more than 4× the
+   viewport never fit. Fit mode now clamps at 0.01.
+   Tests: ``tests/test_canvas_selection_interactions.py`` (all three
+   verified discriminating via stash).
+
+### Verified sound (no change)
+
+- ``processed_export.py`` itself: SXM multi-plane block, PNG-vs-sidecar
+  routing, collision checks, provenance threading.
+- ROI recovery from provenance exports (`load_roi_set_sidecar(sidecar=…)`
+  with an ExportRecord payload) — worked as designed, now pinned end-to-end.
+- Canvas selection state machine: tool transitions, Escape ordering
+  (cancel drawing → clear selection), drag-move reset-to-original +
+  model-rebuild pattern, polygon double-click duplicate-vertex pop,
+  quick-selection marquee lifecycle, wrapper-lifetime destroyed hook
+  (already pinned by test_canvas_item_lifetime.py).
+
+### User-reported follow-up (same day): quick-selection editing restored
+
+Peter reported the yellow quick-selection marquee could no longer be resized
+("I used to be able to grab the edges or sides") and that its outline was
+too thick. Root causes: when the area tools switched from creating ROIs to
+ephemeral selections (2f4d0d3), the marquee never received the resize
+handles managed ROIs have; and the marquee/ROI pens were non-cosmetic
+scene-unit pens, so outlines fattened with zoom (only the lattice-grid
+overlay had received the cosmetic-pen treatment). Fixed in image_canvas.py:
+
+- Rectangle/ellipse selections render gold resize handles (same
+  ``resize_handles``/``resize_roi`` geometry as active ROIs, Shift keeps
+  aspect); dragging the outline (±6 px band, interior still pans) moves any
+  selection kind via ``core.roi.translate``; commits re-emit
+  ``selection_drawn`` so the viewer sees edited geometry through the normal
+  pipeline. Hover cursors + status hint added.
+- Selection/preview pens and the ROI item pens are now cosmetic (constant
+  ~1 px on screen at any zoom).
+  Tests: TestQuickSelectionEditing + TestOutlinePensStayThin in
+  ``tests/test_canvas_selection_interactions.py``.
+
+### Noted, unchanged
+
+- No CLI command replays a ``.probeflow.json`` end-to-end (the library path
+  is now tested; a ``probeflow replay`` command would be a feature, not a
+  fix).
+- ``_movable_overlay_at`` is O(n²) in scene items (fine at current scales).
+- Delete/copy keyboard shortcuts still act on the active ROI while overlays
+  are hidden (explicit user action; left as-is).
 
 ## Deferred (not in code-review scope)
 
