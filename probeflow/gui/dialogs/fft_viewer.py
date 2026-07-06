@@ -160,7 +160,7 @@ class FFTViewerDialog(
         self._fft_cmap = "gray"
         self._cmap_options = ["gray", "gray_r", "inferno", "hot", "viridis", "plasma", "turbo"]
         self._bragg_artists: list = []
-        # Mains-pickup diagnostic/removal (⚡ Mains tab).
+        # Mains-pickup diagnostic/removal (Mains tab).
         self._scan_speed_m_per_s = scan_speed_m_per_s
         self._mains_artists: list = []
         self._mains_preview_active = False
@@ -566,8 +566,10 @@ class FFTViewerDialog(
         self._grid_tab_lay.addWidget(self._grid_placeholder_lbl)
         grid_outer_lay.addWidget(grid_panel_container)
 
-        # Known structure section (moved here from Correction tab)
-        ref_grp = QGroupBox("Known structure")
+        # Known structure section (moved here from Correction tab).  The
+        # "Grid orders ±" spinner also lives here: it sizes the drawn overlay
+        # grid, hence the "& grid overlay" in the group title.
+        ref_grp = QGroupBox("Known structure & grid overlay")
         ref_grp.setFont(ui_font(9))
         ref_grp.setMinimumHeight(120)
         ref_grid = QGridLayout(ref_grp)
@@ -807,7 +809,7 @@ class FFTViewerDialog(
         # Append the Mains tab last so existing tab indices (e.g. _grid_tab_index)
         # are unaffected.
         self._mains_tab_index = self._tab_widget.addTab(
-            self._build_mains_tab(), "⚡ Mains")
+            self._build_mains_tab(), "Mains")
         self._reconstruct_tab_index = self._tab_widget.addTab(
             self._build_reconstruct_tab(), "Inverse FFT")
         self._symmetrize_tab_index = self._tab_widget.addTab(

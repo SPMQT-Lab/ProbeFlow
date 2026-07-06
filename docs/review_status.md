@@ -1,6 +1,6 @@
 # ProbeFlow Review Status
 
-**Updated**: 2026-07-03
+**Updated**: 2026-07-06
 
 This is the single, consolidated record of ProbeFlow's code-review history. The
 detailed per-angle review files (`docs/reviews/2026-05-27-*.md`) and the earlier
@@ -296,6 +296,62 @@ alongside `QT_QPA_PLATFORM=offscreen` in sandboxed shells, or `qapp` creation
 aborts (SIGABRT) at `test_feature_finder.py`; `test_fft_viewer_utils.py` and
 `test_lattice_grid.py` still segfault under offscreen Qt on anaconda py3.13
 (environmental, pre-existing).
+
+## GUI clarity/layout review, 2026-07-06 (fixes applied, uncommitted)
+
+A structural review of the GUI code and layouts (clarity + logical
+organisation, not bug-hunting). All four finding groups were fixed in the
+same session; full suite green (2716 passed / 3 skipped, with adstat + cv2
+installed).
+
+1. **Feature Counting misroute (real bug)** — the Browse card context action
+   "Send to Feature Counting" loaded the scan into a hidden duplicate
+   Features workspace wired into the main window's content/sidebar stacks,
+   so the floating `FeatureCountingWindow` opened empty. The action now loads
+   through the floating window's own off-thread path (saved viewer processing
+   applied), and the dead duplicate workspace (`_features_panel`,
+   `_features_sidebar`, `_features_ctrl`, its pools and handlers) was removed;
+   content/sidebar stacks renumbered to 0 browse / 1 convert / 2 tv / 3 dev /
+   4 survey. Regression test:
+   `test_gui_features.py::test_card_context_features_loads_floating_window`.
+   The `test_gui_features.py` workspace tests now exercise
+   `FeatureCountingWindow` (the real workspace) instead of `ProbeFlowWindow`'s
+   dead copy.
+2. **Main-window menu regroup + navbar removal** — all workspace pages live in
+   one **Workspace** menu (Browse Ctrl+1, Convert Ctrl+2, TV denoise Ctrl+4,
+   Survey, Developer tools Ctrl+5); Feature Counting is a plain action under
+   **Tools** (Ctrl+3) since it opens a floating window, not a page. "Align
+   rows" moved from the one-item top-level "Processing" menu to View →
+   "Thumbnail row alignment" (it is a thumbnail display setting); the
+   redundant Convert menu and the permanently-disabled placeholders (Open
+   recent, Export image..., Preferences...) were dropped. The vestigial
+   `Navbar` (logo strip with never-emitted signals and styling for buttons
+   that no longer existed) was deleted outright — `gui/navbar.py`, its compat
+   re-exports, and the `NAVBAR_*`/`#navBtn` styling. Docs screenshots
+   regenerated.
+3. **Large-file splits (continuing the established convention)** —
+   `gui/features/__init__.py` (2,520 LOC of implementation in a package
+   `__init__`) became `features/panel.py` with a thin re-exporting
+   `__init__`; `dialogs/particle_statistics.py` (5,845 LOC) was split
+   verbatim into `particle_statistics_content.py` (labels, statistic
+   metadata/guides, tutorial lessons — pure data, no Qt),
+   `particle_field_view.py` (point-field renderer + drawing helpers), and
+   `particle_statistics_workers.py` (pooled workers), leaving the dialog at
+   ~4,080 LOC with backward-compatible re-imports of the moved private names.
+4. **Tooltip system unification + label fixes** — `_tooltips.tip()` no longer
+   hard-wraps at 50 columns (the app-wide rich-text wrapper in
+   `gui/tooltips.py` owns wrapping; the double system gave those tooltips a
+   ragged narrower column); the three tests that pinned the ≤52-column
+   pre-wrap now assert tooltips exist. FFT viewer: "⚡ Mains" tab renamed
+   "Mains" (only emoji tab label); Grid tab group retitled "Known structure
+   & grid overlay" since the grid-extent spinner lives in it. A "where the
+   lattice code lives" module map was added to the `gui/__init__` docstring.
+
+Known-good follow-ups not taken: `particle_statistics.py` is still ~4,080
+LOC (dialog + tutorial flow); the viewer's `_build()` (~980-line method) and
+`_build_viewer_menu_bar` (~475 lines) would benefit from a
+method-per-tab/menu pass; `_build_fft_column` still builds three tabs inline
+while the other three have `_build_*_tab()` methods.
 
 ## Deferred (not in code-review scope)
 

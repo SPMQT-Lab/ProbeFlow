@@ -203,7 +203,7 @@ def test_tab_layout_and_content(qapp):
         grid_group_titles = {grp.title() for grp in grid_tab.findChildren(QGroupBox)}
         assert "Draw Grid" in grid_btn_texts
         assert "Clear Grid" in grid_btn_texts
-        assert "Known structure" in grid_group_titles
+        assert "Known structure & grid overlay" in grid_group_titles
         assert "Compare with known structure" in grid_group_titles
 
         # Correction tab: correction label + preview/apply buttons. The piezo

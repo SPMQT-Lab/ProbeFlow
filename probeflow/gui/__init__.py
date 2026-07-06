@@ -20,6 +20,22 @@ remain stable while widgets and dialogs are transplanted into ``browse/``,
 Keep GUI code Qt-facing only: do not add provenance dataclasses, numerical
 kernels, measurement algorithms, readers, or writers here.
 
+Where the "lattice" code lives
+------------------------------
+Several modules share the word "lattice"; they sit at different layers:
+
+- ``analysis/lattice.py`` — backend lattice *extraction* from images (no Qt).
+- ``gui/lattice_grid/`` — the interactive lattice-grid overlay tool
+  (real-space + FFT panels, draggable graphics item, controller).
+  ``gui/lattice_grid_tool.py`` is its compatibility re-export shim and
+  ``gui/lattice_export.py`` holds its export helpers.
+- ``gui/lattice_correction_ui.py`` — shared widgets for lattice-*correction*
+  workflows (used by the viewer and the FFT viewer).
+- ``gui/dialogs/fft_viewer_lattice_mixin.py`` — the FFT viewer's Grid /
+  Correction tab logic (consumes the two above).
+- ``gui/dialogs/feature_lattice_dialog.py`` — compares detected feature
+  positions against an ideal lattice.
+
 Dialog / dock keep-alive convention
 -----------------------------------
 - Non-modal top-level viewers spawned from ``ProbeFlowWindow`` are tracked in

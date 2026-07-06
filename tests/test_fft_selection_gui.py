@@ -246,12 +246,13 @@ class TestReconstructTab:
         dlg._on_reconstruct_export("result")
         assert out.exists() and out.stat().st_size > 0
 
-    def test_tooltips_wrapped(self, qapp):
+    def test_controls_have_tooltips(self, qapp):
+        # Wrapping is owned by the app-wide tooltip event filter; assert the
+        # controls explain themselves.
         dlg, _ = _dialog(qapp)
         for w in (dlg._recon_mode_combo, dlg._recon_conj_cb, dlg._recon_soft_spin,
                   dlg._recon_preview_btn, dlg._recon_apply_btn):
-            tt = w.toolTip()
-            assert tt and max(len(line) for line in tt.split("\n")) <= 52
+            assert w.toolTip()
 
     def test_fields_are_content_width_not_stretched(self, qapp):
         """Spin boxes / combos must not stretch across the row (arrows would be

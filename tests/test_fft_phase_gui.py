@@ -148,8 +148,9 @@ class TestPhaseView:
         assert captured.get("op") == "inverse_fft_filter"
         dlg.deleteLater()
 
-    def test_view_combo_tooltip_wrapped(self, qapp):
+    def test_view_combo_has_tooltip(self, qapp):
+        # Wrapping is owned by the app-wide tooltip event filter; assert the
+        # control explains itself.
         dlg = _dialog(qapp)
-        tt = dlg._fft_view_combo.toolTip()
-        assert tt and max(len(line) for line in tt.split("\n")) <= 52
+        assert dlg._fft_view_combo.toolTip()
         dlg.deleteLater()
