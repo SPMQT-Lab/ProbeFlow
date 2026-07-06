@@ -347,6 +347,16 @@ installed).
    & grid overlay" since the grid-extent spinner lives in it. A "where the
    lattice code lives" module map was added to the `gui/__init__` docstring.
 
+5. **Truncation follow-ups from user screenshots** — the viewer sidebar's
+   hardcoded minimum width (340/360 px) elided every tab label at
+   Medium/Large GUI fonts ("Vi…/Proc…/Meas…"); the minimum is now derived
+   from the tab bar's size hint so all five labels fit un-elided at any
+   font (measured need: 323/390/439 px at Small/Medium/Large). The Particle
+   Statistics bottom pane could be splitter-crushed until the Setup page
+   scrolled, cutting the three column headers mid-glyph; the workflow tab
+   widget now has a minimum height equal to the Setup page's natural height
+   (capped at 460 px), while the Results tab still scrolls freely.
+
 Known-good follow-ups not taken: `particle_statistics.py` is still ~4,080
 LOC (dialog + tutorial flow); the viewer's `_build()` (~980-line method) and
 `_build_viewer_menu_bar` (~475 lines) would benefit from a

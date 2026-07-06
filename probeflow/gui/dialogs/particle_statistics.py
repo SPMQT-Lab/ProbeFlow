@@ -1170,8 +1170,17 @@ class ParticleStatisticsDialog(QDialog):
     def _workflow_tabs(self) -> QTabWidget:
         self._tabs = QTabWidget(self)
         self._tabs.setObjectName("particleStatisticsTabs")
-        self._tabs.addTab(self._scrollable(self._setup_tab()), "Setup")
+        self._setup_page = self._setup_tab()
+        self._tabs.addTab(self._scrollable(self._setup_page), "Setup")
         self._tabs.addTab(self._scrollable(self._results_tab()), "Results")
+        # Let the splitter shrink the bottom pane, but not below the Setup
+        # page's natural height (capped for small screens): a partially
+        # scrolled Setup page cuts the three column headers mid-glyph and
+        # reads as broken rather than scrolled.  Results keeps free rein —
+        # scrolling tall plots there is expected.
+        setup_h = self._setup_page.sizeHint().height()
+        tab_bar_h = self._tabs.tabBar().sizeHint().height()
+        self._tabs.setMinimumHeight(min(setup_h + tab_bar_h + 8, 460))
         # Both the feature-layer picker and the model combo now exist, so set
         # the picker's enabled state for the default model.
         self._sync_feature_layer_controls()

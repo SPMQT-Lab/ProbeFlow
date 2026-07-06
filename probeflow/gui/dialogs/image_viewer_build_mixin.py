@@ -331,6 +331,17 @@ class ImageViewerBuildMixin:
             "Save images (PNG/PDF/SXM/GWY), provenance and hand-off to tools.",
         )
 
+        # Size the sidebar so every tab label fits un-elided at the current
+        # GUI font.  With a hardcoded minimum, Medium/Large fonts elided every
+        # label ("Vi…/Proc…/Meas…"), hiding which tab is which — the elide
+        # mode is a safety net for extreme cases, not the normal state.
+        _tab_bar = self._sidebar_tabs.tabBar()
+        _tabs_w = sum(
+            _tab_bar.tabSizeHint(i).width() for i in range(_tab_bar.count())
+        ) + self._sidebar_collapse_btn.width() + 12
+        self._sidebar_tabs.setMinimumWidth(max(340, _tabs_w))
+        right.setMinimumWidth(max(360, _tabs_w + 16))
+
         def _collapsible_section(
             target_lay: QVBoxLayout,
             title: str,
