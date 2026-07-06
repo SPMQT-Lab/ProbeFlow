@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
     QStatusBar,
 )
 
-from probeflow.gui.features import (
+from probeflow.gui.features.panel import (
     FeaturesPanel,
     FeaturesSidebar,
 )

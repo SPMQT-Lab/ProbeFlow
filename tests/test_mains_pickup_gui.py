@@ -1,4 +1,4 @@
-"""GUI tests for the FFT viewer's ⚡ Mains tab (mains-pickup tool)."""
+"""GUI tests for the FFT viewer's Mains tab (mains-pickup tool)."""
 
 from __future__ import annotations
 
@@ -142,16 +142,17 @@ class TestMainsTab:
         assert dlg._mains_preview_active is False
         dlg.deleteLater()
 
-    def test_controls_have_wrapped_tooltips(self, qapp):
+    def test_controls_have_tooltips(self, qapp):
+        # Tooltip *wrapping* is owned by the app-wide event filter
+        # (probeflow.gui.tooltips.install_global_tooltips), so here we only
+        # assert every control explains itself.
         dlg = _dialog(qapp)
         for w in (
             dlg._mains_overlay_cb, dlg._mains_freq_combo, dlg._mains_auto_cb,
             dlg._mains_harm_spin, dlg._mains_speed_spin, dlg._mains_radius_spin,
             dlg._mains_min_q_spin, dlg._mains_apply_btn,
         ):
-            tt = w.toolTip()
-            assert tt, "control must have a tooltip"
-            assert max(len(line) for line in tt.split("\n")) <= 52
+            assert w.toolTip(), "control must have a tooltip"
         dlg.deleteLater()
 
 

@@ -3,7 +3,7 @@
 This module used to be ``probeflow.gui._legacy`` and held the main-window
 implementation; classes have since been transplanted into their proper
 subpackages (``app``, ``browse``, ``convert``, ``dialogs``, ``features``,
-``navbar``, ``processing``, ``terminal``).  The remaining purpose of this
+``processing``, ``terminal``).  The remaining purpose of this
 file is to keep the historical ``from probeflow.gui import X`` import surface
 stable while ``gui/__init__.py`` re-exports each name through its
 ``_LEGACY_EXPORTS`` set.
@@ -24,7 +24,6 @@ from __future__ import annotations
 from PySide6.QtWidgets import QFileDialog  # noqa: F401
 
 from probeflow.gui.app import ProbeFlowWindow, main  # noqa: F401
-from probeflow.gui.navbar import Navbar  # noqa: F401
 from probeflow.gui.processing import ProcessingControlPanel  # noqa: F401
 from probeflow.gui.terminal import DeveloperTerminalWidget, _DevSidebar  # noqa: F401
 from probeflow.gui.dialogs import (  # noqa: F401
