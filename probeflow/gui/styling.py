@@ -5,10 +5,6 @@ from __future__ import annotations
 from probeflow.gui.config import GUI_FONT_SIZES, GUI_FONT_DEFAULT
 from probeflow.gui.typography import ui_family
 
-NAVBAR_DARK_BG  = "#3273dc"
-NAVBAR_LIGHT_BG = "#ffffff"
-NAVBAR_H        = 58
-
 # Modern-neutral palette: restrained neutral surfaces, one confident accent, soft
 # selection tints and clear borders.  All keys consumed elsewhere (fg, sep, accent_bg,
 # main_bg, entry_bg, card_bg, …) are preserved; ``surface``/``raised``/``sel_tint``/
@@ -237,7 +233,6 @@ THEMES = {
 }
 
 # Ordered theme presets shown in the picker: (key, label, is_dark).
-# is_dark drives the navbar styling and logo variant.
 THEME_PRESETS: tuple[tuple[str, str, bool], ...] = (
     ("dark",          "Dark",          True),
     ("light",         "Light",         False),
@@ -371,16 +366,6 @@ QToolButton#imageToolMore:checked {{
     background-color: {t['accent_bg']};
     color: {t['accent_fg']};
 }}
-/* Navbar buttons (on the coloured navbar). */
-QPushButton#navBtn {{
-    color: #ffffff;
-    background-color: transparent;
-    border: 1px solid rgba(255,255,255,0.40);
-    border-radius: 6px;
-    padding: 4px 12px;
-}}
-QPushButton#navBtn:hover {{ background-color: rgba(255,255,255,0.18); }}
-
 /* ── Inputs ───────────────────────────────────────────────────────────── */
 QComboBox {{
     background-color: {t['entry_bg']};
@@ -640,7 +625,6 @@ def _build_palette(t: dict):
 
 
 __all__ = [
-    "NAVBAR_DARK_BG", "NAVBAR_LIGHT_BG", "NAVBAR_H",
     "THEMES", "THEME_PRESETS", "theme_is_dark",
     "_sep", "_build_qss", "_build_palette",
 ]

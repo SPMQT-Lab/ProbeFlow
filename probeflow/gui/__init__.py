@@ -58,9 +58,6 @@ from probeflow.gui.config import (
     save_config,
 )
 from probeflow.gui.styling import (
-    NAVBAR_DARK_BG,
-    NAVBAR_LIGHT_BG,
-    NAVBAR_H,
     THEMES,
     _sep,
     _build_qss,
@@ -103,7 +100,6 @@ _LEGACY_EXPORTS = {
     "EdgeDetectionDialog",
     "FFTViewerDialog",
     "ImageViewerDialog",
-    "Navbar",
     "PeriodicFilterDialog",
     "ProbeFlowWindow",
     "ProcessingControlPanel",
@@ -195,7 +191,6 @@ __all__ = [
     "GUI_FONT_DEFAULT",
     "GUI_FONT_SIZES",
     "ImageViewerDialog",
-    "Navbar",
     "PLANE_NAMES",
     "PeriodicFilterDialog",
     "ProbeFlowWindow",

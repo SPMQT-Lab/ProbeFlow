@@ -37,7 +37,6 @@ from PySide6.QtWidgets import (
     QStatusBar, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 from probeflow.gui.utils import _open_url
-from probeflow.gui.navbar import Navbar
 from probeflow.gui.features.tv import (
     TVPanel,
     TVSidebar,
@@ -284,12 +283,6 @@ class ProbeFlowWindow(QMainWindow):
         v_lay.setContentsMargins(0, 0, 0, 0)
         v_lay.setSpacing(0)
 
-        self._navbar = Navbar(self._dark, self._gui_font_size)
-        self._navbar.theme_toggle_clicked.connect(self._toggle_theme)
-        self._navbar.font_size_changed.connect(self._on_gui_font_size_changed)
-        self._navbar.about_clicked.connect(self._show_about)
-        v_lay.addWidget(self._navbar)
-
         # Body splitter
         self._splitter = QSplitter(Qt.Horizontal)
         self._splitter.setHandleWidth(5)
@@ -469,16 +462,6 @@ class ProbeFlowWindow(QMainWindow):
             "Use this when the STM has written new scans while ProbeFlow is open.")
         refresh_action.triggered.connect(lambda: self._grid.refresh())
         file_menu.addAction(refresh_action)
-        recent_action = QAction("Open recent", self)
-        recent_action.setEnabled(False)
-        file_menu.addAction(recent_action)
-        file_menu.addSeparator()
-        export_image_action = QAction("Export image...", self)
-        export_image_action.setEnabled(False)
-        file_menu.addAction(export_image_action)
-        export_processed_action = QAction("Export processed image...", self)
-        export_processed_action.setEnabled(False)
-        file_menu.addAction(export_processed_action)
         file_menu.addSeparator()
         restart_action = QAction("Restart ProbeFlow", self)
         restart_action.setShortcut(QKeySequence("Ctrl+Shift+R"))
@@ -493,9 +476,25 @@ class ProbeFlowWindow(QMainWindow):
         quit_action.triggered.connect(self.close)
         file_menu.addAction(quit_action)
 
+        # All main-window workspaces live in one menu so the app's structure is
+        # visible at a glance; Ctrl+1..5 step through them in menu order.
+        # Feature Counting is deliberately NOT here — it opens as a floating
+        # tool window (Tools menu), not a workspace page.
+        workspace_menu = menu_bar.addMenu("Workspace")
+        _mode_action(workspace_menu, "Browse", "browse", "Ctrl+1")
+        _mode_action(workspace_menu, "Convert Createc .dat to .sxm", "convert", "Ctrl+2")
+        _mode_action(workspace_menu, "TV denoise", "tv", "Ctrl+4")
+        survey_action = _mode_action(
+            workspace_menu, "Survey (ScanFlow campaign)", "survey", "Ctrl+Shift+S"
+        )
+        if not self._survey_available:
+            survey_action.setEnabled(False)
+            survey_action.setToolTip(
+                "Survey mode requires the optional `scanflow` dependency."
+            )
+        _mode_action(workspace_menu, "Developer tools", "dev", "Ctrl+5")
+
         view_menu = menu_bar.addMenu("View")
-        _mode_action(view_menu, "Browse", "browse", "Ctrl+1")
-        view_menu.addSeparator()
         reset_layout_action = QAction("Reset window layout", self)
         reset_layout_action.triggered.connect(self._reset_window_layout)
         view_menu.addAction(reset_layout_action)
@@ -545,9 +544,10 @@ class ProbeFlowWindow(QMainWindow):
             self._thumbnail_channel_action_group.addAction(action)
             self._thumbnail_channel_actions[label] = action
             channel_menu.addAction(action)
-
-        processing_menu = menu_bar.addMenu("Processing")
-        align_menu = processing_menu.addMenu("Align rows")
+        # Row alignment is a thumbnail *display* setting like colourmap and
+        # channel, so it lives with them here (it used to be a one-item
+        # top-level "Processing" menu, which wrongly implied image processing).
+        align_menu = view_menu.addMenu("Thumbnail row alignment")
         for label in ("None", "Mean", "Median"):
             action = QAction(label, self)
             action.setCheckable(True)
@@ -558,33 +558,20 @@ class ProbeFlowWindow(QMainWindow):
             self._thumbnail_align_actions[label] = action
             align_menu.addAction(action)
 
-        convert_menu = menu_bar.addMenu("Convert")
-        _mode_action(convert_menu, "Convert Createc .dat to .sxm...", "convert", "Ctrl+2")
-        batch_convert_action = QAction("Batch convert folder...", self)
-        batch_convert_action.triggered.connect(lambda: self._switch_mode("convert"))
-        convert_menu.addAction(batch_convert_action)
-
         tools_menu = menu_bar.addMenu("Tools")
+        # Feature Counting opens a floating window (not a workspace page), so
+        # it is a plain action here rather than a checkable mode entry.
+        fc_action = QAction("Feature Counting…", self)
+        fc_action.setShortcut(QKeySequence("Ctrl+3"))
+        fc_action.setToolTip(
+            "Open the floating Feature Counting window — segmentation, "
+            "template matching, classification and lattice extraction."
+        )
+        fc_action.triggered.connect(self._open_fc_window)
+        tools_menu.addAction(fc_action)
         map_action = QAction("Map Spectra to Images...", self)
         map_action.triggered.connect(self._on_map_spectra)
         tools_menu.addAction(map_action)
-        tools_menu.addSeparator()
-        _mode_action(tools_menu, "Feature Counting…", "features", "Ctrl+3")
-        _mode_action(tools_menu, "TV denoise", "tv", "Ctrl+4")
-        tools_menu.addSeparator()
-        survey_action = _mode_action(
-            tools_menu, "Survey (ScanFlow campaign)", "survey", "Ctrl+Shift+S"
-        )
-        if not self._survey_available:
-            survey_action.setEnabled(False)
-            survey_action.setToolTip(
-                "Survey mode requires the optional `scanflow` dependency."
-            )
-        tools_menu.addSeparator()
-        _mode_action(tools_menu, "Developer tools", "dev", "Ctrl+5")
-        prefs_action = QAction("Preferences...", self)
-        prefs_action.setEnabled(False)
-        tools_menu.addAction(prefs_action)
 
         help_menu = menu_bar.addMenu("Help")
         definitions_action = QAction("Definitions", self)
@@ -736,7 +723,6 @@ class ProbeFlowWindow(QMainWindow):
             return
         self._theme_name = name
         self._dark = theme_is_dark(name)
-        self._navbar.set_dark(self._dark)
         self._apply_theme()
         self._sync_menu_actions()
 
@@ -799,18 +785,6 @@ class ProbeFlowWindow(QMainWindow):
 
     # ── Mode switching ─────────────────────────────────────────────────────────
     def _switch_mode(self, mode: str):
-        if mode == "defs":
-            self._show_definitions()
-            self._status_bar.showMessage(
-                "Processing algorithm reference opened in a separate window")
-            self._sync_menu_actions()
-            return
-        if mode == "features":
-            # Feature Counting opens in its dedicated floating window; the
-            # main window keeps whatever mode it is currently showing.
-            self._open_fc_window()
-            self._sync_menu_actions()
-            return
         self._mode = mode
         if mode == "browse":
             self._content_stack.setCurrentIndex(0)
@@ -1604,14 +1578,11 @@ class ProbeFlowWindow(QMainWindow):
 
     # ── Theme ──────────────────────────────────────────────────────────────────
     def _toggle_theme(self):
-        # Quick navbar/keyboard flip between the base dark and light themes.
+        # Quick keyboard flip (Ctrl+Shift+T) between the base dark and light themes.
         self._set_theme("light" if self._dark else "dark")
 
     def _on_gui_font_size_changed(self, label: str):
         self._gui_font_size = normalise_gui_font_size(label)
-        self._navbar.blockSignals(True)
-        self._navbar.set_font_size(self._gui_font_size)
-        self._navbar.blockSignals(False)
         self._apply_theme()
         self._status_bar.showMessage(f"Text size: {self._gui_font_size}")
 
