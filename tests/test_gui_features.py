@@ -178,25 +178,25 @@ def test_features_panel_sample_label_flow(qapp, monkeypatch):
 def test_features_window_classify_requires_labels(qapp):
     pytest.importorskip("cv2")
     from probeflow.analysis.features import segment_particles
-    from probeflow.gui.compat import ProbeFlowWindow
+    from probeflow.gui.features.window import FeatureCountingWindow
 
     arr = _sample_arr()
     parts = segment_particles(arr, pixel_size_m=1e-9, min_area_nm2=0.5, size_sigma_clip=None)
 
-    win = ProbeFlowWindow()
-    win._features_sidebar._select_mode("classify")
-    win._features_panel.load_entry(_sample_entry(), 0, arr, 1e-9)
-    win._features_panel.set_mode("classify")
-    seg_params = win._features_sidebar.classify_segmentation_params()
-    win._features_panel.set_particles(
+    win = FeatureCountingWindow(theme={})
+    win._sidebar._select_mode("classify")
+    win._panel.load_entry(_sample_entry(), 0, arr, 1e-9)
+    win._panel.set_mode("classify")
+    seg_params = win._sidebar.classify_segmentation_params()
+    win._panel.set_particles(
         parts,
         params_signature=tuple(sorted(seg_params.items())),
         params_meta=seg_params,
     )
 
-    win._features_ctrl._on_run("classify")
+    win._ctrl._on_run("classify")
 
-    assert "Click particles on the image" in win._features_sidebar._status_lbl.text()
+    assert "Click particles on the image" in win._sidebar._status_lbl.text()
     win.close()
     win.deleteLater()
 
@@ -204,41 +204,41 @@ def test_features_window_classify_requires_labels(qapp):
 def test_features_window_segmentation_change_clears_labels(qapp, monkeypatch):
     pytest.importorskip("cv2")
     from probeflow.analysis.features import segment_particles
-    from probeflow.gui.compat import ProbeFlowWindow
+    from probeflow.gui.features.window import FeatureCountingWindow
 
     arr = _sample_arr()
     parts = segment_particles(arr, pixel_size_m=1e-9, min_area_nm2=0.5, size_sigma_clip=None)
 
-    win = ProbeFlowWindow()
-    win._features_sidebar._select_mode("classify")
-    win._features_panel.load_entry(_sample_entry(), 0, arr, 1e-9)
-    seg_params = win._features_sidebar.classify_segmentation_params()
-    win._features_panel.set_particles(
+    win = FeatureCountingWindow(theme={})
+    win._sidebar._select_mode("classify")
+    win._panel.load_entry(_sample_entry(), 0, arr, 1e-9)
+    seg_params = win._sidebar.classify_segmentation_params()
+    win._panel.set_particles(
         parts,
         params_signature=tuple(sorted(seg_params.items())),
         params_meta=seg_params,
     )
     monkeypatch.setattr(
-        win._features_panel,
+        win._panel,
         "_prompt_sample_label",
         lambda current_name="", current_color=(255, 255, 255): {
             "name": "target",
             "color": (255, 0, 0),
         },
     )
-    win._features_panel._edit_sample_label(parts[0])
+    win._panel._edit_sample_label(parts[0])
 
-    assert win._features_panel.has_sample_labels() is True
+    assert win._panel.has_sample_labels() is True
     # The classify-segmentation sidebar shares its widgets with Particles
     # mode after the UniMR-style refactor, so the "min area" knob is now the
     # integer-valued `_min_area_slider` (units of 0.001% of image area), not
     # the legacy `_cls_min_area_spin` nm² double-spin.  Bump from the default
     # (1) to 50 so `classify_params_changed` fires with a clearly different
     # value and the controller clears sample labels.
-    win._features_sidebar._min_area_slider.setValue(50)
+    win._sidebar._min_area_slider.setValue(50)
 
-    assert win._features_panel.has_sample_labels() is False
-    assert "cleared" in win._features_sidebar._status_lbl.text().lower()
+    assert win._panel.has_sample_labels() is False
+    assert "cleared" in win._sidebar._status_lbl.text().lower()
     win.close()
     win.deleteLater()
 
@@ -246,32 +246,32 @@ def test_features_window_segmentation_change_clears_labels(qapp, monkeypatch):
 def test_features_window_classify_export_includes_samples(qapp, monkeypatch, tmp_path):
     pytest.importorskip("cv2")
     from probeflow.analysis.features import Classification, segment_particles
-    from probeflow.gui.compat import ProbeFlowWindow
+    from probeflow.gui.features.window import FeatureCountingWindow
 
     arr = _sample_arr()
     parts = segment_particles(arr, pixel_size_m=1e-9, min_area_nm2=0.5, size_sigma_clip=None)
 
     captured = {}
 
-    win = ProbeFlowWindow()
-    win._features_sidebar._select_mode("classify")
-    win._features_panel.load_entry(_sample_entry(), 0, arr, 1e-9)
-    seg_params = win._features_sidebar.classify_segmentation_params()
-    win._features_panel.set_particles(
+    win = FeatureCountingWindow(theme={})
+    win._sidebar._select_mode("classify")
+    win._panel.load_entry(_sample_entry(), 0, arr, 1e-9)
+    seg_params = win._sidebar.classify_segmentation_params()
+    win._panel.set_particles(
         parts,
         params_signature=tuple(sorted(seg_params.items())),
         params_meta=seg_params,
     )
     monkeypatch.setattr(
-        win._features_panel,
+        win._panel,
         "_prompt_sample_label",
         lambda current_name="", current_color=(255, 255, 255): {
             "name": "target",
             "color": (0, 255, 0),
         },
     )
-    win._features_panel._edit_sample_label(parts[0])
-    win._features_panel.set_classifications(
+    win._panel._edit_sample_label(parts[0])
+    win._panel.set_classifications(
         [Classification(particle_index=parts[1].index, class_name="other", similarity=0.25)],
         meta={"params": {"encoder": "raw"}, "segmentation": seg_params},
     )
@@ -289,7 +289,7 @@ def test_features_window_classify_export_includes_samples(qapp, monkeypatch, tmp
 
     monkeypatch.setattr("probeflow.io.writers.json.write_json", _capture_write_json)
 
-    win._features_ctrl._on_export("classify")
+    win._ctrl._on_export("classify")
 
     assert captured["kind"] == "classifications"
     assert captured["extra_meta"]["samples"][0]["class_name"] == "target"
@@ -327,7 +327,7 @@ def test_features_export_passes_scan_for_provenance(qapp, monkeypatch):
     """
     pytest.importorskip("cv2")
     from probeflow.analysis.features import segment_particles
-    from probeflow.gui.compat import ProbeFlowWindow
+    from probeflow.gui.features.window import FeatureCountingWindow
 
     arr = _sample_arr()
     scan = _make_scan(arr)
@@ -346,12 +346,12 @@ def test_features_export_passes_scan_for_provenance(qapp, monkeypatch):
         lambda *args, **kwargs: ("/tmp/example_particles.json", "JSON (*.json)"),
     )
 
-    win = ProbeFlowWindow()
-    win._features_sidebar._select_mode("particles")
-    win._features_panel.load_entry(_sample_entry(), 0, arr, 1e-9, 1e-9, 1e-9, scan=scan)
-    win._features_panel.set_particles(parts)
+    win = FeatureCountingWindow(theme={})
+    win._sidebar._select_mode("particles")
+    win._panel.load_entry(_sample_entry(), 0, arr, 1e-9, 1e-9, 1e-9, scan=scan)
+    win._panel.set_particles(parts)
 
-    win._features_ctrl._on_export("particles")
+    win._ctrl._on_export("particles")
 
     assert captured["kind"] == "particles"
     assert captured["scan"] is scan, "the loaded Scan must reach write_json"
@@ -367,7 +367,7 @@ def test_features_export_without_scan_falls_back_to_source(qapp, monkeypatch):
     records a source pointer and passes scan=None — no provenance is invented."""
     pytest.importorskip("cv2")
     from probeflow.analysis.features import segment_particles
-    from probeflow.gui.compat import ProbeFlowWindow
+    from probeflow.gui.features.window import FeatureCountingWindow
 
     arr = _sample_arr()
     parts = segment_particles(arr, pixel_size_m=1e-9, min_area_nm2=0.5, size_sigma_clip=None)
@@ -384,17 +384,46 @@ def test_features_export_without_scan_falls_back_to_source(qapp, monkeypatch):
         lambda *args, **kwargs: ("/tmp/example_particles.json", "JSON (*.json)"),
     )
 
-    win = ProbeFlowWindow()
-    win._features_sidebar._select_mode("particles")
-    win._features_panel.load_entry(_sample_entry(), 0, arr, 1e-9)   # no scan
-    win._features_panel.set_particles(parts)
+    win = FeatureCountingWindow(theme={})
+    win._sidebar._select_mode("particles")
+    win._panel.load_entry(_sample_entry(), 0, arr, 1e-9)   # no scan
+    win._panel.set_particles(parts)
 
-    win._features_ctrl._on_export("particles")
+    win._ctrl._on_export("particles")
 
     assert captured["scan"] is None
     assert captured["extra_meta"].get("source") == "/tmp/example.sxm"
     win.close()
     win.deleteLater()
+
+
+def test_card_context_features_loads_floating_window(qapp, monkeypatch):
+    """Regression: the Browse card 'Send to Feature Counting' context action
+    must load the scan into the floating FeatureCountingWindow — the only
+    Features workspace.  It used to load into a hidden duplicate panel in the
+    main window's content stack, so the floating window opened empty."""
+    from PySide6.QtCore import QThreadPool
+
+    from probeflow.gui.app import ProbeFlowWindow
+
+    arr = _sample_arr()
+    scan = _make_scan(arr)
+    monkeypatch.setattr("probeflow.gui.app.load_scan", lambda _path: scan)
+
+    win = ProbeFlowWindow()
+    try:
+        win._on_card_context_action(_sample_entry(), "features")
+        assert win._fc_window is not None, "floating FC window should open"
+        assert QThreadPool.globalInstance().waitForDone(5000)
+        qapp.processEvents()   # deliver the queued finished() signal
+        assert win._fc_window._panel.current_array() is not None, \
+            "scan must arrive in the floating window, not a hidden panel"
+        assert win._fc_window._panel.current_entry().stem == "example"
+    finally:
+        if win._fc_window is not None:
+            win._fc_window.close()
+        win.close()
+        win.deleteLater()
 
 
 def test_load_scan_plane_for_analysis_scan_matches_processed_plane(qapp, monkeypatch):

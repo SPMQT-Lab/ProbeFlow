@@ -38,11 +38,6 @@ from PySide6.QtWidgets import (
 )
 from probeflow.gui.utils import _open_url
 from probeflow.gui.navbar import Navbar
-from probeflow.gui.features import (
-    FeaturesPanel,
-    FeaturesSidebar,
-)
-from probeflow.gui.features.controller import FeatureCountingController
 from probeflow.gui.features.tv import (
     TVPanel,
     TVSidebar,
@@ -320,7 +315,6 @@ class ProbeFlowWindow(QMainWindow):
         self._browse_splitter.setStretchFactor(1, 1)
 
         self._conv_panel    = ConvertPanel(t, self._cfg)
-        self._features_panel = FeaturesPanel(t)
         self._tv_panel       = TVPanel(t)
         self._dev_terminal   = DeveloperTerminalWidget(t)
         # Survey integration is optional — when ``probeflow.gui.survey``
@@ -337,12 +331,13 @@ class ProbeFlowWindow(QMainWindow):
             )
             self._survey_panel.setWordWrap(True)
             self._survey_panel.setAlignment(Qt.AlignCenter)
+        # NOTE: Feature Counting is not a stack page — it opens as a floating
+        # FeatureCountingWindow (see _open_fc_window) so Browse stays visible.
         self._content_stack.addWidget(self._browse_splitter)        # idx 0 browse
         self._content_stack.addWidget(self._conv_panel)             # idx 1 convert
-        self._content_stack.addWidget(self._features_panel)         # idx 2 features
-        self._content_stack.addWidget(self._tv_panel)               # idx 3 tv
-        self._content_stack.addWidget(self._dev_terminal)           # idx 4 dev
-        self._content_stack.addWidget(self._survey_panel)           # idx 5 survey
+        self._content_stack.addWidget(self._tv_panel)               # idx 2 tv
+        self._content_stack.addWidget(self._dev_terminal)           # idx 3 dev
+        self._content_stack.addWidget(self._survey_panel)           # idx 4 survey
         self._splitter.addWidget(self._content_stack)
 
         # ── Right: sidebar stack ───────────────────────────────────────────────
@@ -351,14 +346,12 @@ class ProbeFlowWindow(QMainWindow):
         self._sidebar_stack.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
         self._browse_info      = BrowseInfoPanel(t, self._cfg)
         self._convert_sidebar  = ConvertSidebar(t, self._cfg)
-        self._features_sidebar = FeaturesSidebar(t)
         self._tv_sidebar       = TVSidebar(t)
         self._dev_sidebar      = _DevSidebar(t)
         self._sidebar_stack.addWidget(self._browse_info)        # idx 0
         self._sidebar_stack.addWidget(self._convert_sidebar)    # idx 1
-        self._sidebar_stack.addWidget(self._features_sidebar)   # idx 2
-        self._sidebar_stack.addWidget(self._tv_sidebar)         # idx 3
-        self._sidebar_stack.addWidget(self._dev_sidebar)        # idx 4
+        self._sidebar_stack.addWidget(self._tv_sidebar)         # idx 2
+        self._sidebar_stack.addWidget(self._dev_sidebar)        # idx 3
         # Placeholder sidebar for Survey mode — metadata is shown in the main
         # panel itself, so the right column is just a small hint label.
         _survey_sidebar_placeholder = QWidget()
@@ -372,18 +365,12 @@ class ProbeFlowWindow(QMainWindow):
         ))
         _ssp_lay.itemAt(0).widget().setWordWrap(True)
         _ssp_lay.addStretch(1)
-        self._sidebar_stack.addWidget(_survey_sidebar_placeholder)  # idx 5
+        self._sidebar_stack.addWidget(_survey_sidebar_placeholder)  # idx 4
         self._splitter.addWidget(self._sidebar_stack)
         self._splitter.setChildrenCollapsible(False)
         self._splitter.setStretchFactor(0, 1)
         self._splitter.setStretchFactor(1, 0)
         self._apply_default_splitter_sizes()
-
-        # Features tab plumbing — worker dispatch is owned by the controller.
-        self._features_pool = QThreadPool.globalInstance()
-        # Dedicated 1-thread pool for live slider previews.
-        self._features_preview_pool = QThreadPool()
-        self._features_preview_pool.setMaxThreadCount(1)
 
         # Floating Feature Counting window (lazy-created on first open)
         self._fc_window = None
@@ -428,22 +415,6 @@ class ProbeFlowWindow(QMainWindow):
         self._grid.apply_filter(self._browse_tools.get_filter_mode())
         self._convert_sidebar.run_btn.clicked.connect(self._run)
         self._conv_panel.input_entry.textChanged.connect(self._update_count)
-
-        self._features_panel.go_to_browse_requested.connect(
-            lambda: self._switch_mode("browse"))
-        self._features_sidebar.load_from_browse_requested.connect(
-            self._on_features_load_from_browse)
-        # All other sidebar signals are wired by the controller.
-        self._features_ctrl = FeatureCountingController(
-            self._features_panel, self._features_sidebar,
-            self._features_pool,
-            status_cb=lambda msg: self._status_bar.showMessage(msg),
-            preview_pool=self._features_preview_pool,
-            parent_widget=self,
-            feature_set_store=self._feature_set_store,
-        )
-        self._features_ctrl.open_particle_statistics_requested.connect(
-            self._on_open_particle_statistics_from_features)
 
         # Status bar
         self._status_bar = QStatusBar()
@@ -834,6 +805,12 @@ class ProbeFlowWindow(QMainWindow):
                 "Processing algorithm reference opened in a separate window")
             self._sync_menu_actions()
             return
+        if mode == "features":
+            # Feature Counting opens in its dedicated floating window; the
+            # main window keeps whatever mode it is currently showing.
+            self._open_fc_window()
+            self._sync_menu_actions()
+            return
         self._mode = mode
         if mode == "browse":
             self._content_stack.setCurrentIndex(0)
@@ -841,29 +818,22 @@ class ProbeFlowWindow(QMainWindow):
             n = len(self._grid.get_entries())
             self._status_bar.showMessage(
                 f"{n} scan(s) loaded" if n else "Open a folder to browse scans")
-        elif mode == "features":
-            # Always open Feature Counting in the dedicated floating window
-            # rather than switching the main window's content stack.
-            self._open_fc_window()
-            self._mode = self._mode if self._mode != "features" else "browse"
-            self._sync_menu_actions()
-            return
         elif mode == "tv":
-            self._content_stack.setCurrentIndex(3)
-            self._sidebar_stack.setCurrentIndex(3)
+            self._content_stack.setCurrentIndex(2)
+            self._sidebar_stack.setCurrentIndex(2)
             if self._tv_panel.current_array() is None:
                 self._status_bar.showMessage(
                     "Pick a scan in Browse, then 'Load primary scan from Browse'")
             else:
                 self._status_bar.showMessage("TV-denoise — adjust parameters and Run")
         elif mode == "dev":
-            self._content_stack.setCurrentIndex(4)
-            self._sidebar_stack.setCurrentIndex(4)
+            self._content_stack.setCurrentIndex(3)
+            self._sidebar_stack.setCurrentIndex(3)
             self._status_bar.showMessage(
                 "Developer terminal — run shell commands and Python scripts")
         elif mode == "survey":
-            self._content_stack.setCurrentIndex(5)
-            self._sidebar_stack.setCurrentIndex(5)
+            self._content_stack.setCurrentIndex(4)
+            self._sidebar_stack.setCurrentIndex(4)
             self._status_bar.showMessage(
                 "Survey mode — open a ScanFlow survey.json, polish each feature, then Export PPTX")
         else:
@@ -1079,31 +1049,19 @@ class ProbeFlowWindow(QMainWindow):
     def _on_card_context_action(self, entry, action: str):
         """Dispatch ScanCard right-click actions (Send to Features, export, show metadata)."""
         if action == "features":
-            self._switch_mode("features")
-            try:
-                _scan = load_scan(entry.path)
-            except Exception as exc:
-                self._status_bar.showMessage(f"Could not read scan: {exc}")
-                return
-            plane_idx = self._features_sidebar.plane_index()
-            if plane_idx >= _scan.n_planes:
-                plane_idx = 0
-            arr = _scan.planes[plane_idx]
-            if arr is None:
-                self._status_bar.showMessage("Could not read scan plane.")
-                return
-            w_m, h_m = _scan.scan_range_m
-            Ny, Nx = arr.shape
-            if Nx <= 0 or Ny <= 0 or w_m <= 0 or h_m <= 0:
-                px_x_m = px_y_m = px_m = 1e-10
-            else:
-                px_x_m = float(w_m / Nx)
-                px_y_m = float(h_m / Ny)
-                px_m = float(np.sqrt(px_x_m * px_y_m))
-            self._features_panel.load_entry(entry, plane_idx, arr, px_m, px_x_m, px_y_m, scan=_scan)
-            self._features_sidebar.set_status(
-                f"Loaded {entry.stem} (plane {plane_idx})")
-            self._status_bar.showMessage(f"{entry.stem} sent to FeatureCounting")
+            # Open (or raise) the floating Feature Counting window and load
+            # the scan into it off-thread — same path as its own "Load from
+            # Browse" button, so saved viewer processing is applied too.
+            self._open_fc_window()
+            plane_idx = self._fc_window._sidebar.plane_index()
+            self._fc_window._sidebar.set_status("Loading scan…")
+            worker = _ScanLoadWorker(
+                self._load_scan_plane_for_analysis, entry, plane_idx)
+            worker.signals.finished.connect(
+                lambda result, error, e=entry: self._on_fc_load_finished(e, result, error)
+            )
+            QThreadPool.globalInstance().start(worker)
+            self._status_bar.showMessage(f"{entry.stem} → Feature Counting")
 
         elif action == "export_metadata_csv":
             try:
@@ -1354,27 +1312,6 @@ class ProbeFlowWindow(QMainWindow):
             return
         arr, px_m, px_x_m, px_y_m, plane_idx, scan = result
         self._fc_window.load_entry(entry, plane_idx, arr, px_m, px_x_m, px_y_m, scan=scan)
-
-    # ── Features tab handlers ──────────────────────────────────────────────────
-    def _on_features_load_from_browse(self):
-        entry = self._grid.get_primary_entry()
-        if not entry:
-            self._features_sidebar.set_status("Select a scan in the Browse tab first.")
-            self._status_bar.showMessage("Pick a scan in Browse to load it into FeatureCounting")
-            return
-        if not entry or isinstance(entry, VertFile):
-            self._features_sidebar.set_status("Selected entry is not a topography scan.")
-            return
-        plane_idx = self._features_sidebar.plane_index()
-        try:
-            arr, px_m, px_x_m, px_y_m, plane_idx, scan = \
-                self._load_scan_plane_for_analysis(entry, plane_idx)
-        except Exception as exc:
-            self._features_sidebar.set_status(f"Could not read scan: {exc}")
-            return
-        self._features_panel.load_entry(entry, plane_idx, arr, px_m, px_x_m, px_y_m, scan=scan)
-        self._features_sidebar.set_status(
-            f"Loaded {entry.stem} (plane {plane_idx}, px = {px_m * 1e12:.1f} pm)")
 
     # ── TV-denoise tab handlers ────────────────────────────────────────────────
     def _on_tv_load_from_browse(self):
@@ -1751,8 +1688,7 @@ class ProbeFlowWindow(QMainWindow):
         sporadic crashes on quit. A bounded wait keeps a stuck worker from
         turning quit into a hang.
         """
-        pools = [QThreadPool.globalInstance(),
-                 getattr(self, "_features_preview_pool", None)]
+        pools = [QThreadPool.globalInstance()]
         fc = getattr(self, "_fc_window", None)
         if fc is not None:
             pools.append(getattr(fc, "_preview_pool", None))
