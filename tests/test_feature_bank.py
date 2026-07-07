@@ -87,6 +87,40 @@ def test_bank_to_samples_skips_malformed_entries(tmp_path):
     assert samples[0][0] == "disk"
 
 
+def test_make_entry_records_scale_fields():
+    """Schema-2 entries carry the crop scale + pipeline id used to gate matching."""
+    e = feature_bank.make_entry(
+        [1.0, 2.0], "disk",
+        source_path="/s/a.dat", particle_index=3,
+        embed_version="physfov-mask-v1",
+        pixel_size_nm=0.3, fov_nm=15.0, out_px=96, area_nm2=12.5,
+    )
+    assert e["embed_version"] == "physfov-mask-v1"
+    assert e["pixel_size_nm"] == 0.3
+    assert e["fov_nm"] == 15.0
+    assert e["out_px"] == 96
+    assert e["area_nm2"] == 12.5
+
+
+def test_make_entry_scale_fields_default_none_for_legacy():
+    """Old-style calls still work; scale fields default to None (legacy)."""
+    e = feature_bank.make_entry([1.0], "disk", source_path="/s/a.dat",
+                                particle_index=0)
+    assert e["embed_version"] is None
+    assert e["fov_nm"] is None
+
+
+def test_bank_to_samples_skips_stale_entries():
+    bank = {"entries": [
+        feature_bank.make_entry([1.0], "keep", source_path="/s/a.dat",
+                                particle_index=0),
+        {**feature_bank.make_entry([1.0], "drop", source_path="/s/b.dat",
+                                   particle_index=1), "stale": True},
+    ]}
+    names = [n for n, _ in feature_bank.bank_to_samples(bank)]
+    assert names == ["keep"]
+
+
 def test_class_counts():
     entries = [_entry(0), _entry(1), _entry(2, "ring"), {"embedding": [1.0]}]
     assert feature_bank.class_counts(entries) == {"disk": 2, "ring": 1, "?": 1}

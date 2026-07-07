@@ -11,13 +11,14 @@ GUI-free and dependency-light (json + numpy only): the embeddings are produced b
 ``probeflow.analysis.features._embed_clip`` upstream and passed in as plain lists,
 so this module never imports torch/clip.
 
-KNOWN GAP (physics review 2026-07-02, not yet fixed): entries record no pixel
-size, but crops are a fixed 48 px (see ``embed_particles_clip`` in
-``probeflow.analysis.features``), so a banked sample's physical field of view
-depends on its source scan's resolution. CLIP embeddings are not scale
-invariant, so cross-scan classification is scale-blind and there is currently
-no way to detect the mismatch after the fact. See ``make_entry`` below for
-where to add the fix.
+SCALE GAP FIX (schema 2, 2026-07-07): entries now record the physical crop
+scale — ``pixel_size_nm``, ``fov_nm``, ``out_px``, ``area_nm2`` — and the
+``embed_version`` of the crop/mask/encode pipeline that produced the embedding
+(``probeflow.analysis.features.EMBED_VERSION``). Classification uses these to
+only compare embeddings computed at the same scale by the same pipeline (see
+``select_bank_samples``); mismatched or legacy (schema-1, unscaled) entries are
+excluded rather than silently mis-matched. Legacy banks are re-embedded by
+``scripts/migrate_feature_bank.py`` where the source scan is still reachable.
 """
 
 from __future__ import annotations
@@ -26,11 +27,11 @@ import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Sequence
+from typing import Optional, Sequence
 
 import numpy as np
 
-BANK_SCHEMA_VERSION = 1
+BANK_SCHEMA_VERSION = 2
 
 
 def default_bank_path() -> Path:
@@ -84,14 +85,27 @@ def make_entry(
     source_path,
     particle_index: int,
     bbox_px=None,
+    embed_version: Optional[str] = None,
+    pixel_size_nm: Optional[float] = None,
+    fov_nm: Optional[float] = None,
+    out_px: Optional[int] = None,
+    area_nm2: Optional[float] = None,
 ) -> dict:
-    """Build one bank entry (a labelled CLIP embedding + provenance).
+    """Build one bank entry (a labelled CLIP embedding + provenance + scale).
 
-    TODO(scale-blind bank, see module docstring): while the schema is still
-    young (``BANK_SCHEMA_VERSION`` above), consider adding the source scan's
-    pixel size (or the crop's physical size in nm) here so Phase-2
-    classification can warn on or weight by a scale mismatch between the bank
-    entry and the particle being classified.
+    The scale fields (schema 2) let classification only compare embeddings
+    computed at the same physical scale by the same pipeline:
+
+    * ``embed_version`` — the crop/mask/encode pipeline id
+      (``probeflow.analysis.features.EMBED_VERSION``). Entries whose version
+      differs from the current classifier are excluded, never mis-matched.
+    * ``pixel_size_nm`` / ``fov_nm`` / ``out_px`` — the physical crop geometry.
+    * ``area_nm2`` — the labelled particle's physical area, for the optional
+      size gate in ``classify_particles``.
+
+    All scale fields default to ``None`` for back-compat; an entry without
+    ``embed_version`` is treated as legacy/unscaled and skipped by
+    ``select_bank_samples`` until re-embedded by the migration script.
     """
     return {
         "class_name": str(class_name),
@@ -99,6 +113,11 @@ def make_entry(
         "source_path": str(source_path) if source_path is not None else None,
         "particle_index": int(particle_index),
         "bbox_px": [int(v) for v in bbox_px] if bbox_px is not None else None,
+        "embed_version": str(embed_version) if embed_version is not None else None,
+        "pixel_size_nm": float(pixel_size_nm) if pixel_size_nm is not None else None,
+        "fov_nm": float(fov_nm) if fov_nm is not None else None,
+        "out_px": int(out_px) if out_px is not None else None,
+        "area_nm2": float(area_nm2) if area_nm2 is not None else None,
         "added_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
 
@@ -156,15 +175,80 @@ def append_entries(path, new_entries: Sequence[dict]) -> dict:
 def bank_to_samples(bank: dict) -> list:
     """Return ``(class_name, embedding)`` pairs from a loaded bank.
 
-    Malformed entries (missing name or empty embedding) are skipped rather than
-    raised, so one corrupt row can't block classification with the rest of the
-    bank. This is the Phase-2 read path: the pairs feed straight into
-    ``classify_particles(bank_samples=...)``.
+    Malformed entries (missing name or empty embedding) and entries marked
+    ``stale`` (migration could not re-embed them) are skipped rather than
+    raised, so one bad row can't block classification with the rest of the
+    bank. Note: this does NOT enforce scale/pipeline compatibility — use
+    :func:`select_bank_samples` for the classifier read path.
     """
     out = []
     for e in bank.get("entries", []):
+        if e.get("stale"):
+            continue
         name = e.get("class_name")
         emb = e.get("embedding")
         if isinstance(name, str) and name and isinstance(emb, list) and emb:
             out.append((name, emb))
     return out
+
+
+def select_bank_samples(
+    bank: dict,
+    *,
+    embed_version: str,
+    fov_nm: float,
+    out_px: int,
+    fov_tol: float = 0.05,
+) -> dict:
+    """Pick bank entries comparable to the current classifier configuration.
+
+    Only entries produced by the same crop/mask/encode pipeline
+    (``embed_version``) at the same physical FOV and output grid are safe to
+    compare against the current scan's embeddings. Everything else — legacy
+    (schema-1, no ``embed_version``), a different pipeline, a different FOV, or
+    a ``stale`` entry — is excluded and counted by reason, so the caller can
+    tell the operator *why* N banked samples were skipped instead of silently
+    mis-matching them (the original scale-blind bug).
+
+    Returns ``{"names", "embeddings", "areas", "kept", "skipped", "reasons"}``
+    where ``names``/``embeddings``/``areas`` are aligned lists ready to feed
+    ``classify_particles(bank_samples=zip(names, embeddings), bank_areas=areas)``.
+    """
+    names: list[str] = []
+    embeddings: list[list] = []
+    areas: list = []
+    reasons = {"legacy": 0, "pipeline": 0, "fov": 0, "stale": 0, "malformed": 0}
+
+    for e in bank.get("entries", []):
+        name = e.get("class_name")
+        emb = e.get("embedding")
+        if not (isinstance(name, str) and name and isinstance(emb, list) and emb):
+            reasons["malformed"] += 1
+            continue
+        if e.get("stale"):
+            reasons["stale"] += 1
+            continue
+        ev = e.get("embed_version")
+        if ev is None:
+            reasons["legacy"] += 1
+            continue
+        if ev != embed_version:
+            reasons["pipeline"] += 1
+            continue
+        e_fov, e_out = e.get("fov_nm"), e.get("out_px")
+        if (e_out != int(out_px) or e_fov is None
+                or abs(float(e_fov) - float(fov_nm)) > fov_tol * float(fov_nm)):
+            reasons["fov"] += 1
+            continue
+        names.append(name)
+        embeddings.append(emb)
+        areas.append(e.get("area_nm2"))
+
+    return {
+        "names": names,
+        "embeddings": embeddings,
+        "areas": areas,
+        "kept": len(names),
+        "skipped": sum(reasons.values()),
+        "reasons": reasons,
+    }

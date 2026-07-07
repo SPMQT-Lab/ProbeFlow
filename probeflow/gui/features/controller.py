@@ -279,14 +279,35 @@ class FeatureCountingController(QObject):
 
         entry = self._panel.current_entry()
         source_path = str(entry.path) if entry is not None else None
+        px_x_m, px_y_m = self._panel.current_pixel_sizes()
+        if not px_x_m or not px_y_m or px_x_m <= 0 or px_y_m <= 0:
+            self._sidebar.set_status(
+                "Scan has no physical pixel size — cannot bank a scaled sample.")
+            return
+        from probeflow.analysis.features import (
+            EMBED_VERSION, DEFAULT_CROP_FOV_NM, DEFAULT_OUT_PX,
+        )
+        pixel_size_nm = float(np.sqrt(px_x_m * px_y_m)) * 1e9
         try:
-            embs = embed_particles_clip(arr, [p for _, p in rows])
+            # Physical-FOV embedding so banked vectors are comparable across
+            # scans (scale-invariant); record the scale so the classifier can
+            # gate on it. Same crop pipeline classify uses.
+            embs = embed_particles_clip(
+                arr, [p for _, p in rows],
+                pixel_size_x_m=px_x_m, pixel_size_y_m=px_y_m,
+                fov_nm=DEFAULT_CROP_FOV_NM, out_px=DEFAULT_OUT_PX,
+            )
             new_entries = [
                 feature_bank.make_entry(
                     embs[i], name,
                     source_path=source_path,
                     particle_index=p.index,
                     bbox_px=getattr(p, "bbox_px", None),
+                    embed_version=EMBED_VERSION,
+                    pixel_size_nm=pixel_size_nm,
+                    fov_nm=DEFAULT_CROP_FOV_NM,
+                    out_px=DEFAULT_OUT_PX,
+                    area_nm2=getattr(p, "area_nm2", None),
                 )
                 for i, (name, p) in enumerate(rows)
             ]
@@ -483,8 +504,12 @@ class FeatureCountingController(QObject):
             run_p = self._sidebar.classify_run_params()
 
             # Sample bank (Phase 2): match against embeddings saved on previous
-            # scans. The bank holds CLIP vectors, so it needs the CLIP encoder.
+            # scans. The bank holds CLIP vectors, so it needs the CLIP encoder,
+            # and only entries computed by the current pipeline at this FOV are
+            # comparable — select_bank_samples enforces that (scale-blind fix).
             bank_samples = None
+            bank_areas = None
+            skipped_note = ""
             if run_p.get("use_bank"):
                 if run_p.get("encoder") != "clip":
                     self._sidebar.set_status(
@@ -492,13 +517,28 @@ class FeatureCountingController(QObject):
                         "CLIP (ViT-B/32) or Auto.")
                     return
                 from probeflow.analysis import feature_bank
+                from probeflow.analysis.features import (
+                    EMBED_VERSION, DEFAULT_CROP_FOV_NM, DEFAULT_OUT_PX,
+                )
                 bank = feature_bank.load_bank(feature_bank.default_bank_path())
-                bank_samples = feature_bank.bank_to_samples(bank) or None
+                sel = feature_bank.select_bank_samples(
+                    bank, embed_version=EMBED_VERSION,
+                    fov_nm=DEFAULT_CROP_FOV_NM, out_px=DEFAULT_OUT_PX,
+                )
+                if sel["names"]:
+                    bank_samples = list(zip(sel["names"], sel["embeddings"]))
+                    bank_areas = sel["areas"]
+                if sel["skipped"]:
+                    r = sel["reasons"]
+                    detail = ", ".join(f"{k}:{v}" for k, v in r.items() if v)
+                    skipped_note = (
+                        f" ({sel['skipped']} banked sample(s) skipped — {detail})")
 
             if not self._panel.has_sample_labels() and not bank_samples:
                 self._sidebar.set_status(
                     "Click particles on the image to label at least one "
-                    "example, or enable the sample bank.")
+                    "example, or enable the sample bank."
+                    + (skipped_note or ""))
                 return
             idx_to_p = {p.index: p for p in particles}
             samples = [
@@ -510,6 +550,9 @@ class FeatureCountingController(QObject):
                 "particles":        particles,
                 "samples":          samples,
                 "bank_samples":     bank_samples,
+                "bank_areas":       bank_areas,
+                "pixel_size_x_m":   px_x_m if bank_samples else None,
+                "pixel_size_y_m":   px_y_m if bank_samples else None,
                 "use_sharpness":    run_p.get("use_sharpness",    False),
                 "threshold_method": run_p.get("threshold_method", "gmm"),
                 "manual_threshold": run_p.get("manual_threshold", 0.5),
@@ -518,7 +561,11 @@ class FeatureCountingController(QObject):
             }
             if bank_samples:
                 self._sidebar.set_status(
-                    f"Classifying with {len(bank_samples)} banked sample(s)…")
+                    f"Classifying with {len(bank_samples)} banked sample(s)…"
+                    + skipped_note)
+            elif skipped_note:
+                self._sidebar.set_status(
+                    "No compatible banked samples for this scan" + skipped_note)
         else:
             self._sidebar.set_status(f"Unknown mode {mode!r}")
             return
