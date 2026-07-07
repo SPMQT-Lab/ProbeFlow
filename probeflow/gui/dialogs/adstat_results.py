@@ -179,7 +179,7 @@ class AdStatResultView(QWidget):
         rows = tuple(_field(self._spec, "verdict_rows", ()) or ())
         if rows:
             layout.addWidget(_section_label("Model summary"))
-            layout.addWidget(_model_summary_widget(rows))
+            layout.addWidget(_model_summary_widget(rows, theme=self._theme))
             note = QLabel(
                 "The same model can appear several times because Particle Statistics "
                 "tests one null model with several statistics. Read the group as one "
@@ -1439,7 +1439,8 @@ def _caption_label(panel: Any) -> QLabel:
     return label
 
 
-def _model_summary_widget(rows: tuple[tuple[Any, ...], ...]) -> QWidget:
+def _model_summary_widget(rows: tuple[tuple[Any, ...], ...],
+                          theme: dict | None = None) -> QWidget:
     container = QWidget()
     layout = QVBoxLayout(container)
     layout.setContentsMargins(0, 0, 0, 0)
@@ -1455,6 +1456,7 @@ def _model_summary_widget(rows: tuple[tuple[Any, ...], ...]) -> QWidget:
         return container
     green = "#2fb344"
     red = "#e0564b"
+    border = (theme or {}).get("border", "#384250")
     for model_id, entries in grouped.items():
         # A model is ruled out if any one statistic rejects it; plausible only when
         # every statistic stays consistent. Colour the card so it reads at a glance.
@@ -1463,7 +1465,7 @@ def _model_summary_widget(rows: tuple[tuple[Any, ...], ...]) -> QWidget:
         card = QFrame(container)
         card.setFrameShape(QFrame.StyledPanel)
         card.setStyleSheet(
-            f"QFrame {{ border: 1px solid #384250; border-left: 5px solid {bar}; }}"
+            f"QFrame {{ border: 1px solid {border}; border-left: 5px solid {bar}; }}"
         )
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(10, 8, 8, 8)

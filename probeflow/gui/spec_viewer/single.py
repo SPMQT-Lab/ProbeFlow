@@ -86,7 +86,8 @@ class SpecViewerDialog(QDialog):
     ``spec.channel_order`` and stacks one subplot per selected channel.
     """
 
-    # Dark-theme colours for plot elements.
+    # Fallback plot colours — shadowed per-instance from the active theme in
+    # __init__ so the plots follow light/dark themes.
     _BG = "#1e1e2e"
     _FG = "#cdd6f4"
     # Plot curve colours, cycled across selected channels.
@@ -101,6 +102,8 @@ class SpecViewerDialog(QDialog):
         self.resize(1100, 640)
         self._entry = entry
         self._t = t
+        self._BG = (t or {}).get("bg", self._BG)
+        self._FG = (t or {}).get("fg", self._FG)
         self._spec = None
         self._checkboxes: dict[str, QCheckBox] = {}
         self._channel_check_widgets: list[QCheckBox] = []
