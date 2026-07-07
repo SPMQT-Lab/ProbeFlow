@@ -14,7 +14,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
-import pytest
 
 from probeflow.analysis import feature_bank
 from probeflow.analysis.features import EMBED_VERSION
