@@ -119,3 +119,17 @@ def test_histogram_degenerate_range_does_not_raise():
         assert counts.sum() == arr.size
         assert len(edges) == 257
         assert edges[0] < value < edges[-1] or value == edges[0]
+
+
+def test_histogram_sub_resolution_span_does_not_raise():
+    """A span of a few float64 ulps is > 0 but still cannot hold 128
+    finite-sized bins — the CI failure mode on newer numpy, where
+    percentiles of a constant image round to adjacent floats rather than
+    exactly equal values."""
+    for magnitude in (7.25e5, 1.0, 1e-9):
+        arr = np.full((32, 32), magnitude)
+        arr[0, 0] = magnitude + np.spacing(magnitude)  # 1-ulp span
+        counts, edges = histogram_from_array(
+            arr, bins=128, clip_percentiles=(0.1, 99.9))
+        assert counts.sum() == arr.size
+        assert np.all(np.diff(edges) > 0)  # every bin finite-sized

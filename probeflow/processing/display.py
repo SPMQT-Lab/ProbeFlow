@@ -186,14 +186,25 @@ def histogram_from_array(
         raise ValueError("Array contains no finite values — cannot compute histogram.")
 
     vmin, vmax = clip_range_from_array(arr, *clip_percentiles)
-    if not (np.isfinite(vmin) and np.isfinite(vmax)) or vmax <= vmin:
-        # Degenerate display range (near-constant image after flattening):
-        # numpy raises "Too many bins for data range" on a zero span. Widen
-        # symmetrically by an epsilon scaled to the data so the histogram
-        # stays well-defined with all counts in the central bins.
-        centre = float(vmin) if np.isfinite(vmin) else float(np.median(finite))
-        span = max(abs(centre) * 1e-9, np.finfo(np.float64).eps * bins)
-        vmin, vmax = centre - span, centre + span
+    # Degenerate display range (near-constant image after flattening): numpy
+    # raises "Too many bins for data range" whenever the span cannot hold
+    # `bins` finite-sized float64 bins — that includes spans of a few ulps,
+    # not just exactly zero (percentile rounding differs across numpy
+    # versions, so a constant image may yield either). Widen symmetrically
+    # to a span the bin count can resolve; all counts land in the centre.
+    finite_range = np.isfinite(vmin) and np.isfinite(vmax)
+    if finite_range:
+        min_span = np.spacing(max(abs(vmin), abs(vmax), 1.0)) * bins * 4
+    if not finite_range or (vmax - vmin) < min_span:
+        centre = (
+            (float(vmin) + float(vmax)) / 2.0 if finite_range
+            else float(np.median(finite))
+        )
+        half = max(
+            abs(centre) * 1e-9,
+            np.spacing(max(abs(centre), 1.0)) * bins * 4,
+        )
+        vmin, vmax = centre - half, centre + half
     counts, edges = np.histogram(finite, bins=bins, range=(vmin, vmax))
     return counts, edges
 
