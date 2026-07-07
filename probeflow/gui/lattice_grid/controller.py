@@ -96,7 +96,7 @@ class LatticeGridController(QObject):
         t = event.type()
 
         if t == QEvent.Type.MouseButtonPress and event.button() == Qt.LeftButton:
-            vpos = event.pos()
+            vpos = event.position().toPoint()
             hid = self.hit_handle_screen(vpos)
             if hid != _HANDLE_NONE:
                 self._drag_handle = hid
@@ -107,7 +107,7 @@ class LatticeGridController(QObject):
                 return True
 
         elif t == QEvent.Type.MouseMove:
-            vpos = event.pos()
+            vpos = event.position().toPoint()
             if self._dragging:
                 self._update_drag(self._canvas.mapToScene(vpos))
                 event.accept()

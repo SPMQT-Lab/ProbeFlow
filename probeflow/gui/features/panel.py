@@ -300,12 +300,12 @@ class _FeatureView(QGraphicsView):
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.RightButton:
-            pos = self.mapToScene(event.pos())
+            pos = self.mapToScene(event.position().toPoint())
             self.particle_right_clicked.emit(pos.x(), pos.y())
             event.accept()
             return
         if event.button() == Qt.LeftButton:
-            pos = self.mapToScene(event.pos())
+            pos = self.mapToScene(event.position().toPoint())
             if self._zero_plane_armed:
                 self.zero_plane_pick.emit(pos.x(), pos.y())
                 event.accept()
@@ -331,11 +331,11 @@ class _FeatureView(QGraphicsView):
 
     def mouseMoveEvent(self, event) -> None:
         if self._mask_painting and (event.buttons() & Qt.LeftButton):
-            pos = self.mapToScene(event.pos())
+            pos = self.mapToScene(event.position().toPoint())
             self.mask_painted.emit(pos.x(), pos.y())
             return
         if self._cropping and self._crop_start and (event.buttons() & Qt.LeftButton):
-            pos = self.mapToScene(event.pos())
+            pos = self.mapToScene(event.position().toPoint())
             x0, y0 = self._crop_start
             rect = QRectF(
                 QPointF(min(x0, pos.x()), min(y0, pos.y())),
@@ -348,7 +348,7 @@ class _FeatureView(QGraphicsView):
 
     def mouseReleaseEvent(self, event) -> None:
         if self._cropping and self._crop_start and event.button() == Qt.LeftButton:
-            pos = self.mapToScene(event.pos())
+            pos = self.mapToScene(event.position().toPoint())
             x0, y0 = self._crop_start
             x1, y1 = pos.x(), pos.y()
             ix0, iy0 = int(min(x0, x1)), int(min(y0, y1))

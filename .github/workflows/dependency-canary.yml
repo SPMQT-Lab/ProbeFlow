@@ -1,0 +1,74 @@
+name: dependency-canary
+
+# Weekly early-warning run against UNPINNED latest dependencies.
+#
+# Regular CI (ci.yml) installs through pyproject and therefore respects the
+# version ceilings (numpy<3, PySide6<7) and any constraints — it tells you the
+# supported environment works. This job deliberately upgrades every runtime
+# dependency to the newest release on PyPI (bypassing the ceilings via
+# --no-deps) and runs the full suite, so a breaking PySide6/numpy/skimage
+# release shows up here as a calendar item instead of as a broken lab machine.
+#
+# A red canary does NOT block merges. When it fires: reproduce locally with
+# the same upgrade line, fix or bound the offending package, and refresh
+# constraints.txt.
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"  # Mondays 06:00 UTC
+  workflow_dispatch:
+
+jobs:
+  latest-deps:
+    name: pytest on unpinned latest (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+
+    env:
+      QT_QPA_PLATFORM: offscreen
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Qt runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 libgl1 libxkbcommon0 libdbus-1-3 \
+            libfontconfig1 libxcb-cursor0 libxcb-icccm4 \
+            libxcb-image0 libxcb-keysyms1 libxcb-randr0 \
+            libxcb-render-util0 libxcb-shape0 libxcb-sync1 \
+            libxcb-xfixes0 libxcb-xkb1 libxkbcommon-x11-0
+
+      - name: Install newest releases of every runtime dependency
+        run: |
+          python -m pip install --upgrade pip
+          # Latest of everything, ignoring the pyproject ceilings on purpose.
+          python -m pip install --upgrade \
+            numpy scipy pillow PySide6 matplotlib shapely scikit-image \
+            opencv-python scikit-learn pytest
+          # Package itself without resolving deps (they are already newest).
+          python -m pip install -e . --no-deps
+
+      - name: Report resolved versions
+        run: python -m pip list --format=freeze | grep -iE "numpy|scipy|pillow|pyside6|matplotlib|shapely|scikit" || true
+
+      - name: Run pytest
+        run: pytest -v
+
+      - name: Deprecation sweep (informational)
+        if: always()
+        run: |
+          # Surface how much deprecated API the newest deps complain about,
+          # so migrations can start before removals land.
+          pytest tests/test_canvas_selection_interactions.py \
+                 tests/test_roi_resize_handles_canvas.py -q -W always 2>&1 \
+            | grep -iE "deprecat" | sort | uniq -c | sort -rn | head -20 || true
