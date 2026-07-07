@@ -203,6 +203,9 @@ class ImageCanvas(QGraphicsView):
         self._image_pixmap: Optional[QPixmap] = None
         self._image_size: Optional[tuple[int, int]] = None
         self._raw_arr: Optional[np.ndarray] = None
+        # Externally-set minimum widget size, captured on first _apply_zoom
+        # (see the comment there — setFixedSize destroys the live minimum).
+        self._external_min_size: Optional[tuple[int, int]] = None
 
         self._pixmap_item = QGraphicsPixmapItem()
         self._pixmap_item.setZValue(0)
@@ -339,9 +342,18 @@ class ImageCanvas(QGraphicsView):
     def _apply_zoom(self) -> None:
         if self._image_pixmap is None or self._image_pixmap.isNull():
             return
+        # Honour an externally-set minimum (the Dataset Builder pane calls
+        # setMinimumSize on its canvas), but capture it ONCE before the first
+        # setFixedSize below: setFixedSize itself installs minimum == maximum,
+        # so reading minimumWidth() on later passes would return our own
+        # previous size and the canvas could never shrink again (zoom-out and
+        # fit-to-view would silently stop working).
+        if self._external_min_size is None:
+            self._external_min_size = (self.minimumWidth(), self.minimumHeight())
+        min_w, min_h = self._external_min_size
         Nx, Ny = self._image_size
-        w = max(1, int(Nx * self._zoom), self.minimumWidth())
-        h = max(1, int(Ny * self._zoom), self.minimumHeight())
+        w = max(1, int(Nx * self._zoom), min_w)
+        h = max(1, int(Ny * self._zoom), min_h)
         self.scene().setSceneRect(0, 0, Nx, Ny)
         self.setTransform(QTransform().scale(self._zoom, self._zoom))
         self.setFixedSize(w, h)

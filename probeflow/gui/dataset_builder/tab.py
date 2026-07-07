@@ -9,7 +9,6 @@ from PySide6.QtCore import Qt, Signal, QThreadPool
 from PySide6.QtGui import QImage, QKeySequence, QPainter, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QComboBox,
-    QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
@@ -30,13 +29,13 @@ from probeflow.dataset_builder.annotations import (
     save_mask_annotation,
     save_review_annotation,
 )
-from probeflow.dataset_builder.loading import load_scan_plane
 from probeflow.dataset_builder.models import DatasetExportSpec, DatasetQueueItem, DatasetTaskConfig
 from probeflow.dataset_builder.cache import (
     DatasetBuilderCache,
     LoadedSampleRaw,
     QuickSegPreprocKey,
     QuickSegWatershedKey,
+    SampleCacheKey,
     quickseg_params_fingerprint,
     quickseg_seed_fingerprint,
     sample_cache_key,
@@ -360,7 +359,6 @@ class DatasetBuilderPanel(QWidget):
 
     def _sync_shortcuts_for_task(self) -> None:
         is_step_edge = self._task() == "step_edge_mask"
-        is_quickseg = self._task() == "terrace_segmentation"
         for key in ("E", "V", "C", "Z"):
             if key in self._shortcuts:
                 self._shortcuts[key].setEnabled(is_step_edge)

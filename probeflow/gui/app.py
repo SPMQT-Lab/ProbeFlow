@@ -529,8 +529,8 @@ class ProbeFlowWindow(QMainWindow):
         workspace_menu = menu_bar.addMenu("Workspace")
         _mode_action(workspace_menu, "Browse", "browse", "Ctrl+1")
         _mode_action(workspace_menu, "Convert Createc .dat to .sxm", "convert", "Ctrl+2")
-        _mode_action(workspace_menu, "Feature Counting", "features")
         _mode_action(workspace_menu, "TV denoise", "tv", "Ctrl+4")
+        _mode_action(workspace_menu, "Dataset Builder", "dataset_builder", "Ctrl+Shift+D")
         survey_action = _mode_action(
             workspace_menu, "Survey (ScanFlow campaign)", "survey", "Ctrl+Shift+S"
         )
@@ -619,24 +619,10 @@ class ProbeFlowWindow(QMainWindow):
         map_action = QAction("Map Spectra to Images...", self)
         map_action.triggered.connect(self._on_map_spectra)
         tools_menu.addAction(map_action)
-        tools_menu.addSeparator()
-        _mode_action(tools_menu, "Feature Counting…", "features")
-        _mode_action(tools_menu, "TV denoise", "tv", "Ctrl+4")
-        _mode_action(tools_menu, "Dataset Builder", "dataset_builder", "Ctrl+Shift+D")
-        tools_menu.addSeparator()
-        survey_action = _mode_action(
-            tools_menu, "Survey (ScanFlow campaign)", "survey", "Ctrl+Shift+S"
-        )
-        if not self._survey_available:
-            survey_action.setEnabled(False)
-            survey_action.setToolTip(
-                "Survey mode requires the optional `scanflow` dependency."
-            )
-        tools_menu.addSeparator()
-        _mode_action(tools_menu, "Developer tools", "dev", "Ctrl+5")
-        prefs_action = QAction("Preferences...", self)
-        prefs_action.setEnabled(False)
-        tools_menu.addAction(prefs_action)
+        # Workspace pages (TV denoise, Dataset Builder, Survey, Developer
+        # tools) live in the Workspace menu only — the pre-merge duplicate
+        # block here registered the same shortcuts twice, which makes Qt
+        # treat them as ambiguous and fire neither.
 
         help_menu = menu_bar.addMenu("Help")
         definitions_action = QAction("Definitions", self)

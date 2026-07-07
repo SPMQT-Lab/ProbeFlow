@@ -295,3 +295,42 @@ class TestFitZoomFloor:
         finally:
             canvas.deleteLater()
             sa.deleteLater()
+
+    def test_canvas_can_shrink_after_growing(self, qapp):
+        # Regression (dataset_builder merge): _apply_zoom floored the new
+        # size at self.minimumWidth() — but setFixedSize itself installs
+        # minimum == maximum, so after one large layout the canvas could
+        # never shrink and zoom-out/fit silently stopped working.
+        from PySide6.QtGui import QPixmap
+        from probeflow.gui.image_canvas import ImageCanvas
+
+        canvas = ImageCanvas()
+        try:
+            pm = QPixmap(400, 400)
+            pm.fill()
+            canvas._view_scale_mode = "one_to_one"
+            canvas.set_source(pm, reset_zoom=True)
+            assert canvas.width() == 400
+            canvas.zoom_by(0.5)  # 400 -> 200
+            assert canvas.width() == 200
+        finally:
+            canvas.deleteLater()
+
+    def test_external_minimum_size_still_honoured(self, qapp):
+        # The Dataset Builder pane sets a minimum canvas size before any
+        # pixmap is loaded; zooming small must not go below it.
+        from PySide6.QtGui import QPixmap
+        from probeflow.gui.image_canvas import ImageCanvas
+
+        canvas = ImageCanvas()
+        try:
+            canvas.setMinimumSize(420, 360)
+            pm = QPixmap(400, 400)
+            pm.fill()
+            canvas._view_scale_mode = "one_to_one"
+            canvas.set_source(pm, reset_zoom=True)
+            canvas.zoom_by(0.5)
+            assert canvas.width() >= 420
+            assert canvas.height() >= 360
+        finally:
+            canvas.deleteLater()

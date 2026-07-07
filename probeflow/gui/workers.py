@@ -25,11 +25,6 @@ from probeflow.gui.models import (
 )
 from probeflow.dataset_builder.cache import (
     LoadedSampleRaw,
-    QuickSegPreprocKey,
-    QuickSegWatershedKey,
-    SampleCacheKey,
-    quickseg_params_fingerprint,
-    quickseg_seed_fingerprint,
     sample_cache_key,
 )
 from probeflow.dataset_builder.queue import build_queue_from_indexed_items

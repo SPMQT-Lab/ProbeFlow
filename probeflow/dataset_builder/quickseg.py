@@ -7,15 +7,12 @@ router.
 
 from __future__ import annotations
 
-import json
 import math
-import tempfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
 import numpy as np
-from PIL import Image
 from scipy.ndimage import convolve, gaussian_filter, median_filter
 from skimage import exposure
 from skimage.draw import line as draw_line

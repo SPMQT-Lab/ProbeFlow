@@ -32,7 +32,6 @@ from probeflow.io.roi_sidecar import default_roi_sidecar_path, load_roi_set_side
 from probeflow.io.writers.png import write_png
 from probeflow.provenance.export import (
     build_scan_export_provenance,
-    png_display_state,
     write_provenance_sidecars,
 )
 

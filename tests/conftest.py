@@ -36,6 +36,8 @@ GUI_TEST_MODULES = {
     "test_workflow_replay.py",
     "test_spec_viewer_display.py",
     "test_canvas_selection_interactions.py",
+    "test_dataset_builder_view_tray.py",
+    "test_browse_folder_filter_ui.py",
 }
 
 MIXED_QT_FIXTURE_MODULES = {

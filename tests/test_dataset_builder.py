@@ -15,10 +15,8 @@ from probeflow.dataset_builder.loading import load_scan_plane
 from probeflow.dataset_builder.models import DatasetExportSpec, DatasetTaskConfig
 from probeflow.dataset_builder.cache import (
     DatasetBuilderCache,
-    LoadedSampleRaw,
     QuickSegPreprocKey,
     QuickSegWatershedKey,
-    SampleCacheKey,
     quickseg_params_fingerprint,
     quickseg_seed_fingerprint,
     sample_cache_key,
@@ -286,7 +284,6 @@ def test_dataset_builder_cache_separates_preproc_and_watershed_layers(tmp_path):
     cache = DatasetBuilderCache()
     prepared = object()
     labels_a = np.ones((4, 4), dtype=np.int32)
-    labels_b = np.full((4, 4), 2, dtype=np.int32)
 
     cache.put_preproc(preproc_key, prepared)  # type: ignore[arg-type]
     cache.put_watershed(ws_key_a, labels_a)
