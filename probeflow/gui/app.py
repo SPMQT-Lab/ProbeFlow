@@ -425,6 +425,13 @@ class ProbeFlowWindow(QMainWindow):
         self._browse_tools.thumbnail_channel_changed.connect(self._on_thumbnail_channel_changed)
         self._browse_tools.thumbnail_size_changed.connect(self._on_thumbnail_size_changed)
         self._browse_tools.open_fc_window_requested.connect(self._open_fc_window)
+        # Status bar must exist before initial browse/filter sync because those
+        # calls can emit progress/completion signals immediately.
+        self._status_bar = QStatusBar()
+        self._status_bar.setFont(ui_font(10))
+        self.setStatusBar(self._status_bar)
+        self._dataset_builder_panel.status_message.connect(self._status_bar.showMessage)
+        self._status_bar.showMessage("Open a folder to browse scans")
         # Apply saved thumbnail size preference.
         saved_size = self._cfg.get("thumbnail_size", "large")
         if saved_size != "large":
@@ -453,12 +460,6 @@ class ProbeFlowWindow(QMainWindow):
             self._on_open_particle_statistics_from_features)
         self._dataset_builder_panel.counts_changed.connect(
             self._dataset_builder_sidebar.set_counts)
-        # Status bar
-        self._status_bar = QStatusBar()
-        self._status_bar.setFont(ui_font(10))
-        self.setStatusBar(self._status_bar)
-        self._dataset_builder_panel.status_message.connect(self._status_bar.showMessage)
-        self._status_bar.showMessage("Open a folder to browse scans")
 
     def _build_menu_bar(self) -> None:
         menu_bar = self.menuBar()
@@ -1077,13 +1078,15 @@ class ProbeFlowWindow(QMainWindow):
         self._grid.set_folder_filter_state(state)
 
     def _on_folder_filter_started(self, folder_name: str) -> None:
-        self._status_bar.showMessage(f"Filtering {folder_name}...")
+        if hasattr(self, "_status_bar"):
+            self._status_bar.showMessage(f"Filtering {folder_name}...")
 
     def _on_folder_filter_finished(self, counts) -> None:
         cur = self._grid.current_dir()
         loc = cur.name if cur else "?"
         self._n_loaded = counts.visible_scans + counts.visible_spectra
-        self._status_bar.showMessage(f"{loc}: {self._format_browse_counts(counts)}")
+        if hasattr(self, "_status_bar"):
+            self._status_bar.showMessage(f"{loc}: {self._format_browse_counts(counts)}")
 
     def _on_export_filtered_folder(self) -> None:
         current_dir = self._grid.current_dir()
@@ -1430,6 +1433,40 @@ class ProbeFlowWindow(QMainWindow):
         dlg.activateWindow()
         if set_id:
             dlg.select_feature_set(set_id)
+
+    def _on_features_load_from_browse(self) -> None:
+        """Read Browse selection and load it into the in-tab Feature Counting page."""
+        from probeflow.gui.models import VertFile
+
+        entry = self._grid.get_primary_entry()
+        if not entry:
+            self._features_sidebar.set_status("Select a scan in the Browse tab first.")
+            self._status_bar.showMessage("Pick a scan in Browse to load it into Feature Counting")
+            return
+        if isinstance(entry, VertFile):
+            self._features_sidebar.set_status("Selected entry is not a topography scan.")
+            return
+        plane_idx = self._features_sidebar.plane_index()
+        self._features_sidebar.set_status("Loading scan...")
+        worker = _ScanLoadWorker(self._load_scan_plane_for_analysis, entry, plane_idx)
+        worker.signals.finished.connect(
+            lambda result, error, e=entry: self._on_features_load_finished(e, result, error)
+        )
+        self._features_pool.start(worker)
+
+    def _on_features_load_finished(self, entry, result, error: str) -> None:
+        """Receive the background-loaded scan and hand it to the in-tab Features page."""
+        if error:
+            self._features_sidebar.set_status(f"Could not read scan: {error}")
+            return
+        arr, px_m, px_x_m, px_y_m, plane_idx, scan = result
+        self._features_panel.load_entry(
+            entry, plane_idx, arr, px_m, px_x_m, px_y_m, scan=scan
+        )
+        self._features_sidebar.set_status(
+            f"Loaded {entry.stem} (plane {plane_idx}). Pick a mode and run."
+        )
+        self._status_bar.showMessage(f"{entry.stem} -> Feature Counting")
 
     def _on_fc_load_from_browse(self) -> None:
         """Bridge: read Browse selection → load into the floating FC window (off-thread)."""
