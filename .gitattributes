@@ -1,3 +1,5 @@
 *.bin binary
 *.dat binary
 *.sxm binary
+*.VERT binary
+*.sm4 binary

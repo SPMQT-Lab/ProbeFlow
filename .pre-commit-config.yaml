@@ -1,6 +1,12 @@
 # Run on every commit:  pip install pre-commit && pre-commit install
 # Run manually on all files:  pre-commit run --all-files
 
+# Instrument data and captured byte fixtures must never be "fixed": .dat/.sxm/
+# .VERT files mix a text header with a binary payload, so content-sniffing
+# hooks misidentify them as text and corrupt the payload (observed with
+# mixed-line-ending), and the file_cushions are byte-exact by definition.
+exclude: '^(test_data/|probeflow/data/)'
+
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.6.0
@@ -16,7 +22,9 @@ repos:
         args: ["--fix=lf"]
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.6.9
+    # Keep in lock-step with the ruff pin in constraints.txt — a version
+    # mismatch means the hook can pass while CI fails (or vice versa).
+    rev: v0.15.12
     hooks:
       - id: ruff
         args: ["--fix"]

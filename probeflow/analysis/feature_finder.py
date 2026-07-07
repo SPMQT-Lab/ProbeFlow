@@ -238,5 +238,3 @@ def feature_points_to_csv(
             f"{pt.z_value:.10g}",
         ])
     return out.getvalue()
-
-

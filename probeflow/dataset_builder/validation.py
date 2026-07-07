@@ -32,4 +32,3 @@ def validate_dataset(path: str | Path) -> dict:
             if rel and not (root / rel).exists():
                 errors.append(f"row {index}: missing mask path {rel}")
     return {"ok": not errors, "errors": errors, "n_rows": len(rows)}
-

@@ -209,9 +209,10 @@ dzdv = numeric_derivative(spec.x_array, z_smooth)
 ## Development
 
 ```bash
-python -m pip install -e ".[dev,features]"
+python -m pip install -e ".[dev,features]" -c constraints.txt
+pre-commit install              # once per clone — runs ruff on every commit
 pytest                          # run the test suite
-ruff check probeflow tests      # lint (install ruff separately or via pre-commit)
+ruff check .                    # lint (same pinned ruff as CI and the hook)
 ```
 
 Repository layout:

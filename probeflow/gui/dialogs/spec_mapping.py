@@ -259,4 +259,3 @@ class ViewerSpecMappingDialog(QDialog):
                 if out.get(spec_stem) == self._image_stem:
                     out.pop(spec_stem, None)
         return out
-

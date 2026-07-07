@@ -92,20 +92,20 @@ def z_scale_m_per_dac(hdr: dict, vpd: float) -> float:
     ``Dacto[A]z ≈ 2 * ZPiezoconst * vpd`` observed across all known Createc
     fixtures: ZPiezoconst already captures the full piezo + HV-amplifier
     sensitivity (nm per volt of DAC output), and the bipolar ±V_ref DAC gives
-    2*V_ref / 2^bits volts per count.  
+    2*V_ref / 2^bits volts per count.
 
-    After testing on some additional old createc files, GainZ value can change to be not 10. 
-    One file had it as 3, and analysis of that image gave a 3* larger step height, suggesting scaling 
+    After testing on some additional old createc files, GainZ value can change to be not 10.
+    One file had it as 3, and analysis of that image gave a 3* larger step height, suggesting scaling
     was a factor of 3 larger than expected from the Dacto[A]z formula.
 
-    the model now is: 
+    the model now is:
     ZPiezoconst / Dacto[A]z = piezo displacement per DAC output count at a reference Z gain (with GainZ_ref = 10)
     GainZ = user-selected Z high-voltage amplifier gain
     raw_z_counts = feedback/controller counts saved before, or not fully including, that gain
 
-    With this, we obtain the physical height to be: 
-    
-    z = raw_z_counts * base_dac_to_z * actual_gain / reference_gain 
+    With this, we obtain the physical height to be:
+
+    z = raw_z_counts * base_dac_to_z * actual_gain / reference_gain
 
     with reference gain as 10 this leaves the GainZ=10 files unchanged and scales GainZ=3 files by 0.3
 

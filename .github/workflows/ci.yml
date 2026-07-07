@@ -71,11 +71,16 @@ jobs:
           python-version: "3.12"
           cache: pip
 
+      # Pinned via constraints.txt so lint results cannot drift between a
+      # contributor's machine, the pre-commit hook, and CI (a new ruff
+      # release must not turn main red without a code change).
       - name: Install ruff
-        run: python -m pip install ruff
+        run: python -m pip install ruff -c constraints.txt
 
+      # Whole repo (incl. scripts/), matching `ruff check .` locally and the
+      # pre-commit hook's staged-file coverage.
       - name: ruff check
-        run: ruff check probeflow tests
+        run: ruff check .
       # Note: `ruff format --check` is intentionally not enforced in CI yet.
       # The existing codebase has not been through a one-time format pass.
       # Enable this step after the format pass commit lands (Track A).

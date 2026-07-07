@@ -39,13 +39,25 @@ extras installed (so OpenCV / scikit-learn paths are exercised).
 ## Linting
 
 ```bash
-ruff check probeflow tests
+ruff check .
 ```
 
 Currently we only enforce **pyflakes** (real bugs: undefined names,
 shadowed imports, etc.). The full pycodestyle / pep8-naming /
 import-sorting suite will be turned on after a one-time format pass.
 Until then, follow the existing style of the file you are editing.
+
+Ruff is version-pinned in `constraints.txt`, and CI and the pre-commit
+hook both use that pin — so `ruff check .` on your machine, the hook,
+and CI always agree. When bumping the pin, update `constraints.txt` and
+the `ruff-pre-commit` rev in `.pre-commit-config.yaml` together.
+
+**Please run `pre-commit install` once per clone** (see Local setup).
+Every red CI run so far has been a lint error that the hook would have
+caught before the commit was made. Note the hooks are configured to
+never touch `test_data/` or `probeflow/data/` — instrument files mix
+text headers with binary payloads, and "fixing" their line endings
+corrupts them.
 
 ## Architectural boundaries
 

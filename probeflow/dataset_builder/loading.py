@@ -37,4 +37,3 @@ def plane_sample_id(path: str | Path, plane_index: int) -> str:
     # with a short hash of the relative path (or the parent folder name).
     p = Path(path)
     return f"{p.stem}_plane{int(plane_index)}"
-

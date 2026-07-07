@@ -309,7 +309,7 @@ class LatticeGridDisplay:
 class RealSpaceCalibration:
     """
     Pixel → physical unit conversion for a real-space image.
-    
+
     All conversions assume linear pixel-to-physical mapping:
     - px_size_x, px_size_y are derived from scan_range_m and image dimensions
     - scan_range_m is the total scan range (metres), not per-pixel spacing

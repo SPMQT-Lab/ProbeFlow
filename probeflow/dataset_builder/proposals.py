@@ -97,4 +97,3 @@ def generate_proposal(
         )
 
     raise ValueError(f"No proposal implementation for method {method!r}")
-

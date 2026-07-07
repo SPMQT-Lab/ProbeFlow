@@ -126,7 +126,7 @@ def facet_level(
     # Convert gradient from data-units/pixel to dimensionless rise/run by
     # dividing by the physical pixel size in metres.  This makes the
     # tan(threshold_deg) comparison physically meaningful.
-    # 
+    #
     # Clamp pixel sizes to 1e-30 m/px as a guard: if pixel_size is 0 or NaN,
     # the clamp prevents division by zero while ensuring physically unreasonable
     # pixel sizes (< 1 pm) are treated as missing metadata. The resulting slope

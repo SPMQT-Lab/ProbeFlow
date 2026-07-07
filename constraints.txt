@@ -1,4 +1,4 @@
-# Known-good dependency versions for ProbeFlow (last verified 2026-07-06,
+# Known-good dependency versions for ProbeFlow (last verified 2026-07-08,
 # full suite green on macOS / Python 3.13).
 #
 # Usage — reproduce the verified environment:
@@ -11,8 +11,11 @@
 # has drifted from these.
 numpy==2.1.3
 scipy==1.15.3
-pillow==11.1.0
+pillow==12.2.0
 PySide6==6.11.0
 matplotlib==3.10.0
 shapely==2.1.2
 scikit-image==0.25.0
+# Toolchain: CI and the pre-commit hook pin the same ruff so lint results
+# cannot drift between a contributor's machine and CI.
+ruff==0.15.12
