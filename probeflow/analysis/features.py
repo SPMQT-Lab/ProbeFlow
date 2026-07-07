@@ -76,6 +76,165 @@ def _sklearn():
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# Scale-invariant classification crop pipeline
+# ═════════════════════════════════════════════════════════════════════════════
+# The classifier fingerprints a crop around each particle. The legacy crop is a
+# fixed *pixel* window (``_crop_particle``), so its physical field of view (FOV)
+# = crop_size_px × pixel_size varies per scan and the same molecule embeds
+# differently at different resolutions — which made the cross-scan feature bank
+# scale-blind. The physical-FOV path below crops a fixed FOV in *nanometres* and
+# resamples to a fixed grid, so every embedding is computed at the same nm/px by
+# construction, and optionally blends the background toward the crop median via
+# the segmentation mask so shape (not shared background) drives the similarity.
+#
+# EMBED_VERSION identifies this crop/mask/resample pipeline. The feature bank
+# stores it per entry and refuses to compare embeddings across versions — so any
+# change to the crop, mask, or resample logic below MUST bump EMBED_VERSION.
+DEFAULT_CROP_FOV_NM = 15.0   # physical field of view of each classifier crop, nm
+DEFAULT_OUT_PX = 96          # crops resampled to this fixed grid before encoding
+MIN_CROP_PX = 24             # below this the source scan is too coarse for the FOV
+EMBED_VERSION = "physfov-mask-v1"
+
+
+def _particle_center_px(particle: "Particle") -> tuple[int, int]:
+    cx = (particle.bbox_px[0] + particle.bbox_px[2]) // 2
+    cy = (particle.bbox_px[1] + particle.bbox_px[3]) // 2
+    return int(cx), int(cy)
+
+
+def _extract_window(arr2d: np.ndarray, cx: int, cy: int,
+                    win_x: int, win_y: int) -> np.ndarray:
+    """Reflect-padded ``(win_y, win_x)`` crop centred on ``(cx, cy)``.
+
+    Shared geometry so an image and its mask crop identically and stay aligned.
+    """
+    Ny, Nx = arr2d.shape
+    hx, hy = win_x // 2, win_y // 2
+    x0, x1 = cx - hx, cx - hx + win_x
+    y0, y1 = cy - hy, cy - hy + win_y
+    pad_l, pad_r = max(0, -x0), max(0, x1 - Nx)
+    pad_t, pad_b = max(0, -y0), max(0, y1 - Ny)
+    x0c, x1c = max(0, x0), min(Nx, x1)
+    y0c, y1c = max(0, y0), min(Ny, y1)
+    crop = arr2d[y0c:y1c, x0c:x1c]
+    if pad_l or pad_r or pad_t or pad_b:
+        crop = np.pad(crop, ((pad_t, pad_b), (pad_l, pad_r)), mode="reflect")
+    return crop
+
+
+def _physical_window_px(pixel_size_x_m: float, pixel_size_y_m: float,
+                        fov_nm: float) -> tuple[int, int]:
+    """Pixel side lengths that span ``fov_nm`` on each axis (rectangular-safe)."""
+    fov_m = float(fov_nm) * 1e-9
+    win_x = int(round(fov_m / float(pixel_size_x_m)))
+    win_y = int(round(fov_m / float(pixel_size_y_m)))
+    return max(1, win_x), max(1, win_y)
+
+
+def _particle_mask_full(shape: tuple[int, int], particle: "Particle",
+                        pixel_size_x_m: float, pixel_size_y_m: float) -> np.ndarray:
+    """Rasterise a particle's contour into a full-image uint8 mask (1 = inside).
+
+    Falls back to the bounding box when no usable contour is stored.
+    """
+    Ny, Nx = shape
+    mask = np.zeros((Ny, Nx), dtype=np.uint8)
+    contour = getattr(particle, "contour_xy_m", None)
+    if contour:
+        pts = np.array(
+            [[int(round(x / pixel_size_x_m)), int(round(y / pixel_size_y_m))]
+             for x, y in contour],
+            dtype=np.int32,
+        )
+        if len(pts) >= 3:
+            _cv().fillPoly(mask, [pts], 1)
+            return mask
+    x0, y0, x1, y1 = particle.bbox_px
+    mask[max(0, int(y0)):min(Ny, int(y1)), max(0, int(x0)):min(Nx, int(x1))] = 1
+    return mask
+
+
+def _crop_particle_physical(
+    arr: np.ndarray,
+    particle: "Particle",
+    *,
+    fov_nm: float,
+    pixel_size_x_m: float,
+    pixel_size_y_m: float,
+    out_px: int = DEFAULT_OUT_PX,
+    apply_mask: bool = True,
+) -> np.ndarray:
+    """Fixed-physical-FOV, fixed-grid crop for scale-invariant embedding.
+
+    Crops a ``fov_nm`` window around the centroid (reflect-padded at edges),
+    optionally blends the background toward the crop median through the feathered
+    segmentation mask, then resamples to ``out_px × out_px``. Raises ValueError
+    when the source scan is too coarse (window < ``MIN_CROP_PX``) to represent
+    the FOV without upsampling detail that isn't there.
+    """
+    cv2 = _cv()
+    win_x, win_y = _physical_window_px(pixel_size_x_m, pixel_size_y_m, fov_nm)
+    if min(win_x, win_y) < MIN_CROP_PX:
+        raise ValueError(
+            f"scan too coarse for a {fov_nm:.1f} nm crop: the FOV spans only "
+            f"{min(win_x, win_y)} px (< {MIN_CROP_PX} px minimum). Use a finer "
+            "scan or a larger FOV."
+        )
+    cx, cy = _particle_center_px(particle)
+    crop = _extract_window(np.asarray(arr, dtype=np.float64), cx, cy, win_x, win_y)
+    if apply_mask:
+        mask_full = _particle_mask_full(arr.shape, particle,
+                                        pixel_size_x_m, pixel_size_y_m)
+        mcrop = _extract_window(mask_full.astype(np.float64), cx, cy, win_x, win_y)
+        # Feather so the blend has no hard edge (hard edges create CLIP
+        # artefacts), then pull background toward the crop median.
+        sigma = max(win_x, win_y) / 24.0
+        if sigma > 0:
+            mcrop = cv2.GaussianBlur(mcrop, (0, 0), sigmaX=sigma)
+        mcrop = np.clip(mcrop, 0.0, 1.0)
+        bg = float(np.median(crop))
+        crop = bg + (crop - bg) * mcrop
+    interp = cv2.INTER_AREA if out_px < min(win_x, win_y) else cv2.INTER_LINEAR
+    resized = cv2.resize(crop.astype(np.float32), (out_px, out_px),
+                         interpolation=interp)
+    return resized.astype(np.float64)
+
+
+def _stack_crops(
+    arr: np.ndarray,
+    particles,
+    *,
+    crop_size_px: int,
+    pixel_size_x_m,
+    pixel_size_y_m,
+    fov_nm: float,
+    out_px: int,
+    apply_mask: bool,
+) -> np.ndarray:
+    """Stack crops for a list of particles via the physical or legacy path.
+
+    Physical path (``pixel_size_*`` given): scale-invariant fixed-FOV crops.
+    Legacy path (``pixel_size_*`` None): the historical fixed-pixel crops.
+    Returns an empty ``(0, H, W)`` stack when ``particles`` is empty.
+    """
+    physical = pixel_size_x_m is not None and pixel_size_y_m is not None
+    if not particles:
+        side = out_px if physical else crop_size_px
+        return np.empty((0, side, side), dtype=np.float64)
+    if physical:
+        return np.stack([
+            _crop_particle_physical(
+                arr, p, fov_nm=fov_nm,
+                pixel_size_x_m=pixel_size_x_m, pixel_size_y_m=pixel_size_y_m,
+                out_px=out_px, apply_mask=apply_mask,
+            )
+            for p in particles
+        ], axis=0)
+    return np.stack([_crop_particle(arr, p, crop_size_px) for p in particles],
+                    axis=0)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # 1. Particle segmentation   (UniMR-style Otsu + contour pipeline, in SI units)
 # ═════════════════════════════════════════════════════════════════════════════
 
@@ -598,7 +757,15 @@ def _normalise_brightness_u8(crop_u8: np.ndarray, target: float = 120.0) -> np.n
 
 
 def embed_particles_clip(
-    arr: np.ndarray, particles: Sequence["Particle"], *, crop_size_px: int = 48
+    arr: np.ndarray,
+    particles: Sequence["Particle"],
+    *,
+    crop_size_px: int = 48,
+    pixel_size_x_m: Optional[float] = None,
+    pixel_size_y_m: Optional[float] = None,
+    fov_nm: float = DEFAULT_CROP_FOV_NM,
+    out_px: int = DEFAULT_OUT_PX,
+    apply_mask: bool = True,
 ) -> np.ndarray:
     """CLIP-embed a set of particles cropped from ``arr``. Returns an (N, 512) array.
 
@@ -606,12 +773,21 @@ def embed_particles_clip(
     crop + embedding pipeline the classifier uses, without reaching into the
     private ``_crop_particle`` / ``_embed_clip`` internals. Returns an empty
     ``(0, 512)`` array when given no particles.
+
+    When ``pixel_size_x_m`` / ``pixel_size_y_m`` are given the scale-invariant
+    physical-FOV crop is used (:data:`EMBED_VERSION`), which is what the feature
+    bank requires so cross-scan embeddings are comparable. Without them the
+    legacy fixed-pixel crop is used (back-compat for callers that don't classify
+    across scans).
     """
     particles = list(particles)
     if not particles:
         return np.empty((0, 512), dtype=np.float64)
-    crops = np.stack(
-        [_crop_particle(arr, p, crop_size_px) for p in particles], axis=0
+    crops = _stack_crops(
+        arr, particles,
+        crop_size_px=crop_size_px,
+        pixel_size_x_m=pixel_size_x_m, pixel_size_y_m=pixel_size_y_m,
+        fov_nm=fov_nm, out_px=out_px, apply_mask=apply_mask,
     )
     return _embed_clip(crops)
 
@@ -741,6 +917,13 @@ def classify_particles(
     sharpness_weight: float = 3.0,
     rotate_augment: bool = False,
     bank_samples: Optional[Sequence[Tuple[str, Sequence[float]]]] = None,
+    pixel_size_x_m: Optional[float] = None,
+    pixel_size_y_m: Optional[float] = None,
+    fov_nm: float = DEFAULT_CROP_FOV_NM,
+    out_px: int = DEFAULT_OUT_PX,
+    apply_mask: bool = True,
+    bank_areas: Optional[Sequence[float]] = None,
+    area_gate_ratio: Optional[float] = None,
 ) -> List[Classification]:
     """Classify each particle against labelled sample particles.
 
@@ -792,6 +975,23 @@ def classify_particles(
         and are not comparable to the per-image raw/PCA pixel vectors.  With a
         non-empty bank, ``samples`` may be empty — a new scan can be classified
         without labelling anything in it.
+    pixel_size_x_m, pixel_size_y_m
+        Physical pixel sizes of ``arr`` (metres). When both are given, crops use
+        the scale-invariant physical-FOV path (see :data:`EMBED_VERSION`): a
+        fixed ``fov_nm`` window resampled to ``out_px``, so embeddings are
+        comparable across scan resolutions. **Required whenever ``bank_samples``
+        is used** — the bank holds physical-FOV embeddings that are only
+        comparable to physical-FOV crops. Omit both for the legacy fixed-pixel
+        crop (back-compat for in-image-only, non-bank classification).
+    fov_nm, out_px, apply_mask
+        Physical-FOV crop parameters (used only when pixel sizes are given):
+        field of view in nm, output grid size, and whether to blend background
+        toward the crop median via the feathered segmentation mask.
+    bank_areas, area_gate_ratio
+        Optional per-bank-entry particle areas (nm²) and a size gate. When
+        ``area_gate_ratio`` is set (e.g. 2.0), a bank sample is excluded for a
+        given particle unless their areas agree within that factor — cheap
+        rejection of same-shape-different-size confusions (monomer vs dimer).
 
     Returns
     -------
@@ -807,19 +1007,30 @@ def classify_particles(
             "bank_samples holds CLIP embeddings and requires encoder='clip' "
             f"(got encoder={encoder!r})"
         )
+    physical = pixel_size_x_m is not None and pixel_size_y_m is not None
+    if bank and not physical:
+        raise ValueError(
+            "bank_samples requires the physical-FOV crop path — pass "
+            "pixel_size_x_m and pixel_size_y_m so bank and in-image embeddings "
+            "are computed at the same scale"
+        )
     if not samples and not bank:
         return [Classification(p.index, "other", 0.0) for p in particles]
 
     all_particles = list(particles)
     sample_particles = [sp for _, sp in samples]
 
-    pcrops = np.stack([_crop_particle(arr, p, crop_size_px)
-                       for p in all_particles], axis=0)
+    _crop_kw = dict(
+        crop_size_px=crop_size_px,
+        pixel_size_x_m=pixel_size_x_m, pixel_size_y_m=pixel_size_y_m,
+        fov_nm=fov_nm, out_px=out_px, apply_mask=apply_mask,
+    )
+    pcrops = _stack_crops(arr, all_particles, **_crop_kw)
 
     # Build sample crops — optionally augmented with 36 rotations.  With a
     # bank-only run (no in-image samples) this degenerates to an empty stack;
     # every match candidate then comes from the bank.
-    raw_scrops = [_crop_particle(arr, sp, crop_size_px) for sp in sample_particles]
+    raw_scrops = list(_stack_crops(arr, sample_particles, **_crop_kw))
     if not raw_scrops:
         scrops = np.empty((0,) + pcrops.shape[1:], dtype=pcrops.dtype)
         sample_names: List[str] = []
@@ -911,6 +1122,29 @@ def classify_particles(
     s_u = _unit(s_emb)
     sim_matrix = p_u @ s_u.T    # (Np, Ns)
 
+    # ── Optional physical-size gate on bank candidates ────────────────────────
+    # A bank sample and a particle that share a shape but differ in physical
+    # size (e.g. monomer vs dimer) should not match. When an area gate is set,
+    # blank out (−inf) the similarity to any bank column whose area disagrees
+    # with the particle's by more than ``area_gate_ratio``×. Only bank columns
+    # are gated — in-image samples share this scan and need no size check.
+    if bank and area_gate_ratio and area_gate_ratio > 1.0 and bank_areas is not None:
+        n_bank = len(bank)
+        first_bank_col = sim_matrix.shape[1] - n_bank
+        b_area = list(bank_areas)
+        p_area = [float(getattr(p, "area_nm2", 0.0) or 0.0) for p in all_particles]
+        for j in range(n_bank):
+            bj = float(b_area[j]) if j < len(b_area) and b_area[j] else 0.0
+            if bj <= 0.0:
+                continue  # unknown bank area — can't judge, leave it in
+            col = first_bank_col + j
+            for i, ai in enumerate(p_area):
+                if ai <= 0.0:
+                    continue
+                ratio = max(ai / bj, bj / ai)
+                if ratio > area_gate_ratio:
+                    sim_matrix[i, col] = -np.inf
+
     # Per-particle: max similarity across all samples (or augmented rotations)
     # plus the class of the argmax.
     best_sim = sim_matrix.max(axis=1)
@@ -919,15 +1153,20 @@ def classify_particles(
     if threshold_method == "manual":
         cutoff = float(manual_threshold)
     else:
-        cutoff = _threshold_similarities(best_sim, threshold_method)
+        # The area gate can set a row entirely to −inf (every bank candidate
+        # rejected on size); those must not poison the data-driven cutoff.
+        finite = best_sim[np.isfinite(best_sim)]
+        cutoff = _threshold_similarities(
+            finite if finite.size else best_sim, threshold_method)
 
     out: List[Classification] = []
     for i, (p, sim, argmax) in enumerate(zip(all_particles, best_sim, best_idx)):
-        label = sample_names[int(argmax)] if sim >= cutoff else "other"
+        matched = np.isfinite(sim) and sim >= cutoff
+        label = sample_names[int(argmax)] if matched else "other"
         out.append(Classification(
             particle_index=p.index,
             class_name=label,
-            similarity=float(sim),
+            similarity=float(sim) if np.isfinite(sim) else 0.0,
             particle_orientation_deg=getattr(p, "orientation_deg", 0.0),
         ))
     return out

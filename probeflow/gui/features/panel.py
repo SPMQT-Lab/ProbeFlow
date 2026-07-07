@@ -457,6 +457,9 @@ class _FeaturesWorker(QRunnable):
                     encoder=self._params.get("encoder", "raw"),
                     rotate_augment=self._params.get("rotate_augment", False),
                     bank_samples=self._params.get("bank_samples"),
+                    bank_areas=self._params.get("bank_areas"),
+                    pixel_size_x_m=self._params.get("pixel_size_x_m"),
+                    pixel_size_y_m=self._params.get("pixel_size_y_m"),
                 )
             else:
                 raise ValueError(f"Unknown mode {self._mode!r}")
