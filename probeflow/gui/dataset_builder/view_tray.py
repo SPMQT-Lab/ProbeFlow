@@ -7,8 +7,6 @@ from PySide6.QtGui import QCursor, QFont
 from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFormLayout,
-    QHBoxLayout,
-    QLabel,
     QPushButton,
     QVBoxLayout,
     QWidget,

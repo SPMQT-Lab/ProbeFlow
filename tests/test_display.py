@@ -107,3 +107,15 @@ def test_histogram_contract():
     vmin, vmax = clip_range_from_array(outlier, 1.0, 99.0)
     assert abs(edges[0] - vmin) < 1e-10
     assert abs(edges[-1] - vmax) < 1e-10
+
+
+def test_histogram_degenerate_range_does_not_raise():
+    """A near-constant image (e.g. display-flattened plane) has a zero
+    percentile span; numpy would raise "Too many bins for data range".
+    The guard widens the range by an epsilon instead."""
+    for value in (0.0, 1.0, -3.7e-9):
+        arr = np.full((32, 32), value)
+        counts, edges = histogram_from_array(arr, bins=256)
+        assert counts.sum() == arr.size
+        assert len(edges) == 257
+        assert edges[0] < value < edges[-1] or value == edges[0]
