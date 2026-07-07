@@ -91,6 +91,8 @@ class BrowseToolPanel(QWidget):
 
         # ── Open folder button ─────────────────────────────────────────────────
         open_btn = QPushButton("Open folder…")
+        open_btn.setToolTip(
+            "Open a folder of scans (.sxm, .dat, .sm4) and spectra to browse.")
         open_btn.setFont(ui_font(9))
         open_btn.setFixedHeight(30)
         open_btn.setCursor(QCursor(Qt.PointingHandCursor))
@@ -99,6 +101,9 @@ class BrowseToolPanel(QWidget):
         lay.addWidget(open_btn)
 
         self._filter_toggle_btn = QPushButton("[+] Filter folder")
+        self._filter_toggle_btn.setToolTip(
+            "Show or hide the folder filters — hide scans outside a size, "
+            "completion or bias range.")
         self._filter_toggle_btn.setFont(ui_font(9, weight=QFont.Bold))
         self._filter_toggle_btn.setFixedHeight(26)
         self._filter_toggle_btn.setCursor(QCursor(Qt.PointingHandCursor))
@@ -111,11 +116,20 @@ class BrowseToolPanel(QWidget):
         filter_box_lay.setSpacing(6)
 
         self._size_filter_btn = self._make_filter_toggle("Size (nm)")
+        self._size_filter_btn.setToolTip(
+            "Only show scans whose physical width and height fall inside "
+            "the min/max ranges below.")
         filter_box_lay.addWidget(self._size_filter_btn)
         self._size_min_width_nm = self._make_filter_spinbox(0.0, 1_000_000.0, 1.0, " nm")
+        self._size_min_width_nm.setToolTip(
+            "Hide scans narrower than this. 0 disables the lower bound.")
         self._size_max_width_nm = self._make_filter_spinbox(0.0, 1_000_000.0, 1.0, " nm")
+        self._size_max_width_nm.setToolTip("Hide scans wider than this.")
         self._size_min_height_nm = self._make_filter_spinbox(0.0, 1_000_000.0, 1.0, " nm")
+        self._size_min_height_nm.setToolTip(
+            "Hide scans shorter than this. 0 disables the lower bound.")
         self._size_max_height_nm = self._make_filter_spinbox(0.0, 1_000_000.0, 1.0, " nm")
+        self._size_max_height_nm.setToolTip("Hide scans taller than this.")
         self._size_max_width_nm.setValue(1_000_000.0)
         self._size_max_height_nm.setValue(1_000_000.0)
         filter_box_lay.addWidget(self._labeled_spin_row("Min width", self._size_min_width_nm))
@@ -124,21 +138,34 @@ class BrowseToolPanel(QWidget):
         filter_box_lay.addWidget(self._labeled_spin_row("Max height", self._size_max_height_nm))
 
         self._completion_filter_btn = self._make_filter_toggle("Completion (%)")
+        self._completion_filter_btn.setToolTip(
+            "Only show scans that recorded at least the given fraction of "
+            "their frame — hides scans that were stopped early.")
         filter_box_lay.addWidget(self._completion_filter_btn)
         self._completion_min_pct = self._make_filter_spinbox(0.0, 100.0, 1.0, " %")
+        self._completion_min_pct.setToolTip(
+            "Minimum recorded fraction of the frame. Raise it to hide "
+            "partially-recorded scans; 0 shows everything.")
         self._completion_min_pct.setValue(50.0)
         filter_box_lay.addWidget(self._labeled_spin_row("Min completion", self._completion_min_pct))
 
         self._bias_filter_btn = self._make_filter_toggle("Bias (mV)")
+        self._bias_filter_btn.setToolTip(
+            "Only show scans acquired with a sample bias inside the min/max "
+            "range below.")
         filter_box_lay.addWidget(self._bias_filter_btn)
         self._bias_min_mv = self._make_filter_spinbox(-10000.0, 10000.0, 1.0, " mV")
+        self._bias_min_mv.setToolTip("Hide scans acquired below this bias.")
         self._bias_max_mv = self._make_filter_spinbox(-10000.0, 10000.0, 1.0, " mV")
+        self._bias_max_mv.setToolTip("Hide scans acquired above this bias.")
         self._bias_min_mv.setValue(-500.0)
         self._bias_max_mv.setValue(500.0)
         filter_box_lay.addWidget(self._labeled_spin_row("Min bias", self._bias_min_mv))
         filter_box_lay.addWidget(self._labeled_spin_row("Max bias", self._bias_max_mv))
 
         self._export_filtered_btn = QPushButton("Export filtered folder")
+        self._export_filtered_btn.setToolTip(
+            "Copy the scans that pass the current filters into a new folder.")
         self._export_filtered_btn.setFont(ui_font(9))
         self._export_filtered_btn.setFixedHeight(28)
         self._export_filtered_btn.setCursor(QCursor(Qt.PointingHandCursor))
@@ -158,8 +185,14 @@ class BrowseToolPanel(QWidget):
         self._filter_group.setExclusive(True)
         self._filter_btns: dict[str, QPushButton] = {}
         _modes = [("All", "all"), ("Images", "images"), ("Spectra", "spectra")]
+        _mode_tips = {
+            "all": "Show every file in the folder.",
+            "images": "Show only topography scans.",
+            "spectra": "Show only spectroscopy files.",
+        }
         for i, (label, mode) in enumerate(_modes):
             btn = QPushButton(label)
+            btn.setToolTip(_mode_tips[mode])
             btn.setCheckable(True)
             btn.setFont(ui_font(9))
             btn.setFixedHeight(26)
@@ -196,6 +229,8 @@ class BrowseToolPanel(QWidget):
         self.cmap_cb = QComboBox()
         self.cmap_cb.addItems(CMAP_NAMES)
         self.cmap_cb.setCurrentText(cfg.get("colormap", DEFAULT_CMAP_LABEL))
+        self.cmap_cb.setToolTip(
+            "Colormap used to render the browse thumbnails.")
         self.cmap_cb.setFont(ui_font(10))
         self.cmap_cb.currentTextChanged.connect(self._on_colormap_changed)
         lay.addWidget(self.cmap_cb)
@@ -235,6 +270,8 @@ class BrowseToolPanel(QWidget):
         self.size_cb = QComboBox()
         self.size_cb.addItems(["Large", "Small"])
         self.size_cb.setCurrentText(cfg.get("thumbnail_size", "large").capitalize())
+        self.size_cb.setToolTip(
+            "Thumbnail card size — Small fits more scans per row.")
         self.size_cb.setFont(ui_font(10))
         self.size_cb.currentTextChanged.connect(
             lambda t: self.thumbnail_size_changed.emit(t.lower()))
@@ -523,6 +560,8 @@ class BrowseInfoPanel(QWidget):
         meta_lay.setSpacing(4)
         self.search_box = QLineEdit()
         self.search_box.setPlaceholderText("Search…")
+        self.search_box.setToolTip(
+            "Filter the metadata table below by parameter name or value.")
         self.search_box.setFont(ui_font(10))
         self.search_box.setFixedHeight(28)
         self.search_box.textChanged.connect(self._filter_meta)

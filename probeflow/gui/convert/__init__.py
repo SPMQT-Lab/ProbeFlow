@@ -44,9 +44,13 @@ class ConvertPanel(QWidget):
         self.input_entry = QLineEdit()
         self.input_entry.setFont(ui_font(11))
         self.input_entry.setPlaceholderText("Select folder with .dat files…")
+        self.input_entry.setToolTip(
+            "Folder containing the Createc .dat scans to convert. "
+            "Every .dat file in this folder is converted in one run.")
         in_btn = QPushButton("Browse")
         in_btn.setFont(ui_font(10))
         in_btn.setFixedWidth(80)
+        in_btn.setToolTip("Pick the input folder in a file dialog.")
         in_btn.clicked.connect(self._browse_input)
         in_row.addWidget(in_lbl)
         in_row.addWidget(self.input_entry)
@@ -56,6 +60,9 @@ class ConvertPanel(QWidget):
         # Custom output checkbox + row (hidden by default)
         self._custom_out_cb = QCheckBox("Custom output folder")
         self._custom_out_cb.setFont(ui_font(11))
+        self._custom_out_cb.setToolTip(
+            "Write converted files somewhere other than the input folder. "
+            "When unchecked, outputs land in subfolders of the input folder.")
         self._custom_out_cb.setChecked(cfg.get("custom_output", False))
         self._custom_out_cb.toggled.connect(self._toggle_output_row)
         lay.addWidget(self._custom_out_cb)
@@ -69,6 +76,9 @@ class ConvertPanel(QWidget):
         self.output_entry = QLineEdit()
         self.output_entry.setFont(ui_font(11))
         self.output_entry.setPlaceholderText("Defaults to input folder…")
+        self.output_entry.setToolTip(
+            "Destination folder for converted files. Leave empty to write "
+            "into the input folder.")
         out_btn = QPushButton("Browse")
         out_btn.setFont(ui_font(10))
         out_btn.setFixedWidth(80)
@@ -146,9 +156,21 @@ class ConvertSidebar(QWidget):
         lay.addWidget(hdr)
 
         self.png_cb = QCheckBox("PNG preview")
+        self.png_cb.setToolTip(
+            "Also render each scan to a PNG image (display only — pixel "
+            "values are contrast-stretched, not physical units).")
         self.sxm_cb = QCheckBox("SXM (Nanonis)")
+        self.sxm_cb.setToolTip(
+            "Write a Nanonis .sxm for each scan so it opens in ProbeFlow, "
+            "Gwyddion and other SPM tools. The usual choice.")
         self.npy_raw_cb = QCheckBox("RAW .npy")
+        self.npy_raw_cb.setToolTip(
+            "Export each channel as a NumPy array of raw DAC values, "
+            "exactly as stored in the .dat file.")
         self.npy_physical_cb = QCheckBox("Physical .npy")
+        self.npy_physical_cb.setToolTip(
+            "Export each channel as a NumPy array in physical SI units "
+            "(metres for Z, amperes for current).")
         self.png_cb.setChecked(cfg.get("do_png", False))
         self.sxm_cb.setChecked(cfg.get("do_sxm", True))
         self.npy_raw_cb.setChecked(cfg.get("do_npy_raw", False))
@@ -187,13 +209,24 @@ class ConvertSidebar(QWidget):
             return spin
 
         self.clip_low_spin  = _spin_row("Clip low (%):",  cfg.get("clip_low",  1.0),  0.0, 10.0)
+        self.clip_low_spin.setToolTip(
+            "Lower percentile cut for PNG contrast. Pixels darker than this "
+            "percentile are clipped to black. Increase it to suppress dark "
+            "outliers (e.g. tip crashes); 0 disables the cut.")
         self.clip_high_spin = _spin_row("Clip high (%):", cfg.get("clip_high", 99.0), 90.0, 100.0)
+        self.clip_high_spin.setToolTip(
+            "Upper percentile cut for PNG contrast. Pixels brighter than "
+            "this percentile are clipped to white. Decrease it to suppress "
+            "bright outliers; 100 disables the cut.")
         self._adv_widget.setVisible(False)
         lay.addWidget(self._adv_widget)
 
         lay.addWidget(_sep())
 
         self.run_btn = QPushButton("  RUN  ")
+        self.run_btn.setToolTip(
+            "Convert every .dat file in the input folder to the selected "
+            "output formats.")
         self.run_btn.setFont(ui_font(14, weight=QFont.Bold))
         self.run_btn.setFixedHeight(48)
         self.run_btn.setCursor(QCursor(Qt.PointingHandCursor))
