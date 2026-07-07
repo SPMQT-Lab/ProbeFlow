@@ -25,11 +25,13 @@ class RulerWidget(QWidget):
 
     THICKNESS_PX = 26  # height for horizontal, width for vertical
 
-    def __init__(self, orientation: str = "horizontal", parent=None):
+    def __init__(self, orientation: str = "horizontal", parent=None,
+                 fg: str = "#cdd6f4"):
         super().__init__(parent)
         if orientation not in ("horizontal", "vertical"):
             raise ValueError(f"orientation must be 'horizontal' or 'vertical', got {orientation!r}")
         self._orient = orientation
+        self._fg = QColor(fg)
         self._scan_nm: float = 0.0
         self._extent_px: int = 0  # image pixel extent in this direction
         if orientation == "horizontal":
@@ -72,7 +74,7 @@ class RulerWidget(QWidget):
             return
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        painter.setPen(QPen(QColor("#cdd6f4"), 1))
+        painter.setPen(QPen(self._fg, 1))
         painter.setFont(ui_font(7))
 
         step = self._nice_step(self._scan_nm)
@@ -251,6 +253,7 @@ class LineProfilePanel(QWidget):
         self._meas_label = QLabel("")
         self._meas_label.setFont(ui_font(8))
         self._meas_label.setAlignment(Qt.AlignCenter)
+        # Recoloured from the theme in show_empty/plot_profile.
         self._meas_label.setStyleSheet("color: #cdd6f4;")
         self._meas_label.setVisible(False)
         lay.addWidget(self._meas_label)
@@ -327,6 +330,7 @@ class LineProfilePanel(QWidget):
         self._meas_artists.clear()
         if hasattr(self, "_meas_label"):
             self._meas_label.setVisible(False)
+            self._meas_label.setStyleSheet(f"color: {fg};")
         self._ax.set_facecolor(bg)
         self._ax.text(0.5, 0.5, message, ha="center", va="center",
                       transform=self._ax.transAxes, color=fg, fontsize=9)
@@ -358,6 +362,7 @@ class LineProfilePanel(QWidget):
         self._meas_pts.clear()
         self._meas_artists.clear()
         self._meas_label.setVisible(False)
+        self._meas_label.setStyleSheet(f"color: {fg};")
         self._ax.set_facecolor(bg)
         self._ax.plot(x_vals, values, color=accent, linewidth=1.1)
         self._ax.set_xlabel(x_label, fontsize=8, color=fg)

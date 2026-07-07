@@ -202,8 +202,9 @@ class ImageViewerBuildMixin:
 
         # Rulers scroll together with the image (placed in the same scroll
         # viewport via a small grid container).
-        self._ruler_top  = RulerWidget("horizontal")
-        self._ruler_left = RulerWidget("vertical")
+        ruler_fg = (self._t or {}).get("fg", "#cdd6f4")
+        self._ruler_top  = RulerWidget("horizontal", fg=ruler_fg)
+        self._ruler_left = RulerWidget("vertical", fg=ruler_fg)
         ruler_corner = QWidget()
         ruler_corner.setFixedSize(RulerWidget.THICKNESS_PX, RulerWidget.THICKNESS_PX)
         self._ruler_container = QWidget()

@@ -483,6 +483,44 @@ QScrollBar::handle:horizontal {{
 }}
 QScrollBar::handle:horizontal:hover {{ background-color: {t['sub_fg']}; }}
 QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0; }}
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical,
+QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{
+    background: transparent;
+}}
+
+/* ── Menus ────────────────────────────────────────────────────────────── */
+QMenuBar {{
+    background-color: {t['bg']};
+    color: {t['fg']};
+    border: none;
+}}
+QMenuBar::item {{
+    background: transparent;
+    color: {t['fg']};
+    padding: 4px 8px;
+    border-radius: 4px;
+}}
+QMenuBar::item:selected {{ background-color: {t['hover']}; }}
+QMenuBar::item:pressed {{ background-color: {t['sel_tint']}; }}
+QMenu {{
+    background-color: {t['card_bg']};
+    color: {t['fg']};
+    border: 1px solid {t['sep']};
+    border-radius: 6px;
+    padding: 4px;
+}}
+QMenu::item {{
+    background: transparent;
+    padding: 4px 24px 4px 12px;
+    border-radius: 4px;
+}}
+QMenu::item:selected {{ background-color: {t['hover']}; }}
+QMenu::item:disabled {{ color: {t['sub_fg']}; }}
+QMenu::separator {{
+    height: 1px;
+    background-color: {t['sep']};
+    margin: 4px 8px;
+}}
 
 /* ── Tabs ─────────────────────────────────────────────────────────────── */
 QTabWidget::pane {{ border: none; border-top: 1px solid {t['sep']}; }}

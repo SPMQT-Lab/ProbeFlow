@@ -149,10 +149,15 @@ _TUTORIAL_VISITED_CONTROL_STYLE = (
     "border: 1px solid #e0b020; }"
 )
 # Statistic selector buttons look like normal ProbeFlow buttons; the active one
-# (whose plot is currently shown) gets a blue highlight.
-_STAT_SELECTED_STYLE = (
-    "QPushButton { border: 2px solid #2f81f7; background: #243044; font-weight: 700; }"
-)
+# (whose plot is currently shown) gets an accent highlight.
+def _stat_selected_style(theme: dict | None) -> str:
+    t = theme or {}
+    accent = t.get("accent_bg", "#2f81f7")
+    bg = t.get("sel_tint", "#243044")
+    return (
+        f"QPushButton {{ border: 2px solid {accent}; background: {bg}; "
+        "font-weight: 700; }}"
+    )
 _PARTICLE_STATISTICS_LAYOUT_KEY = "particle_statistics"
 
 
@@ -193,7 +198,8 @@ class FocusedStatisticPanel(QFrame):
         self._annotation.setObjectName("particleStatisticsFocusAnnotation")
         self._annotation.setWordWrap(True)
         self._annotation.setStyleSheet(
-            "color: #9ecbff; border: 1px solid rgba(47, 129, 247, 0.45); "
+            f"color: {self._theme.get('accent_bg', '#9ecbff')}; "
+            "border: 1px solid rgba(47, 129, 247, 0.45); "
             "padding: 3px 6px;"
         )
         self._annotation.setVisible(False)
@@ -285,7 +291,9 @@ class FocusedStatisticPanel(QFrame):
         placeholder.setObjectName("particleStatisticsFocusPlaceholder")
         placeholder.setAlignment(Qt.AlignCenter)
         placeholder.setWordWrap(True)
-        placeholder.setStyleSheet("border: 1px solid #3b4250; padding: 12px;")
+        placeholder.setStyleSheet(
+            f"border: 1px solid {self._theme.get('border', '#3b4250')}; "
+            "padding: 12px;")
         self._plot_layout.addWidget(placeholder, 1)
 
     def _clear_plot(self) -> None:
@@ -726,7 +734,8 @@ class ParticleStatisticsDialog(QDialog):
             selected = statistic_id == self._focused_statistic
             button.setChecked(selected)
             # Normal ProbeFlow button when unselected; highlighted when its plot is shown.
-            button.setStyleSheet(_STAT_SELECTED_STYLE if selected else "")
+            button.setStyleSheet(
+                _stat_selected_style(self._theme) if selected else "")
         self._refresh_selected_statistic_help()
         self._sync_workflow_actions()
 
@@ -1036,7 +1045,8 @@ class ParticleStatisticsDialog(QDialog):
         card.setObjectName(object_name)
         card.setFrameShape(QFrame.StyledPanel)
         card.setStyleSheet(
-            "QFrame { border: 1px solid #3b4250; border-radius: 6px; }"
+            f"QFrame {{ border: 1px solid "
+            f"{self._theme.get('border', '#3b4250')}; border-radius: 6px; }}"
         )
         layout = QVBoxLayout(card)
         layout.setContentsMargins(14, 14, 14, 14)
@@ -1585,7 +1595,8 @@ class ParticleStatisticsDialog(QDialog):
         title_box.setSpacing(0)
         self._tutorial_progress_lbl = QLabel("", panel)
         self._tutorial_progress_lbl.setAlignment(Qt.AlignCenter)
-        self._tutorial_progress_lbl.setStyleSheet("color: #c9d1d9; font-size: 9pt;")
+        self._tutorial_progress_lbl.setStyleSheet(
+            f"color: {self._theme.get('sub_fg', '#c9d1d9')}; font-size: 9pt;")
         self._tutorial_title_lbl = QLabel("", panel)
         self._tutorial_title_lbl.setObjectName("particleStatisticsTutorialTitle")
         self._tutorial_title_lbl.setAlignment(Qt.AlignCenter)
@@ -1871,14 +1882,16 @@ class ParticleStatisticsDialog(QDialog):
         if self._tutorial_active and is_generated:
             self._generated_banner.setText("Tutorial: generated example")
             self._generated_banner.setStyleSheet(
-                "background: rgba(47, 179, 68, 0.14); color: #d8ffe0; "
+                "background: rgba(47, 179, 68, 0.14); "
+                f"color: {self._theme.get('fg', '#d8ffe0')}; "
                 "font-weight: 700; padding: 4px; border: 1px solid #2fb344;"
             )
             return
         if self._active_mode == "sandbox":
             self._generated_banner.setText("Model simulations")
             self._generated_banner.setStyleSheet(
-                "background: rgba(47, 129, 247, 0.14); color: #dceaff; "
+                "background: rgba(47, 129, 247, 0.14); "
+                f"color: {self._theme.get('fg', '#dceaff')}; "
                 "font-weight: 700; padding: 4px; border: 1px solid #2f81f7;"
             )
             return
@@ -2538,19 +2551,22 @@ class ParticleStatisticsDialog(QDialog):
         if step.where_to_check:
             predict_parts.append(f"<b>Then check:</b> {step.where_to_check}")
         if predict_parts:
+            warn = self._theme.get("warn_fg", "#f0b429")
             parts.append(
-                "<span style='color:#f0b429;'>" + " &nbsp; ".join(predict_parts) + "</span>"
+                f"<span style='color:{warn};'>" + " &nbsp; ".join(predict_parts) + "</span>"
             )
         if look_for:
-            parts.append(f"<span style='color:#7cc7ff;'><b>Look for:</b> {look_for}</span>")
+            accent = self._theme.get("accent_bg", "#7cc7ff")
+            parts.append(f"<span style='color:{accent};'><b>Look for:</b> {look_for}</span>")
         context_chips = []
         if step.model_label:
             context_chips.append(f"Model: {step.model_label}")
         if step.statistic_label:
             context_chips.append(f"Statistic: {step.statistic_label}")
         if context_chips:
+            sub = self._theme.get("sub_fg", "#c9d1d9")
             parts.append(
-                "<span style='color:#c9d1d9; font-size: 10pt;'>"
+                f"<span style='color:{sub}; font-size: 10pt;'>"
                 + " &nbsp; ".join(context_chips)
                 + "</span>"
             )
@@ -2757,7 +2773,8 @@ class ParticleStatisticsDialog(QDialog):
                         continue
                     seen.add(id(widget))
                     if isinstance(widget, QPushButton) and widget in self._statistic_buttons.values():
-                        style = _STAT_SELECTED_STYLE if widget.isChecked() else ""
+                        style = (_stat_selected_style(self._theme)
+                                 if widget.isChecked() else "")
                     elif widget is self._exit_tutorial_btn:
                         style = _TUTORIAL_EXIT_STYLE
                     elif widget is self._start_tutorial_btn:

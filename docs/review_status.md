@@ -1,6 +1,6 @@
 # ProbeFlow Review Status
 
-**Updated**: 2026-07-06 (spectroscopy display wiring pass added)
+**Updated**: 2026-07-07 (GUI general-fixes round added)
 
 This is the single, consolidated record of ProbeFlow's code-review history. The
 detailed per-angle review files (`docs/reviews/2026-05-27-*.md`) and the earlier
@@ -512,6 +512,74 @@ overlay had received the cosmetic-pen treatment). Fixed in image_canvas.py:
 - ``_movable_overlay_at`` is O(n²) in scene items (fine at current scales).
 - Delete/copy keyboard shortcuts still act on the active ROI while overlays
   are hidden (explicit user action; left as-is).
+
+## GUI general-fixes round, 2026-07-07 (Rohan's "General" list)
+
+Implemented in this round (see git history for detail):
+
+- **Scrollbar tracks** — the `add-page`/`sub-page` sub-controls were unstyled,
+  so Qt painted its native textured fill in the groove either side of the
+  handle. Now transparent in the global QSS (`styling.py`).
+- **Menu hover** — `QMenuBar`/`QMenu` had no styling anywhere and fell through
+  to the native white-on-black hover. A themed Menus section in the global QSS
+  now covers all four menu bars (main window, image editor, particle
+  statistics, FFT viewer).
+- **Breadcrumb back/up buttons** hide when they cannot navigate instead of
+  rendering as inert grey squares next to the folder title.
+- **Workspaces are independent windows** — Convert, TV denoise, Dataset
+  Builder, Survey and Developer tools now open as top-level
+  `WorkspaceWindow`s (generalising `FeatureCountingWindow`); the main window
+  hosts Browse only. Windows are lazily created, hidden (not destroyed) on
+  close so state survives reopen, geometry persists per window in the config,
+  and workspace shortcuts use `Qt.ApplicationShortcut` so they work from any
+  window. The converter workspace was renamed **"STM File Converter"**.
+- **Theme sweep (first pass)** — fixed dark-assuming literals that broke light
+  themes: spec-viewer plot background/foreground now follow the theme
+  (`spec_viewer/single.py` `_BG`/`_FG`), image-viewer rulers and line-profile
+  measurement label take theme colours (`viewer/widgets.py`), and
+  `particle_statistics.py`/`adstat_results.py` borders, tutorial text and the
+  selected-statistic highlight route through the theme dict.
+- **Tooltips** — Convert and Browse tool panels now have hover descriptions on
+  every parameter input (house style: what it does, plus the effect of
+  increasing/decreasing for numeric inputs).
+
+### Reversible file conversions — investigated, deferred
+
+Rohan requested `.sxm → .dat` and general format interchange. Findings from a
+feasibility pass (2026-07-07):
+
+- There is **no Createc `.dat` writer** (writers cover `.sxm`, `.gwy`, and
+  rendered `.png`/`.pdf`/`.csv` only), and the `.dat` **reader is deliberately
+  lossy** in exactly the dimensions a faithful writer needs: it drops the
+  artifact first column and the trailing appendix, trims partial rows
+  (mutating `Num.X`/`Num.Y`), reorders channels to the canonical public order,
+  and converts DAC→SI (so a writer must re-quantise SI→DAC with loss).
+- The existing `.sxm` writer is itself not a general Nanonis serialiser — it
+  reproduces one reverse-engineered reference layout via the captured byte
+  fixtures in `probeflow/data/file_cushions/`.
+- Verdict: a *behaviourally* faithful `.dat` writer (re-readable, values
+  correct, not byte-identical) is achievable but is a standalone project:
+  cushion-style captured layout, regeneration of the dropped column/appendix,
+  SI→DAC re-quantisation, plus a reader policy that retains currently-dropped
+  raw bytes behind a "lossless" flag. Deferred until there is a concrete use
+  case that `.sxm`/`.gwy` export does not cover.
+
+### Remaining sweep backlog (follow-up sessions)
+
+- **Theme**: most of the ~300 remaining hex literals turned out to be benign
+  (theme-`get` fallbacks or data-encoding colours such as class overlays and
+  plot palettes — checked: `definitions.py`, `fft_viewer.py`,
+  `features/panel.py`). Real remaining offenders are the smaller per-widget
+  sheets in `dataset_builder/view_tray.py`, `roi_items.py`,
+  `lattice_grid/fft_overlay.py`, `image_canvas.py` and a long tail; convert
+  opportunistically when touching those files. Status colours (green/red/amber
+  chips that define both bg and fg) are self-contained and deliberately left
+  theme-invariant.
+- **Tooltips**: Convert + Browse set the template; remaining panels are the
+  image-viewer sidebars, Feature Counting, TV denoise, and the Dataset Builder
+  tuning tray (the latter is on Rohan's Dataset Builder list anyway).
+- **Rohan's Dataset Builder list** — deferred to its own round; the pop-out
+  window item is now free (Dataset Builder already opens as a window).
 
 ## Deferred (not in code-review scope)
 

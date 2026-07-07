@@ -36,6 +36,7 @@ class _BreadcrumbBar(QWidget):
         self._back_btn.setFixedSize(24, 24)
         self._back_btn.setCursor(QCursor(Qt.PointingHandCursor))
         self._back_btn.setEnabled(False)
+        self._back_btn.setVisible(False)
         self._back_btn.clicked.connect(self.back_requested)
         lay.addWidget(self._back_btn)
 
@@ -43,6 +44,7 @@ class _BreadcrumbBar(QWidget):
         self._up_btn.setFixedSize(24, 24)
         self._up_btn.setCursor(QCursor(Qt.PointingHandCursor))
         self._up_btn.setEnabled(False)
+        self._up_btn.setVisible(False)
         self._up_btn.clicked.connect(self.up_requested)
         lay.addWidget(self._up_btn)
 
@@ -88,10 +90,13 @@ class _BreadcrumbBar(QWidget):
                   *, can_go_back: bool):
         self._root = root
         self._current = current
+        can_go_up = current is not None and root is not None and current != root
+        # Hidden (not just greyed) when unusable: disabled 24px squares read as
+        # inert decoration next to the folder title.
         self._back_btn.setEnabled(can_go_back)
-        self._up_btn.setEnabled(
-            current is not None and root is not None and current != root
-        )
+        self._back_btn.setVisible(can_go_back)
+        self._up_btn.setEnabled(can_go_up)
+        self._up_btn.setVisible(can_go_up)
         self._rebuild_segments()
 
     def _clear_segments(self):
