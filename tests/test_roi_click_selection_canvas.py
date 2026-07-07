@@ -57,7 +57,7 @@ def _move(canvas, xy):
     from PySide6.QtGui import QMouseEvent
 
     canvas.mouseMoveEvent(
-        QMouseEvent(QEvent.MouseMove, QPointF(*xy), Qt.NoButton, Qt.NoButton, Qt.NoModifier)
+        QMouseEvent(QEvent.MouseMove, QPointF(*xy), QPointF(*xy), Qt.NoButton, Qt.NoButton, Qt.NoModifier)
     )
 
 
@@ -66,7 +66,7 @@ def _press(canvas, xy):
     from PySide6.QtGui import QMouseEvent
 
     canvas.mousePressEvent(
-        QMouseEvent(QEvent.MouseButtonPress, QPointF(*xy), Qt.LeftButton, Qt.LeftButton, Qt.NoModifier)
+        QMouseEvent(QEvent.MouseButtonPress, QPointF(*xy), QPointF(*xy), Qt.LeftButton, Qt.LeftButton, Qt.NoModifier)
     )
 
 

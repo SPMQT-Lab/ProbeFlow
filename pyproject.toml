@@ -9,11 +9,17 @@ description = "ProbeFlow — STM scan browser, processor, and Createc↔Nanonis 
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.11"
+# Major-version ceilings on the two libraries whose breaking releases would
+# take the app down wholesale (Qt wrapper-lifetime workarounds are coupled to
+# PySide6 internals; numpy 3 will be another 1->2-scale migration). Exact
+# known-good versions live in constraints.txt; the weekly dependency-canary
+# CI job tests unpinned latest so ceiling bumps are a calendar item, not a
+# surprise.
 dependencies = [
-  "numpy",
+  "numpy>=1.26,<3",
   "scipy",
   "pillow",
-  "PySide6",
+  "PySide6>=6.7,<7",
   "matplotlib",
   "shapely>=2.0",
   "scikit-image>=0.22",

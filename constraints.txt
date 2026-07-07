@@ -1,0 +1,18 @@
+# Known-good dependency versions for ProbeFlow (last verified 2026-07-06,
+# full suite green on macOS / Python 3.13).
+#
+# Usage — reproduce the verified environment:
+#   pip install -e ".[all]" -c constraints.txt
+#
+# This is a pip constraints file, not a requirements file: it pins versions
+# only for packages that get installed anyway, so applying it never adds
+# packages. Update it deliberately (run the full test suite, then refresh the
+# pins) — the weekly dependency-canary CI job tracks how far unpinned latest
+# has drifted from these.
+numpy==2.1.3
+scipy==1.15.3
+pillow==11.1.0
+PySide6==6.11.0
+matplotlib==3.10.0
+shapely==2.1.2
+scikit-image==0.25.0

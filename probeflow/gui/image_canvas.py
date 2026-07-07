@@ -1223,7 +1223,7 @@ class ImageCanvas(QGraphicsView):
     def mousePressEvent(self, event) -> None:
         # ── middle-mouse pan ──────────────────────────────────────────────────
         if event.button() == Qt.MiddleButton:
-            self._mid_pan_start = event.pos()
+            self._mid_pan_start = event.position().toPoint()
             self.setCursor(Qt.ClosedHandCursor)
             event.accept()
             return
@@ -1234,7 +1234,7 @@ class ImageCanvas(QGraphicsView):
 
         # ── set-zero mode ─────────────────────────────────────────────────────
         if self._set_zero_mode and self._image_size:
-            pos = self.mapToScene(event.pos())
+            pos = self.mapToScene(event.position().toPoint())
             Nx, Ny = self._image_size
             fx = max(0.0, min(1.0, pos.x() / Nx))
             fy = max(0.0, min(1.0, pos.y() / Ny))
@@ -1247,12 +1247,12 @@ class ImageCanvas(QGraphicsView):
         if self._tool == "pan" and self._show_markers and self._marker_items:
             for item in self._marker_items:
                 sp = self.mapFromScene(item.pos())
-                if (abs(sp.x() - event.pos().x()) <= 12
-                        and abs(sp.y() - event.pos().y()) <= 12):
+                if (abs(sp.x() - event.position().toPoint().x()) <= 12
+                        and abs(sp.y() - event.position().toPoint().y()) <= 12):
                     self.marker_clicked.emit(item.entry)
                     return
 
-        scene_pos = self._snap(self.mapToScene(event.pos()))
+        scene_pos = self._snap(self.mapToScene(event.position().toPoint()))
         tool = self._tool
 
         # ── pan tool ──────────────────────────────────────────────────────────
@@ -1260,15 +1260,15 @@ class ImageCanvas(QGraphicsView):
             # Quick-selection interactions first: the marquee is the topmost
             # overlay, so its handles/outline win over ROIs beneath it.
             if self._selection is not None:
-                sel_handle = self._selection_handle_at(event.pos())
+                sel_handle = self._selection_handle_at(event.position().toPoint())
                 if sel_handle is not None:
                     self._sel_handle_name = sel_handle
                     self._sel_base_roi = self._selection_as_roi()
                     self.setCursor(Qt.CrossCursor)
                     event.accept()
                     return
-                if self._selection_outline_hit(event.pos()):
-                    self._sel_move_start = self.mapToScene(event.pos())
+                if self._selection_outline_hit(event.position().toPoint()):
+                    self._sel_move_start = self.mapToScene(event.position().toPoint())
                     self._sel_base_roi = self._selection_as_roi()
                     self.setCursor(Qt.SizeAllCursor)
                     event.accept()
@@ -1280,7 +1280,7 @@ class ImageCanvas(QGraphicsView):
             # preceding move).
             roi_id = self._hover_roi_id
             if roi_id is None or roi_id not in self._roi_items:
-                roi_id = self._roi_at_pos(event.pos())
+                roi_id = self._roi_at_pos(event.position().toPoint())
             active_id = self._image_roi_set.active_roi_id if self._image_roi_set else None
 
             # Resize-handle hit test runs only against the active ROI, and only
@@ -1296,7 +1296,7 @@ class ImageCanvas(QGraphicsView):
             if self._image_roi_set and handle_candidate_id and self._rois_visible:
                 cand_roi = self._image_roi_set.get(handle_candidate_id)
                 if cand_roi is not None:
-                    vpos = event.pos()
+                    vpos = event.position().toPoint()
                     # Pick the NEAREST handle within the 12px box, not the first
                     # in order — for small ROIs adjacent handles can both fall
                     # inside the box and an exact hit must win.
@@ -1336,11 +1336,11 @@ class ImageCanvas(QGraphicsView):
                 # starting a pan.  ItemIgnoresTransformations items need a
                 # manual screen-space distance check because QGraphicsView hit
                 # testing for those items can miss at non-unity zoom.
-                hit = self._movable_overlay_at(event.pos())
+                hit = self._movable_overlay_at(event.position().toPoint())
                 if hit is not None:
                     super().mousePressEvent(event)
                     return
-                self._left_pan_start = event.pos()
+                self._left_pan_start = event.position().toPoint()
                 self.setCursor(Qt.ClosedHandCursor)
             event.accept()
             return
@@ -1391,8 +1391,8 @@ class ImageCanvas(QGraphicsView):
     def mouseMoveEvent(self, event) -> None:
         # ── middle-mouse pan ──────────────────────────────────────────────────
         if self._mid_pan_start is not None and event.buttons() & Qt.MiddleButton:
-            delta = event.pos() - self._mid_pan_start
-            self._mid_pan_start = event.pos()
+            delta = event.position().toPoint() - self._mid_pan_start
+            self._mid_pan_start = event.position().toPoint()
             self._scroll_by(-delta.x(), -delta.y())
             event.accept()
             # fall through to update pixel readout below (don't return early)
@@ -1400,7 +1400,7 @@ class ImageCanvas(QGraphicsView):
         # ── quick-selection resize-handle drag ────────────────────────────────
         elif self._sel_handle_name is not None and event.buttons() & Qt.LeftButton:
             from probeflow.core.roi import resize_roi
-            scene_pos = self.mapToScene(event.pos())
+            scene_pos = self.mapToScene(event.position().toPoint())
             keep_aspect = bool(event.modifiers() & Qt.ShiftModifier)
             new_roi = resize_roi(
                 self._sel_base_roi, self._sel_handle_name,
@@ -1415,7 +1415,7 @@ class ImageCanvas(QGraphicsView):
         # ── quick-selection outline drag-move ─────────────────────────────────
         elif self._sel_move_start is not None and event.buttons() & Qt.LeftButton:
             from probeflow.core.roi import translate
-            scene_pos = self.mapToScene(event.pos())
+            scene_pos = self.mapToScene(event.position().toPoint())
             new_roi = translate(
                 self._sel_base_roi,
                 scene_pos.x() - self._sel_move_start.x(),
@@ -1429,7 +1429,7 @@ class ImageCanvas(QGraphicsView):
         # ── ROI resize-handle drag ────────────────────────────────────────────
         elif self._handle_roi_id is not None and event.buttons() & Qt.LeftButton:
             from probeflow.core.roi import resize_roi
-            scene_pos = self.mapToScene(event.pos())
+            scene_pos = self.mapToScene(event.position().toPoint())
             keep_aspect = bool(event.modifiers() & Qt.ShiftModifier)
             new_roi = resize_roi(
                 self._handle_base_roi, self._handle_name,
@@ -1445,7 +1445,7 @@ class ImageCanvas(QGraphicsView):
 
         # ── active-ROI drag-move ──────────────────────────────────────────────
         elif self._move_roi_id is not None and event.buttons() & Qt.LeftButton:
-            scene_pos = self.mapToScene(event.pos())
+            scene_pos = self.mapToScene(event.position().toPoint())
             dx = scene_pos.x() - self._move_scene_start.x()
             dy = scene_pos.y() - self._move_scene_start.y()
             item = self._roi_items.get(self._move_roi_id)
@@ -1466,15 +1466,15 @@ class ImageCanvas(QGraphicsView):
         # ── left-button pan ───────────────────────────────────────────────────
         elif (self._tool == "pan" and self._left_pan_start is not None
               and event.buttons() & Qt.LeftButton):
-            delta = event.pos() - self._left_pan_start
-            self._left_pan_start = event.pos()
+            delta = event.position().toPoint() - self._left_pan_start
+            self._left_pan_start = event.position().toPoint()
             self._scroll_by(-delta.x(), -delta.y())
             event.accept()
             # fall through to update pixel readout
 
         # ── drawing preview ───────────────────────────────────────────────────
         else:
-            scene_pos = self._snap(self.mapToScene(event.pos()))
+            scene_pos = self._snap(self.mapToScene(event.position().toPoint()))
             tool = self._tool
             if event.buttons() & Qt.LeftButton:
                 if tool == "rectangle" and self._draw_start is not None:
@@ -1493,14 +1493,14 @@ class ImageCanvas(QGraphicsView):
 
         # ── hover highlight (pan mode, no drag) ───────────────────────────────
         if self._tool == "pan" and not (event.buttons() & Qt.LeftButton):
-            self._update_hover(event.pos())
-            self._update_cursor_for_hover(event.pos())
+            self._update_hover(event.position().toPoint())
+            self._update_cursor_for_hover(event.position().toPoint())
 
         if self._tool == "pan":
-            self._emit_hover_message(event.pos())
+            self._emit_hover_message(event.position().toPoint())
 
         # ── pixel coordinate readout ──────────────────────────────────────────
-        raw_pos = self.mapToScene(event.pos())
+        raw_pos = self.mapToScene(event.position().toPoint())
         col = int(raw_pos.x())
         row = int(raw_pos.y())
         if self._image_size is not None and self._raw_arr is not None:
@@ -1516,8 +1516,8 @@ class ImageCanvas(QGraphicsView):
         if self._show_markers and self._markers and self._image_size:
             for item in self._marker_items:
                 sp = self.mapFromScene(item.pos())
-                if (abs(sp.x() - event.pos().x()) <= 10
-                        and abs(sp.y() - event.pos().y()) <= 10):
+                if (abs(sp.x() - event.position().toPoint().x()) <= 10
+                        and abs(sp.y() - event.position().toPoint().y()) <= 10):
                     entry = item.entry
                     lines = [entry.stem]
                     if getattr(entry, "measurement_label", None):
@@ -1548,7 +1548,7 @@ class ImageCanvas(QGraphicsView):
         # ── finish quick-selection resize / move ──────────────────────────────
         if self._sel_handle_name is not None or self._sel_move_start is not None:
             from probeflow.core.roi import resize_roi, translate
-            scene_pos = self.mapToScene(event.pos())
+            scene_pos = self.mapToScene(event.position().toPoint())
             if self._sel_handle_name is not None:
                 keep_aspect = bool(event.modifiers() & Qt.ShiftModifier)
                 new_roi = resize_roi(
@@ -1576,7 +1576,7 @@ class ImageCanvas(QGraphicsView):
         # ── finish resize-handle drag ─────────────────────────────────────────
         if self._handle_roi_id is not None:
             from probeflow.core.roi import resize_roi
-            scene_pos = self.mapToScene(event.pos())
+            scene_pos = self.mapToScene(event.position().toPoint())
             keep_aspect = bool(event.modifiers() & Qt.ShiftModifier)
             new_roi = resize_roi(
                 self._handle_base_roi, self._handle_name,
@@ -1594,7 +1594,7 @@ class ImageCanvas(QGraphicsView):
 
         # ── finish active-ROI drag-move ───────────────────────────────────────
         if self._move_roi_id is not None:
-            scene_pos = self.mapToScene(event.pos())
+            scene_pos = self.mapToScene(event.position().toPoint())
             dx = round(scene_pos.x() - self._move_scene_start.x())
             dy = round(scene_pos.y() - self._move_scene_start.y())
             roi_id = self._move_roi_id
@@ -1624,7 +1624,7 @@ class ImageCanvas(QGraphicsView):
 
         # ── complete drawing shapes ───────────────────────────────────────────
         tool = self._tool
-        scene_pos = self._snap(self.mapToScene(event.pos()))
+        scene_pos = self._snap(self.mapToScene(event.position().toPoint()))
 
         if tool == "rectangle" and self._draw_start is not None:
             p1, p2 = self._draw_start, scene_pos
@@ -1741,6 +1741,8 @@ class ImageCanvas(QGraphicsView):
             super().wheelEvent(event)
 
     def contextMenuEvent(self, event) -> None:
+        # QContextMenuEvent is not a pointer event: pos()/globalPos() are the
+        # supported API here (position()/globalPosition() do not exist on it).
         roi_id = self._roi_at_pos(event.pos())
         if roi_id:
             self.roi_context_menu_requested.emit(roi_id, event.globalPos())

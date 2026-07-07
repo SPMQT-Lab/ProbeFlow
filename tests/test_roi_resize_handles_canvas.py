@@ -57,7 +57,7 @@ def _press_move_release(canvas, qapp, press_xy, release_xy, modifiers=None):
 
     def _evt(kind, xy):
         return QMouseEvent(
-            kind, QPointF(*xy), Qt.LeftButton,
+            kind, QPointF(*xy), QPointF(*xy), Qt.LeftButton,
             Qt.LeftButton if kind != QEvent.MouseButtonRelease else Qt.NoButton,
             mods,
         )

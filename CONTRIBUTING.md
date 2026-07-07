@@ -8,13 +8,21 @@ that keep the codebase navigable as it grows.
 ```bash
 git clone https://github.com/SPMQT-Lab/ProbeFlow.git
 cd ProbeFlow
-python -m pip install -e ".[dev,features]"
+python -m pip install -e ".[dev,features]" -c constraints.txt
 pip install pre-commit
 pre-commit install
 ```
 
 `pre-commit install` wires the repo's hooks (ruff, trailing whitespace,
 file size, merge-conflict markers) so they run on every `git commit`.
+
+`constraints.txt` pins the exact dependency versions the suite was last
+verified against (notably PySide6 and numpy — the two whose breaking
+releases would take the GUI down wholesale). Omit `-c constraints.txt` to
+live on latest; the weekly **dependency-canary** CI job does exactly that,
+so check its status before blaming your own changes for a fresh-environment
+breakage. When bumping a pin: run the full suite, then refresh the pin and
+the "last verified" date in the file header.
 
 ## Running the test suite
 
