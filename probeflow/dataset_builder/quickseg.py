@@ -507,6 +507,13 @@ def quickseg_stage(prepared: QuickSegPrepared, stage: str) -> np.ndarray:
     return np.asarray(arr)
 
 
+# REVIEW(2026-07-06, med): renumbering by area rank breaks the contract
+# between the exported seeds JSON (which keeps the user's terrace_label_ids)
+# and the exported label map — a downstream consumer cannot align seeds with
+# regions, the GUI seed-dot colours don't match their region fills, and the
+# ids flip whenever a parameter tweak changes the area ordering. Either keep
+# the marker ids in the watershed output, or write the old→new id mapping
+# into the seeds payload.
 def reorder_labels_area(labels: np.ndarray) -> np.ndarray:
     labels = np.asarray(labels, dtype=np.int32)
     new_labels = np.zeros_like(labels, dtype=np.int32)

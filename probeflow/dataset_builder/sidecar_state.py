@@ -19,6 +19,14 @@ def utc_now() -> str:
 
 
 def default_state_sidecar_path(scan_path: str | Path) -> Path:
+    # REVIEW(2026-07-06, high): `<stem>.probeflow.json` next to the scan is
+    # the SAME path a provenance sidecar gets when the user exports
+    # `<stem>.csv`/`.gwy` beside the data (write_provenance_sidecars →
+    # out_path.with_suffix(".probeflow.json")). A non-forced export then dies
+    # with a confusing FileExistsError, and `--force`/overwrite=True replaces
+    # this file WHOLESALE — wiping every dataset_builder review record for
+    # the scan. Rename the state file (e.g. `<stem>.dataset.json`) while the
+    # format is young; keep a one-shot migration read from the old name.
     path = Path(scan_path)
     return path.parent / f"{path.stem}.probeflow.json"
 
@@ -95,6 +103,10 @@ def save_review_record(scan_path: str | Path, record: ReviewRecord) -> Path:
     return path
 
 
+# REVIEW(2026-07-06, low): dead code — nothing calls mark_exported, so the
+# "exported" status and exported_at timestamps in REVIEW_STATUSES never
+# happen. Either wire it into export_dataset (per exported row) or drop the
+# status from the lifecycle; half-wired it will confuse the queue UI later.
 def mark_exported(scan_path: str | Path, record: ReviewRecord) -> ReviewRecord:
     exported = ReviewRecord(
         source_path=record.source_path,

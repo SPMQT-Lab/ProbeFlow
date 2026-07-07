@@ -73,6 +73,13 @@ def _copy_json_sidecar(src: Path, dst: Path, *, overwrite: bool) -> str:
 
 def export_dataset(spec: DatasetExportSpec) -> dict[str, Any]:
     """Export a frozen ML-ready dataset snapshot and return a summary."""
+    # REVIEW(2026-07-06, low): any FileExistsError/OSError mid-loop leaves a
+    # partial snapshot directory with NO manifest and no cleanup — a
+    # half-dataset that looks real. Consider collecting rows first and doing
+    # a preflight collision pass (or writing into a temp dir and renaming).
+    # Note also the exported arrays are the RAW plane (no saved viewer
+    # processing) — masks are pixel-aligned to raw so this is consistent,
+    # but the manifest should say so explicitly for downstream users.
 
     out = Path(spec.output_dir)
     for name in ("arrays", "previews", "masks", "rois", "seeds", "objects", "provenance"):
@@ -138,6 +145,11 @@ def export_dataset(spec: DatasetExportSpec) -> dict[str, Any]:
                 _mask_png(mask.data, mask_png, overwrite=spec.overwrite)
                 mask_paths[mask.name] = _rel(mask_npy, out)
                 mask_paths[f"{mask.name}_png"] = _rel(mask_png, out)
+        # REVIEW(2026-07-06, med): if the mask named spec.label_name is gone
+        # from the sidecar (renamed/deleted after acceptance), this sample
+        # still exports with an empty mask_paths_json — a silently unlabeled
+        # training sample. For label_type == "mask", skip the row with a
+        # warning (or fail the export) when no matching mask was found.
 
         seed_path_value = ""
         quickseg_result_export_path = ""
@@ -154,6 +166,13 @@ def export_dataset(spec: DatasetExportSpec) -> dict[str, Any]:
                     proposal_params=dict(record.proposal_parameters),
                 ),
             )
+            # REVIEW(2026-07-06, med): recomputing here regenerates labels
+            # with the *current* code and params — on a machine without the
+            # result .npy (e.g. only the JSON sidecar was synced), the export
+            # can silently differ from the segmentation the reviewer actually
+            # accepted. At minimum record "recomputed_at_export": true in the
+            # manifest row; better, treat a missing result as an error for
+            # accepted samples.
             if quick_state.result is None and quick_state.seeds:
                 prepared = prepare_quickseg_inputs(
                     arr,

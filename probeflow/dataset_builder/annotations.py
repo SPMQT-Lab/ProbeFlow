@@ -51,6 +51,11 @@ def save_mask_annotation(
         mask_set = MaskSet(image_id=str(scan_path))
 
     existing = mask_set.get_by_name(config.label_name)
+    # REVIEW(2026-07-06, low): upsert-by-name into the shared .masks.json can
+    # silently overwrite a mask the user made in the viewer with the same
+    # name (e.g. "step_edge"). Sharing the sidecar is the right call, but
+    # consider a dataset_builder marker in parameters + a warning when the
+    # existing mask was not created by this tool.
     if existing is not None:
         mask_set.replace(existing.id, image_mask.data)
         existing.method = image_mask.method
