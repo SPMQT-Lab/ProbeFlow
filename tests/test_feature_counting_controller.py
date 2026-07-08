@@ -40,9 +40,8 @@ def test_pct_to_nm2_zero_percent():
 # ── _classify_summary ─────────────────────────────────────────────────────────
 
 class _FakeClassified:
-    def __init__(self, class_name, angle=0.0):
+    def __init__(self, class_name):
         self.class_name = class_name
-        self.particle_orientation_deg = angle
 
 
 def test_classify_summary_other_class():
@@ -54,21 +53,22 @@ def test_classify_summary_other_class():
 
 def test_classify_summary_multiple_classes():
     result = [
-        _FakeClassified("A", 10.0),
-        _FakeClassified("A", 10.0),
-        _FakeClassified("B", 90.0),
+        _FakeClassified("A"),
+        _FakeClassified("A"),
+        _FakeClassified("B"),
     ]
     summary = _classify_summary(result)
-    assert "A" in summary
-    assert "B" in summary
+    assert "A: 2" in summary
+    assert "B: 1" in summary
     assert "  |  " in summary
 
 
-def test_classify_summary_empty_angles():
-    result = [_FakeClassified("X")]
-    result[0].particle_orientation_deg = float("nan")
+def test_classify_summary_counts_only_no_orientation():
+    """Regression: classification no longer reports per-orientation bins."""
+    result = [_FakeClassified("X"), _FakeClassified("X")]
     summary = _classify_summary(result)
-    assert "X: 1" in summary
+    assert "X: 2" in summary
+    assert "°" not in summary
 
 
 # ── FeatureCountingController signal wiring ────────────────────────────────────

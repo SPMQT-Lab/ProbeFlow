@@ -635,8 +635,6 @@ class Classification:
     particle_index: int
     class_name: str
     similarity: float
-    particle_orientation_deg: float = 0.0
-    """Orientation of the classified particle (copied from Particle.orientation_deg)."""
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -1167,6 +1165,5 @@ def classify_particles(
             particle_index=p.index,
             class_name=label,
             similarity=float(sim) if np.isfinite(sim) else 0.0,
-            particle_orientation_deg=getattr(p, "orientation_deg", 0.0),
         ))
     return out

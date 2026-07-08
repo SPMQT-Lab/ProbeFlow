@@ -811,68 +811,29 @@ class FeaturesPanel(QWidget):
         self._overlay_toggle_btn.setVisible(True)
         self._overlay_toggle_btn.setText("👁 Original")
 
-        # ── Per-class orientation sub-rows ────────────────────────────────────
-        # For each class, bin orientations into 15° windows (0–180°).
-        # Each non-empty bin becomes its own row:  "T (30°)", "T (45°)", …
-        # "other" is never sub-divided — it just gets one summary row.
-        import math
-        _BIN_DEG = 15           # window width in degrees
-        _N_BINS  = 180 // _BIN_DEG   # 12 bins for [0, 180)
-
-        class_angles: dict[str, list] = {}
+        # ── Per-class summary rows ────────────────────────────────────────────
+        # One row per class with its count and percentage. (Orientation is not
+        # reported for classifications — the PCA major-axis is meaningless for
+        # near-circular particles, so it was unreliable.)
+        class_counts: dict[str, int] = {}
         for c in classifications:
-            class_angles.setdefault(c.class_name, []).append(
-                getattr(c, "particle_orientation_deg", 0.0)
-            )
+            class_counts[c.class_name] = class_counts.get(c.class_name, 0) + 1
 
         total = len(classifications)
 
         # Build flat list of (label, n, pct, hex_color, is_summary) rows.
-        # Each non-"other" class gets a bold summary row (total) followed by
-        # indented sub-rows for each non-empty 15° orientation bin.
         table_rows: list[tuple[str, int, float, str, bool]] = []
-
-        for cls_name in sorted(class_angles.keys()):
-            angles = class_angles[cls_name]
-            hex_color = self._class_colors.get(cls_name, _CLASSIFY_OTHER_COLOR)
-            n_total = len(angles)
+        for cls_name in sorted(class_counts.keys()):
+            n_total = class_counts[cls_name]
             pct_total = 100.0 * n_total / total if total > 0 else 0.0
-
-            # "other" — single summary row only (no orientation breakdown).
-            if cls_name == "other":
-                table_rows.append(("other", n_total, pct_total, hex_color, True))
-                continue
-
-            # Summary row for this class (bold, all orientations combined).
+            hex_color = self._class_colors.get(cls_name, _CLASSIFY_OTHER_COLOR)
             table_rows.append((cls_name, n_total, pct_total, hex_color, True))
 
-            valid = np.array([a for a in angles if not math.isnan(a)],
-                             dtype=np.float64)
-            if valid.size == 0:
-                continue
-
-            # Assign each angle to a 15° bin
-            bin_idx = np.floor(valid / _BIN_DEG).astype(int)
-            bin_idx = np.clip(bin_idx, 0, _N_BINS - 1)
-
-            for b in range(_N_BINS):
-                mask = bin_idx == b
-                if not mask.any():
-                    continue
-                bin_angles = valid[mask]
-                n_bin = int(mask.sum())
-                pct = 100.0 * n_bin / total if total > 0 else 0.0
-                # Mean angle of the particles in this bin (arithmetic ok for
-                # a 15° window — no wrap issue within such a narrow range).
-                mean_ang = float(bin_angles.mean())
-                label = f"  {cls_name} ({mean_ang:.0f}°)"   # indented sub-row
-                table_rows.append((label, n_bin, pct, hex_color, False))
-
-        # Populate the table — 3 columns: class (angle) | N | %
+        # Populate the table — 3 columns: class | N | %
         _bold_font   = ui_font(9, weight=QFont.Bold)
         _normal_font = ui_font(9)
         self._results_table.setColumnCount(3)
-        self._results_table.setHorizontalHeaderLabels(["class (angle)", "N", "%"])
+        self._results_table.setHorizontalHeaderLabels(["class", "N", "%"])
         self._results_table.setRowCount(len(table_rows))
 
         for i, (label, n, pct, hex_color, is_summary) in enumerate(table_rows):
@@ -1367,20 +1328,6 @@ class FeaturesPanel(QWidget):
                     xs.append(xs[0])
                     ys.append(ys[0])
                     self._view.add_path(xs, ys, color, lw=lw)
-
-                # For classified (non-other) particles: draw an orientation tick
-                # as a short line through the centroid — same color, same thickness.
-                if not is_other:
-                    cx = p.centroid_x_m / self._pixel_size_x_m
-                    cy = p.centroid_y_m / self._pixel_size_y_m
-                    bw = p.bbox_px[2] - p.bbox_px[0]
-                    bh = p.bbox_px[3] - p.bbox_px[1]
-                    half = max(5.0, 0.4 * float(np.sqrt(bw ** 2 + bh ** 2)))
-                    orient_rad = np.radians(getattr(c, "particle_orientation_deg", 0.0))
-                    dx_ = half * np.cos(orient_rad)
-                    dy_ = half * np.sin(orient_rad)
-                    self._view.add_line(cx - dx_, cy - dy_, cx + dx_, cy + dy_,
-                                        color, lw=1.2)
 
 
 class FeaturesSidebar(QWidget):

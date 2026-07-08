@@ -40,30 +40,16 @@ def _pct_to_nm2(pct: float, arr: np.ndarray, px_x_m: float, px_y_m: float) -> fl
 
 
 def _classify_summary(result) -> str:
-    """Build compact '  |  '-delimited classify summary string."""
-    _BIN = 15
-    class_angles: dict = {}
+    """Build compact '  |  '-delimited classify summary string (per-class counts)."""
+    class_counts: dict = {}
     for c in result:
-        class_angles.setdefault(c.class_name, []).append(
-            getattr(c, "particle_orientation_deg", 0.0))
+        class_counts[c.class_name] = class_counts.get(c.class_name, 0) + 1
     total = len(result)
     parts: list[str] = []
-    for cls_name in sorted(class_angles):
-        angles = class_angles[cls_name]
-        if cls_name == "other":
-            pct = 100.0 * len(angles) / total if total > 0 else 0.0
-            parts.append(f"other: {len(angles)} ({pct:.0f}%)")
-            continue
-        valid = np.array([a for a in angles if a == a], dtype=float)
-        if valid.size == 0:
-            parts.append(f"{cls_name}: {len(angles)}")
-            continue
-        bins = np.floor(valid / _BIN).astype(int)
-        for b in sorted(set(bins.tolist())):
-            n_b = int((bins == b).sum())
-            mean_a = float(valid[bins == b].mean())
-            pct = 100.0 * n_b / total if total > 0 else 0.0
-            parts.append(f"{cls_name}({mean_a:.0f}°): {n_b} ({pct:.0f}%)")
+    for cls_name in sorted(class_counts):
+        n = class_counts[cls_name]
+        pct = 100.0 * n / total if total > 0 else 0.0
+        parts.append(f"{cls_name}: {n} ({pct:.0f}%)")
     return "  |  ".join(parts)
 
 
