@@ -636,6 +636,12 @@ class FeaturesPanel(QWidget):
         self._sample_labels = {}
         self._label_history = []
         self._class_colors  = {}
+        self._classifications = []      # drop any results from the previous image
+        # Start every freshly-loaded image in plain segmentation mode. Without
+        # this, a leftover "classify" mode from the previous image draws the new
+        # segmentation contours in the unlabeled-gray of the labelling phase
+        # instead of the normal segmentation colour.
+        self._current_mode = "particles"
         self._show_overlay  = True
         self._overlay_toggle_btn.setVisible(False)
         self._overlay_toggle_btn.setText("👁 Original")

@@ -127,6 +127,10 @@ class FeatureCountingWindow(QMainWindow):
                    px_m: float, px_x_m: float, px_y_m: float, scan=None) -> None:
         """Load a scan plane from Browse into this window."""
         self._panel.load_entry(entry, plane_idx, arr, px_m, px_x_m, px_y_m, scan=scan)
+        # Return the sidebar to the segmentation mode so a new image starts a
+        # fresh workflow (Phase 1). This also re-syncs the panel mode + disarms
+        # any leftover sample-labelling from the previous image's classify run.
+        self._sidebar._select_mode("particles")
         self._sidebar.set_status(
             f"Loaded {entry.stem}  (plane {plane_idx},  "
             f"px = {px_m * 1e12:.1f} pm)")
