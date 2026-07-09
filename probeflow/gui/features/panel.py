@@ -885,6 +885,11 @@ class FeaturesPanel(QWidget):
         return [p for p in self._particles
                 if p.index not in self._ignored_indices]
 
+    def counted_area_nm2(self) -> float:
+        """Total segmented area (nm²) over the counted (non-ignored) particles."""
+        return float(sum(getattr(p, "area_nm2", 0.0) or 0.0
+                         for p in self._counted_particles()))
+
     def _fill_particles_table(self) -> None:
         """(Re)populate the results table with the counted (non-ignored) particles."""
         counted = self._counted_particles()
@@ -2227,22 +2232,25 @@ class FeaturesSidebar(QWidget):
         """Return to Phase 1 (Segmentation)."""
         self._phase_stack.setCurrentIndex(0)
 
-    def set_segment_count(self, n: int) -> None:
+    @staticmethod
+    def _area_suffix(area_nm2: float | None) -> str:
+        return "" if area_nm2 is None else f"  ·  total area {area_nm2:.1f} nm²"
+
+    def set_segment_count(self, n: int, area_nm2: float | None = None) -> None:
         """Called after segmentation completes — shows count and switches to Phase 2."""
         self._segment_count_lbl.setText(
-            f"{n} particle{'s' if n != 1 else ''} found.")
+            f"{n} particle{'s' if n != 1 else ''} found."
+            + self._area_suffix(area_nm2))
         self._phase_stack.setCurrentIndex(1)
         self._update_run_btn_label()
 
-    def update_segment_count(self, n_counted: int, n_ignored: int) -> None:
+    def update_segment_count(self, n_counted: int, n_ignored: int,
+                             area_nm2: float | None = None) -> None:
         """Refresh the count label after an ignore toggle (no phase switch)."""
-        if n_ignored:
-            self._segment_count_lbl.setText(
-                f"{n_counted} particle{'s' if n_counted != 1 else ''} counted "
-                f"({n_ignored} ignored).")
-        else:
-            self._segment_count_lbl.setText(
-                f"{n_counted} particle{'s' if n_counted != 1 else ''} found.")
+        base = (f"{n_counted} particle{'s' if n_counted != 1 else ''} counted "
+                f"({n_ignored} ignored)." if n_ignored
+                else f"{n_counted} particle{'s' if n_counted != 1 else ''} found.")
+        self._segment_count_lbl.setText(base + self._area_suffix(area_nm2))
 
     def _update_run_btn_label(self) -> None:
         mode = self._current_mode()

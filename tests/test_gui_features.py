@@ -192,6 +192,9 @@ def test_ignore_particle_excludes_it_from_count(qapp, monkeypatch):
     panel.set_particles(parts)
     assert len(panel.get_particles()) == len(parts)
 
+    total_area = sum(p.area_nm2 for p in parts)
+    assert panel.counted_area_nm2() == pytest.approx(total_area)
+
     events = []
     panel.segment_count_changed.connect(lambda c, i: events.append((c, i)))
 
@@ -201,6 +204,8 @@ def test_ignore_particle_excludes_it_from_count(qapp, monkeypatch):
     assert len(kept) == len(parts) - 1
     assert victim not in [p.index for p in kept]
     assert events[-1] == (len(parts) - 1, 1)      # (counted, ignored)
+    # Total area drops by exactly the ignored particle's area.
+    assert panel.counted_area_nm2() == pytest.approx(total_area - parts[0].area_nm2)
 
     panel._toggle_ignored(victim)                 # un-ignore restores it
     assert len(panel.get_particles()) == len(parts)

@@ -173,15 +173,18 @@ class FeatureCountingController(QObject):
 
     def _on_segment_count_changed(self, n_counted: int, n_ignored: int) -> None:
         """A particle was right-click ignored/un-ignored — refresh count UI."""
-        self._sidebar.update_segment_count(n_counted, n_ignored)
+        area = self._panel.counted_area_nm2()
+        self._sidebar.update_segment_count(n_counted, n_ignored, area)
         if n_ignored:
             self._sidebar.set_status(
-                f"{n_counted} particle(s) counted — "
+                f"{n_counted} particle(s) counted, {area:.1f} nm² total — "
                 f"{n_ignored} edge particle(s) ignored.")
         else:
-            self._sidebar.set_status(f"{n_counted} particle(s) counted.")
+            self._sidebar.set_status(
+                f"{n_counted} particle(s) counted, {area:.1f} nm² total.")
         self._status_cb(
-            f"Segmentation: {n_counted} particle(s) ({n_ignored} ignored)")
+            f"Segmentation: {n_counted} particle(s), {area:.1f} nm² "
+            f"({n_ignored} ignored)")
 
     def _on_classify_params_changed(self) -> None:
         self._panel.clear_sample_labels()
@@ -454,7 +457,8 @@ class FeatureCountingController(QObject):
         self._sidebar.stop_mask_painting()
         self._sidebar.disarm_zero_plane()          # ensure zero-plane btn is unchecked
         self._panel.set_zero_plane_armed(False)    # ensure view click mode is disarmed
-        self._sidebar.set_segment_count(len(particles))
+        self._sidebar.set_segment_count(
+            len(particles), self._panel.counted_area_nm2())
         if self._sidebar.current_mode() == "classify":
             self._panel.set_mode("classify")
             self._panel.set_sample_selection_armed(True)
@@ -584,7 +588,8 @@ class FeatureCountingController(QObject):
 
         if mode == "particles":
             self._panel.set_particles(result)
-            self._sidebar.set_segment_count(len(result))
+            self._sidebar.set_segment_count(
+                len(result), self._panel.counted_area_nm2())
             if self._sidebar.current_mode() == "classify":
                 self._panel.set_mode("classify")
                 self._panel.set_sample_selection_armed(True)
@@ -593,9 +598,12 @@ class FeatureCountingController(QObject):
                     "Click any particle to label it, then press ▶ Run.")
             else:
                 self._sidebar.set_status(
-                    f"Found {len(result)} particle(s). "
+                    f"Found {len(result)} particle(s), "
+                    f"{self._panel.counted_area_nm2():.1f} nm² total. "
                     "Right-click an edge particle to ignore it.")
-            self._status_cb(f"Segmentation: {len(result)} particle(s)")
+            self._status_cb(
+                f"Segmentation: {len(result)} particle(s), "
+                f"{self._panel.counted_area_nm2():.1f} nm²")
 
         elif mode == "template":
             self._panel.set_detections(result)
