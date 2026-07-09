@@ -129,6 +129,7 @@ class FeatureCountingController(QObject):
         sidebar.reset_to_original_requested.connect(self._on_reset_to_original)
         panel.scan_loaded.connect(self._on_scan_loaded)
         panel.zero_plane_applied.connect(self._on_zero_plane_applied)
+        panel.segment_count_changed.connect(self._on_segment_count_changed)
 
         # Histogram contrast — drag lines / sliders → update panel display clip
         sidebar.display_clip_changed.connect(panel.set_display_range)
@@ -169,6 +170,18 @@ class FeatureCountingController(QObject):
                 "Click any particle on the image to label it, then press ▶ Run.")
         elif mode != "classify":
             self._panel.set_sample_selection_armed(False)
+
+    def _on_segment_count_changed(self, n_counted: int, n_ignored: int) -> None:
+        """A particle was right-click ignored/un-ignored — refresh count UI."""
+        self._sidebar.update_segment_count(n_counted, n_ignored)
+        if n_ignored:
+            self._sidebar.set_status(
+                f"{n_counted} particle(s) counted — "
+                f"{n_ignored} edge particle(s) ignored.")
+        else:
+            self._sidebar.set_status(f"{n_counted} particle(s) counted.")
+        self._status_cb(
+            f"Segmentation: {n_counted} particle(s) ({n_ignored} ignored)")
 
     def _on_classify_params_changed(self) -> None:
         self._panel.clear_sample_labels()
@@ -579,7 +592,9 @@ class FeatureCountingController(QObject):
                     f"Found {len(result)} particle(s). "
                     "Click any particle to label it, then press ▶ Run.")
             else:
-                self._sidebar.set_status(f"Found {len(result)} particle(s).")
+                self._sidebar.set_status(
+                    f"Found {len(result)} particle(s). "
+                    "Right-click an edge particle to ignore it.")
             self._status_cb(f"Segmentation: {len(result)} particle(s)")
 
         elif mode == "template":

@@ -175,6 +175,44 @@ def test_features_panel_sample_label_flow(qapp, monkeypatch):
     panel.deleteLater()
 
 
+def test_ignore_particle_excludes_it_from_count(qapp, monkeypatch):
+    """Right-click 'ignore' drops an (edge) particle from get_particles() so it
+    no longer counts, and un-ignoring restores it."""
+    pytest.importorskip("cv2")
+    from probeflow.analysis.features import segment_particles
+    from probeflow.gui.features import FeaturesPanel
+
+    arr = _sample_arr()
+    parts = segment_particles(arr, pixel_size_m=1e-9, min_area_nm2=0.5,
+                              size_sigma_clip=None)
+    assert len(parts) >= 2
+
+    panel = FeaturesPanel({})
+    panel.load_entry(_sample_entry(), 0, arr, 1e-9)
+    panel.set_particles(parts)
+    assert len(panel.get_particles()) == len(parts)
+
+    events = []
+    panel.segment_count_changed.connect(lambda c, i: events.append((c, i)))
+
+    victim = parts[0].index
+    panel._toggle_ignored(victim)
+    kept = panel.get_particles()
+    assert len(kept) == len(parts) - 1
+    assert victim not in [p.index for p in kept]
+    assert events[-1] == (len(parts) - 1, 1)      # (counted, ignored)
+
+    panel._toggle_ignored(victim)                 # un-ignore restores it
+    assert len(panel.get_particles()) == len(parts)
+    assert events[-1] == (len(parts), 0)
+
+    # Re-segmenting clears the ignore set.
+    panel._toggle_ignored(victim)
+    panel.set_particles(parts)
+    assert len(panel.get_particles()) == len(parts)
+    panel.deleteLater()
+
+
 def test_features_window_classify_requires_labels(qapp):
     pytest.importorskip("cv2")
     from probeflow.analysis.features import segment_particles

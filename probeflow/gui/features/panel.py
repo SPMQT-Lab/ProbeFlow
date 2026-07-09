@@ -488,6 +488,7 @@ class FeaturesPanel(QWidget):
     go_to_browse_requested  = Signal()       # ← Browse button
     scan_loaded             = Signal(object) # emitted after load_entry with the arr
     zero_plane_applied      = Signal()       # emitted after zero-plane correction
+    segment_count_changed   = Signal(int, int)  # (n_counted, n_ignored) after ignore toggle
 
     def __init__(self, t: dict, parent=None):
         super().__init__(parent)
@@ -510,6 +511,11 @@ class FeaturesPanel(QWidget):
         self._current_mode: str = "particles"
         self._params_signature = None
         self._params_meta: dict | None = None
+        # Particle indices the user right-clicked to exclude from the count
+        # (typically edge particles, truncated by the frame). Excluded from
+        # get_particles(), so they drop out of the count, classification,
+        # export and statistics alike. Reset on every new segmentation/image.
+        self._ignored_indices: set = set()
         self._sample_armed: bool = False
         self._sample_labels: dict = {}     # particle_index → {"name": str, "color": tuple}
         self._classifications: list = []
@@ -636,6 +642,7 @@ class FeaturesPanel(QWidget):
         self._sample_labels = {}
         self._label_history = []
         self._class_colors  = {}
+        self._ignored_indices = set()   # drop any ignored-particle marks
         self._classifications = []      # drop any results from the previous image
         # Start every freshly-loaded image in plain segmentation mode. Without
         # this, a leftover "classify" mode from the previous image draws the new
@@ -865,20 +872,42 @@ class FeaturesPanel(QWidget):
         self._particles    = particles
         self._params_signature = params_signature
         self._params_meta = params_meta
+        self._ignored_indices = set()   # fresh segmentation → nothing ignored yet
         self._overlay_mode = "particles"
         self._show_overlay = True
         self._overlay_toggle_btn.setVisible(bool(particles))
         self._overlay_toggle_btn.setText("👁 Original")
         self._redraw()
+        self._fill_particles_table()
+
+    def _counted_particles(self) -> list:
+        """Segmented particles minus the ones the user marked 'ignore'."""
+        return [p for p in self._particles
+                if p.index not in self._ignored_indices]
+
+    def _fill_particles_table(self) -> None:
+        """(Re)populate the results table with the counted (non-ignored) particles."""
+        counted = self._counted_particles()
         self._results_table.setColumnCount(4)
         self._results_table.setHorizontalHeaderLabels(
             ["#", "x (nm)", "y (nm)", "area (nm^2)"])
-        self._results_table.setRowCount(len(particles))
-        for i, p in enumerate(particles):
+        self._results_table.setRowCount(len(counted))
+        for i, p in enumerate(counted):
             self._results_table.setItem(i, 0, QTableWidgetItem(str(p.index)))
             self._results_table.setItem(i, 1, QTableWidgetItem(f"{p.centroid_x_m * 1e9:.2f}"))
             self._results_table.setItem(i, 2, QTableWidgetItem(f"{p.centroid_y_m * 1e9:.2f}"))
             self._results_table.setItem(i, 3, QTableWidgetItem(f"{p.area_nm2:.2f}"))
+
+    def _toggle_ignored(self, particle_index: int) -> None:
+        """Flip a particle's ignore state, then refresh table + overlay + count."""
+        if particle_index in self._ignored_indices:
+            self._ignored_indices.discard(particle_index)
+        else:
+            self._ignored_indices.add(particle_index)
+        self._fill_particles_table()
+        self._redraw()
+        n_ignored = len(self._ignored_indices)
+        self.segment_count_changed.emit(len(self._particles) - n_ignored, n_ignored)
 
     def set_detections(self, detections):
         self._detections   = detections
@@ -920,7 +949,9 @@ class FeaturesPanel(QWidget):
             self._results_table.setItem(i, 1, QTableWidgetItem(v))
 
     def get_particles(self):
-        return list(self._particles)
+        # Ignored (edge) particles are excluded here, so they drop out of the
+        # count, classification, export and statistics consistently.
+        return self._counted_particles()
 
     def clear_particles(self) -> None:
         """Remove segmentation overlay — returns the panel to the raw image."""
@@ -1187,6 +1218,21 @@ class FeaturesPanel(QWidget):
         if best_p is None or best_dist_sq > max_dist_sq:
             return
 
+        # ── CASE 0: plain segmentation — ignore / un-ignore an edge particle ─────
+        # STM particles clipped by the frame edge bias the count, so let the user
+        # right-click to exclude them. Toggling updates the count everywhere
+        # (get_particles filters them out).
+        if self._overlay_mode == "particles" and self._current_mode != "classify":
+            is_ignored = best_p.index in self._ignored_indices
+            menu = QMenu(self)
+            label = (f"Count particle #{best_p.index} again" if is_ignored
+                     else f"Ignore particle #{best_p.index} (edge)")
+            menu.addAction(label)
+            if menu.exec(QCursor.pos()) is None:
+                return
+            self._toggle_ignored(best_p.index)
+            return
+
         # ── CASE 1: manual labeling phase (before running classification) ────────
         if self._overlay_mode == "particles" and self._current_mode == "classify":
             label_info = self._sample_labels.get(best_p.index)
@@ -1287,14 +1333,22 @@ class FeaturesPanel(QWidget):
                         self._view.add_text(cx + 2, cy - 8, label_info["name"], color)
             else:
                 for p in self._particles:
+                    ignored = p.index in self._ignored_indices
                     xs = [c[0] / self._pixel_size_x_m for c in p.contour_xy_m]
                     ys = [c[1] / self._pixel_size_y_m for c in p.contour_xy_m]
                     if xs:
                         xs.append(xs[0]); ys.append(ys[0])
-                        self._view.add_path(xs, ys, "#f38ba8")
-                    cx = p.centroid_x_m / self._pixel_size_x_m
-                    cy = p.centroid_y_m / self._pixel_size_y_m
-                    self._view.add_cross(cx, cy, "#a6e3a1")
+                        # Counted: pink contour + green centre cross.
+                        # Ignored (edge): muted grey, thin, no cross — visibly
+                        # excluded but still shown so it can be un-ignored.
+                        if ignored:
+                            self._view.add_path(xs, ys, "#6c7086", lw=0.5)
+                        else:
+                            self._view.add_path(xs, ys, "#f38ba8")
+                    if not ignored:
+                        cx = p.centroid_x_m / self._pixel_size_x_m
+                        cy = p.centroid_y_m / self._pixel_size_y_m
+                        self._view.add_cross(cx, cy, "#a6e3a1")
 
         elif self._overlay_mode == "template" and self._show_overlay:
             for d in self._detections:
@@ -1795,6 +1849,10 @@ class FeaturesSidebar(QWidget):
         self._segment_count_lbl = QLabel("Segmentation not run yet.")
         self._segment_count_lbl.setFont(ui_font(9, weight=QFont.Bold))
         self._segment_count_lbl.setWordWrap(True)
+        self._segment_count_lbl.setToolTip(_tip(
+            "Right-click a particle on the image to ignore it (e.g. one clipped "
+            "by the frame edge) — ignored particles are greyed out and drop out "
+            "of the count. Right-click again to count it back."))
         lay.addWidget(self._segment_count_lbl)
 
         lay.addWidget(_sep())
@@ -2175,6 +2233,16 @@ class FeaturesSidebar(QWidget):
             f"{n} particle{'s' if n != 1 else ''} found.")
         self._phase_stack.setCurrentIndex(1)
         self._update_run_btn_label()
+
+    def update_segment_count(self, n_counted: int, n_ignored: int) -> None:
+        """Refresh the count label after an ignore toggle (no phase switch)."""
+        if n_ignored:
+            self._segment_count_lbl.setText(
+                f"{n_counted} particle{'s' if n_counted != 1 else ''} counted "
+                f"({n_ignored} ignored).")
+        else:
+            self._segment_count_lbl.setText(
+                f"{n_counted} particle{'s' if n_counted != 1 else ''} found.")
 
     def _update_run_btn_label(self) -> None:
         mode = self._current_mode()
