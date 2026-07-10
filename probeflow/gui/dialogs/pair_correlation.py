@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QDoubleSpinBox,
+    QFileDialog,
     QFormLayout,
     QFrame,
     QHBoxLayout,
@@ -25,7 +26,12 @@ from PySide6.QtWidgets import (
 )
 
 from probeflow.analysis.pair_correlation import PairCorrelationResult, compute_pair_correlation
+from probeflow.analysis.point_summary import PointPatternSummary, summarize_point_pattern
 from probeflow.measurements.models import MeasurementResult
+from probeflow.measurements.point_stats_io import (
+    point_stats_csv_text,
+    point_stats_json_text,
+)
 
 
 def _sep() -> QFrame:
@@ -37,7 +43,11 @@ def _sep() -> QFrame:
 
 
 class PairCorrelationDialog(QDialog):
-    """Compute g(r) from detected feature points or point ROIs.
+    """Basic point-pattern statistics for detected feature points or point ROIs.
+
+    Shows the pair-correlation function g(r) and the nearest-neighbour distance
+    distribution, with count / density / NN summary and a random (CSR) baseline,
+    and exports the computed quantities to CSV / JSON.
 
     Parameters
     ----------
@@ -67,8 +77,8 @@ class PairCorrelationDialog(QDialog):
         parent=None,
     ):
         super().__init__(parent)
-        self.setWindowTitle("Pair correlation")
-        self.resize(900, 600)
+        self.setWindowTitle("Point statistics")
+        self.resize(960, 600)
         self.setAttribute(Qt.WA_DeleteOnClose, False)
 
         self._sources = sources
@@ -82,6 +92,7 @@ class PairCorrelationDialog(QDialog):
         self._on_add_result = on_add_result
         self._t = theme or {}
         self._result: PairCorrelationResult | None = None
+        self._summary: PointPatternSummary | None = None
 
         self._build()
 
@@ -92,14 +103,16 @@ class PairCorrelationDialog(QDialog):
         main.setContentsMargins(6, 6, 6, 6)
         main.setSpacing(6)
 
-        # Left: matplotlib canvas.
-        self._fig = Figure(figsize=(5, 4), tight_layout=True)
+        # Left: matplotlib canvas — g(r) and the NN-distance histogram.
+        self._fig = Figure(figsize=(6.5, 4), tight_layout=True)
         bg = self._t.get("figure.facecolor", "#ffffff")
         self._fig.patch.set_facecolor(bg)
-        self._ax = self._fig.add_subplot(111)
-        self._ax.set_facecolor(bg)
+        self._ax_gr = self._fig.add_subplot(121)
+        self._ax_nn = self._fig.add_subplot(122)
+        for ax in (self._ax_gr, self._ax_nn):
+            ax.set_facecolor(bg)
         self._canvas = FigureCanvasQTAgg(self._fig)
-        self._canvas.setMinimumWidth(400)
+        self._canvas.setMinimumWidth(520)
         main.addWidget(self._canvas, 1)
 
         # Right: controls in a scroll area.
@@ -172,6 +185,14 @@ class PairCorrelationDialog(QDialog):
 
         lay.addWidget(_sep())
 
+        self._export_btn = QPushButton("Export statistics…")
+        self._export_btn.setDefault(False)
+        self._export_btn.setAutoDefault(False)
+        self._export_btn.setEnabled(False)
+        self._export_btn.setToolTip("Save the computed quantities as CSV or JSON.")
+        self._export_btn.clicked.connect(self._export)
+        lay.addWidget(self._export_btn)
+
         self._add_btn = QPushButton("Add to measurement table")
         self._add_btn.setDefault(False)
         self._add_btn.setAutoDefault(False)
@@ -183,7 +204,7 @@ class PairCorrelationDialog(QDialog):
 
         if not self._sources:
             self._result_lbl.setText(
-                "Run Feature finder or select point ROIs first."
+                "Detect feature maxima or select point ROIs first."
             )
 
     # ── Compute ────────────────────────────────────────────────────────────────
@@ -204,20 +225,35 @@ class PairCorrelationDialog(QDialog):
             r_max_m=(r_max * 1e-9) if r_max > 0 else None,
             bin_width_m=(bw * 1e-9) if bw > 0 else None,
         )
+        # Nearest-neighbour distribution (pure inter-point geometry; area/density
+        # come from the ROI region below, so scan_range is left unset here).
+        summary = summarize_point_pattern(
+            pts, scan_range_m=None, image_shape=None, region_label=src_name,
+        )
         self._result = result
-        self._update_plot(result)
-        self._update_result_text(result)
+        self._summary = summary
+        self._update_gr_plot(result)
+        self._update_nn_plot(summary)
+        self._canvas.draw()
+        self._update_result_text(result, summary)
+        has_stats = result.n_points > 0
+        self._export_btn.setEnabled(has_stats)
         self._add_btn.setEnabled(result.quality != "failed")
 
-    def _update_plot(self, result: PairCorrelationResult) -> None:
-        ax = self._ax
-        ax.cla()
+    def _style_axis(self, ax) -> None:
         fg = self._t.get("text.color", "#000000")
         bg = self._t.get("figure.facecolor", "#ffffff")
         ax.set_facecolor(bg)
         for spine in ax.spines.values():
             spine.set_edgecolor(fg)
         ax.tick_params(colors=fg, labelsize=7)
+
+    def _update_gr_plot(self, result: PairCorrelationResult) -> None:
+        ax = self._ax_gr
+        ax.cla()
+        self._style_axis(ax)
+        fg = self._t.get("text.color", "#000000")
+        bg = self._t.get("figure.facecolor", "#ffffff")
 
         if len(result.r_m) == 0:
             ax.text(0.5, 0.5, "Insufficient data", ha="center", va="center",
@@ -240,22 +276,104 @@ class PairCorrelationDialog(QDialog):
                 ax.legend(fontsize=7, framealpha=0.6,
                           labelcolor=fg, facecolor=bg, edgecolor=fg)
 
-        self._canvas.draw()
+    def _update_nn_plot(self, summary: PointPatternSummary) -> None:
+        ax = self._ax_nn
+        ax.cla()
+        self._style_axis(ax)
+        fg = self._t.get("text.color", "#000000")
+        bg = self._t.get("figure.facecolor", "#ffffff")
 
-    def _update_result_text(self, result: PairCorrelationResult) -> None:
-        lines = [f"Points: {result.n_points}"]
-        if result.density_m2 is not None:
-            d_nm2 = result.density_m2 * 1e-18
-            lines.append(f"Density: {d_nm2:.4g} nm⁻²")
-        if result.nearest_neighbour_median_m is not None:
-            nn_nm = result.nearest_neighbour_median_m * 1e9
-            lines.append(f"NN median: {nn_nm:.4g} nm")
-        if result.first_peak_m is not None:
-            pk_nm = result.first_peak_m * 1e9
-            lines.append(f"First peak: {pk_nm:.4g} nm")
+        nn = np.asarray(summary.nn_distances_nm, dtype=float)
+        nn = nn[np.isfinite(nn)]
+        if nn.size < 2:
+            ax.text(0.5, 0.5, "Too few points", ha="center", va="center",
+                    transform=ax.transAxes, color=fg, fontsize=9)
+        else:
+            bins = int(min(30, max(6, round(np.sqrt(nn.size)))))
+            ax.hist(nn, bins=bins, color="#5aa469", alpha=0.85)
+            ax.set_xlabel("NN distance  (nm)", color=fg, fontsize=8)
+            ax.set_ylabel("count", color=fg, fontsize=8)
+            ax.set_title("Nearest-neighbour spacing", color=fg, fontsize=9)
+            csr = self._expected_csr_nn_nm()
+            if csr is not None:
+                ax.axvline(csr, color="#d94a4a", lw=1.0, linestyle=":", alpha=0.9,
+                           label=f"Random: {csr:.3g} nm")
+                ax.legend(fontsize=7, framealpha=0.6,
+                          labelcolor=fg, facecolor=bg, edgecolor=fg)
+
+    def _density_per_nm2(self) -> float | None:
+        if self._result is None or self._result.density_m2 is None:
+            return None
+        return self._result.density_m2 * 1e-18
+
+    def _expected_csr_nn_nm(self) -> float | None:
+        """Mean NN distance for a random (Poisson) pattern: 1 / (2 sqrt(density))."""
+        density = self._density_per_nm2()
+        if density is None or density <= 0.0:
+            return None
+        return 1.0 / (2.0 * float(np.sqrt(density)))
+
+    def _stat_rows(self) -> list[tuple[str, object, str]]:
+        """Ordered (label, value, unit) rows shared by the display and export."""
+        r = self._result
+        s = self._summary
+        rows: list[tuple[str, object, str]] = [("Points", r.n_points if r else 0, "")]
+        if self._roi_area_m2 is not None:
+            rows.append(("Region area", self._roi_area_m2 * 1e18, "nm^2"))
+        rows.append(("Density", self._density_per_nm2(), "nm^-2"))
+        if s is not None:
+            rows += [
+                ("NN mean", s.nn_mean_nm, "nm"),
+                ("NN median", s.nn_median_nm, "nm"),
+                ("NN min", s.nn_min_nm, "nm"),
+                ("NN max", s.nn_max_nm, "nm"),
+            ]
+        rows.append(("NN expected (random)", self._expected_csr_nn_nm(), "nm"))
+        if r is not None and r.first_peak_m is not None:
+            rows.append(("g(r) first peak", r.first_peak_m * 1e9, "nm"))
+        return rows
+
+    def _update_result_text(
+        self, result: PairCorrelationResult, summary: PointPatternSummary
+    ) -> None:
+        def _fmt(v, unit=""):
+            return "—" if v is None else f"{v:.4g}{unit}"
+
+        lines = [f"{label}: {_fmt(value)}{(' ' + unit) if (unit and value is not None) else ''}"
+                 for label, value, unit in self._stat_rows()]
         lines.append(f"Quality: {result.quality}")
         self._result_lbl.setText("\n".join(lines))
         self._warning_lbl.setText(result.message if result.message else "")
+
+    def _export(self) -> None:
+        if self._result is None:
+            return
+        path, selected = QFileDialog.getSaveFileName(
+            self, "Export statistics", "point_statistics.csv",
+            "CSV (*.csv);;JSON (*.json)",
+        )
+        if not path:
+            return
+        scalars = self._stat_rows()
+        want_json = path.lower().endswith(".json") or "json" in selected.lower()
+        if want_json:
+            curves: dict[str, dict[str, object]] = {}
+            if self._result.r_m.size:
+                curves["pair_correlation"] = {
+                    "r_nm": self._result.r_m * 1e9, "g_r": self._result.g_r,
+                }
+            if self._summary is not None and self._summary.nn_distances_nm.size:
+                curves["nn_distances_nm"] = {"nn_nm": self._summary.nn_distances_nm}
+            text = point_stats_json_text(scalars, curves or None)
+        else:
+            text = point_stats_csv_text(scalars)
+        try:
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(text)
+        except OSError as exc:
+            self._warning_lbl.setText(f"Export failed: {exc}")
+            return
+        self._warning_lbl.setText(f"Saved → {path}")
 
     # ── Add to table ───────────────────────────────────────────────────────────
 

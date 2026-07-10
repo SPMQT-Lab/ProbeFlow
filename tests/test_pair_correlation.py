@@ -190,3 +190,67 @@ def test_coincident_points_return_failed_empty_result():
     assert result.g_r.size == 0
     assert result.first_peak_m is None
     assert "zero" in result.message.lower()
+
+
+# ── Point-statistics dialog: NN summary + export ──────────────────────────────
+def _stats_dialog(qapp, spacing_m=1e-9, n=6, area_m2=25e-18):
+    from probeflow.gui.dialogs.pair_correlation import PairCorrelationDialog
+    dlg = PairCorrelationDialog(
+        {"Detected feature maxima": _square_lattice(n, spacing_m)},
+        roi_area_m2=area_m2,
+        pixel_size_x_m=spacing_m,
+        pixel_size_y_m=spacing_m,
+    )
+    dlg._run()
+    return dlg
+
+
+def test_dialog_computes_nn_summary_and_enables_export(qapp):
+    dlg = _stats_dialog(qapp, spacing_m=1e-9)
+    assert dlg._summary is not None
+    # square lattice with 1 nm spacing → NN distances all ≈ 1 nm
+    assert dlg._summary.nn_median_nm == pytest.approx(1.0, abs=1e-6)
+    assert dlg._summary.nn_mean_nm == pytest.approx(1.0, abs=1e-6)
+    assert dlg._export_btn.isEnabled()
+    dlg.close(); dlg.deleteLater()
+
+
+def test_stat_rows_cover_count_density_nn_and_csr(qapp):
+    dlg = _stats_dialog(qapp)
+    labels = {label for label, _v, _u in dlg._stat_rows()}
+    assert {"Points", "Density", "NN mean", "NN median", "NN min", "NN max",
+            "NN expected (random)"} <= labels
+    dlg.close(); dlg.deleteLater()
+
+
+def test_export_csv_writes_quantities(qapp, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QFileDialog
+    dlg = _stats_dialog(qapp)
+    out = tmp_path / "stats.csv"
+    monkeypatch.setattr(
+        QFileDialog, "getSaveFileName",
+        staticmethod(lambda *a, **k: (str(out), "CSV (*.csv)")),
+    )
+    dlg._export()
+    text = out.read_text(encoding="utf-8")
+    assert text.splitlines()[0] == "quantity,value,unit"
+    assert any(line.startswith("Points,36,") for line in text.splitlines())
+    assert any(line.startswith("NN mean,") for line in text.splitlines())
+    dlg.close(); dlg.deleteLater()
+
+
+def test_export_json_includes_curves(qapp, tmp_path, monkeypatch):
+    import json
+    from PySide6.QtWidgets import QFileDialog
+    dlg = _stats_dialog(qapp)
+    out = tmp_path / "stats.json"
+    monkeypatch.setattr(
+        QFileDialog, "getSaveFileName",
+        staticmethod(lambda *a, **k: (str(out), "JSON (*.json)")),
+    )
+    dlg._export()
+    obj = json.loads(out.read_text(encoding="utf-8"))
+    assert obj["statistics"][0]["quantity"] == "Points"
+    assert "pair_correlation" in obj["curves"]
+    assert "nn_distances_nm" in obj["curves"]
+    dlg.close(); dlg.deleteLater()
