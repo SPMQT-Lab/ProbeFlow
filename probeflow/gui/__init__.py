@@ -16,7 +16,7 @@ Future cleanup
 A small backward-compatibility shim lives in ``probeflow.gui.compat``
 (formerly ``_legacy.py``) so public ``from probeflow.gui import X`` imports
 remain stable while widgets and dialogs are transplanted into ``browse/``,
-``viewer/``, ``convert/``, ``features/``, ``terminal/``, and ``dialogs/``.
+``viewer/``, ``convert/``, and ``dialogs/``.
 Keep GUI code Qt-facing only: do not add provenance dataclasses, numerical
 kernels, measurement algorithms, readers, or writers here.
 
@@ -112,7 +112,6 @@ _LEGACY_EXPORTS = {
     "BrowseToolPanel",
     "ConvertPanel",
     "ConvertSidebar",
-    "DeveloperTerminalWidget",
     "EdgeDetectionDialog",
     "FFTViewerDialog",
     "ImageViewerDialog",
@@ -125,7 +124,6 @@ _LEGACY_EXPORTS = {
     "STMBackgroundDialog",
     "ThumbnailGrid",
     "_DefinitionsDialog",
-    "_DevSidebar",
     "_TerminalPane",
 }
 
@@ -199,7 +197,6 @@ __all__ = [
     "DEFAULT_CMAP_KEY",
     "DEFAULT_CMAP_LABEL",
     "DEFAULT_CUSHION",
-    "DeveloperTerminalWidget",
     "EdgeDetectionDialog",
     "FFTViewerDialog",
     "GUI_FONT_DEFAULT",
