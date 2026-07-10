@@ -556,8 +556,6 @@ def _build_parser() -> argparse.ArgumentParser:
     diag_z.set_defaults(func=_cmd_diag_z)
 
     gui = sub.add_parser("gui", help="Launch the ProbeFlow graphical interface")
-    gui.add_argument("--open-survey", type=Path, default=None, metavar="SURVEY_JSON",
-                     help="Pre-load a ScanFlow survey manifest into Survey mode")
     gui.add_argument("--browse", type=Path, default=None, metavar="FOLDER",
                      help="Open this folder in the Browse tab on startup "
                           "(used internally by the Restart action)")
@@ -632,9 +630,6 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: Optional[List[str]] = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
-    # Top-level shortcut: `probeflow --open-survey PATH` → `probeflow gui --open-survey PATH`.
-    if argv and (argv[0] == "--open-survey" or argv[0].startswith("--open-survey=")):
-        argv = ["gui"] + list(argv)
     parser = _build_parser()
     args = parser.parse_args(argv)
     rc = args.func(args)

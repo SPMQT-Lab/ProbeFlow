@@ -143,8 +143,7 @@ class ProbeFlowWindow(QMainWindow):
     RIGHT_INSPECTOR_MIN_W = 300
     CENTRAL_BROWSER_MIN_W = 500
 
-    def __init__(self, *, open_survey: Optional[Path] = None,
-                 browse_folder: Optional[Path] = None):
+    def __init__(self, *, browse_folder: Optional[Path] = None):
         super().__init__()
         self.setWindowTitle("ProbeFlow")
         self.setMinimumSize(1100, 720)
@@ -165,7 +164,6 @@ class ProbeFlowWindow(QMainWindow):
         self._workspace_windows: dict[str, WorkspaceWindow] = {}
         self._running  = False
         self._n_loaded = 0
-        self._pending_survey = Path(open_survey) if open_survey else None
         self._pending_browse = Path(browse_folder) if browse_folder else None
         # Spec → image mapping (populated by user via "Map spectra…" dialogs;
         # kept empty by default so we never auto-attach spectra to the wrong
@@ -181,14 +179,9 @@ class ProbeFlowWindow(QMainWindow):
         # Per-scan processing memory: path_str → (mtime_at_save, processing dict).
         # Populated when a viewer closes; restored when the same scan is reopened
         # *and* its mtime is unchanged (review gui-arch #10).  This prevents
-        # cached processing from replaying on top of stale data after ScanFlow
-        # or an external editor rewrites the file.
+        # cached processing from replaying on top of stale data after an
+        # external editor rewrites the file.
         self._saved_processing: dict[str, tuple[float | None, dict]] = {}
-
-        # Probe whether the optional Survey/ScanFlow integration is importable
-        # (review gui-arch #17).  We resolve this before ``_build_ui`` so the
-        # Tools menu and the deferred SurveyPanel construction agree.
-        self._survey_available = self._probe_survey_available()
 
         self._build_ui()
         self._apply_theme()
@@ -203,15 +196,6 @@ class ProbeFlowWindow(QMainWindow):
             except Exception:
                 pass   # non-fatal: bad path just opens to an empty Browse
 
-        # If launched with --open-survey, open the Survey window with the
-        # manifest pre-loaded (the factory wires log_message → its status bar).
-        if self._pending_survey is not None:
-            try:
-                win = self._open_workspace("survey")
-                if win is not None:
-                    self._survey_panel.load_manifest(self._pending_survey)
-            except Exception as e:
-                self._status_bar.showMessage(f"Could not open survey: {e}")
 
     # ── Per-scan processing cache (mtime-aware) ───────────────────────────────
 
@@ -227,9 +211,9 @@ class ProbeFlowWindow(QMainWindow):
     def _saved_processing_get(self, entry) -> dict | None:
         """Return cached processing for *entry* if and only if its mtime matches.
 
-        On mismatch (file rewritten on disk by ScanFlow / external editor /
-        re-save), drop the cache entry and emit a status-bar notice so the
-        user understands why their saved processing no longer applies.
+        On mismatch (file rewritten on disk by an external editor or
+        acquisition tool / re-save), drop the cache entry and emit a status-bar
+        notice so the user understands why their saved processing no longer applies.
         """
         key = str(entry.path)
         cached = self._saved_processing.get(key)
@@ -256,23 +240,6 @@ class ProbeFlowWindow(QMainWindow):
         else:
             self._saved_processing.pop(key, None)
 
-    # ── Optional Survey integration probe ─────────────────────────────────────
-    @staticmethod
-    def _probe_survey_available() -> bool:
-        """Return True iff :mod:`probeflow.gui.survey` is importable.
-
-        Used so the GUI degrades gracefully when the optional ``scanflow``
-        dependency is missing (review gui-arch #17): the Tools-menu Survey
-        action becomes disabled, the content-stack slot shows a help label,
-        and any ``--open-survey`` startup argument logs a status-bar notice
-        instead of failing.
-        """
-        try:
-            import probeflow.gui.survey  # noqa: F401
-            return True
-        except Exception:
-            return False
-
     # ── Build ──────────────────────────────────────────────────────────────────
     def _build_ui(self):
         self._build_menu_bar()
@@ -292,7 +259,7 @@ class ProbeFlowWindow(QMainWindow):
 
         # ── Center: Browse — inner splitter [BrowseToolPanel | ThumbnailGrid] ──
         # Browse is the main window's only content; every other workspace
-        # (convert, TV, dataset builder, survey, dev) opens as an independent
+        # (convert, TV, dataset builder, dev) opens as an independent
         # WorkspaceWindow via _open_workspace, like Feature Counting always has.
         self._browse_tools = BrowseToolPanel(t, self._cfg)
         self._browse_tools.setMinimumWidth(self.LEFT_SIDEBAR_MIN_W)
@@ -430,14 +397,6 @@ class ProbeFlowWindow(QMainWindow):
         _workspace_action(workspace_menu, "STM File Converter", "convert", "Ctrl+2")
         _workspace_action(workspace_menu, "TV denoise", "tv", "Ctrl+4")
         _workspace_action(workspace_menu, "Dataset Builder", "dataset_builder", "Ctrl+Shift+D")
-        survey_action = _workspace_action(
-            workspace_menu, "Survey (ScanFlow campaign)", "survey", "Ctrl+Shift+S"
-        )
-        if not self._survey_available:
-            survey_action.setEnabled(False)
-            survey_action.setToolTip(
-                "Survey mode requires the optional `scanflow` dependency."
-            )
         _workspace_action(workspace_menu, "Developer tools", "dev", "Ctrl+5")
 
         view_menu = menu_bar.addMenu("View")
@@ -509,7 +468,7 @@ class ProbeFlowWindow(QMainWindow):
         map_action = QAction("Map Spectra to Images...", self)
         map_action.triggered.connect(self._on_map_spectra)
         tools_menu.addAction(map_action)
-        # Workspace pages (TV denoise, Dataset Builder, Survey, Developer
+        # Workspace pages (TV denoise, Dataset Builder, Developer
         # tools) live in the Workspace menu only — the pre-merge duplicate
         # block here registered the same shortcuts twice, which makes Qt
         # treat them as ambiguous and fire neither.
@@ -784,7 +743,6 @@ class ProbeFlowWindow(QMainWindow):
             "tv": self._create_tv_window,
             "dev": self._create_dev_window,
             "dataset_builder": self._create_dataset_builder_window,
-            "survey": self._create_survey_window,
         }.get(mode)
         return factory() if factory is not None else None
 
@@ -849,28 +807,6 @@ class ProbeFlowWindow(QMainWindow):
         )
         self._dataset_builder_panel.status_message.connect(win.show_status)
         win.show_status("Dataset Builder - queue, propose, correct, save, export")
-        return win
-
-    def _create_survey_window(self) -> WorkspaceWindow | None:
-        # Survey integration is optional — when ``probeflow.gui.survey``
-        # cannot be imported (e.g. scanflow not installed in this venv) the
-        # menu action is disabled, and this factory degrades to a status-bar
-        # notice for any other entry path (review gui-arch #17).
-        if not self._survey_available:
-            self._status_bar.showMessage(
-                "Survey mode is unavailable — install `scanflow` to enable it."
-            )
-            return None
-        from probeflow.gui.survey import SurveyPanel
-        self._survey_panel = SurveyPanel()
-        win = WorkspaceWindow(
-            key="survey", title="Survey (ScanFlow campaign)",
-            panel=self._survey_panel, sidebar=None, parent=self,
-        )
-        self._survey_panel.log_message.connect(win.show_status)
-        win.show_status(
-            "Survey mode — open a ScanFlow survey.json, polish each feature, "
-            "then Export PPTX")
         return win
 
     def _sync_menu_actions(self) -> None:
@@ -1754,13 +1690,12 @@ class ProbeFlowWindow(QMainWindow):
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────
-def main(*, open_survey: "Optional[Path]" = None,
-         browse_folder: "Optional[Path]" = None) -> None:
+def main(*, browse_folder: "Optional[Path]" = None) -> None:
     app    = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("ProbeFlow")
     from probeflow.gui.tooltips import install_global_tooltips
     install_global_tooltips(app)
-    window = ProbeFlowWindow(open_survey=open_survey, browse_folder=browse_folder)
+    window = ProbeFlowWindow(browse_folder=browse_folder)
     if getattr(window, "_show_maximized_on_start", False):
         window.showMaximized()
     else:

@@ -1,6 +1,6 @@
 """Independent top-level window hosting one workspace (panel + sidebar).
 
-Workspaces (STM File Converter, TV denoise, Dataset Builder, Survey,
+Workspaces (STM File Converter, TV denoise, Dataset Builder,
 Developer tools) used to live as pages in the main window's stacked
 layout; they now open as separate windows so users can flick between a
 workspace and Browse without losing either.

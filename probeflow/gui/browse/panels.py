@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 
 from probeflow.core.browse_filters import FolderFilterState
 from probeflow.gui.typography import ui_font
@@ -772,23 +771,6 @@ class BrowseInfoPanel(QWidget):
                 if s:
                     rows.append((k, s))
 
-        scanflow = dict(entry.scanflow_acquisition or {})
-        if scanflow:
-            rows.append(("SCANFLOW_SCHEMA", str(scanflow.get("schema") or "")))
-            rows.append(("SCANFLOW_RECORD_TYPE", str(scanflow.get("record_type") or "")))
-            session = scanflow.get("session") or {}
-            if isinstance(session, dict):
-                for key in ("session_id", "routine"):
-                    value = session.get(key)
-                    if value not in (None, ""):
-                        rows.append((f"SCANFLOW_SESSION_{key.upper()}", str(value)))
-            for key in ("step", "motion", "drift", "quality", "safety", "scan_parameters", "position"):
-                value = scanflow.get(key)
-                if value not in (None, {}, []):
-                    if isinstance(value, dict):
-                        rows.append((f"SCANFLOW_{key.upper()}", json.dumps(value, sort_keys=True, default=str)))
-                    else:
-                        rows.append((f"SCANFLOW_{key.upper()}", str(value)))
         self._meta_rows = rows
         self._filter_meta()
 
