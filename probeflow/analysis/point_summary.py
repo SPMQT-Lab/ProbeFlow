@@ -2,15 +2,12 @@
 
 Computes the "simple" statistics a user expects before (and independently of)
 any model comparison: particle count, analysis-region area, density, and
-nearest-neighbour distances. Used by the Particle Statistics dialog for its
-instant data summary; needs only numpy and scipy, never the optional AdStat
-engine.
+nearest-neighbour distances for the basic particle-statistics summary; needs
+only numpy and scipy.
 
-Region semantics match the AdStat comparison path
-(:func:`probeflow.analysis.adstat_adapter._filter_table_to_region`): when a
-mask is given, points outside it are excluded and the density is the inside
-count over the mask area. Unlike the comparison path this never raises for
-too-few points — a summary of an empty region is descriptive, not an error.
+Region semantics: when a mask is given, points outside it are excluded and the
+density is the inside count over the mask area. This never raises for too-few
+points — a summary of an empty region is descriptive, not an error.
 """
 
 from __future__ import annotations

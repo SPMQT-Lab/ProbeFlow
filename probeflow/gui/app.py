@@ -1270,8 +1270,6 @@ class ProbeFlowWindow(QMainWindow):
             )
             self._fc_window.load_from_browse_needed.connect(
                 self._on_fc_load_from_browse)
-            self._fc_window.open_particle_statistics_needed.connect(
-                self._on_open_particle_statistics_from_features)
         self._fc_window.show()
         self._fc_window.raise_()
         self._fc_window.activateWindow()
@@ -1385,43 +1383,6 @@ class ProbeFlowWindow(QMainWindow):
             analysis_scan.record_processing_state(processing_state)
 
         return arr, px_m, px_x_m, px_y_m, plane_idx, analysis_scan
-
-    def _on_open_particle_statistics_from_features(self, scan_context, set_id: str) -> None:
-        """Open (or raise) Particle Statistics for a set sent from Feature Counting."""
-        from probeflow.gui.dialogs.particle_statistics import ParticleStatisticsDialog
-
-        theme = THEMES[self._theme_name]
-        dlg = getattr(self, "_features_particle_statistics_dialog", None)
-        try:
-            if dlg is not None:
-                dlg.isVisible()
-        except RuntimeError:
-            dlg = None
-        if dlg is None:
-            dlg = ParticleStatisticsDialog(
-                scan=scan_context,
-                feature_set_store=self._feature_set_store,
-                theme=theme,
-                initial_mode="real",
-                parent=None,
-            )
-            self._features_particle_statistics_dialog = dlg
-            try:
-                dlg.destroyed.connect(
-                    lambda _obj=None: setattr(self, "_features_particle_statistics_dialog", None)
-                )
-            except Exception:
-                pass
-        else:
-            dlg.refresh_probe_context(
-                scan=scan_context, feature_set_store=self._feature_set_store
-            )
-            dlg.set_current_mode("real")
-        dlg.show()
-        dlg.raise_()
-        dlg.activateWindow()
-        if set_id:
-            dlg.select_feature_set(set_id)
 
     def _on_fc_load_from_browse(self) -> None:
         """Bridge: read Browse selection → load into the floating FC window (off-thread)."""

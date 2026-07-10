@@ -109,44 +109,6 @@ def test_semicolon_delimiter_sniffed(tmp_path):
 # --------------------------------------------------------------------------- #
 # JSON
 # --------------------------------------------------------------------------- #
-def test_feature_counting_particles_json(tmp_path):
-    payload = {
-        "meta": {
-            "kind": "particles",
-            "scan_range_m": [100e-9, 80e-9],
-            "pixels": [200, 160],
-        },
-        "items": [
-            {"index": 0, "centroid_x_m": 10e-9, "centroid_y_m": 20e-9, "area_nm2": 5.0},
-            {"index": 1, "centroid_x_m": 30e-9, "centroid_y_m": 40e-9, "area_nm2": 6.0},
-        ],
-    }
-    p = _write(tmp_path / "particles.json", json.dumps(payload))
-    preview = sniff_point_table(p)
-    assert preview.kind == "probeflow_json"
-    assert preview.scan_range_m == (100e-9, 80e-9)
-    assert preview.image_shape == (160, 200)  # (ny, nx)
-    assert preview.needs_calibration is False
-
-    (fs,) = load_point_table(p)
-    assert fs.point_count == 2
-    np.testing.assert_allclose(fs.points_m[0], [10e-9, 20e-9], rtol=1e-6)
-    np.testing.assert_allclose(fs.points_m[1], [30e-9, 40e-9], rtol=1e-6)
-
-
-def test_feature_counting_detections_json(tmp_path):
-    payload = {
-        "meta": {"kind": "detections", "scan_range_m": [50e-9, 50e-9], "pixels": [100, 100]},
-        "items": [
-            {"index": 0, "x_m": 5e-9, "y_m": 6e-9, "x_px": 10, "y_px": 12, "correlation": 0.9},
-        ],
-    }
-    p = _write(tmp_path / "det.json", json.dumps(payload))
-    (fs,) = load_point_table(p)
-    assert fs.point_count == 1
-    np.testing.assert_allclose(fs.points_m[0], [5e-9, 6e-9], rtol=1e-6)
-
-
 def test_feature_set_store_json_roundtrip(tmp_path):
     fs1 = FeatureSet.from_points(
         name="img A",
@@ -438,13 +400,7 @@ def test_pixel_size_derived_from_px_and_nm_columns(tmp_path):
 # --------------------------------------------------------------------------- #
 # Feature Counting fallback consistency (no AdStat)
 # --------------------------------------------------------------------------- #
-def test_items_fallback_applies_status_filter(monkeypatch):
-    import probeflow.analysis.adstat_adapter as adapter
-
-    def _boom(*args, **kwargs):
-        raise RuntimeError("simulate missing AdStat")
-
-    monkeypatch.setattr(adapter, "feature_counting_to_particle_table", _boom)
+def test_items_applies_status_filter():
     items = [
         {"x_m": 1e-9, "y_m": 2e-9, "status": "accepted"},
         {"x_m": 3e-9, "y_m": 4e-9, "status": "rejected"},
@@ -457,4 +413,4 @@ def test_items_fallback_applies_status_filter(monkeypatch):
         image_shape=(10, 10),
         name="fallback",
     )
-    assert fs.point_count == 3  # the rejected item is excluded, as with AdStat
+    assert fs.point_count == 3  # the rejected item is excluded

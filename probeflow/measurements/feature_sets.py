@@ -5,9 +5,6 @@ A :class:`FeatureSet` is a compact snapshot of one image's detected points
 point ROIs (one ROI per point), a set stores its points as arrays, so hundreds of
 points stay lightweight and many sets — e.g. one per image in a study — can
 coexist in a :class:`FeatureSetStore` and be pooled in Particle Statistics.
-
-The store is deliberately decoupled from AdStat: conversion to an
-``AdStatPointSetRecord`` happens lazily via the adapter's ``point_set_record``.
 """
 
 from __future__ import annotations
@@ -17,7 +14,6 @@ import time
 import uuid
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
@@ -75,49 +71,6 @@ class FeatureSet:
             image_label=str(image_label),
             metadata=dict(metadata or {}),
         )
-
-    # ---- AdStat conversion -------------------------------------------------
-    def to_point_set_record(self, *, mask: Any = None) -> Any:
-        """Build an ``AdStatPointSetRecord`` (table + region + calibration)."""
-
-        from probeflow.analysis.adstat_adapter import point_set_record
-
-        ny, nx = self.image_shape
-        scan = SimpleNamespace(scan_range_m=self.scan_range_m, dims=(nx, ny))
-        point_source = SimpleNamespace(
-            label=self.name,
-            source_type=self.source_type,
-            points_px=self.points_px,
-            points_m=self.points_m,
-            metadata=dict(self.metadata),
-        )
-        return point_set_record(
-            dataset_id=self.set_id,
-            scan=scan,
-            point_source=point_source,
-            roi_or_mask=mask,
-            image_shape=self.image_shape,
-        )
-
-    def to_feature_layer(self) -> dict[str, Any]:
-        """Represent this set as an independent points feature layer for AdStat.
-
-        Marked ``measured_independently`` so AdStat accepts it for the
-        measured-feature model; the caller is responsible for choosing a set that
-        is genuinely independent of the tested particles (a different feature).
-        """
-        return {
-            "kind": "points",
-            "name": self.name,
-            "xy_nm": self.points_m * 1e9,
-            "feature_type": "feature",
-            "source": self.image_label or self.name,
-            "provenance": {
-                "measured_independently": True,
-                "derived_from_particles": False,
-                "source": self.image_label or self.name,
-            },
-        }
 
     # ---- persistence -------------------------------------------------------
     def to_dict(self) -> dict[str, Any]:

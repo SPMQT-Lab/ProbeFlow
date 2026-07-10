@@ -43,8 +43,6 @@ GUI_TEST_MODULES = {
 MIXED_QT_FIXTURE_MODULES = {
     "test_feature_lattice.py",
     "test_pair_correlation.py",
-    "test_adstat_results_dialog.py",
-    "test_adstat_workbench_dialog.py",
     "test_fft_viewer_utils.py",
     "test_definitions_dialog.py",
     "test_lattice_grid.py",

@@ -14,14 +14,10 @@ Supported inputs:
 * **ProbeFlow CSV exports** — Feature Finder
   (``index,x_px,y_px,x_nm,y_nm,value``) and the measurements point export
   (``point_id,x_px,y_px,x_phys,y_phys,...,x_unit,...``).
-* **ProbeFlow JSON** — Feature Counting ``write_json`` particle/detection files
-  (``meta`` + ``items``, with embedded calibration) and a saved
-  :class:`FeatureSetStore` (``{"version", "feature_sets": [...]}``).
+* **ProbeFlow feature-set JSON** — a saved :class:`FeatureSetStore`
+  (``{"version", "feature_sets": [...]}``, calibration embedded).
 
-The CSV path has no third-party dependencies (numpy + stdlib only).  Feature
-Counting JSON is routed through the AdStat adapter's
-``feature_counting_to_particle_table`` when available, falling back to a direct
-field read if AdStat is not installed.
+Dependencies are numpy + stdlib only.
 """
 
 from __future__ import annotations
@@ -31,7 +27,6 @@ import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
@@ -76,7 +71,7 @@ class PointTablePreview:
     """What ``sniff_point_table`` learned about a file before a full load."""
 
     path: str
-    kind: str  # generic_csv | probeflow_csv | probeflow_json | feature_set_store_json
+    kind: str  # generic_csv | probeflow_csv | feature_set_store_json
     n_points: int
     n_sets: int = 1
     delimiter: str | None = None
@@ -137,7 +132,10 @@ def load_point_table(
             return list(
                 FeatureSetStore.from_dict(json.loads(p.read_text(encoding="utf-8"))).all()
             )
-        return [_load_probeflow_json(p, preview, scan_range_m, image_shape, label)]
+        raise ValueError(
+            f"unsupported JSON point file {p.name}; import points as CSV "
+            "(x,y in nm or px) or a ProbeFlow feature-set file"
+        )
 
     # CSV (generic or ProbeFlow)
     parsed = _parse_csv(p)
@@ -720,65 +718,9 @@ def _sniff_json(p: Path) -> PointTablePreview:
             needs_calibration=False,
             notes=("Saved ProbeFlow feature-set file; calibration is embedded.",),
         )
-    if isinstance(data, dict) and "items" in data:
-        meta = data.get("meta") or {}
-        items = data.get("items") or []
-        scan_range = meta.get("scan_range_m")
-        pixels = meta.get("pixels")
-        scan_range_m = (
-            (float(scan_range[0]), float(scan_range[1])) if scan_range else None
-        )
-        image_shape = (int(pixels[1]), int(pixels[0])) if pixels else None  # (ny, nx)
-        return PointTablePreview(
-            path=str(p),
-            kind="probeflow_json",
-            n_points=len(items),
-            columns=(str(meta.get("kind", "items")),),
-            units="m",
-            scan_range_m=scan_range_m,
-            image_shape=image_shape,
-            needs_calibration=scan_range_m is None,
-            notes=("ProbeFlow analysis JSON; calibration read from its meta block.",),
-        )
-    raise ValueError(f"unrecognised JSON structure in {p.name}")
-
-
-def _load_probeflow_json(
-    p: Path,
-    preview: PointTablePreview,
-    scan_range_m: tuple[float, float] | None,
-    image_shape: tuple[int, int] | None,
-    label: str,
-) -> FeatureSet:
-    data = json.loads(p.read_text(encoding="utf-8"))
-    items = list(data.get("items") or [])
-    scan_range_m = scan_range_m or preview.scan_range_m
-    image_shape = image_shape or preview.image_shape
-    if scan_range_m is None:
-        # Derive from the metre coordinates if the meta block lacked a field size.
-        xy = _items_xy_m(items)
-        bbox = _bbox(xy)
-        scan_range_m = default_scan_range_m(bbox, "m")
-    if image_shape is None:
-        image_shape = default_image_shape(scan_range_m)
-
-    points_px, points_m = _items_to_px_m(items, scan_range_m, image_shape)
-    points_m, shift_m = _fit_points_to_field(points_m, scan_range_m)
-    metadata: dict[str, Any] = {"import_source": str(p)}
-    if shift_m is not None:
-        ny, nx = image_shape
-        points_px = points_m / np.array(
-            [scan_range_m[0] / nx, scan_range_m[1] / ny], dtype=float
-        )
-        metadata["import_recentered_offset_m"] = list(shift_m)
-    return FeatureSet.from_points(
-        name=label,
-        points_px=points_px,
-        points_m=points_m,
-        scan_range_m=scan_range_m,
-        image_shape=image_shape,
-        source_type="imported_json",
-        metadata=metadata,
+    raise ValueError(
+        f"unrecognised JSON structure in {p.name}; import points as CSV "
+        "(x,y in nm or px) or a ProbeFlow feature-set file"
     )
 
 
@@ -827,40 +769,22 @@ def _items_to_px_m(
     """
 
     ny, nx = image_shape
-    scan = SimpleNamespace(scan_range_m=scan_range_m, dims=(nx, ny))
-    try:
-        from probeflow.analysis.adstat_adapter import (
-            feature_counting_to_particle_table,
-            scan_calibration_to_adstat,
-        )
+    points_m = _items_xy_m(items)
+    px_x_m = scan_range_m[0] / nx
+    px_y_m = scan_range_m[1] / ny
+    points_px = points_m / np.array([px_x_m, px_y_m], dtype=float)
+    return points_px, points_m
 
-        calibration = scan_calibration_to_adstat(scan)
-        table = feature_counting_to_particle_table(items, calibration=calibration)
-        points_m = np.asarray(table.xy_nm, dtype=float) * 1e-9
-        points_px = np.asarray(
-            [[float(par.x_px), float(par.y_px)] for par in table.particles],
-            dtype=float,
-        )
-        return points_px, points_m
-    except Exception:
-        # Direct fallback (no AdStat): read metre coordinates and synthesise px.
-        points_m = _items_xy_m(items)
-        px_x_m = scan_range_m[0] / nx
-        px_y_m = scan_range_m[1] / ny
-        points_px = points_m / np.array([px_x_m, px_y_m], dtype=float)
-        return points_px, points_m
+
+# Accepted Feature Counting item statuses (kept in sync with the former AdStat
+# adapter, which is no longer part of Core).
+_KEEP_STATUSES = frozenset({"accepted", "manual"})
 
 
 def _items_xy_m(items: list[dict]) -> np.ndarray:
-    """Metre coordinates of accepted Feature Counting items (no-AdStat fallback).
+    """Metre coordinates of accepted Feature Counting items."""
 
-    Applies the same accepted/manual status filter as the adapter's
-    ``feature_counting_to_particle_table`` so the imported point count does not
-    depend on whether the optional AdStat package is installed.
-    """
-
-    from probeflow.analysis.adstat_adapter import KEEP_STATUSES
-
+    KEEP_STATUSES = _KEEP_STATUSES
     out = []
     for it in items:
         status = it.get("status", "accepted")

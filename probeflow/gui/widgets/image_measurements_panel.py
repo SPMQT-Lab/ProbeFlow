@@ -50,10 +50,6 @@ class ImageMeasurementsPanel(QWidget):
     clearAngleRequested = Signal()
     featureFinderRequested = Signal()
     pairCorrelationRequested = Signal()
-    particleStatisticsRequested = Signal()
-    adstatWorkbenchRequested = Signal()
-    adstatStatisticsRequested = Signal()
-    adstatSandboxRequested = Signal()
     featureToLatticeRequested = Signal()
     latticeGridRequested = Signal()
     fftViewerRequested = Signal()
@@ -88,7 +84,6 @@ class ImageMeasurementsPanel(QWidget):
             ("FFT viewer…", "fft_viewer", "dialog"),
             ("Lattice grid…", "lattice_grid", "dialog"),
             ("Feature finder…", "feature_finder", "dialog"),
-            ("Particle Statistics…", "particle_statistics", "dialog"),
         ]),
     ]
 
@@ -99,10 +94,6 @@ class ImageMeasurementsPanel(QWidget):
         "fft_viewer": "fftViewerRequested",
         "feature_finder": "featureFinderRequested",
         "pair_correlation": "pairCorrelationRequested",
-        "particle_statistics": "particleStatisticsRequested",
-        "adstat_workbench": "adstatWorkbenchRequested",
-        "adstat_statistics": "adstatStatisticsRequested",
-        "adstat_sandbox": "adstatSandboxRequested",
         "feature_to_lattice": "featureToLatticeRequested",
         "lattice_grid": "latticeGridRequested",
     }
@@ -487,10 +478,6 @@ class ImageMeasurementsPanel(QWidget):
             "lattice_grid": "Lattice grid",
             "feature_finder": "Feature finder",
             "pair_correlation": "Pair correlation",
-            "particle_statistics": "Particle Statistics",
-            "adstat_workbench": "AdStat workbench",
-            "adstat_statistics": "AdStat statistics",
-            "adstat_sandbox": "Model simulations",
             "feature_to_lattice": "Feature-to-lattice",
         })
         for _group, tools in self._TOOL_GROUPS:

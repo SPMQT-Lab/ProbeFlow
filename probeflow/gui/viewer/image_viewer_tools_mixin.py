@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from types import SimpleNamespace
 
 import numpy as np
 
@@ -146,7 +145,7 @@ class ImageViewerToolsMixin:
             theme=self._t,
             value_scale=value_scale,
             value_unit=value_unit,
-            on_send_to_particle_statistics=self._on_send_features_to_particle_statistics,
+            on_send_to_particle_statistics=None,
             parent=self,
         )
         self._feature_finder_dlg = dlg
@@ -464,50 +463,6 @@ class ImageViewerToolsMixin:
         self._present_modal_tool(dlg)
         self._status_lbl.setText("Pair correlation opened.")
 
-    def _on_open_particle_statistics(
-        self,
-        *,
-        initial_mode: str = "landing",
-        include_real_context: bool = True,
-        preserve_existing_mode: bool = True,
-    ) -> None:
-        from probeflow.gui.dialogs.particle_statistics import ParticleStatisticsDialog
-
-        context = self._particle_statistics_context(include_real_context=include_real_context)
-        existing = getattr(self, "_particle_statistics_dialog", None)
-        try:
-            if existing is not None:
-                existing.isVisible()
-        except RuntimeError:
-            existing = None
-            self._particle_statistics_dialog = None
-
-        if existing is None:
-            dlg = ParticleStatisticsDialog(
-                **context,
-                theme=self._t,
-                initial_mode=initial_mode,
-                parent=self,
-                context_refresh_fn=lambda: self._particle_statistics_context(include_real_context=True),
-            )
-            self._particle_statistics_dialog = dlg
-            self._track_modeless_child(dlg)
-            try:
-                dlg.destroyed.connect(lambda _obj=None: setattr(self, "_particle_statistics_dialog", None))
-            except Exception:
-                pass
-        else:
-            dlg = existing
-            if include_real_context:
-                dlg.refresh_probe_context(**context)
-            if not preserve_existing_mode:
-                dlg.set_current_mode(initial_mode)
-
-        dlg.show()
-        dlg.raise_()
-        dlg.activateWindow()
-        self._status_lbl.setText("Particle Statistics opened.")
-
     def _feature_set_store(self):
         """Lazily-created viewer-session store of named feature sets."""
         store = getattr(self, "_feature_set_store_obj", None)
@@ -517,102 +472,6 @@ class ImageViewerToolsMixin:
             store = FeatureSetStore()
             self._feature_set_store_obj = store
         return store
-
-    def _on_send_features_to_particle_statistics(self, result) -> None:
-        """Snapshot a Feature Finder result into the store and open Particle Statistics."""
-        arr = self._display_arr if self._display_arr is not None else self._raw_arr
-        points = list(getattr(result, "points", []) or [])
-        if arr is None or not points:
-            self._status_lbl.setText("No features to send.")
-            return
-        import numpy as np
-
-        from probeflow.measurements.feature_sets import FeatureSet
-
-        px_x_m, px_y_m = self._pixel_size_xy_m()
-        points_px = np.array([[float(p.x_px), float(p.y_px)] for p in points], dtype=float)
-        points_m = points_px * np.array([px_x_m, px_y_m], dtype=float)
-        ny, nx = arr.shape[:2]
-        image_label = self.windowTitle() or "image"
-        mode = str(getattr(result, "mode", "features") or "features")
-        feature_set = FeatureSet.from_points(
-            name=f"{image_label} · {mode} (N={len(points)})",
-            points_px=points_px,
-            points_m=points_m,
-            scan_range_m=(nx * px_x_m, ny * px_y_m),
-            image_shape=(ny, nx),
-            source_type="feature_finder",
-            image_label=image_label,
-            metadata={"detection_mode": mode},
-        )
-        set_id = self._feature_set_store().add(feature_set)
-        self._on_open_particle_statistics(
-            initial_mode="real",
-            include_real_context=True,
-            preserve_existing_mode=False,
-        )
-        dlg = getattr(self, "_particle_statistics_dialog", None)
-        if dlg is not None and hasattr(dlg, "select_feature_set"):
-            dlg.select_feature_set(set_id)
-
-    def _particle_statistics_context(self, *, include_real_context: bool) -> dict:
-        arr = self._display_arr if self._display_arr is not None else self._raw_arr
-        point_sources = self._point_source_records() if include_real_context else []
-        active_area_roi = self._active_image_roi() if include_real_context else None
-        active_mask = None
-        if include_real_context:
-            active_mask_getter = getattr(self, "_active_mask_array", None)
-            if callable(active_mask_getter):
-                active_mask = active_mask_getter()
-
-        return {
-            "point_sources": point_sources,
-            "scan": self._adstat_scan_context(arr) if include_real_context else None,
-            "active_area_roi": active_area_roi,
-            "active_mask": active_mask,
-            "image_shape": arr.shape[:2] if arr is not None and include_real_context else None,
-            "feature_sets": self._feature_set_store().all(),
-            "feature_set_store": self._feature_set_store(),
-        }
-
-    def _on_open_adstat_workbench(
-        self,
-        *,
-        initial_mode: str = "real",
-        include_real_context: bool = True,
-    ) -> None:
-        self._on_open_particle_statistics(
-            initial_mode=initial_mode,
-            include_real_context=include_real_context,
-            preserve_existing_mode=False,
-        )
-
-    def _on_open_adstat_statistics(self) -> None:
-        self._on_open_adstat_workbench(initial_mode="landing", include_real_context=True)
-
-    def _on_open_adstat_sandbox(self) -> None:
-        # Opens the free-play Model simulations (sandbox) mode, not the tutorial.
-        self._on_open_adstat_workbench(
-            initial_mode="sandbox",
-            include_real_context=False,
-        )
-
-    def _adstat_scan_context(self, arr):
-        if arr is None:
-            return None
-        scan_range = getattr(self, "_display_scan_range_m", None)
-        if scan_range is None:
-            scan_range = getattr(self, "_scan_range_m", None)
-        if scan_range is None:
-            return None
-        entries = getattr(self, "_entries", [])
-        entry = entries[self._idx] if entries else None
-        shape = arr.shape[:2]
-        return SimpleNamespace(
-            scan_range_m=(float(scan_range[0]), float(scan_range[1])),
-            dims=(int(shape[1]), int(shape[0])),
-            source_path=getattr(entry, "path", None),
-        )
 
     def _on_open_feature_lattice(self) -> None:
         item = getattr(self, "_lattice_grid_item", None)

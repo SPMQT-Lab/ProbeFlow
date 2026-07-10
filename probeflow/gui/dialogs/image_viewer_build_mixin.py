@@ -928,18 +928,6 @@ class ImageViewerBuildMixin:
         self._measurement_panel.pairCorrelationRequested.connect(
             self._on_open_pair_correlation
         )
-        self._measurement_panel.particleStatisticsRequested.connect(
-            self._on_open_particle_statistics
-        )
-        self._measurement_panel.adstatWorkbenchRequested.connect(
-            self._on_open_adstat_workbench
-        )
-        self._measurement_panel.adstatStatisticsRequested.connect(
-            self._on_open_adstat_statistics
-        )
-        self._measurement_panel.adstatSandboxRequested.connect(
-            self._on_open_adstat_sandbox
-        )
         self._measurement_panel.featureToLatticeRequested.connect(
             self._on_open_feature_lattice
         )
