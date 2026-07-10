@@ -96,48 +96,27 @@ the origin, and the **Export** menu saves the spectrum or filtered image.
 For a quick periodicity measurement without the full viewer, use
 **Measurements → Find spacing from line profile...** on a line ROI.
 
-## Working with Feature Finder
+## Detecting features and point-pattern measurements
 
-Open **Measurements → Feature finder...** to detect point-like features —
-atoms, molecules, defects, moiré sites — on the current image.
+Under **Measurements → Features** you can locate point-like features —
+atoms, molecules, defects, moiré sites — and analyse their spatial pattern:
 
-1. Choose the **Detection mode**: *Maxima* for protrusions, *Minima* for
-   depressions.
-2. Choose a **Threshold mode** (*Above*, *Below*, or *Between*) and a
-   height threshold so that only genuine features qualify.
-3. Set the **Detection settings**: *Min distance* enforces one detection
-   per feature, and *Pre-smooth σ* suppresses pixel noise before the
-   search.
-4. Click **Update preview** — detected features are marked on the image
-   and counted.
+- **Feature maxima** detects local protrusions (or, with an area ROI
+  selected, only within that region), marking them as points in physical
+  (nm) coordinates.
+- **Pair correlation** computes the pair-correlation function g(r) from the
+  detected points or from point ROIs, reporting the density, the
+  nearest-neighbour median spacing, and the first-peak position. With a
+  calibrated area ROI, g(r) is density-normalised.
+- **Point mask / FFT** builds a mask from detected features and inspects its
+  FFT.
 
-From the **Export** section you can write the coordinates to CSV, render
-a synthetic *feature image* (a disk at every detection, useful for pair
-correlation and lattice statistics), or send that feature image straight
-to the FFT viewer. When Particle Statistics is available, **Send to Particle
-Statistics** saves the current detections as a calibrated session feature set
-for single-image or pooled spatial statistics.
-
-For segmentation-based workflows — particle size statistics, template
-matching, classification, lattice extraction — use the **Feature
-Counting** window (button in the Browse sidebar). It requires the
-optional `features` extra:
+SIFT-based lattice-vector extraction is an optional tool that needs the
+`lattice` extra:
 
 ```bash
-pip install "probeflow[features]"
+pip install "probeflow[lattice]"
 ```
-
-For particle spatial-statistics workflows, these detected features and point
-ROIs can be analysed from **Measurements → Features → Particle Statistics...**.
-With points already detected, the tool opens straight onto a Data summary
-(count, density, nearest-neighbour histogram) — no model run needed. Use
-**Analyze scan points** for real ProbeFlow data, **Learn with tutorial** for
-a guided walkthrough, or **Model simulations** to explore synthetic patterns and
-null-model behaviour freely before applying the tool to a scan. Particle
-Statistics is the newest and least user-tested part of ProbeFlow — treat its
-verdicts as exploratory and verify important results independently. See the
-[Particle Statistics guide](adstat_user_guide.md)
-and the developer-facing [AdStat integration](adstat_integration.md) contract.
 
 ## Beyond the basics
 

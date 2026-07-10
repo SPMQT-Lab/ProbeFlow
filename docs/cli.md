@@ -36,14 +36,13 @@ Run `probeflow <command> --help` for exact options.
 | `profile` | Line profile from endpoints or a named line ROI |
 | `periodicity` | Find dominant spatial periodicities via power spectrum |
 | `autoclip` | Suggest display clip percentiles |
-| `particles`, `count`, `classify` | Feature analysis workflows |
 | `grains` | Detect grains / islands by threshold and print statistics |
 | `lattice`, `unit-cell` | Lattice extraction and unit-cell averaging |
 | `diag-z` | Diagnose Z-scale candidates for a Createc `.dat` file |
 | `spec-info`, `spec-plot`, `spec-overlay`, `spec-positions` | Spectroscopy utilities |
 
-Some feature/lattice commands require optional dependencies from the
-`features` extra.
+The `lattice` command requires the optional `lattice` extra (OpenCV +
+scikit-learn).
 
 ## Examples
 

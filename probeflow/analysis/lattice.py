@@ -8,7 +8,7 @@ the historical scalar ``pixel_size_m`` for square-pixel callers and also accepts
 rectangular scans.
 
 Optional dependency: this module needs OpenCV (for SIFT) and scikit-learn
-(for silhouette-scored clustering). Install via ``pip install probeflow[features]``.
+(for silhouette-scored clustering). Install via ``pip install probeflow[lattice]``.
 
 Keep heavy imports lazy so ``import probeflow`` never pays the cost.
 """
@@ -36,7 +36,7 @@ def _sk_cluster():
     except ImportError as exc:  # pragma: no cover
         raise ImportError(
             "scikit-learn is required for lattice extraction. "
-            "Install with `pip install probeflow[features]`."
+            "Install with `pip install probeflow[lattice]`."
         ) from exc
     return AgglomerativeClustering, silhouette_score
 

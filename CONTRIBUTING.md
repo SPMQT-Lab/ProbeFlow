@@ -8,8 +8,7 @@ that keep the codebase navigable as it grows.
 ```bash
 git clone https://github.com/SPMQT-Lab/ProbeFlow.git
 cd ProbeFlow
-python -m pip install -e ".[dev,features]" -c constraints.txt
-pip install pre-commit
+python -m pip install -e ".[dev,lattice]" -c constraints.txt
 pre-commit install
 ```
 
@@ -70,8 +69,8 @@ and what does **not**. Read these before adding new code:
   `.sxm` byte layout. **Not** processing, **not** display.
 - `probeflow/processing/` — Qt-free numerical kernels and the
   `ProcessingState` model.
-- `probeflow/analysis/` — particles, lattice, spectroscopy plotting,
-  feature counting.
+- `probeflow/analysis/` — grain/feature detection, lattice extraction,
+  pair correlation, spectroscopy plotting.
 - `probeflow/provenance/` — export provenance now; future scan-graph
   dataclasses (`ImageNode`, `MeasurementNode`, etc.).
 - `probeflow/gui/` — PySide6 widgets and dialogs only. **Not** numerical
