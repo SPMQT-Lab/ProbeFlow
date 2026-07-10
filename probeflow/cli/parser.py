@@ -35,12 +35,6 @@ from probeflow.cli.commands.analysis import (
     _cmd_unit_cell,
 )
 from probeflow.cli.commands.conversion import _cmd_dat2npy, _cmd_dat2png, _cmd_dat2sxm
-from probeflow.cli.commands.dataset_builder import (
-    _cmd_dataset_export,
-    _cmd_dataset_propose,
-    _cmd_dataset_summary,
-    _cmd_dataset_validate,
-)
 from probeflow.cli.commands.gui import _cmd_gui
 from probeflow.cli.commands.processing import (
     _cmd_pipeline,
@@ -457,90 +451,6 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     prep.add_argument("--verbose", action="store_true")
     prep.set_defaults(func=_cmd_prepare_png)
-
-    # ── Dataset Builder ──
-    dataset = sub.add_parser(
-        "dataset",
-        help="Dataset Builder queue, proposal, and frozen ML-ready export commands",
-    )
-    dataset_sub = dataset.add_subparsers(
-        dest="dataset_command",
-        required=True,
-        metavar="<dataset-command>",
-    )
-
-    ds_summary = dataset_sub.add_parser(
-        "summary",
-        help="Summarise Dataset Builder review status for a folder or scan",
-    )
-    ds_summary.add_argument("source", type=Path)
-    ds_summary.add_argument("--task", default="step_edge_mask")
-    ds_summary.add_argument("--label-name", default="step_edge")
-    ds_summary.add_argument("--plane", type=int, default=0)
-    ds_summary.add_argument("--json", action="store_true")
-    ds_summary.add_argument("--verbose", action="store_true")
-    ds_summary.set_defaults(func=_cmd_dataset_summary)
-
-    ds_propose = dataset_sub.add_parser(
-        "propose",
-        help="Generate a proposal and save it to native Dataset Builder sidecars",
-    )
-    ds_propose.add_argument("input", type=Path)
-    ds_propose.add_argument("--task", default="step_edge_mask")
-    ds_propose.add_argument("--label-name", default="step_edge")
-    ds_propose.add_argument("--plane", type=int, default=0)
-    ds_propose.add_argument(
-        "--method",
-        choices=("step_edge", "canny", "feature_points"),
-        default="step_edge",
-    )
-    ds_propose.add_argument(
-        "--param",
-        action="append",
-        default=[],
-        metavar="KEY=VALUE",
-        help="Proposal parameter override; may be passed multiple times",
-    )
-    ds_propose.add_argument(
-        "--status",
-        choices=("draft", "accepted", "uncertain", "rejected"),
-        default="draft",
-    )
-    ds_propose.add_argument("--annotator", default=None)
-    ds_propose.add_argument("--notes", default="")
-    ds_propose.add_argument("--json", action="store_true")
-    ds_propose.add_argument("--verbose", action="store_true")
-    ds_propose.set_defaults(func=_cmd_dataset_propose)
-
-    ds_export = dataset_sub.add_parser(
-        "export",
-        help="Export a frozen ML-ready dataset snapshot from native sidecars",
-    )
-    ds_export.add_argument("source", type=Path)
-    ds_export.add_argument("output", type=Path)
-    ds_export.add_argument("--task", default="step_edge_mask")
-    ds_export.add_argument("--label-name", default="step_edge")
-    ds_export.add_argument("--plane", type=int, default=0)
-    ds_export.add_argument(
-        "--status",
-        nargs="+",
-        default=["accepted"],
-        choices=("draft", "accepted", "uncertain", "rejected", "exported"),
-        help="Review statuses to include in the export",
-    )
-    ds_export.add_argument("--colormap", default="gray")
-    ds_export.add_argument("--clip-low", type=float, default=1.0)
-    ds_export.add_argument("--clip-high", type=float, default=99.0)
-    ds_export.add_argument("--force", action="store_true")
-    ds_export.add_argument("--verbose", action="store_true")
-    ds_export.set_defaults(func=_cmd_dataset_export)
-
-    ds_validate = dataset_sub.add_parser(
-        "validate",
-        help="Validate a Dataset Builder export directory",
-    )
-    ds_validate.add_argument("dataset", type=Path)
-    ds_validate.set_defaults(func=_cmd_dataset_validate)
 
     # ── info / gui ──
     info = sub.add_parser("info", help="Print .sxm header metadata")

@@ -91,7 +91,6 @@ from probeflow.gui.workers import (
 from probeflow.gui.browse import ThumbnailGrid, BrowseInfoPanel, BrowseToolPanel
 from probeflow.gui.convert import ConvertPanel, ConvertSidebar
 from probeflow.gui.workspace_window import WorkspaceWindow
-from probeflow.gui.dataset_builder import DatasetBuilderPanel, DatasetBuilderSidebar
 from probeflow.gui.dialogs.definitions import _DefinitionsDialog
 from probeflow.gui.terminal import _DevSidebar
 from probeflow.gui.dialogs.image_viewer import ImageViewerDialog
@@ -396,7 +395,6 @@ class ProbeFlowWindow(QMainWindow):
         _workspace_action(workspace_menu, "Browse", "browse", "Ctrl+1")
         _workspace_action(workspace_menu, "STM File Converter", "convert", "Ctrl+2")
         _workspace_action(workspace_menu, "TV denoise", "tv", "Ctrl+4")
-        _workspace_action(workspace_menu, "Dataset Builder", "dataset_builder", "Ctrl+Shift+D")
         _workspace_action(workspace_menu, "Developer tools", "dev", "Ctrl+5")
 
         view_menu = menu_bar.addMenu("View")
@@ -468,7 +466,7 @@ class ProbeFlowWindow(QMainWindow):
         map_action = QAction("Map Spectra to Images...", self)
         map_action.triggered.connect(self._on_map_spectra)
         tools_menu.addAction(map_action)
-        # Workspace pages (TV denoise, Dataset Builder, Developer
+        # Workspace pages (TV denoise, Developer
         # tools) live in the Workspace menu only — the pre-merge duplicate
         # block here registered the same shortcuts twice, which makes Qt
         # treat them as ambiguous and fire neither.
@@ -742,7 +740,6 @@ class ProbeFlowWindow(QMainWindow):
             "convert": self._create_convert_window,
             "tv": self._create_tv_window,
             "dev": self._create_dev_window,
-            "dataset_builder": self._create_dataset_builder_window,
         }.get(mode)
         return factory() if factory is not None else None
 
@@ -788,25 +785,6 @@ class ProbeFlowWindow(QMainWindow):
             panel=self._dev_terminal, sidebar=self._dev_sidebar, parent=self,
         )
         win.show_status("Developer terminal — run shell commands and Python scripts")
-        return win
-
-    def _create_dataset_builder_window(self) -> WorkspaceWindow:
-        t = THEMES[self._theme_name]
-        self._dataset_builder_panel = DatasetBuilderPanel(t, self._cfg)
-        self._dataset_builder_sidebar = DatasetBuilderSidebar(t)
-        self._dataset_builder_sidebar.set_global_view_tray(
-            self._dataset_builder_panel.view_tray_widget())
-        self._dataset_builder_sidebar.set_current_view_tray(
-            self._dataset_builder_panel.current_view_tray_widget())
-        self._dataset_builder_panel.counts_changed.connect(
-            self._dataset_builder_sidebar.set_counts)
-        win = WorkspaceWindow(
-            key="dataset_builder", title="Dataset Builder",
-            panel=self._dataset_builder_panel,
-            sidebar=self._dataset_builder_sidebar, parent=self,
-        )
-        self._dataset_builder_panel.status_message.connect(win.show_status)
-        win.show_status("Dataset Builder - queue, propose, correct, save, export")
         return win
 
     def _sync_menu_actions(self) -> None:
