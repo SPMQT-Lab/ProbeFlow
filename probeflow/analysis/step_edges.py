@@ -27,9 +27,9 @@ molecule — including ones on flat terraces.  We therefore:
 Placement note for future maintainers / AI agents
 --------------------------------------------------
 This is a GUI-free numerical kernel.  It depends only on numpy + scipy.ndimage
-(no OpenCV, no Qt).  Import it lazily from ``probeflow.gui.features`` or the CLI,
-like the rest of :mod:`probeflow.analysis`, so the optional/heavier dependencies
-stay out of the browse/convert path.
+(no OpenCV, no Qt).  Import it lazily from the CLI or GUI, like the rest of
+:mod:`probeflow.analysis`, so the optional/heavier dependencies stay out of the
+browse/convert path.
 """
 
 from __future__ import annotations

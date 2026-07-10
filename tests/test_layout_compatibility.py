@@ -75,8 +75,7 @@ def test_backend_imports_do_not_require_qt():
 
 
 def test_canonical_io_and_analysis_imports_are_available():
-    from probeflow.analysis.features import segment_particles
-    from probeflow.analysis.lattice import LatticeParams
+    from probeflow.analysis.lattice import LatticeParams, extract_lattice
     from probeflow.io.converters.createc_dat_to_png import dat_to_hdr_imgs
     from probeflow.io.converters.createc_dat_to_sxm import convert_dat_to_sxm
     from probeflow.io.readers.createc_scan import read_dat
@@ -85,7 +84,7 @@ def test_canonical_io_and_analysis_imports_are_available():
 
     assert callable(dat_to_hdr_imgs)
     assert callable(convert_dat_to_sxm)
-    assert callable(segment_particles)
+    assert callable(extract_lattice)
     assert LatticeParams.__name__ == "LatticeParams"
     assert callable(read_dat)
     assert callable(read_sxm)

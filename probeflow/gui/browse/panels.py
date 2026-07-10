@@ -65,7 +65,6 @@ class BrowseToolPanel(QWidget):
     export_filtered_requested  = Signal()
     thumbnail_channel_changed  = Signal(str)
     thumbnail_size_changed     = Signal(str)   # "large" | "small"
-    open_fc_window_requested   = Signal()      # floating Feature Counting window
 
     def __init__(self, t: dict, cfg: dict, parent=None):
         super().__init__(parent)
@@ -298,21 +297,6 @@ class BrowseToolPanel(QWidget):
             "waterfall one common signal channel.")
         self._overlay_spectra_btn.clicked.connect(self.overlay_spectra_requested.emit)
         lay.addWidget(self._overlay_spectra_btn)
-
-        lay.addWidget(_sep())
-
-        fc_btn = QPushButton("🔬  Feature Counting")
-        fc_btn.setFont(ui_font(10, weight=QFont.Bold))
-        fc_btn.setFixedHeight(34)
-        fc_btn.setCursor(QCursor(Qt.PointingHandCursor))
-        fc_btn.setObjectName("accentBtn")
-        fc_btn.setToolTip(
-            "Open the Feature Counting window.\n"
-            "Stays open alongside Browse so you can keep browsing\n"
-            "thumbnails while counting molecules.\n"
-            "Shortcut: Ctrl+3")
-        fc_btn.clicked.connect(self.open_fc_window_requested.emit)
-        lay.addWidget(fc_btn)
 
         lay.addStretch()
         scroll.setWidget(inner)

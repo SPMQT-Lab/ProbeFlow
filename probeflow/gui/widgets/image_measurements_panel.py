@@ -48,9 +48,7 @@ class ImageMeasurementsPanel(QWidget):
     angleRequested = Signal()
     updateAngleRequested = Signal()
     clearAngleRequested = Signal()
-    featureFinderRequested = Signal()
     pairCorrelationRequested = Signal()
-    featureToLatticeRequested = Signal()
     latticeGridRequested = Signal()
     fftViewerRequested = Signal()
     lineProfileWidthChanged = Signal(int)
@@ -83,7 +81,6 @@ class ImageMeasurementsPanel(QWidget):
         ("Tools", [
             ("FFT viewer…", "fft_viewer", "dialog"),
             ("Lattice grid…", "lattice_grid", "dialog"),
-            ("Feature finder…", "feature_finder", "dialog"),
         ]),
     ]
 
@@ -92,9 +89,7 @@ class ImageMeasurementsPanel(QWidget):
 
     _DIALOG_SIGNALS = {
         "fft_viewer": "fftViewerRequested",
-        "feature_finder": "featureFinderRequested",
         "pair_correlation": "pairCorrelationRequested",
-        "feature_to_lattice": "featureToLatticeRequested",
         "lattice_grid": "latticeGridRequested",
     }
     _ONESHOT_SIGNALS = {
@@ -476,9 +471,7 @@ class ImageMeasurementsPanel(QWidget):
             "angle": "Angle",
             "fft_viewer": "FFT viewer",
             "lattice_grid": "Lattice grid",
-            "feature_finder": "Feature finder",
             "pair_correlation": "Pair correlation",
-            "feature_to_lattice": "Feature-to-lattice",
         })
         for _group, tools in self._TOOL_GROUPS:
             for label, key, _kind in tools:

@@ -18,7 +18,6 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-import numpy as np
 import pytest
 
 
@@ -29,31 +28,6 @@ def qapp():
     except Exception as exc:  # pragma: no cover
         pytest.skip(f"PySide6 unavailable: {exc}")
     return QApplication.instance() or QApplication([])
-
-
-def test_features_worker_signals_parented_to_app(qapp):
-    from probeflow.gui.features import _FeaturesWorker
-
-    w = _FeaturesWorker(
-        "particles", np.zeros((8, 8), dtype=float), 1e-9, 1e-9, 1e-9,
-        {"threshold": "otsu"},
-    )
-    # Auto-created signals must be owned by the main-thread QApplication so the
-    # worker's off-thread auto-delete can't destroy them.
-    assert w.signals.parent() is qapp
-
-
-def test_features_worker_keeps_caller_signals_unparented(qapp):
-    """When the caller supplies signals, the worker must not reparent them
-    (the caller owns their lifetime)."""
-    from probeflow.gui.features import _FeaturesWorker, _FeaturesWorkerSignals
-
-    sig = _FeaturesWorkerSignals()
-    w = _FeaturesWorker(
-        "particles", np.zeros((8, 8), dtype=float), 1e-9, 1e-9, 1e-9,
-        {"threshold": "otsu"}, signals=sig,
-    )
-    assert w.signals is sig
 
 
 def test_scan_load_worker_signals_parented_to_app(qapp):

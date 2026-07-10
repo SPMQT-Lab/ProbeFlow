@@ -23,7 +23,6 @@ from probeflow.gui.roi_context import (
     selected_or_active_area_roi_context,
 )
 from probeflow.gui.viewer.tool_launch import (
-    feature_lattice_launch_context,
     lattice_grid_launch_context,
     pair_correlation_launch_context,
 )
@@ -121,35 +120,6 @@ class ImageViewerToolsMixin:
             on_close=lambda: self._clear_lattice_grid_overlay(close_panel=False),
         )
         self._sync_viewer_menu_actions()
-
-    def _on_open_feature_finder(self):
-        arr = self._display_arr if self._display_arr is not None else self._raw_arr
-        if arr is None:
-            self._status_lbl.setText("No image loaded.")
-            return
-        px_x_m, px_y_m = self._pixel_size_xy_m()
-        roi_mask = None
-        roi_ctx = selected_or_active_area_roi_context(
-            self._image_roi_set,
-            getattr(self, "_roi_panel", None),
-        )
-        if roi_ctx.roi is not None:
-            roi_mask = area_roi_mask(roi_ctx.roi, arr.shape[:2])
-        value_scale, value_unit, _ = self._channel_unit()
-        from probeflow.gui.dialogs.feature_finder import FeatureFinderDialog
-        dlg = FeatureFinderDialog(
-            arr,
-            pixel_size_x_m=px_x_m,
-            pixel_size_y_m=px_y_m,
-            roi_mask=roi_mask,
-            theme=self._t,
-            value_scale=value_scale,
-            value_unit=value_unit,
-            on_send_to_particle_statistics=None,
-            parent=self,
-        )
-        self._feature_finder_dlg = dlg
-        self._present_modal_tool(dlg)
 
     def _on_open_image_operations(self) -> None:
         arr = self._display_arr if self._display_arr is not None else self._raw_arr
@@ -472,47 +442,6 @@ class ImageViewerToolsMixin:
             store = FeatureSetStore()
             self._feature_set_store_obj = store
         return store
-
-    def _on_open_feature_lattice(self) -> None:
-        item = getattr(self, "_lattice_grid_item", None)
-        grid = item.grid() if item is not None else None
-        arr = self._display_arr if self._display_arr is not None else self._raw_arr
-        px_x, px_y = self._pixel_size_xy_m()
-        context = feature_lattice_launch_context(
-            self._point_source_records(),
-            lattice_grid=grid,
-            image_shape=arr.shape[:2] if arr is not None else None,
-            pixel_size_x_m=px_x,
-            pixel_size_y_m=px_y,
-        )
-        if not context.ready:
-            self._status_lbl.setText(str(context.status_message))
-            return
-        _, ch_unit, _ = self._channel_unit()
-        entries = getattr(self, "_entries", [])
-        entry = entries[self._idx] if entries else None
-        from probeflow.gui.dialogs.feature_lattice_dialog import FeatureLatticeDialog
-
-        def _add(result):
-            self._add_dialog_measurement_result(result)
-
-        dlg = FeatureLatticeDialog(
-            context.sources_px,
-            lattice_origin_px=context.lattice_origin_px,
-            a_px=context.a_px,
-            b_px=context.b_px,
-            pixel_size_x_m=context.pixel_size_x_m,
-            pixel_size_y_m=context.pixel_size_y_m,
-            image_shape=context.image_shape,
-            source_label=self._source_label(),
-            source_path=str(entry.path) if entry is not None else None,
-            channel=ch_unit,
-            source_metadata=context.source_metadata,
-            on_add_result=_add,
-            theme=self._t,
-            parent=self,
-        )
-        self._present_modal_tool(dlg)
 
     def _on_open_fft_viewer(self):
         arr = self._display_arr if self._display_arr is not None else self._raw_arr

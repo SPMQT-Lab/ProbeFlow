@@ -37,7 +37,7 @@ from PySide6.QtWidgets import (
     QStatusBar, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 from probeflow.gui.utils import _open_url
-from probeflow.gui.features.tv import (
+from probeflow.gui.tv import (
     TVPanel,
     TVSidebar,
     _TVWorker,
@@ -318,12 +318,9 @@ class ProbeFlowWindow(QMainWindow):
         self._splitter.setStretchFactor(1, 0)
         self._apply_default_splitter_sizes()
 
-        # Floating Feature Counting window (lazy-created on first open)
-        self._fc_window = None
-
-        # One application-level feature-set store shared across image viewers,
-        # Feature Counting, and file imports, so points from any source can be
-        # pooled together in Particle Statistics.
+        # One application-level feature-set store shared across image viewers
+        # and file imports, so points from any source can be pooled for the
+        # basic particle-statistics panel.
         from probeflow.measurements.feature_sets import FeatureSetStore
         self._feature_set_store = FeatureSetStore()
 
@@ -345,7 +342,6 @@ class ProbeFlowWindow(QMainWindow):
         self._browse_tools.export_filtered_requested.connect(self._on_export_filtered_folder)
         self._browse_tools.thumbnail_channel_changed.connect(self._on_thumbnail_channel_changed)
         self._browse_tools.thumbnail_size_changed.connect(self._on_thumbnail_size_changed)
-        self._browse_tools.open_fc_window_requested.connect(self._open_fc_window)
         # Status bar must exist before initial browse/filter sync because those
         # calls can emit progress/completion signals immediately.
         self._status_bar = QStatusBar()
@@ -510,17 +506,6 @@ class ProbeFlowWindow(QMainWindow):
             align_menu.addAction(action)
 
         tools_menu = menu_bar.addMenu("Tools")
-        # Feature Counting opens a floating window (not a workspace page), so
-        # it is a plain action here rather than a checkable mode entry.
-        fc_action = QAction("Feature Counting…", self)
-        fc_action.setShortcut(QKeySequence("Ctrl+3"))
-        fc_action.setShortcutContext(Qt.ApplicationShortcut)
-        fc_action.setToolTip(
-            "Open the floating Feature Counting window — segmentation, "
-            "template matching, classification and lattice extraction."
-        )
-        fc_action.triggered.connect(self._open_fc_window)
-        tools_menu.addAction(fc_action)
         map_action = QAction("Map Spectra to Images...", self)
         map_action.triggered.connect(self._on_map_spectra)
         tools_menu.addAction(map_action)
@@ -1189,23 +1174,8 @@ class ProbeFlowWindow(QMainWindow):
         dlg.exec()
 
     def _on_card_context_action(self, entry, action: str):
-        """Dispatch ScanCard right-click actions (Send to Features, export, show metadata)."""
-        if action == "features":
-            # Open (or raise) the floating Feature Counting window and load
-            # the scan into it off-thread — same path as its own "Load from
-            # Browse" button, so saved viewer processing is applied too.
-            self._open_fc_window()
-            plane_idx = self._fc_window._sidebar.plane_index()
-            self._fc_window._sidebar.set_status("Loading scan…")
-            worker = _ScanLoadWorker(
-                self._load_scan_plane_for_analysis, entry, plane_idx)
-            worker.signals.finished.connect(
-                lambda result, error, e=entry: self._on_fc_load_finished(e, result, error)
-            )
-            QThreadPool.globalInstance().start(worker)
-            self._status_bar.showMessage(f"{entry.stem} → Feature Counting")
-
-        elif action == "export_metadata_csv":
+        """Dispatch ScanCard right-click actions (export, show metadata)."""
+        if action == "export_metadata_csv":
             try:
                 _scan = load_scan(entry.path)
                 header = dict(getattr(_scan, "header", {}) or {})
@@ -1257,22 +1227,6 @@ class ProbeFlowWindow(QMainWindow):
             close_btn.clicked.connect(dlg.accept)
             v.addWidget(close_btn)
             dlg.exec()
-
-    # ── Floating Feature Counting window ──────────────────────────────────────
-
-    def _open_fc_window(self) -> None:
-        """Open (or raise) the floating Feature Counting window."""
-        if self._fc_window is None:
-            from probeflow.gui.features.window import FeatureCountingWindow
-            theme = THEMES[self._theme_name]
-            self._fc_window = FeatureCountingWindow(
-                parent=None, theme=theme, feature_set_store=self._feature_set_store
-            )
-            self._fc_window.load_from_browse_needed.connect(
-                self._on_fc_load_from_browse)
-        self._fc_window.show()
-        self._fc_window.raise_()
-        self._fc_window.activateWindow()
 
     def _load_scan_plane_for_analysis(
         self, entry, plane_idx: int
@@ -1383,38 +1337,6 @@ class ProbeFlowWindow(QMainWindow):
             analysis_scan.record_processing_state(processing_state)
 
         return arr, px_m, px_x_m, px_y_m, plane_idx, analysis_scan
-
-    def _on_fc_load_from_browse(self) -> None:
-        """Bridge: read Browse selection → load into the floating FC window (off-thread)."""
-        from probeflow.gui.models import VertFile
-        if self._fc_window is None:
-            return
-        entry = self._grid.get_primary_entry()
-        if not entry:
-            self._fc_window._sidebar.set_status(
-                "Select a scan in the Browse tab first.")
-            return
-        if isinstance(entry, VertFile):
-            self._fc_window._sidebar.set_status(
-                "Selected entry is not a topography scan.")
-            return
-        plane_idx = self._fc_window._sidebar.plane_index()
-        self._fc_window._sidebar.set_status("Loading scan…")
-        worker = _ScanLoadWorker(self._load_scan_plane_for_analysis, entry, plane_idx)
-        worker.signals.finished.connect(
-            lambda result, error, e=entry: self._on_fc_load_finished(e, result, error)
-        )
-        QThreadPool.globalInstance().start(worker)
-
-    def _on_fc_load_finished(self, entry, result, error: str) -> None:
-        """Receive the background-loaded scan and hand it to the FC window."""
-        if self._fc_window is None:
-            return
-        if error:
-            self._fc_window._sidebar.set_status(f"Could not read scan: {error}")
-            return
-        arr, px_m, px_x_m, px_y_m, plane_idx, scan = result
-        self._fc_window.load_entry(entry, plane_idx, arr, px_m, px_x_m, px_y_m, scan=scan)
 
     # ── TV-denoise tab handlers ────────────────────────────────────────────────
     def _on_tv_load_from_browse(self):
@@ -1601,11 +1523,7 @@ class ProbeFlowWindow(QMainWindow):
             px_m = float(np.sqrt(px_x_m * px_y_m))
         else:
             px_x_m = px_y_m = px_m = 1e-10
-        if action == "features":
-            self._open_fc_window()
-            self._fc_window.load_entry(entry, plane_idx, arr, px_m, px_x_m, px_y_m)
-            self._status_bar.showMessage(f"{entry.stem} → Feature Counting")
-        elif action == "tv":
+        if action == "tv":
             self._open_workspace("tv")
             self._tv_panel.load_entry(entry, plane_idx, arr, px_m)
             self._tv_sidebar.set_status(
@@ -1634,11 +1552,7 @@ class ProbeFlowWindow(QMainWindow):
             px_m = float(np.sqrt(px_x_m * px_y_m))
         else:
             px_x_m = px_y_m = px_m = 1e-10
-        if action == "features":
-            self._open_fc_window()
-            self._fc_window.load_entry(entry, plane_idx, arr, px_m, px_x_m, px_y_m)
-            self._status_bar.showMessage(f"{entry.stem} → Feature Counting (viewer open)")
-        elif action == "tv":
+        if action == "tv":
             self._open_workspace("tv")
             self._tv_panel.load_entry(entry, plane_idx, arr, px_m)
             self._tv_sidebar.set_status(
@@ -1735,8 +1649,6 @@ class ProbeFlowWindow(QMainWindow):
         self._browse_info.apply_theme(t)
         for win in self._workspace_windows.values():
             win.apply_theme(t)
-        if self._fc_window is not None:
-            self._fc_window.apply_theme(t)
         self._sync_menu_actions()
 
     # ── About ──────────────────────────────────────────────────────────────────
@@ -1799,9 +1711,6 @@ class ProbeFlowWindow(QMainWindow):
         turning quit into a hang.
         """
         pools = [QThreadPool.globalInstance()]
-        fc = getattr(self, "_fc_window", None)
-        if fc is not None:
-            pools.append(getattr(fc, "_preview_pool", None))
         for pool in pools:
             if pool is None:
                 continue

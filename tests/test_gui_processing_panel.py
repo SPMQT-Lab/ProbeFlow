@@ -1432,44 +1432,6 @@ def test_viewer_point_source_collectors_include_measure_tab_feature_points(qapp)
     np.testing.assert_allclose(m_sources["Detected feature maxima"], [[8e-9, 15e-9]])
 
 
-def test_feature_finder_receives_active_area_roi_mask(qapp, monkeypatch):
-    from probeflow.core.roi import ROI, ROISet
-    from probeflow.gui import ImageViewerDialog
-    import probeflow.gui.dialogs.feature_finder as feature_finder_module
-
-    image = np.zeros((8, 8), dtype=float)
-    roi_set = ROISet(image_id="img1")
-    roi = ROI.new("rectangle", {"x": 2, "y": 1, "width": 3, "height": 4}, name="scope")
-    roi_set.add(roi)
-    roi_set.set_active(roi.id)
-    captured = {}
-
-    class FakeFeatureFinderDialog:
-        def __init__(self, *args, **kwargs):
-            captured["roi_mask"] = kwargs.get("roi_mask")
-
-    monkeypatch.setattr(
-        feature_finder_module,
-        "FeatureFinderDialog",
-        FakeFeatureFinderDialog,
-    )
-    dlg = ImageViewerDialog.__new__(ImageViewerDialog)
-    dlg._display_arr = image
-    dlg._raw_arr = None
-    dlg._image_roi_set = roi_set
-    dlg._pixel_size_xy_m = lambda: (1e-9, 1e-9)
-    dlg._channel_unit = lambda: (1.0, "", "")
-    dlg._t = {}
-    dlg._status_lbl = _FakeStatus()
-    # Tools now open via the modal-overlay helper (which needs a real QWidget);
-    # stub it since this test only checks the ROI mask handed to the dialog.
-    dlg._present_modal_tool = lambda _d, **_kw: captured.__setitem__("shown", True)
-
-    dlg._on_open_feature_finder()
-
-    expected = roi.to_mask(image.shape)
-    assert captured["shown"] is True
-    np.testing.assert_array_equal(captured["roi_mask"], expected)
 
 
 def test_legacy_measurement_context_survives_dock_conversion(qapp):

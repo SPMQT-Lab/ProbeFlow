@@ -154,11 +154,6 @@ def _add_point_roi_actions(menu: QMenu, viewer, roi_id: str) -> None:
 
 
 def _add_send_to_tool_actions(menu: QMenu, viewer) -> None:
-    a_feat = QAction("Send to Feature Counting", viewer)
-    a_feat.setToolTip("Send processed image to Feature Counting tab")
-    a_feat.triggered.connect(viewer._on_send_to_features)
-    menu.addAction(a_feat)
-
     a_tv = QAction("Send to TV Denoising", viewer)
     a_tv.setToolTip("Send processed image to TV Denoising tab")
     a_tv.triggered.connect(viewer._on_send_to_tv)

@@ -11,8 +11,6 @@ from probeflow.gui.dialogs.definitions import (
     render_roi_reference_html,
 )
 from probeflow.gui.dialogs.edge_detection import EdgeDetectionDialog
-from probeflow.gui.dialogs.feature_finder import FeatureFinderDialog
-from probeflow.gui.dialogs.feature_lattice_dialog import FeatureLatticeDialog
 from probeflow.gui.dialogs.fft_viewer import FFTViewerDialog
 from probeflow.gui.dialogs.import_points import ImportPointsDialog
 from probeflow.gui.dialogs.pair_correlation import PairCorrelationDialog
@@ -31,8 +29,6 @@ __all__ = [
     "_DefinitionsDialog",
     "_DefinitionsPanel",
     "render_roi_reference_html",
-    "FeatureFinderDialog",
-    "FeatureLatticeDialog",
     "FFTViewerDialog",
     "ImportPointsDialog",
     "PairCorrelationDialog",

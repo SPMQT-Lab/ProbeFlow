@@ -11,7 +11,6 @@ from probeflow.gui.roi_context import (
     PointSource,
     active_area_roi_area_m2,
     point_source_arrays_m,
-    point_source_arrays_px,
     point_source_metadata,
 )
 
@@ -27,25 +26,6 @@ class PairCorrelationLaunchContext:
     sources_m: dict[str, np.ndarray]
     source_metadata: dict[str, dict[str, object]]
     roi_area_m2: float | None
-    pixel_size_x_m: float
-    pixel_size_y_m: float
-    status_message: str | None = None
-
-    @property
-    def ready(self) -> bool:
-        return self.status_message is None
-
-
-@dataclass(frozen=True)
-class FeatureLatticeLaunchContext:
-    """Inputs needed to open the feature-to-lattice dialog."""
-
-    sources_px: dict[str, np.ndarray]
-    source_metadata: dict[str, dict[str, object]]
-    lattice_origin_px: tuple[float, float] | None
-    a_px: tuple[float, float] | None
-    b_px: tuple[float, float] | None
-    image_shape: tuple[int, int] | None
     pixel_size_x_m: float
     pixel_size_y_m: float
     status_message: str | None = None
@@ -124,51 +104,4 @@ def lattice_grid_launch_context(
     return LatticeGridLaunchContext(
         image_shape=image_shape,
         scan_range_m=(float(scan_range_m[0]), float(scan_range_m[1])),
-    )
-
-
-def feature_lattice_launch_context(
-    point_sources: list[PointSource],
-    *,
-    lattice_grid: Any = None,
-    image_shape: tuple[int, int] | None = None,
-    pixel_size_x_m: float,
-    pixel_size_y_m: float,
-) -> FeatureLatticeLaunchContext:
-    """Build a feature-lattice launch context from point sources and grid state."""
-    sources_px = point_source_arrays_px(point_sources)
-    metadata = point_source_metadata(point_sources)
-    if not sources_px:
-        return FeatureLatticeLaunchContext(
-            sources_px={},
-            source_metadata={},
-            lattice_origin_px=None,
-            a_px=None,
-            b_px=None,
-            image_shape=image_shape,
-            pixel_size_x_m=float(pixel_size_x_m),
-            pixel_size_y_m=float(pixel_size_y_m),
-            status_message=POINT_SOURCE_REQUIRED_MESSAGE,
-        )
-    if lattice_grid is None:
-        return FeatureLatticeLaunchContext(
-            sources_px=sources_px,
-            source_metadata=metadata,
-            lattice_origin_px=None,
-            a_px=None,
-            b_px=None,
-            image_shape=image_shape,
-            pixel_size_x_m=float(pixel_size_x_m),
-            pixel_size_y_m=float(pixel_size_y_m),
-            status_message=LATTICE_REQUIRED_MESSAGE,
-        )
-    return FeatureLatticeLaunchContext(
-        sources_px=sources_px,
-        source_metadata=metadata,
-        lattice_origin_px=lattice_grid.origin_px,
-        a_px=lattice_grid.a_px,
-        b_px=lattice_grid.b_px,
-        image_shape=image_shape,
-        pixel_size_x_m=float(pixel_size_x_m),
-        pixel_size_y_m=float(pixel_size_y_m),
     )

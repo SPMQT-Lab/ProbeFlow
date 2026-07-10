@@ -14,7 +14,6 @@ CUSHION_DIR = REPO_ROOT / "probeflow" / "data" / "file_cushions"
 GUI_TEST_MODULES = {
     "test_gui_index_integration.py",
     "test_gui_processing_panel.py",
-    "test_gui_features.py",
     "test_viewer_window_menu.py",
     "test_roi_click_selection_canvas.py",
     "test_viewer_region_levels.py",

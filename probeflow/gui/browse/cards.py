@@ -150,11 +150,6 @@ class ScanCard(_BrowseCard):
 
     def contextMenuEvent(self, event):
         menu = QMenu(self)
-        a_features = QAction("Send to FeatureCounting", self)
-        a_features.triggered.connect(
-            lambda: self.context_action_requested.emit(self.entry, "features"))
-        menu.addAction(a_features)
-
         a_meta_csv = QAction("Export metadata as CSV…", self)
         a_meta_csv.triggered.connect(
             lambda: self.context_action_requested.emit(self.entry, "export_metadata_csv"))

@@ -11,7 +11,6 @@ from probeflow.measurements.feature_sets import FeatureSet, FeatureSetStore
 from probeflow.measurements.point_table_io import (
     default_image_shape,
     default_scan_range_m,
-    feature_items_to_feature_set,
     load_point_table,
     sniff_point_table,
 )
@@ -159,47 +158,6 @@ def test_unrecognised_json_raises(tmp_path):
         sniff_point_table(p)
 
 
-# --------------------------------------------------------------------------- #
-# Feature Counting -> FeatureSet (the live FC send path; exercises the adapter)
-# --------------------------------------------------------------------------- #
-def test_feature_items_to_feature_set_from_dicts():
-    items = [
-        {"index": 0, "centroid_x_m": 10e-9, "centroid_y_m": 20e-9, "area_nm2": 5.0},
-        {"index": 1, "centroid_x_m": 30e-9, "centroid_y_m": 40e-9, "area_nm2": 6.0},
-    ]
-    fs = feature_items_to_feature_set(
-        items,
-        scan_range_m=(100e-9, 80e-9),
-        image_shape=(160, 200),
-        name="fc particles",
-        source_type="feature_counting_particles",
-    )
-    assert fs.point_count == 2
-    np.testing.assert_allclose(fs.points_m[0], [10e-9, 20e-9], rtol=1e-6)
-    np.testing.assert_allclose(fs.points_m[1], [30e-9, 40e-9], rtol=1e-6)
-
-
-def test_feature_items_to_feature_set_accepts_objects():
-    class _P:
-        def __init__(self, x, y):
-            self.x_m, self.y_m, self.x_px, self.y_px = x, y, 0, 0
-
-        def to_dict(self):
-            return {"x_m": self.x_m, "y_m": self.y_m, "x_px": self.x_px, "y_px": self.y_px}
-
-    fs = feature_items_to_feature_set(
-        [_P(5e-9, 6e-9)],
-        scan_range_m=(50e-9, 50e-9),
-        image_shape=(100, 100),
-        name="fc detections",
-    )
-    assert fs.point_count == 1
-    np.testing.assert_allclose(fs.points_m[0], [5e-9, 6e-9], rtol=1e-6)
-
-
-# --------------------------------------------------------------------------- #
-# Offset / absolute coordinate origins
-# --------------------------------------------------------------------------- #
 def test_default_scan_range_sized_to_extent_for_offset_origin():
     bbox = (100.0, 200.0, 110.0, 208.0)  # nm, offset origin
     w, h = default_scan_range_m(bbox, "nm")
@@ -400,17 +358,3 @@ def test_pixel_size_derived_from_px_and_nm_columns(tmp_path):
 # --------------------------------------------------------------------------- #
 # Feature Counting fallback consistency (no AdStat)
 # --------------------------------------------------------------------------- #
-def test_items_applies_status_filter():
-    items = [
-        {"x_m": 1e-9, "y_m": 2e-9, "status": "accepted"},
-        {"x_m": 3e-9, "y_m": 4e-9, "status": "rejected"},
-        {"x_m": 5e-9, "y_m": 6e-9, "status": "manual"},
-        {"x_m": 7e-9, "y_m": 8e-9},  # no status -> accepted by default
-    ]
-    fs = feature_items_to_feature_set(
-        items,
-        scan_range_m=(10e-9, 10e-9),
-        image_shape=(10, 10),
-        name="fallback",
-    )
-    assert fs.point_count == 3  # the rejected item is excluded

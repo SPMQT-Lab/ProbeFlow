@@ -706,13 +706,6 @@ class ImageViewerProcessingExportMixin:
             _log.warning("Could not build export provenance record; history "
                          "panel not updated", exc_info=True)
 
-    def _on_send_to_features(self):
-        self._deferred.action = "features"
-        self._deferred.plane_idx = self._ch_cb.currentIndex()
-        # Emit immediately so the parent can load data without closing the viewer.
-        # The viewer stays open; the parent clears _deferred so _on_closed won't fire it again.
-        self.immediate_action_requested.emit("features")
-
     def _on_send_to_tv(self):
         self._deferred.action = "tv"
         self._deferred.plane_idx = self._ch_cb.currentIndex()

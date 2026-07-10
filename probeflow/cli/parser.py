@@ -25,13 +25,10 @@ from probeflow.cli.processing_ops import (
 )
 from probeflow.cli.commands.analysis import (
     _cmd_autoclip,
-    _cmd_classify,
-    _cmd_count,
     _cmd_fft_spectrum,
     _cmd_grains,
     _cmd_histogram,
     _cmd_lattice,
-    _cmd_particles,
     _cmd_periodicity,
     _cmd_profile,
     _cmd_tv_denoise,
@@ -275,66 +272,7 @@ def _build_parser() -> argparse.ArgumentParser:
     period.add_argument("--verbose", action="store_true")
     period.set_defaults(func=_cmd_periodicity)
 
-    # ── Optional feature commands: counting / lattice / denoise / classify ──
-    particles = sub.add_parser("particles",
-        help="Segment bright (or dark) particles / molecules on a scan plane")
-    particles.add_argument("input", type=Path)
-    particles.add_argument("-o", "--output", type=Path, default=None,
-        help="Optional .json output with full particle list + scan provenance")
-    particles.add_argument("--plane", type=int, default=0)
-    particles.add_argument("--threshold", choices=("otsu", "manual", "adaptive"),
-                           default="otsu")
-    particles.add_argument("--manual-value", type=float, default=None,
-        help="0-255 byte cutoff when --threshold=manual")
-    particles.add_argument("--invert", action="store_true",
-        help="Segment depressions instead of bright features")
-    particles.add_argument("--min-area", type=float, default=0.5,
-        help="Minimum particle area (nm²; default 0.5)")
-    particles.add_argument("--max-area", type=float, default=None,
-        help="Maximum particle area (nm²; default: no limit)")
-    particles.add_argument("--sigma-clip", type=float, default=2.0,
-        help="Drop particles more than this many σ from the mean area")
-    particles.add_argument("--no-sigma-clip", action="store_true",
-        help="Disable σ-clipping of particle areas")
-    particles.add_argument("--clip-low", type=float, default=1.0)
-    particles.add_argument("--clip-high", type=float, default=99.0)
-    particles.add_argument("--limit", type=int, default=20,
-        help="Max particles printed to stdout (table mode)")
-    particles.add_argument("--json", action="store_true")
-    particles.add_argument("--verbose", action="store_true")
-    # Reproducible step-edge exclusion (analysis.step_edges.step_edge_mask)
-    particles.add_argument("--exclude-step-edges", action="store_true",
-        help="Drop molecules sitting on substrate step edges (algorithmic, "
-             "reproducible alternative to hand-painting a mask)")
-    particles.add_argument("--step-angle", type=float, default=20.0,
-        help="Step slope angle in degrees (default 20)")
-    particles.add_argument("--step-molecule-size", type=float, default=1.0,
-        help="Molecule diameter in nm, suppressed before step detection (default 1.0)")
-    particles.add_argument("--step-margin", type=float, default=0.3,
-        help="Extra margin grown around the step band, nm (default 0.3)")
-    particles.add_argument("--step-min-height", type=float, default=0.0,
-        help="Only exclude at steps at least this tall, nm (0 = any steep edge)")
-    particles.add_argument("--step-max-overlap", type=float, default=0.25,
-        help="Reject a particle when more than this fraction overlaps the step band")
-    particles.set_defaults(func=_cmd_particles)
-
-    count = sub.add_parser("count",
-        help="Count features by template matching (AiSurf atom_counting)")
-    count.add_argument("input", type=Path)
-    count.add_argument("--template", type=Path, required=True,
-        help="Template image — PNG or another scan file")
-    count.add_argument("-o", "--output", type=Path, default=None,
-        help="Optional .json output with all detections")
-    count.add_argument("--plane", type=int, default=0)
-    count.add_argument("--min-corr", type=float, default=0.5,
-        help="Minimum normalised cross-correlation (0.4-0.6 typical)")
-    count.add_argument("--min-distance", type=float, default=None,
-        help="Minimum feature separation (nm); default = half template side")
-    count.add_argument("--clip-low", type=float, default=1.0)
-    count.add_argument("--clip-high", type=float, default=99.0)
-    count.add_argument("--json", action="store_true")
-    count.add_argument("--verbose", action="store_true")
-    count.set_defaults(func=_cmd_count)
+    # ── Optional commands: denoise / lattice ──
 
     tv = sub.add_parser("tv-denoise",
         help="Total-variation denoising (Huber-ROF / TV-L1)")
@@ -371,25 +309,6 @@ def _build_parser() -> argparse.ArgumentParser:
     lat.add_argument("--verbose", action="store_true")
     lat.set_defaults(func=_cmd_lattice)
 
-    classify = sub.add_parser("classify",
-        help="Few-shot classify particles against labelled samples")
-    classify.add_argument("input", type=Path)
-    classify.add_argument("--samples", type=Path, required=True,
-        help="JSON file with sample particles (each object must include "
-             "'class_name' / 'label' and all Particle fields)")
-    classify.add_argument("-o", "--output", type=Path, default=None)
-    classify.add_argument("--plane", type=int, default=0)
-    classify.add_argument("--encoder", choices=("raw", "pca_kmeans"),
-                          default="raw")
-    classify.add_argument("--threshold-method",
-                          choices=("gmm", "otsu", "distribution"),
-                          default="gmm")
-    classify.add_argument("--min-area", type=float, default=0.5)
-    classify.add_argument("--sigma-clip", type=float, default=2.0)
-    classify.add_argument("--no-sigma-clip", action="store_true")
-    classify.add_argument("--json", action="store_true")
-    classify.add_argument("--verbose", action="store_true")
-    classify.set_defaults(func=_cmd_classify)
 
     # ── line profile ──
     profile = sub.add_parser("profile",

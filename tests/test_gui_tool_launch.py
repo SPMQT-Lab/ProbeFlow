@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -11,9 +10,7 @@ from probeflow.core.roi import ROI
 from probeflow.gui.roi_context import PointSource
 from probeflow.gui.viewer.tool_launch import (
     IMAGE_REQUIRED_MESSAGE,
-    LATTICE_REQUIRED_MESSAGE,
     POINT_SOURCE_REQUIRED_MESSAGE,
-    feature_lattice_launch_context,
     lattice_grid_launch_context,
     pair_correlation_launch_context,
 )
@@ -64,57 +61,6 @@ def test_pair_correlation_launch_context_records_active_area():
     assert context.roi_area_m2 == pytest.approx(36e-18)
 
 
-def test_feature_lattice_launch_context_checks_sources_before_lattice():
-    context = feature_lattice_launch_context(
-        [],
-        lattice_grid=None,
-        image_shape=(8, 8),
-        pixel_size_x_m=2e-9,
-        pixel_size_y_m=3e-9,
-    )
-
-    assert not context.ready
-    assert context.status_message == POINT_SOURCE_REQUIRED_MESSAGE
-
-
-def test_feature_lattice_launch_context_requires_lattice_grid():
-    context = feature_lattice_launch_context(
-        [_point_source()],
-        lattice_grid=None,
-        image_shape=(8, 8),
-        pixel_size_x_m=2e-9,
-        pixel_size_y_m=3e-9,
-    )
-
-    assert not context.ready
-    assert context.status_message == LATTICE_REQUIRED_MESSAGE
-    assert "Detected feature maxima" in context.sources_px
-
-
-def test_feature_lattice_launch_context_returns_grid_and_sources():
-    grid = SimpleNamespace(
-        origin_px=(1.0, 2.0),
-        a_px=(10.0, 0.0),
-        b_px=(0.0, 12.0),
-    )
-
-    context = feature_lattice_launch_context(
-        [_point_source()],
-        lattice_grid=grid,
-        image_shape=(9, 10),
-        pixel_size_x_m=2e-9,
-        pixel_size_y_m=3e-9,
-    )
-
-    assert context.ready
-    assert context.lattice_origin_px == (1.0, 2.0)
-    assert context.a_px == (10.0, 0.0)
-    assert context.b_px == (0.0, 12.0)
-    assert context.image_shape == (9, 10)
-    np.testing.assert_allclose(
-        context.sources_px["Detected feature maxima"],
-        [[1.0, 2.0], [3.0, 4.0]],
-    )
 
 
 def test_lattice_grid_launch_context_requires_image():
