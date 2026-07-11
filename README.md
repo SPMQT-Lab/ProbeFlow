@@ -4,130 +4,72 @@
 
 # ProbeFlow
 
-ProbeFlow is a lab workflow tool for scanning tunnelling microscopy and related
-SPM data. It helps you browse folders of scans and spectra, apply routine image
-corrections, draw ROIs, make common measurements, and export figures or data
-with enough context to understand how they were produced. It reads Createc,
-Nanonis, and RHK files and runs from a desktop GUI (with a command-line
-interface for scripting and batch work).
+ProbeFlow is a desktop tool for scanning tunnelling microscopy (STM) and
+related SPM data. It browses folders of scans and spectra, applies routine
+image corrections, measures with ROIs and FFT tools, and exports figures or
+data with enough provenance to understand how they were produced — all while
+keeping the physical calibration (nm, pA, V) that plain bitmaps lose. It
+reads Createc, Nanonis, and RHK files, and includes a command-line interface
+for scripting and batch work.
 
-> **Beta software.** ProbeFlow is `0.0.0b0`: the GUI, CLI, Python API, and JSON
-> sidecar formats may still change. Raw microscope files are treated as
-> read-only — processing and exports always write new files, with provenance
-> sidecars where supported.
+> **Beta software.** ProbeFlow is `0.0.0b0`: the GUI, CLI, Python API, and
+> JSON sidecar formats may still change. Raw microscope files are treated as
+> read-only — processing and exports always write new files.
 
-## Quick start
+## Get started
 
-Install from a checkout (Python 3.11+):
+Python 3.11 or newer is required.
 
 ```bash
 git clone https://github.com/SPMQT-Lab/ProbeFlow.git
 cd ProbeFlow
 python -m pip install -e .
-```
-
-Launch the GUI:
-
-```bash
 probeflow gui
 ```
 
-A typical first session:
+Then, in the app:
 
-1. Open a folder of `.dat`, `.sxm`, `.sm4`, or spectroscopy files.
-2. Pick a scan or spectrum from the thumbnail browser.
-3. Choose a channel, colormap, and display range.
-4. Draw an ROI or line profile if you need one.
-5. Apply a correction, open the FFT viewer, or take a measurement.
-6. Export the image, table, profile, spectrum, or processed scan.
+1. **Open folder…** and point it at a directory of `.dat`, `.sxm`, `.sm4`,
+   or spectroscopy files — every supported file appears as a thumbnail.
+2. **Double-click a scan** to open the image viewer.
+3. Fix the usual artifacts: `Processing → STM scan-line background…`
+   (`Ctrl+Alt+B`) or plane subtraction (`Ctrl+Shift+B`), previewing the fit
+   before applying.
+4. Draw an ROI or line profile, take measurements from the **Measure** tab,
+   or open the FFT viewer (`Ctrl+Shift+F`).
+5. **Export** the image, profile, table, or processed scan — most exports
+   carry a JSON provenance sidecar recording exactly how they were made.
 
-Prefer the command line for inspection, conversion, and batch pipelines? See the
-[command-line guide](docs/cli.md).
-
-## A tour of the GUI
-
-The full walkthrough, with each step spelled out, is in the
-[GUI guide](docs/gui.md).
-
-**Loading images.** Open a folder (`File → Open folder...`) and every
-supported scan and spectrum appears in a thumbnail grid — switch thumbnail
-channel, colormap, and row alignment from the sidebar, then double-click a
-scan to open the image viewer.
+Everything in the viewer is also reachable from the search box (`Ctrl+K`) —
+type a few letters of what you want ("background", "profile", "fft").
 
 ![Browse mode with a folder of scans loaded](docs/images/gui_browse.png)
 
 ![The image viewer showing a terraced surface](docs/images/gui_viewer.png)
 
-**Subtracting a background.** `Processing → STM scan-line background...`
-(`Ctrl+Alt+B`) fits a per-scan-line background; switch between models
-(linear, polynomial, low-pass, piezo-creep variants) with the dropdown and
-watch the residual plots to judge the fit before applying. A polynomial
-plane fit lives next to it under `Processing → Plane/background
-subtraction...` (`Ctrl+Shift+B`).
+The step-by-step walkthrough is in the **[GUI guide](docs/gui.md)**; batch
+and scripting workflows are in the **[command-line guide](docs/cli.md)**.
 
-![STM scan-line background dialog with a linear fit previewed](docs/images/gui_stm_background.png)
+## What it does
 
-**Performing an FFT.** `Measurements → FFT viewer...` (`Ctrl+Shift+F`)
-shows the spectrum with q-axes in nm⁻¹, intensity controls, and a radial
-profile; the tabs fit a reciprocal lattice, correct drift distortion,
-suppress mains pickup, reconstruct a filtered image by inverse FFT, and
-symmetrize the image by rotational averaging.
-
-**Finding features.** `Measurements → Feature finder...` detects maxima or
-minima with threshold, spacing, and smoothing controls, then exports the
-coordinates to CSV or a synthetic feature image for lattice statistics.
-
-## Main features
-
-ProbeFlow is honest about being a focused toolkit rather than a do-everything
-suite. What it does today:
-
-- **Browse** folders of scans and spectra in a thumbnail grid; switch channels
-  (Z / current, forward / backward), colormaps, and display contrast.
-- **Process images** — row alignment, bad-line detection and repair, background
-  subtraction (plane fit, STM line-by-line, facet levelling), Gaussian
-  smoothing and high-pass, edge detection, Fourier low/high-pass filters,
-  periodic-spot notch filters, TV denoising, point/plane zeroing, lossless and
-  arbitrary geometry transforms, and derived arithmetic channels. Steps are
-  recorded as a processing state so an export can be reproduced.
-- **Advanced edge detection** (Process tab) — **Canny** and **Sobel/Scharr**
-  detectors with a live, non-destructive overlay preview and STM-tuned presets.
-  Results become reusable analysis objects: an overlay, a new image, an **active
-  mask**, or ROI(s). The active-mask layer (Masks tab) supports morphological
-  cleanup (remove small objects, fill holes, dilate/erode/open/close,
-  skeletonize) and restricts statistics directly; convert it to ROI(s) to
-  exclude regions from a plane fit. Masks are saved to a `<scan>.masks.json`
-  sidecar.
-- **FFT tools** (the FFT viewer) — inspect the magnitude and radial profile with
-  q in nm⁻¹; overlay a draggable reciprocal-lattice grid and apply an affine
-  lattice correction; show Bragg-shell rings for a known structure; predict and
-  notch out **mains pickup** (50/60 Hz); use the **inverse-FFT /
-  Fourier-reconstruction** tool to select circle/ellipse features, *remove* or
-  *keep* them, preview the reconstructed image and the residual, then apply;
-  and **symmetrize** an image by n-fold (optionally mirrored) rotational
-  averaging, with the removed residual always shown alongside.
-- **ROIs and measurements** — rectangle, ellipse, polygon, freehand, line, and
-  point ROIs; ROI-scoped processing; line profiles, periodicity, ROI
-  statistics, step heights, distances and angles, feature points, point-mask
-  FFTs, pair correlation, and lattice / grid / unit-cell measurements. ROIs save
-  to a `<scan>.rois.json` sidecar.
-- **Point-pattern measurements** — detect local maxima in a region and compute
-  the pair-correlation function g(r), with density, nearest-neighbour spacing,
-  and first-peak position, for points marked as ROIs or detected in the viewer.
-  SIFT-based lattice-vector extraction is optional and needs the `lattice`
-  extra (OpenCV + scikit-learn).
-- **Spectroscopy** — inspect single traces or overlays / waterfalls. Smoothing,
-  derivative, normalization, outlier masking, and offsets operate on derived
-  display data; the raw loaded arrays are left intact.
-- **Convert** Createc `.dat` scans to Nanonis-compatible `.sxm` (and PNG), or
-  export them as raw / physical NumPy `.npy` bundles with header and
-  provenance sidecars (`dat2npy`).
-- **Export with context** — PNG, PDF, CSV, JSON, SXM, and optional Gwyddion
-  `.gwy`. Many exports also write a JSON provenance sidecar (source file and
-  channel, display settings, processing state, ROIs, and warnings). It is not a
-  full electronic lab notebook, but it makes exported figures and data easier to
-  interpret later. Exports never overwrite an existing file unless you ask
-  (CLI `--force` / writer `overwrite=True`).
+- **Browse** scans and spectra as thumbnails — channels, colormaps, sorting,
+  and a bias filter; raw files are never modified.
+- **Process** — row alignment, bad-line repair, background subtraction,
+  smoothing/high-pass, edge detection and masks, Fourier filters, TV
+  denoising, geometry transforms. Every step is recorded so an export can be
+  reproduced.
+- **Measure** — rectangle/ellipse/polygon/freehand/line/point ROIs, line
+  profiles and periodicity, ROI statistics, step heights, distances and
+  angles, feature maxima and point statistics (pair correlation g(r),
+  nearest-neighbour spacing, density).
+- **FFT tools** — magnitude and radial profile with q in nm⁻¹, draggable
+  reciprocal-lattice grids, affine drift correction, mains-pickup notching,
+  inverse-FFT reconstruction, and n-fold symmetrization.
+- **Spectroscopy** — single traces, overlays, and waterfalls with smoothing,
+  derivatives, and normalization on derived display data.
+- **Convert and export** — Createc `.dat` → Nanonis `.sxm`, PNG, or NumPy
+  `.npy` bundles; export PNG/PDF/CSV/JSON/SXM (and Gwyddion `.gwy` with the
+  optional extra), with provenance sidecars.
 
 ## Supported files
 
@@ -138,36 +80,23 @@ suite. What it does today:
 | Input | Nanonis `.sxm` | STM/SPM image scan |
 | Input | Nanonis `.dat` | Point spectroscopy |
 | Input | RHK `.sm4` | STM/SPM image scan |
-| Output | `.sxm` | Converted or processed scan data |
-| Output | `.npy` | Raw / physical NumPy array bundles (with header + provenance sidecars) |
+| Output | `.sxm`, `.npy` | Converted or processed scan data |
 | Output | `.png`, `.pdf` | Figure / image export |
-| Output | `.csv`, `.json` | Numerical data, metadata, or provenance |
-| Output | `.gwy` | Optional Gwyddion export when `gwyfile` is installed |
+| Output | `.csv`, `.json` | Numerical data, metadata, provenance |
+| Output | `.gwy` | Optional Gwyddion export |
 
-Createc `.dat` reader details (interrupted-scan handling, payload conventions)
-are in [docs/createc_dat_reader.md](docs/createc_dat_reader.md).
-
-## Installation notes
-
-Python 3.11 or newer is required. The core install pulls in numpy, scipy,
-Pillow, PySide6, matplotlib, shapely, and scikit-image.
-
-Optional extras:
+## Optional extras
 
 ```bash
 python -m pip install -e ".[lattice]"    # SIFT lattice-vector extraction (OpenCV, scikit-learn)
-python -m pip install -e ".[gwyddion]"   # Gwyddion .gwy writer (gwyfile)
-python -m pip install -e ".[dev]"        # test + lint tooling (pytest, ruff, pre-commit)
-python -m pip install -e ".[all]"        # lattice + gwyddion + pytest
+python -m pip install -e ".[gwyddion]"   # Gwyddion .gwy writer
+python -m pip install -e ".[dev]"        # test + lint tooling
 ```
 
-Lattice-vector extraction is inactive until the `lattice` extra is installed,
-and `.gwy` export needs the `gwyddion` extra; everything else works with the
-core install.
+Everything else works with the core install (numpy, scipy, Pillow, PySide6,
+matplotlib, shapely, scikit-image).
 
 ## Using ProbeFlow from Python
-
-ProbeFlow can also be driven as a library:
 
 ```python
 from probeflow import load_scan, processing
@@ -179,50 +108,25 @@ scan.save("processed.sxm")
 scan.save("processed.png", colormap="gray")
 ```
 
-```python
-from probeflow.io.spectroscopy import read_spec_file
-from probeflow.processing.spectroscopy import smooth_spectrum, numeric_derivative
-
-spec = read_spec_file("spectrum.VERT")
-z_smooth = smooth_spectrum(spec.channels["Z"], method="savgol")
-dzdv = numeric_derivative(spec.x_array, z_smooth)
-```
-
 ## Documentation
 
-- [GUI guide](docs/gui.md)
-- [Command-line guide](docs/cli.md)
-- [Createc `.dat` reader notes](docs/createc_dat_reader.md)
-- [ROI manual workflow checklist](docs/roi_manual_test_checklist.md)
-- [Review and cleanup status](docs/review_status.md)
-- [Contributor notes](CONTRIBUTING.md)
+- [GUI guide](docs/gui.md) — the full tour with screenshots
+- [Command-line guide](docs/cli.md) — inspection, conversion, batch pipelines
+- [Createc `.dat` reader notes](docs/createc_dat_reader.md) — format details
+- [Contributor notes](CONTRIBUTING.md) — setup, tests, architecture boundaries
+- [Review and cleanup status](docs/review_status.md) — code-review record
 
 ## Development
 
 ```bash
-python -m pip install -e ".[dev,features]" -c constraints.txt
-pre-commit install              # once per clone — runs ruff on every commit
-pytest                          # run the test suite
-ruff check .                    # lint (same pinned ruff as CI and the hook)
+python -m pip install -e ".[dev,lattice]" -c constraints.txt
+pre-commit install    # once per clone — runs ruff on every commit
+pytest                # run the test suite
+ruff check .          # lint (same pinned ruff as CI and the hook)
 ```
 
-Repository layout:
-
-```text
-probeflow/
-|-- core/        # Scan model, loading dispatch, metadata, ROI, validation
-|-- io/          # File sniffing, readers, writers, converters, sidecars
-|-- processing/  # Numerical processing and ProcessingState
-|-- analysis/    # Image, lattice, feature, and spectroscopy analysis helpers
-|-- provenance/  # Export provenance and graph data structures
-|-- gui/         # PySide6 GUI package
-|-- cli/         # Command-line interface
-`-- plugins/     # Plugin API and registry groundwork
-
-tests/           # pytest suite
-test_data/       # sample input data
-docs/            # additional documentation
-```
+The package layout and architectural boundaries are described in
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Acknowledgements
 

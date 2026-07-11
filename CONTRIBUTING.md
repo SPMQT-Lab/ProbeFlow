@@ -32,8 +32,8 @@ pytest -k "lattice"          # by name
 QT_QPA_PLATFORM=offscreen pytest   # if you don't have a display
 ```
 
-CI runs `pytest` on Python 3.11 and 3.12 with the `dev` and `features`
-extras installed (so OpenCV / scikit-learn paths are exercised).
+CI runs `pytest` on Python 3.11 and 3.12 with the `dev` and `lattice`
+extras installed (so the OpenCV / scikit-learn paths are exercised).
 
 ## Linting
 
