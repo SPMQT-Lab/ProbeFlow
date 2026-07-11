@@ -3,13 +3,13 @@
 QThreadPool auto-deletes a finished QRunnable on the *worker* thread. If the
 runnable is the sole owner of a parentless ``*Signals`` QObject (which carries
 cross-thread signal/slot connections), that QObject is destroyed off the main
-thread, corrupting Qt internals — observed as a hard SIGSEGV inside the
-app-level tooltip event filter when opening Feature Finder / Feature Counting.
+thread, corrupting Qt internals — historically observed as a hard SIGSEGV
+inside the app-level tooltip event filter.
 
 The fix parents the worker-owned signals to the QApplication (created on the
 main thread) so Shiboken never C++-destroys it from the worker thread; the
 worker ``deleteLater()``s it to avoid accumulation. These tests lock the
-invariant for the workers in the Feature-Counting flow.
+invariant for every pooled worker.
 """
 
 from __future__ import annotations

@@ -1,9 +1,9 @@
-"""GUI-free readers for point-position tables (CSV / JSON) for Particle Statistics.
+"""GUI-free readers for point-position tables (CSV / JSON) for point statistics.
 
 ProbeFlow can analyse externally produced point collections by importing a file
 from disk.  This module sniffs a file to understand its shape, then loads it into
-one or more :class:`~probeflow.measurements.feature_sets.FeatureSet` objects that
-the Particle Statistics UI already knows how to analyse and pool.
+one or more :class:`~probeflow.measurements.feature_sets.FeatureSet` objects
+ready for the point-statistics tools to analyse and pool.
 
 Supported inputs:
 
@@ -11,7 +11,7 @@ Supported inputs:
   particle-number / id column), delimiter and header auto-detected, units
   inferred from header names (``x_px`` / ``x_nm`` / ``x_m`` / ``x_phys`` + unit
   columns) or supplied by the caller.
-* **ProbeFlow CSV exports** — Feature Finder
+* **ProbeFlow CSV exports** — the feature-point export
   (``index,x_px,y_px,x_nm,y_nm,value``) and the measurements point export
   (``point_id,x_px,y_px,x_phys,y_phys,...,x_unit,...``).
 * **ProbeFlow feature-set JSON** — a saved :class:`FeatureSetStore`

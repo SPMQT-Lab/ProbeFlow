@@ -1478,7 +1478,7 @@ _MEASUREMENT_ENTRIES: tuple[_DefinitionEntry, ...] = (
         ),
     ),
     _DefinitionEntry(
-        title="Pair correlation",
+        title="Point statistics (pair correlation)",
         params=("point set", "nn_median", "g(r)"),
         summary=(
             "Describes how a set of points is arranged relative to each other: it "
@@ -1511,39 +1511,6 @@ _MEASUREMENT_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "Reliable statistics need many points; a few detections give a noisy "
             "g(r). Missed or spurious features distort the nearest-neighbour "
             "distance, so check the detection first.",
-        ),
-    ),
-    _DefinitionEntry(
-        title="Feature → lattice",
-        params=("point set", "ideal lattice", "rms_displacement_m"),
-        summary=(
-            "Compares detected features against an ideal, perfectly regular lattice "
-            "and measures how far each one is displaced from where it 'should' be. "
-            "The single-number result — the RMS displacement — quantifies disorder, "
-            "strain, or distortion in an otherwise periodic arrangement."
-        ),
-        in_practice=(
-            "Detect the features, define or fit the ideal lattice, then run "
-            "Feature-to-lattice. A small RMS displacement means a well-ordered "
-            "lattice; a large one flags strain or disorder."
-        ),
-        equations=(
-            "match each feature to its nearest ideal lattice site (within a radius)\n"
-            "displacement d_k = |feature_k - matched_site_k|\n"
-            "rms_displacement = sqrt(mean(d_k^2))   over matched features\n"
-            "reported in pixels and in metres",
-        ),
-        details=(
-            "Only features that fall within the match radius of a lattice site are "
-            "counted, so a few stray detections do not dominate the result. The RMS "
-            "displacement is the root-mean-square of how far the real features sit "
-            "from the ideal grid.",
-        ),
-        cautions=(
-            "The answer depends on the ideal lattice you compare against — a wrong "
-            "lattice constant or orientation inflates the displacement. Make sure "
-            "the reference lattice matches the real one before reading disorder "
-            "from this number.",
         ),
     ),
 )
@@ -2067,197 +2034,12 @@ def _reference_document(
 """
 
 
-_PARTICLE_STATISTICS_ENTRIES: tuple[_DefinitionEntry, ...] = (
-    _DefinitionEntry(
-        title="What is a null model?",
-        params=(),
-        summary=(
-            "A null model is the 'boring explanation' you test your points against - "
-            "a precise recipe for what the positions would look like if nothing "
-            "interesting were going on. The most common one is complete randomness: "
-            "points dropped independently, with no clustering, no preferred spacing, "
-            "and no preference for any location. Particle Statistics asks whether "
-            "your real points could plausibly have come from that recipe. If they "
-            "could, you have no evidence for structure; if they clearly could not, "
-            "that is evidence something real is shaping the pattern."
-        ),
-        in_practice=(
-            "Choose the null model that captures the 'boring' explanation you want to "
-            "rule out, then run the comparison. Start with homogeneous Poisson "
-            "(pure randomness) unless you have a specific alternative in mind."
-        ),
-        equations=(),
-        details=(
-            "Think of it as a strawman on purpose: you set up the simplest "
-            "explanation, then see whether your data can knock it down. Rejecting the "
-            "null ('inconsistent') is the informative outcome; failing to reject it "
-            "('consistent') just means this data does not provide evidence against it.",
-            "Different null models encode different boring explanations - pure "
-            "randomness, randomness with a minimum spacing, or randomness biased "
-            "toward a measured feature - so the model you pick defines exactly what "
-            "'no structure' means for your question.",
-        ),
-        cautions=(
-            "A null model is a baseline to argue against, not a description of your "
-            "sample. 'Consistent with the null' is not proof that the null is true - "
-            "only that this data cannot rule it out.",
-        ),
-    ),
-    _DefinitionEntry(
-        title="How a comparison works (null model + envelope test)",
-        params=(
-            "model = homogeneous_poisson | hard_core_random | measured_feature_poisson",
-            "simulations (n_sim)",
-            "random_seed",
-            "alpha = 0.05",
-        ),
-        summary=(
-            "Particle Statistics never judges a pattern in isolation. It measures a "
-            "statistic on your points, then measures the same statistic on many "
-            "random patterns drawn from a chosen null model on the identical "
-            "region, and asks whether your observed curve looks like one of those "
-            "null draws. The spread of the null draws is the envelope; the verdict "
-            "is a single global test, not a glance at the band."
-        ),
-        in_practice=(
-            "Pick a null model, set the number of simulations (more gives a smoother "
-            "envelope and a finer smallest p-value), and run. Use the same region "
-            "for the observed statistic and every simulation."
-        ),
-        equations=(
-            "Observed statistic T_obs(r); null draws T_1(r) … T_n(r) on the same region.\n"
-            "\n"
-            "Pointwise band (display only): at each r, [low, high] = 2.5th-97.5th\n"
-            "percentile of the simulated T_k(r).\n"
-            "\n"
-            "Global verdict - extreme rank length (ERL; Myllymaki et al. 2017):\n"
-            "  pool = {T_obs, T_1, ..., T_n}     (n+1 functions, exchangeable under H0)\n"
-            "  R_k(r) = min( #{j: T_j(r) >= T_k(r)}, #{j: T_j(r) <= T_k(r)} )\n"
-            "          (two-sided pointwise rank; smaller = more extreme)\n"
-            "  sort each function's ranks ascending, compare lexicographically\n"
-            "  p = (1 + #{k>=1 : T_k at least as extreme as T_obs}) / (n_sim + 1)\n"
-            "  verdict = inconsistent if p <= alpha (0.05), else consistent",
-        ),
-        details=(
-            "Why uncorrected statistics still give a correct test: the SAME estimator "
-            "- with the same finite-region edge bias - is applied to the observed "
-            "pattern and to every null simulation on the identical region or mask. "
-            "The ERL test only asks whether the observed curve is exchangeable with "
-            "the simulated ones, so any bias they share cancels out. AdStat's "
-            "calibration test confirms the test holds its nominal ~5% false-positive "
-            "rate under a true null.",
-            "The pointwise band is for the eye only. Because it is computed at each r "
-            "separately, some points fall outside it a few percent of the time even "
-            "under a true null - so the verdict comes from the one global ERL test, "
-            "not from counting out-of-band points.",
-            "The smallest possible p-value is 1/(n_sim+1): with 19 simulations the "
-            "best you can claim is p = 0.05; use 99 or more to resolve p <= 0.01.",
-        ),
-        cautions=(
-            "Comparing one pattern against several models (or reading several "
-            "statistics) is multiple testing, and ProbeFlow does not correct for it. "
-            "Treat a single rejection among many comparisons cautiously.",
-        ),
-    ),
-    _DefinitionEntry(
-        title="Null model: Homogeneous Poisson (complete spatial randomness)",
-        params=("N fixed to the observed count",),
-        summary=(
-            "The baseline 'no structure' model: every point is placed independently "
-            "and uniformly across the allowed region, at one average density. It is "
-            "the reference for clustering and spacing questions alike."
-        ),
-        in_practice=(
-            "Start here. If the pattern is already consistent with random placement, "
-            "the more specific models rarely add anything."
-        ),
-        equations=(
-            "Simulate: N points placed independently and uniformly over the region\n"
-            "(mask-aware - only allowed pixels are used).\n"
-            "Intensity (density): lambda = N / A_region\n"
-            "\n"
-            "This is a binomial process: the count is conditioned on the observed N\n"
-            "(not Poisson-distributed N), which is exactly the right question - 'are\n"
-            "THESE N points randomly placed?'.",
-        ),
-        cautions=(
-            "It assumes one homogeneous density over the whole region (stationarity). "
-            "A strong large-scale coverage gradient violates that assumption and can "
-            "masquerade as clustering; restrict the analysis region or mask to a "
-            "uniform area first.",
-        ),
-    ),
-    _DefinitionEntry(
-        title="Null model: Hard-core random (minimum separation)",
-        params=(
-            "hard_core_radius (centre-to-centre minimum, nm)",
-            "attempt_limit",
-        ),
-        summary=(
-            "Random placement, but with a forbidden minimum separation - a simple "
-            "model of particles that cannot overlap or sit too close (excluded "
-            "volume, site blocking)."
-        ),
-        in_practice=(
-            "Use it when nearest-neighbour distances show a clear minimum spacing and "
-            "you want to test whether plain exclusion explains the pattern."
-        ),
-        equations=(
-            "Simple sequential inhibition (SSI / random sequential adsorption):\n"
-            "  repeat: draw a uniform candidate; accept iff its distance to every\n"
-            "  already-accepted point >= r_hc; stop at N accepted or attempt_limit.\n"
-            "\n"
-            "Each accepted centre carries an exclusion disk of radius r_hc/2; these\n"
-            "disks never overlap. Packing fraction phi = N * pi (r_hc/2)^2 / A.\n"
-            "SSI jams (cannot fit more) near phi ~ 0.547.",
-        ),
-        cautions=(
-            "SSI is a non-equilibrium process: it is NOT the thermodynamic "
-            "equilibrium hard-disk gas. 'Consistent with hard-core' means consistent "
-            "with this sequential-exclusion null, not with a Gibbs hard-disk model.",
-            "If placement cannot fit N points before the attempt limit, lower the "
-            "radius or the count - a failure here means the requested density exceeds "
-            "what exclusion allows.",
-        ),
-    ),
-    _DefinitionEntry(
-        title="Null model: Measured-feature Poisson (association)",
-        params=(
-            "feature_layer (independently measured)",
-            "kernel_sigma_nm (sigma)",
-            "feature_weight (w1)",
-            "background_weight (w0)",
-        ),
-        summary=(
-            "Tests whether points follow an independently measured feature - for "
-            "example, whether adsorbates sit preferentially near step edges. The "
-            "feature defines a non-uniform expected density."
-        ),
-        in_practice=(
-            "Provide a feature set that was measured separately from the particles "
-            "(e.g. step traces). Choose sigma to match how far the influence reaches."
-        ),
-        equations=(
-            "Inhomogeneous Poisson intensity from a Gaussian kernel around the\n"
-            "measured features f_i:\n"
-            "  lambda(x) = w0 + w1 * SUM_i exp( - d(x, f_i)^2 / (2 sigma^2) )\n"
-            "  d = distance to a point feature, or to the nearest point on a line\n"
-            "      segment.\n"
-            "Simulate: sample N points with probability proportional to lambda(x)\n"
-            "(evaluated on an adaptive grid, then jittered within a cell).",
-        ),
-        cautions=(
-            "The feature layer must be measured independently of the particles being "
-            "tested. Using the particles - or anything derived from them - as their "
-            "own feature layer is circular and manufactures a false association.",
-        ),
-    ),
+_POINT_STATISTICS_ENTRIES: tuple[_DefinitionEntry, ...] = (
     _DefinitionEntry(
         title="Statistic: Pair correlation g(r)",
         params=(
             "pair_bin_width_nm",
             "pair_max_radius_nm",
-            "edge_correction = none | translation",
         ),
         summary=(
             "At each separation r, are there more or fewer neighbour pairs than "
@@ -2266,8 +2048,8 @@ _PARTICLE_STATISTICS_ENTRIES: tuple[_DefinitionEntry, ...] = (
         ),
         in_practice=(
             "A bump above 1 at small r is clustering; a dip below 1 near zero is "
-            "spacing/avoidance. Read it together with the model envelope, not against "
-            "the 1.0 line alone."
+            "spacing/avoidance. With few points the curve is noisy, so read broad "
+            "trends rather than single bins."
         ),
         equations=(
             "Count unordered pairs (i<j) into distance shells [r0, r1):\n"
@@ -2276,18 +2058,20 @@ _PARTICLE_STATISTICS_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "  g(r) = observed_pairs(r) / E\n"
             "  g(r) = 1 random ;  > 1 clustering ;  < 1 spacing/avoidance\n"
             "\n"
-            "Optional translation edge weight for a pair separated by (dx, dy):\n"
+            "Square-window translation edge weight (applied when the region area "
+            "is known):\n"
             "  w = A_region / [ (W - |dx|) (H - |dy|) ]",
         ),
         cautions=(
-            "Uncorrected g(r) is biased high near the boundary; the matched "
-            "simulations carry the same bias so the verdict stays valid, but read "
-            "absolute g(r) values at r approaching half the field size with care.",
+            "Edge effects bias g(r) near the boundary; the translation correction "
+            "compensates for a square window, but read absolute g(r) values at r "
+            "approaching half the field size with care. Without a calibrated "
+            "region area the plot shows raw pair counts, not normalised g(r).",
         ),
     ),
     _DefinitionEntry(
         title="Statistic: Nearest-neighbour distribution",
-        params=("nn_bin_width_nm", "nn_max_distance_nm"),
+        params=(),
         summary=(
             "The distribution of each point's distance to its single closest "
             "neighbour - the clearest first test of spacing versus clumping."
@@ -2298,127 +2082,15 @@ _PARTICLE_STATISTICS_ENTRIES: tuple[_DefinitionEntry, ...] = (
         ),
         equations=(
             "For each point i:  d_NN(i) = min over j != i of || x_i - x_j ||\n"
-            "Histogram d_NN over bins, normalised to a fraction (counts / N).\n"
+            "Histogram of d_NN (bin count scales with sqrt(N)).\n"
             "\n"
-            "CSR reference distribution (intensity lambda):\n"
-            "  G(r) = 1 - exp( - lambda * pi * r^2 )",
+            "Mean NN distance for a random pattern of the same density lambda:\n"
+            "  E[d_NN] = 1 / (2 sqrt(lambda))",
         ),
         details=(
-            "The maximum distance is chosen from the point density so the histogram "
-            "is not truncated for sparse fields. The empirical distribution is "
-            "compared to the simulations, not to the closed-form G(r).",
-        ),
-    ),
-    _DefinitionEntry(
-        title="Statistic: Ripley's L",
-        params=("derived radii", "edge_correction = none | translation"),
-        summary=(
-            "A cumulative, variance-stabilised count of how many neighbours fall "
-            "within each distance - sensitive to clustering or regularity across a "
-            "range of scales at once."
-        ),
-        in_practice=(
-            "L(r) - r above zero is clustering, below zero is regularity. Because it "
-            "is cumulative, read where the curve first leaves the envelope."
-        ),
-        equations=(
-            "K(r) = (A_region / [N(N-1)]) * 2 * C(r),\n"
-            "  C(r) = number of unordered pairs with distance <= r\n"
-            "L(r) = sqrt( K(r) / pi )\n"
-            "Under CSR:  K(r) = pi r^2  =>  L(r) - r = 0\n"
-            "  L(r) - r > 0 clustering ;  < 0 regularity/spacing",
-        ),
-        cautions=(
-            "Being cumulative, it accumulates structure across scales - an excursion "
-            "at large r can reflect structure that really lives at smaller r. Use "
-            "g(r) to localise the scale.",
-        ),
-    ),
-    _DefinitionEntry(
-        title="Statistic: Cluster sizes",
-        params=("cluster_radius_nm (link distance)",),
-        summary=(
-            "Groups points that chain together within a link distance and reports how "
-            "many singletons, pairs, triples, and larger groups there are."
-        ),
-        in_practice=(
-            "An excess of large groups versus the null is clustering. Choose the link "
-            "distance from the scale of grouping you care about."
-        ),
-        equations=(
-            "Build a graph: link i-j iff || x_i - x_j || <= r_link.\n"
-            "Clusters = connected components (single linkage; links are transitive,\n"
-            "so a chain of close points forms one cluster).\n"
-            "Report the histogram of component sizes.",
-        ),
-        cautions=(
-            "The link distance is an analysis threshold, not a physical capture "
-            "radius. Single linkage can chain a sparse bridge of points into one "
-            "large cluster - compare the size histogram to the simulated null, not to "
-            "an absolute expectation.",
-        ),
-    ),
-    _DefinitionEntry(
-        title="Local-order checks: psi4 / psi6 and angular g(r, theta) (opt-in)",
-        params=(
-            "neighbour_radius_nm (~1.35 x median nearest-neighbour distance)",
-            "symmetry n = 4 | 6",
-            "pair_angle_bin_width_deg",
-        ),
-        summary=(
-            "Do neighbours sit at lattice-like angles - square (psi4) or triangular "
-            "(psi6)? These answer a different question from the randomness checks and "
-            "are off by default; tick 'Include local-order checks' to compute them."
-        ),
-        in_practice=(
-            "Reach for these only when you suspect ordered packing or registry. "
-            "Values of |psi_n| near 1 mean strong local n-fold order."
-        ),
-        equations=(
-            "Per point i, over its neighbours j within the cutoff radius:\n"
-            "  psi_n(i) = (1 / k_i) * SUM_j exp( i * n * theta_ij ),\n"
-            "    theta_ij = atan2(dy, dx)\n"
-            "  |psi_n| = 0 isotropic ... 1 perfect n-fold local order\n"
-            "Report the histogram of |psi_n| (psi6 triangular, psi4 square).\n"
-            "\n"
-            "Angular pair map g(r, theta): pair counts in (distance, direction)\n"
-            "bins, with directions folded to [0, 180) since a pair has no arrow.",
-        ),
-        details=(
-            "Validated by known-answer tests: a triangular lattice rejects on psi6 "
-            "and a square lattice on psi4, while random points stay consistent "
-            "(tests/test_adstat_validation.py).",
-        ),
-        cautions=(
-            "Sensitive to the neighbour cutoff and to edges: there is no boundary "
-            "correction, so points near the region edge have truncated "
-            "neighbourhoods and read as less ordered. A high |psi_n| suggests local "
-            "order; it is not proof of a crystal or a specific adsorption site.",
-        ),
-    ),
-    _DefinitionEntry(
-        title="Reading verdicts and limitations",
-        params=(),
-        summary=(
-            "How to read a result and what it does - and does not - prove."
-        ),
-        equations=(),
-        details=(
-            "'Consistent with the model' means the null was not rejected at alpha. It "
-            "is not positive proof there is no structure: a small or noisy set may "
-            "simply lack the power to detect an effect.",
-            "'Inconsistent with the model' is evidence the pattern departs from that "
-            "null - not proof of any particular physical mechanism.",
-            "Pooling several independent images of the same condition is the "
-            "practical way to gain statistical power.",
-        ),
-        cautions=(
-            "This is the newest and least user-tested part of ProbeFlow and may "
-            "contain mistakes; verify important results independently (the maturity "
-            "note at the top of this reference says the same).",
-            "Hard-core compares against a sequential-exclusion null, not an "
-            "equilibrium hard-disk gas; no correction is applied for comparing "
-            "several models or statistics - treat an isolated rejection cautiously.",
+            "The dashed reference line on the histogram marks the random-pattern "
+            "mean: distances piling up well below it suggest clustering, well "
+            "above it suggest spacing.",
         ),
     ),
 )
@@ -2519,24 +2191,23 @@ def render_howto_html(theme: Mapping[str, object] | None = None) -> str:
     )
 
 
-def render_particle_statistics_html(theme: Mapping[str, object] | None = None) -> str:
-    """Return theme-aware HTML for the Particle Statistics reference."""
+def render_point_statistics_html(theme: Mapping[str, object] | None = None) -> str:
+    """Return theme-aware HTML for the Point statistics reference."""
     return _render_reference_html(
-        title="Particle Statistics Reference",
+        title="Point Statistics Reference",
         intro=(
-            "Particle Statistics asks a spatial question: are these point positions "
-            "consistent with a simple null model, or do they show clustering, "
-            "spacing, or association with an independently measured feature? It never "
-            "judges a pattern alone - it compares the observed statistic with the "
-            "same statistic measured on many random patterns drawn from a chosen "
-            "model on the identical region. Each entry below gives a plain-language "
-            "summary, the exact estimator or algorithm the program uses, practical "
-            "notes, and cautions. Maturity note: this is the newest and least "
-            "user-tested part of ProbeFlow and may contain mistakes - treat verdicts "
-            "as exploratory and verify important results independently. Calculations "
-            "are powered by the AdStat engine."
+            "Point statistics describe the spatial arrangement of a set of marked "
+            "points - detected feature maxima or point ROIs: how many there are, "
+            "how densely they cover the region, how far each sits from its "
+            "nearest neighbour, and whether pairs are more or less common at a "
+            "given separation than random placement would give. Each entry below "
+            "gives a plain-language summary, the exact estimator the program "
+            "uses, practical notes, and cautions. These are descriptive "
+            "statistics - they characterise the pattern you measured; deciding "
+            "whether a deviation from randomness is significant needs more "
+            "points, repeats, or a dedicated spatial-statistics analysis."
         ),
-        entries=_PARTICLE_STATISTICS_ENTRIES,
+        entries=_POINT_STATISTICS_ENTRIES,
         theme=theme,
     )
 
@@ -2545,7 +2216,7 @@ _DEFINITIONS_HTML = render_definitions_html()
 _ROI_REFERENCE_HTML = render_roi_reference_html()
 _MEASUREMENTS_HTML = render_measurements_html()
 _HOWTO_HTML = render_howto_html()
-_PARTICLE_STATISTICS_HTML = render_particle_statistics_html()
+_POINT_STATISTICS_HTML = render_point_statistics_html()
 
 
 class _HtmlReferencePanel(QWidget):
@@ -2607,11 +2278,11 @@ class _HowToPanel(_HtmlReferencePanel):
         super().__init__(t, render_howto_html(t), parent)
 
 
-class _ParticleStatisticsPanel(_HtmlReferencePanel):
-    """Scrollable reference panel describing the Particle Statistics models."""
+class _PointStatisticsPanel(_HtmlReferencePanel):
+    """Scrollable reference panel describing the point-pattern statistics."""
 
     def __init__(self, t: dict, parent=None):
-        super().__init__(t, render_particle_statistics_html(t), parent)
+        super().__init__(t, render_point_statistics_html(t), parent)
 
 
 class _DefinitionsDialog(QDialog):
@@ -2629,12 +2300,12 @@ class _DefinitionsDialog(QDialog):
         self._panel = _DefinitionsPanel(t, self)
         self._measurements_panel = _MeasurementsPanel(t, self)
         self._roi_panel = _ROIReferencePanel(t, self)
-        self._particle_stats_panel = _ParticleStatisticsPanel(t, self)
+        self._point_stats_panel = _PointStatisticsPanel(t, self)
         self._tabs.addTab(self._howto_panel, "How-to")
         self._tabs.addTab(self._panel, "Processing")
         self._tabs.addTab(self._measurements_panel, "Measurements")
         self._tabs.addTab(self._roi_panel, "ROI Actions")
-        self._tabs.addTab(self._particle_stats_panel, "Particle Statistics")
+        self._tabs.addTab(self._point_stats_panel, "Point Statistics")
         lay.addWidget(self._tabs)
         self.set_reference_tab(initial_tab)
 
@@ -2644,7 +2315,7 @@ class _DefinitionsDialog(QDialog):
         "processing": 1,
         "measurements": 2,
         "roi": 3,
-        "particle_statistics": 4,
+        "point_statistics": 4,
     }
 
     def set_reference_tab(self, tab: str) -> None:
@@ -2657,13 +2328,13 @@ class _DefinitionsDialog(QDialog):
         elif key in {"measurements", "measurement", "measure"}:
             key = "measurements"
         elif key in {
+            "point_statistics",
             "particle_statistics",
-            "particle",
-            "particles",
+            "points",
             "stats",
             "statistics",
         }:
-            key = "particle_statistics"
+            key = "point_statistics"
         else:
             key = "processing"
         self._tabs.setCurrentIndex(self._TAB_INDEX[key])

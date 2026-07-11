@@ -1407,7 +1407,6 @@ def test_viewer_point_source_collectors_include_measure_tab_feature_points(qapp)
 
     dlg = ImageViewerDialog.__new__(ImageViewerDialog)
     dlg._pixel_size_xy_m = lambda: (2e-9, 3e-9)
-    dlg._feature_finder_dlg = None
     dlg._image_roi_set = None
     dlg._image_measurements = SimpleNamespace(
         feature_points=[

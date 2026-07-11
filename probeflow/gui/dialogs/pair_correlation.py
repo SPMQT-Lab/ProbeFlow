@@ -26,7 +26,12 @@ from PySide6.QtWidgets import (
 )
 
 from probeflow.analysis.pair_correlation import PairCorrelationResult, compute_pair_correlation
-from probeflow.analysis.point_summary import PointPatternSummary, summarize_point_pattern
+from probeflow.analysis.point_summary import (
+    PointPatternSummary,
+    expected_csr_nn_nm,
+    nn_histogram_nm,
+    summarize_point_pattern,
+)
 from probeflow.measurements.models import MeasurementResult
 from probeflow.measurements.point_stats_io import (
     point_stats_csv_text,
@@ -235,7 +240,7 @@ class PairCorrelationDialog(QDialog):
         self._update_gr_plot(result)
         self._update_nn_plot(summary)
         self._canvas.draw()
-        self._update_result_text(result, summary)
+        self._update_result_text(result)
         has_stats = result.n_points > 0
         self._export_btn.setEnabled(has_stats)
         self._add_btn.setEnabled(result.quality != "failed")
@@ -283,14 +288,12 @@ class PairCorrelationDialog(QDialog):
         fg = self._t.get("text.color", "#000000")
         bg = self._t.get("figure.facecolor", "#ffffff")
 
-        nn = np.asarray(summary.nn_distances_nm, dtype=float)
-        nn = nn[np.isfinite(nn)]
-        if nn.size < 2:
+        edges, counts = nn_histogram_nm(summary.nn_distances_nm, max_bins=30)
+        if counts.size == 0:
             ax.text(0.5, 0.5, "Too few points", ha="center", va="center",
                     transform=ax.transAxes, color=fg, fontsize=9)
         else:
-            bins = int(min(30, max(6, round(np.sqrt(nn.size)))))
-            ax.hist(nn, bins=bins, color="#5aa469", alpha=0.85)
+            ax.stairs(counts, edges, fill=True, color="#5aa469", alpha=0.85)
             ax.set_xlabel("NN distance  (nm)", color=fg, fontsize=8)
             ax.set_ylabel("count", color=fg, fontsize=8)
             ax.set_title("Nearest-neighbour spacing", color=fg, fontsize=9)
@@ -307,11 +310,7 @@ class PairCorrelationDialog(QDialog):
         return self._result.density_m2 * 1e-18
 
     def _expected_csr_nn_nm(self) -> float | None:
-        """Mean NN distance for a random (Poisson) pattern: 1 / (2 sqrt(density))."""
-        density = self._density_per_nm2()
-        if density is None or density <= 0.0:
-            return None
-        return 1.0 / (2.0 * float(np.sqrt(density)))
+        return expected_csr_nn_nm(self._density_per_nm2())
 
     def _stat_rows(self) -> list[tuple[str, object, str]]:
         """Ordered (label, value, unit) rows shared by the display and export."""
@@ -333,11 +332,13 @@ class PairCorrelationDialog(QDialog):
             rows.append(("g(r) first peak", r.first_peak_m * 1e9, "nm"))
         return rows
 
-    def _update_result_text(
-        self, result: PairCorrelationResult, summary: PointPatternSummary
-    ) -> None:
-        def _fmt(v, unit=""):
-            return "—" if v is None else f"{v:.4g}{unit}"
+    def _update_result_text(self, result: PairCorrelationResult) -> None:
+        def _fmt(v):
+            if v is None:
+                return "—"
+            if isinstance(v, (int, np.integer)):
+                return str(v)
+            return f"{v:.4g}"
 
         lines = [f"{label}: {_fmt(value)}{(' ' + unit) if (unit and value is not None) else ''}"
                  for label, value, unit in self._stat_rows()]

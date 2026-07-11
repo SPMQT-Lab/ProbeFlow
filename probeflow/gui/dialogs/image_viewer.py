@@ -85,9 +85,9 @@ class ImageViewerDialog(
 ):
     """Double-click viewer with scroll/zoom, histogram display, processing, export."""
 
-    # Emitted by "→ Feature Counting" / "→ TV Denoising" buttons so the
-    # parent can act immediately without the viewer closing.
-    immediate_action_requested = Signal(str)   # "features" | "tv"
+    # Emitted by the "→ TV Denoising" button so the parent can act
+    # immediately without the viewer closing.
+    immediate_action_requested = Signal(str)   # "tv"
 
     # Width of the collapsed-sidebar rail (px).
     _SIDEBAR_RAIL_W = 46

@@ -14,7 +14,7 @@ from probeflow.gui.roi_context import (
     point_source_metadata,
 )
 
-POINT_SOURCE_REQUIRED_MESSAGE = "Run Feature finder or select point ROIs first."
+POINT_SOURCE_REQUIRED_MESSAGE = "Detect feature maxima or select point ROIs first."
 LATTICE_REQUIRED_MESSAGE = "Open the Lattice/Grid tool first."
 IMAGE_REQUIRED_MESSAGE = "No image loaded."
 

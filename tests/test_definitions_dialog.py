@@ -146,8 +146,7 @@ def test_measurements_reference_has_entries_and_formulas():
         "ROI statistics",
         "Step height",
         "Feature maxima",
-        "Pair correlation",
-        "Feature → lattice",
+        "Point statistics (pair correlation)",
         # A couple of formulas must match the implementation.
         "rms_roughness = sqrt(mean((z - mean(z))^2))",
         "height_difference = mean_b - mean_a",
@@ -185,54 +184,47 @@ def test_definitions_dialog_tabs_can_focus_howto_processing_and_roi(qapp):
         qapp.processEvents()
 
 
-def test_particle_statistics_reference_has_models_and_formulas():
+def test_point_statistics_reference_has_statistics_and_formulas():
     from probeflow.gui.dialogs.definitions import (
-        _PARTICLE_STATISTICS_ENTRIES,
-        render_particle_statistics_html,
+        _POINT_STATISTICS_ENTRIES,
+        render_point_statistics_html,
     )
     from probeflow.gui.styling import THEMES
 
-    html = render_particle_statistics_html(THEMES["light"])
+    html = render_point_statistics_html(THEMES["light"])
 
     # Every entry that defines an Operation block renders an equation.
-    with_equations = sum(1 for entry in _PARTICLE_STATISTICS_ENTRIES if entry.equations)
+    with_equations = sum(1 for entry in _POINT_STATISTICS_ENTRIES if entry.equations)
     assert html.count('class="equation"') >= with_equations
 
-    # The methodology, all three null models, and each statistic are documented.
+    # Both shipped statistics are documented.
     for heading in (
-        "How a comparison works",
-        "Homogeneous Poisson",
-        "Hard-core random",
-        "Measured-feature Poisson",
+        "Point Statistics Reference",
         "Pair correlation g(r)",
         "Nearest-neighbour distribution",
-        "Ripley",  # apostrophe in "Ripley's L" is HTML-escaped
-        "Cluster sizes",
-        "Reading verdicts and limitations",
     ):
         assert heading in html, heading
 
-    # The mathematical defence and honest caveats are present.
-    assert "extreme rank length" in html.lower()
-    assert "exchangeable" in html.lower()
-    assert "lambda = N / A" in html  # CSR intensity
-    assert "L(r) = sqrt( K(r) / pi )" in html  # Ripley L transform
-    assert "non-equilibrium" in html.lower()  # hard-core honesty
-    assert "least user-tested" in html.lower()  # maturity note in the intro
+    # Formulas match the implementation.
+    assert "lambda = N/A" in html  # CSR intensity
+    assert "E[d_NN] = 1 / (2 sqrt(lambda))" in html  # CSR mean NN distance
+    # The removed model-comparison machinery must not resurface.
+    for gone in ("null model", "AdStat", "Ripley", "verdict"):
+        assert gone not in html, gone
 
 
-def test_definitions_dialog_can_focus_particle_statistics_tab(qapp):
+def test_definitions_dialog_can_focus_point_statistics_tab(qapp):
     from probeflow.gui.dialogs.definitions import _DefinitionsDialog
     from probeflow.gui.styling import THEMES
 
-    stats_first = _DefinitionsDialog(THEMES["light"], initial_tab="particle_statistics")
+    stats_first = _DefinitionsDialog(THEMES["light"], initial_tab="point_statistics")
     default = _DefinitionsDialog(THEMES["light"])
     try:
-        assert stats_first.current_reference_tab() == "particle_statistics"
-        default.set_reference_tab("particle_statistics")
-        assert default.current_reference_tab() == "particle_statistics"
+        assert stats_first.current_reference_tab() == "point_statistics"
+        default.set_reference_tab("point_statistics")
+        assert default.current_reference_tab() == "point_statistics"
         default.set_reference_tab("stats")  # alias
-        assert default.current_reference_tab() == "particle_statistics"
+        assert default.current_reference_tab() == "point_statistics"
     finally:
         for dlg in (stats_first, default):
             dlg.close()

@@ -370,14 +370,12 @@ class ImageViewerToolsMixin:
 
     def _point_source_records(self):
         px_x, px_y = self._pixel_size_xy_m()
-        ff_dlg = getattr(self, "_feature_finder_dlg", None)
         measure_ctrl = getattr(self, "_image_measurements", None)
         dock = getattr(self, "_roi_panel", None)
         sel_ids = list(dock.selected_roi_ids()) if dock and hasattr(dock, "selected_roi_ids") else []
         return collect_point_source_records(
             pixel_size_x_m=px_x,
             pixel_size_y_m=px_y,
-            feature_finder_result=getattr(ff_dlg, "result", None),
             measurement_points=getattr(measure_ctrl, "feature_points", []) or [],
             measurement_metadata=getattr(measure_ctrl, "feature_metadata", {}) or {},
             roi_set=self._image_roi_set,

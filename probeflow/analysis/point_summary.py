@@ -38,6 +38,17 @@ class PointPatternSummary:
     message: str = ""
 
 
+def expected_csr_nn_nm(density_per_nm2: float | None) -> float | None:
+    """Mean NN distance for a random (Poisson) pattern: ``1 / (2 sqrt(density))``.
+
+    Returns ``None`` when the density is unknown or non-positive.
+    """
+
+    if density_per_nm2 is None or density_per_nm2 <= 0.0:
+        return None
+    return 0.5 / math.sqrt(density_per_nm2)
+
+
 def summarize_point_pattern(
     points_m: np.ndarray,
     *,
@@ -109,11 +120,7 @@ def summarize_point_pattern(
     density_per_nm2 = (
         n_in_region / area_nm2 if area_nm2 is not None and area_nm2 > 0.0 else None
     )
-    expected_csr_nn_mean_nm = (
-        0.5 / math.sqrt(density_per_nm2)
-        if density_per_nm2 is not None and density_per_nm2 > 0.0
-        else None
-    )
+    expected_csr_nn_mean_nm = expected_csr_nn_nm(density_per_nm2)
 
     nn_distances_nm = np.empty(0)
     nn_min_nm = nn_mean_nm = nn_median_nm = nn_max_nm = None

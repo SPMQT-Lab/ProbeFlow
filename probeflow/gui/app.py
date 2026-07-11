@@ -256,8 +256,8 @@ class ProbeFlowWindow(QMainWindow):
 
         # ── Center: Browse — inner splitter [BrowseToolPanel | ThumbnailGrid] ──
         # Browse is the main window's only content; every other workspace
-        # (convert, TV, dataset builder, dev) opens as an independent
-        # WorkspaceWindow via _open_workspace, like Feature Counting always has.
+        # (convert, TV) opens as an independent WorkspaceWindow via
+        # _open_workspace.
         self._browse_tools = BrowseToolPanel(t, self._cfg)
         self._browse_tools.setMinimumWidth(self.LEFT_SIDEBAR_MIN_W)
         self._browse_tools.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
@@ -387,8 +387,6 @@ class ProbeFlowWindow(QMainWindow):
         # All workspaces live in one menu so the app's structure is visible at
         # a glance; each opens (or raises) its own top-level window, so users
         # can flick between a workspace and Browse without losing either.
-        # Feature Counting is deliberately NOT here — it opens as a floating
-        # tool window (Tools menu).
         workspace_menu = menu_bar.addMenu("Workspace")
         _workspace_action(workspace_menu, "Browse", "browse", "Ctrl+1")
         _workspace_action(workspace_menu, "STM File Converter", "convert", "Ctrl+2")
@@ -713,8 +711,7 @@ class ProbeFlowWindow(QMainWindow):
         """Open (or raise) the independent window for *mode*.
 
         Windows are created lazily on first open and merely hidden on close,
-        so panel state (loaded scans, in-progress
-        queue …) survives close/reopen.
+        so panel state (loaded scans, in-progress work) survives close/reopen.
         """
         win = self._workspace_windows.get(mode)
         if win is None:
@@ -1130,8 +1127,8 @@ class ProbeFlowWindow(QMainWindow):
 
         Returns ``(arr, px_m, px_x_m, px_y_m, actual_plane_idx, scan)`` or
         raises.  The returned array is the *processed* version — identical to
-        what the user last saw in the image viewer — so Feature Counting and
-        TV-denoise work on the same data the user inspected.  ``scan`` is the
+        what the user last saw in the image viewer — so TV-denoise works on
+        the same data the user inspected.  ``scan`` is the
         loaded :class:`Scan`, carried through so analysis exports can record the
         same provenance the CLI does.
         """
@@ -1161,8 +1158,7 @@ class ProbeFlowWindow(QMainWindow):
                 processing_state = processing_state_from_gui(saved_proc)
                 if processing_state.steps:
                     # Resolve roi / mask scope steps against persisted sidecars
-                    # so scoped local filters replay here too (review:
-                    # mask-scope replay not connected through feature counting).
+                    # so scoped local filters replay here too.
                     roi_set = mask_set = None
                     try:
                         from probeflow.io.roi_sidecar import load_roi_set_sidecar
@@ -1364,8 +1360,8 @@ class ProbeFlowWindow(QMainWindow):
             if not spec and d._deferred.is_pending():
                 self._load_from_viewer(d, d._deferred.action)
         dlg.finished.connect(_on_closed)
-        # immediate_action_requested fires when user clicks "→ Feature Counting" /
-        # "→ TV Denoising" so the viewer stays open and the action runs right away.
+        # immediate_action_requested fires when user clicks "→ TV Denoising"
+        # so the viewer stays open and the action runs right away.
         # Only the image viewer exposes this signal; spectroscopy viewers don't.
         if not is_spec:
             dlg.immediate_action_requested.connect(

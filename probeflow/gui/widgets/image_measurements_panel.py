@@ -64,10 +64,10 @@ class ImageMeasurementsPanel(QWidget):
     ]
 
     # Curated Measure-tab menu: the commonly-used tools only. The niche / ImageJ-style
-    # measurements (step height, feature maxima, point/FFT, pair correlation,
-    # feature-to-lattice) live in the Measurements top menu + command finder; line
-    # periodicity is reached from the Line-profile detail (drawing a line is when you
-    # want it). (group title, [(label, key, kind), …]); kind ∈ setup|oneshot|dialog.
+    # measurements (step height, feature maxima, point/FFT, point statistics) live in
+    # the Measurements top menu + command finder; line periodicity is reached from the
+    # Line-profile detail (drawing a line is when you want it).
+    # (group title, [(label, key, kind), …]); kind ∈ setup|oneshot|dialog.
     _TOOL_GROUPS = [
         ("Quick measurements", [
             ("Angle", "angle", "oneshot"),

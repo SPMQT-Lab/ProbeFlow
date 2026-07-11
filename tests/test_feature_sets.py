@@ -1,4 +1,4 @@
-"""Tests for the named feature-set store and its AdStat hand-off."""
+"""Tests for the named feature-set store."""
 
 from __future__ import annotations
 

@@ -33,8 +33,6 @@ Several modules share the word "lattice"; they sit at different layers:
   workflows (used by the viewer and the FFT viewer).
 - ``gui/dialogs/fft_viewer_lattice_mixin.py`` — the FFT viewer's Grid /
   Correction tab logic (consumes the two above).
-- ``gui/dialogs/feature_lattice_dialog.py`` — compares detected feature
-  positions against an ideal lattice.
 
 Dialog / dock keep-alive convention
 -----------------------------------

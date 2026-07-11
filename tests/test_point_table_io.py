@@ -1,4 +1,4 @@
-"""Tests for the point-table importer (CSV / JSON) for Particle Statistics."""
+"""Tests for the point-table importer (CSV / JSON) for point statistics."""
 
 from __future__ import annotations
 
@@ -353,8 +353,3 @@ def test_pixel_size_derived_from_px_and_nm_columns(tmp_path):
     assert preview.pixel_size_m is not None
     np.testing.assert_allclose(preview.pixel_size_m, [0.5e-9, 0.75e-9])
     assert any("Pixel size" in note for note in preview.notes)
-
-
-# --------------------------------------------------------------------------- #
-# Feature Counting fallback consistency (no AdStat)
-# --------------------------------------------------------------------------- #

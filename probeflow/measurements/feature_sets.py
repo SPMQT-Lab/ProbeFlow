@@ -1,10 +1,10 @@
-"""Named, persistable feature-point sets for multi-image Particle Statistics.
+"""Named, persistable feature-point sets for multi-image point statistics.
 
 A :class:`FeatureSet` is a compact snapshot of one image's detected points
 (pixel + metre coordinates) plus the calibration needed to analyse them. Unlike
 point ROIs (one ROI per point), a set stores its points as arrays, so hundreds of
 points stay lightweight and many sets — e.g. one per image in a study — can
-coexist in a :class:`FeatureSetStore` and be pooled in Particle Statistics.
+coexist in a :class:`FeatureSetStore` and be pooled for point statistics.
 """
 
 from __future__ import annotations
