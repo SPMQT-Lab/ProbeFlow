@@ -332,11 +332,26 @@ class FFTLatticePanel(QWidget):
     # ── stored grid layers ────────────────────────────────────────────────────
 
     def _grid_summary(self, grid: LatticeGrid) -> str:
+        # Compact one-liner for the stored-grid row; the row's tooltip
+        # carries the full plane-spacing text.
         try:
-            d = format_reciprocal_measurements(grid, self._cal)
-            return f"{d['g1']} · {d['g2']} · {d['angle']}"
+            g1 = self._cal.vec_length_q(grid.a_px)
+            g2 = self._cal.vec_length_q(grid.b_px)
+            qa = self._cal.vec_px_to_q(grid.a_px)
+            qb = self._cal.vec_px_to_q(grid.b_px)
+            dot = qa[0] * qb[0] + qa[1] * qb[1]
+            denom = max(g1 * g2, 1e-30)
+            angle = math.degrees(math.acos(max(-1.0, min(1.0, dot / denom))))
+            return f"|g|={g1:.3g}, {g2:.3g} nm⁻¹ · {angle:.1f}°"
         except Exception:
             return "grid"
+
+    def _grid_detail(self, grid: LatticeGrid) -> str:
+        try:
+            d = format_reciprocal_measurements(grid, self._cal)
+            return f"{d['g1']}\n{d['g2']}\nangle {d['angle']}"
+        except Exception:
+            return ""
 
     def _stored_entry_from(self, grid: LatticeGrid, color: str) -> StoredGrid:
         return StoredGrid(
@@ -345,6 +360,7 @@ class FFTLatticePanel(QWidget):
             line_width_px=float(self._line_width_spin.value()),
             color=color,
             summary=self._grid_summary(grid),
+            detail=self._grid_detail(grid),
         )
 
     def _push_stored_to_overlay(self) -> None:

@@ -41,6 +41,7 @@ class StoredGrid:
     line_width_px: float
     color: str      # hex colour of this layer's lines
     summary: str    # short human-readable lattice description
+    detail: str = ""  # optional longer description for the row tooltip
 
 
 class StoredGridList(QWidget):
@@ -100,9 +101,14 @@ class StoredGridList(QWidget):
             swatch.setToolTip("Colour of this stored grid layer on the image.")
             row_lay.addWidget(swatch)
 
-            lbl = QLabel(entry.summary)
+            # Elide long summaries so the Edit/remove buttons are never pushed
+            # out of the row; the full text lives in the tooltip.
+            lbl = QLabel()
             lbl.setFont(ui_font(8))
-            lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            metrics = lbl.fontMetrics()
+            lbl.setText(metrics.elidedText(entry.summary, Qt.ElideRight, 190))
+            lbl.setToolTip(entry.detail or entry.summary)
+            lbl.setMinimumWidth(40)
             row_lay.addWidget(lbl, 1)
 
             edit_btn = QPushButton("Edit")

@@ -1177,6 +1177,16 @@ class LatticeGridPanel(QWidget):
         except Exception:
             return "grid"
 
+    def _grid_detail(self, grid) -> str:
+        try:
+            d = format_real_space_measurements(grid, self._cal)
+            return (
+                f"|a| = {d['a_length']}\n|b| = {d['b_length']}\n"
+                f"angle = {d['angle']}\narea = {d['area']}"
+            )
+        except Exception:
+            return ""
+
     def _stored_entry_from(self, grid, color: str) -> StoredGrid:
         return StoredGrid(
             grid=replace(grid, show_handles=False, show_labels=False),
@@ -1184,6 +1194,7 @@ class LatticeGridPanel(QWidget):
             line_width_px=float(self._line_width_spin.value()),
             color=color,
             summary=self._grid_summary(grid),
+            detail=self._grid_detail(grid),
         )
 
     def _on_store_grid(self) -> None:

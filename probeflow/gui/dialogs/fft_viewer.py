@@ -1360,15 +1360,17 @@ class FFTViewerDialog(
 
         Two floors are taken and the larger is used:
           • 1e-4 × full span  — absolute safety floor (prevents floating-point collapse)
-          • 4 px / N × full span — keeps at least 4 reciprocal-lattice pixels visible
-            so the user always sees meaningful structure rather than a single point.
+          • 2 px / N × full span — keeps at least 2 reciprocal-lattice pixels visible
+            so the view cannot collapse to a single point. Small scans (few FFT
+            pixels) hit this cap early: the whole Bragg cluster may be only a
+            handful of pixels, so the max zoom is deliberately close.
         """
         Ny, Nx = self._arr.shape[:2]
         full_x = abs(float(self._qx[-1]) - float(self._qx[0]))
         full_y = abs(float(self._qy[-1]) - float(self._qy[0]))
         return (
-            max(full_x * 1e-4, full_x * 4.0 / max(1, Nx)),
-            max(full_y * 1e-4, full_y * 4.0 / max(1, Ny)),
+            max(full_x * 1e-4, full_x * 2.0 / max(1, Nx)),
+            max(full_y * 1e-4, full_y * 2.0 / max(1, Ny)),
         )
 
     @staticmethod
