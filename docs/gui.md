@@ -22,9 +22,11 @@ Nanonis `.sxm`, RHK `.sm4`, plus `.VERT` and Nanonis spectroscopy files.
 ![Browse mode with a folder of scans loaded](images/gui_browse.png)
 
 Each card shows the scan size, setpoint, and channel info. The sidebar
-controls the thumbnail colormap, channel, row alignment, and size, and the
-filter buttons (All / Images / Spectra) narrow the grid. **Double-click a
-thumbnail** to open it in the image viewer.
+controls the thumbnail colormap, channel, row alignment, and size; the
+filter buttons (All / Images / Spectra) narrow the grid, cards can be
+sorted by name or scan size, and the **Bias** picker lists the bias
+values present in the folder so one setpoint can be shown alone.
+**Double-click a thumbnail** to open it in the image viewer.
 
 ![The image viewer showing a terraced surface](images/gui_viewer.png)
 

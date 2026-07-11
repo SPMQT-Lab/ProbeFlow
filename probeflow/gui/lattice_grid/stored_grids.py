@@ -112,8 +112,7 @@ class StoredGridList(QWidget):
             row_lay.addWidget(lbl, 1)
 
             edit_btn = QPushButton("Edit")
-            edit_btn.setFont(ui_font(8))
-            edit_btn.setFixedSize(40, 20)
+            edit_btn.setFixedSize(48, 22)
             edit_btn.setToolTip(
                 "Swap this layer into the editor; the grid you are editing "
                 "takes its place here."
@@ -124,8 +123,7 @@ class StoredGridList(QWidget):
             row_lay.addWidget(edit_btn)
 
             del_btn = QPushButton("✕")
-            del_btn.setFont(ui_font(8))
-            del_btn.setFixedSize(20, 20)
+            del_btn.setFixedSize(24, 22)
             del_btn.setToolTip("Remove this stored grid layer from the image.")
             del_btn.setDefault(False)
             del_btn.setAutoDefault(False)

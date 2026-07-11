@@ -894,7 +894,13 @@ class ProbeFlowWindow(QMainWindow):
                 f"{n_sel} selected / {self._n_loaded} total  |  Double-click to view full size")
 
     def _on_selection_changed(self, n_selected: int):
-        self._browse_tools.update_selection_hint(n_selected)
+        # Make the spectra multi-select discoverable: once two or more spectra
+        # are Ctrl-selected, point at the action that consumes them.
+        if n_selected >= 2 and hasattr(self, "_status_bar"):
+            self._status_bar.showMessage(
+                f"{n_selected} spectra selected — use 'Overlay selected spectra…' "
+                "to compare them."
+            )
 
     def _on_filter_changed(self, mode: str):
         self._grid.apply_filter(mode)

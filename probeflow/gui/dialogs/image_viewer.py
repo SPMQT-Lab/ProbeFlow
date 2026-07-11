@@ -251,6 +251,22 @@ class ImageViewerDialog(
             self._idx += 1
             self._load_current(reset_zoom=True)
 
+    def _clear_per_image_overlays(self) -> None:
+        """Drop overlays that live in one image's pixel frame.
+
+        The angle overlay and lattice grid (incl. stored layers) would linger,
+        misaligned, over a newly loaded scan. Only touch the grid (and its
+        sidebar panel) when one actually exists, so an unrelated sidebar tool
+        is never closed by plain navigation.
+        """
+        if hasattr(self, "_clear_angle_overlay"):
+            self._clear_angle_overlay(silent=True)
+        if (
+            getattr(self, "_lattice_grid_item", None) is not None
+            or getattr(self, "_lattice_grid_panel", None) is not None
+        ):
+            self._clear_lattice_grid_overlay(close_panel=True)
+
     # ── Load / render ──────────────────────────────────────────────────────────
     def _load_current(self, reset_zoom: bool = True):
         entry = self._entries[self._idx]
@@ -278,6 +294,7 @@ class ImageViewerDialog(
         # Quick selections are per-image and ephemeral — drop on navigation.
         if hasattr(self, "_clear_quick_selection"):
             self._clear_quick_selection()
+        self._clear_per_image_overlays()
         self._roi_filter_scope_id = None
         self._load_image_roi_set(entry)
         self._load_image_mask_set(entry)

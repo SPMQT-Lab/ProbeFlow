@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 
-from probeflow.core.browse_filters import FolderFilterState
+from probeflow.core.browse_filters import BIAS_MATCH_TOLERANCE_MV, FolderFilterState
 from probeflow.gui.typography import ui_font
 from PySide6.QtCore import Qt, QThreadPool, Signal, Slot
 from PySide6.QtGui import QColor, QCursor, QFont, QImage, QPixmap
@@ -325,7 +325,10 @@ class BrowseToolPanel(QWidget):
         for bias_mv, count in options:
             label = f"{bias_mv:g} mV ({count})"
             self.bias_cb.addItem(label, float(bias_mv))
-            if previous is not None and abs(float(bias_mv) - float(previous)) <= 0.5:
+            if (
+                previous is not None
+                and abs(float(bias_mv) - float(previous)) <= BIAS_MATCH_TOLERANCE_MV
+            ):
                 restored_index = self.bias_cb.count() - 1
         self.bias_cb.setCurrentIndex(restored_index)
         self.bias_cb.blockSignals(False)
@@ -341,14 +344,6 @@ class BrowseToolPanel(QWidget):
         btn = self._filter_btns[mode]
         if not btn.isChecked():
             btn.setChecked(True)
-
-    def update_selection_hint(self, n: int):
-        if n == 0:
-            return
-        elif n == 1:
-            return
-        else:
-            return
 
     def apply_theme(self, t: dict):
         self._t = t

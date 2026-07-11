@@ -102,6 +102,43 @@ def test_angle_placement_shows_live_value_without_storing(qapp, monkeypatch):
         qapp.processEvents()
 
 
+def test_navigation_clears_angle_and_lattice_grid_overlays(qapp, monkeypatch):
+    """Per-image overlays must not linger, misaligned, over the next scan."""
+    from PySide6.QtCore import QPointF
+
+    import numpy as np
+
+    dlg = _dialog(monkeypatch)
+    try:
+        dlg._on_angle_points_ready(QPointF(0, 0), QPointF(10, 0), QPointF(10, 10))
+        assert dlg._angle_overlay is not None
+        assert dlg._measurement_panel._angle_live_lbl.text() == "90.00°"
+
+        # The stubbed loader leaves no image; the grid tool needs one.
+        dlg._raw_arr = np.zeros((32, 32), dtype=float)
+        dlg._scan_range_m = (10e-9, 10e-9)
+        dlg._on_open_lattice_grid()
+        assert dlg._lattice_grid_item is not None
+        panel = dlg._lattice_grid_panel
+        panel._on_store_grid()
+        from probeflow.gui.lattice_grid.graphics_item import LatticeGridItem
+        scene_items = dlg._zoom_lbl.scene().items()
+        assert sum(isinstance(i, LatticeGridItem) for i in scene_items) == 2
+
+        # The clearing hook _load_current_source runs on every navigation.
+        dlg._clear_per_image_overlays()
+
+        assert dlg._angle_overlay is None
+        assert dlg._measurement_panel._angle_live_lbl.text() == "—"
+        assert dlg._lattice_grid_item is None
+        scene_items = dlg._zoom_lbl.scene().items()
+        assert sum(isinstance(i, LatticeGridItem) for i in scene_items) == 0
+    finally:
+        dlg.close()
+        dlg.deleteLater()
+        qapp.processEvents()
+
+
 def test_add_angle_without_overlay_is_a_noop(qapp, monkeypatch):
     dlg = _dialog(monkeypatch)
     try:
