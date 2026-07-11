@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import json
 import logging
-from pathlib import Path
 
 import numpy as np
 from PIL import Image
@@ -102,129 +101,8 @@ def _cmd_periodicity(args) -> int:
     return 0
 
 
-def _cmd_particles(args) -> int:
-    """Segment bright (or dark, with --invert) particles and print / export."""
-    setup_logging(args.verbose)
-    try:
-        scan = load_scan(args.input)
-    except Exception as exc:
-        log.error("Could not load %s: %s", args.input, exc)
-        return 1
-    if args.plane >= scan.n_planes:
-        log.error("Plane %d not present (file has %d)",
-                  args.plane, scan.n_planes)
-        return 1
-    dx_m, dy_m = _pixel_sizes_m_from_scan(scan)
-    px_m = float(np.sqrt(dx_m * dy_m)) if dx_m > 0 and dy_m > 0 else 0.0
-    if px_m <= 0:
-        log.error("Scan has no physical pixel size — cannot segment.")
-        return 1
-
-    # Optional reproducible step-edge exclusion: drop molecules sitting on a
-    # substrate step, computed from the raw plane (see analysis.step_edges).
-    exclude_mask = None
-    if getattr(args, "exclude_step_edges", False):
-        from probeflow.analysis.step_edges import step_edge_mask
-        exclude_mask = step_edge_mask(
-            scan.planes[args.plane],
-            pixel_size_x_m=dx_m, pixel_size_y_m=dy_m,
-            molecule_diameter_m=args.step_molecule_size * 1e-9,
-            threshold_deg=args.step_angle,
-            dilate_m=args.step_margin * 1e-9,
-            min_step_height_m=(args.step_min_height * 1e-9
-                               if args.step_min_height > 0 else None),
-            suppress_dark=args.invert,
-        )
-        log.info("Step-edge band covers %.1f%% of the plane",
-                 100.0 * float(exclude_mask.mean()))
-
-    from probeflow.analysis.features import segment_particles
-    particles = segment_particles(
-        scan.planes[args.plane],
-        pixel_size_m=px_m,
-        pixel_size_x_m=dx_m,
-        pixel_size_y_m=dy_m,
-        threshold=args.threshold,
-        manual_value=args.manual_value,
-        invert=args.invert,
-        min_area_nm2=args.min_area,
-        max_area_nm2=args.max_area,
-        size_sigma_clip=None if args.no_sigma_clip else args.sigma_clip,
-        clip_low=args.clip_low,
-        clip_high=args.clip_high,
-        exclude_mask=exclude_mask,
-        max_exclude_overlap=getattr(args, "step_max_overlap", 0.25),
-    )
-
-    if args.output:
-        from probeflow.io.writers.json import write_json
-        write_json(args.output, particles, kind="particles", scan=scan,
-                   extra_meta={"plane": args.plane, "threshold": args.threshold})
-        log.info("[OK] %d particles → %s", len(particles), args.output)
-    if args.json:
-        print(json.dumps([p.to_dict() for p in particles], indent=2))
-    else:
-        print(f"Detected {len(particles)} particles")
-        for p in particles[:args.limit]:
-            print(f"  #{p.index:4d}  area={p.area_nm2:8.2f} nm²  "
-                  f"centroid=({p.centroid_x_m * 1e9:7.2f},"
-                  f" {p.centroid_y_m * 1e9:7.2f}) nm  "
-                  f"mean_h={p.mean_height: .3e}")
-        if len(particles) > args.limit:
-            print(f"  ... ({len(particles) - args.limit} more)")
-    return 0
 
 
-def _cmd_count(args) -> int:
-    """Count features by cross-correlating with a template image."""
-    setup_logging(args.verbose)
-    try:
-        scan = load_scan(args.input)
-    except Exception as exc:
-        log.error("Could not load %s: %s", args.input, exc)
-        return 1
-    if args.plane >= scan.n_planes:
-        log.error("Plane %d not present (file has %d)",
-                  args.plane, scan.n_planes)
-        return 1
-    dx_m, dy_m = _pixel_sizes_m_from_scan(scan)
-    px_m = float(np.sqrt(dx_m * dy_m)) if dx_m > 0 and dy_m > 0 else 0.0
-    if px_m <= 0:
-        log.error("Scan has no physical pixel size.")
-        return 1
-
-    if args.template.suffix.lower() == ".png":
-        tmpl = np.asarray(Image.open(args.template).convert("L"),
-                          dtype=np.float64)
-    else:
-        tscan = load_scan(args.template)
-        tmpl = tscan.planes[0]
-
-    from probeflow.analysis.features import count_features
-    dets = count_features(
-        scan.planes[args.plane], tmpl,
-        pixel_size_m=px_m,
-        pixel_size_x_m=dx_m,
-        pixel_size_y_m=dy_m,
-        min_correlation=args.min_corr,
-        min_distance_m=args.min_distance * 1e-9 if args.min_distance else None,
-        clip_low=args.clip_low,
-        clip_high=args.clip_high,
-    )
-
-    if args.output:
-        from probeflow.io.writers.json import write_json
-        write_json(args.output, dets, kind="detections", scan=scan,
-                   extra_meta={"template": str(args.template),
-                               "min_correlation": args.min_corr})
-        log.info("[OK] %d detections → %s", len(dets), args.output)
-    if args.json:
-        print(json.dumps([d.to_dict() for d in dets], indent=2))
-    else:
-        print(f"Detected {len(dets)} features")
-        mean_corr = float(np.mean([d.correlation for d in dets])) if dets else 0.0
-        print(f"Mean correlation: {mean_corr:.3f}")
-    return 0
 
 
 def _cmd_tv_denoise(args) -> int:
@@ -324,69 +202,6 @@ def _cmd_lattice(args) -> int:
     return 0
 
 
-def _cmd_classify(args) -> int:
-    """Classify segmented particles against labelled samples in a JSON file."""
-    setup_logging(args.verbose)
-    try:
-        scan = load_scan(args.input)
-    except Exception as exc:
-        log.error("Could not load %s: %s", args.input, exc)
-        return 1
-    if args.plane >= scan.n_planes:
-        log.error("Plane %d not present (file has %d)",
-                  args.plane, scan.n_planes)
-        return 1
-    dx_m, dy_m = _pixel_sizes_m_from_scan(scan)
-    px_m = float(np.sqrt(dx_m * dy_m)) if dx_m > 0 and dy_m > 0 else 0.0
-    if px_m <= 0:
-        log.error("Scan has no physical pixel size.")
-        return 1
-
-    from probeflow.analysis.features import (
-        Particle, segment_particles, classify_particles,
-    )
-    arr = scan.planes[args.plane]
-
-    particles = segment_particles(
-        arr, pixel_size_m=px_m,
-        pixel_size_x_m=dx_m,
-        pixel_size_y_m=dy_m,
-        min_area_nm2=args.min_area,
-        size_sigma_clip=None if args.no_sigma_clip else args.sigma_clip,
-    )
-
-    samples_data = json.loads(Path(args.samples).read_text(encoding="utf-8"))
-    if isinstance(samples_data, dict) and "items" in samples_data:
-        samples_data = samples_data["items"]
-    samples: list[tuple[str, Particle]] = []
-    for entry in samples_data:
-        name = entry.get("class_name") or entry.get("label") or "sample"
-        p = Particle(**{k: v for k, v in entry.items()
-                        if k in Particle.__dataclass_fields__})
-        samples.append((name, p))
-
-    classifs = classify_particles(
-        arr, particles, samples,
-        encoder=args.encoder,
-        threshold_method=args.threshold_method,
-    )
-
-    if args.output:
-        from probeflow.io.writers.json import write_json
-        write_json(args.output, classifs, kind="classifications", scan=scan,
-                   extra_meta={"encoder": args.encoder,
-                               "threshold_method": args.threshold_method})
-        log.info("[OK] %d classifications → %s", len(classifs), args.output)
-
-    counts: dict = {}
-    for c in classifs:
-        counts[c.class_name] = counts.get(c.class_name, 0) + 1
-    if args.json:
-        print(json.dumps(counts, indent=2))
-    else:
-        for name, n in sorted(counts.items(), key=lambda kv: -kv[1]):
-            print(f"  {name:20s}  {n}")
-    return 0
 
 
 def _cmd_profile(args) -> int:
@@ -738,13 +553,10 @@ def _cmd_unit_cell(args) -> int:
 
 __all__ = [
     "_cmd_autoclip",
-    "_cmd_classify",
-    "_cmd_count",
     "_cmd_fft_spectrum",
     "_cmd_grains",
     "_cmd_histogram",
     "_cmd_lattice",
-    "_cmd_particles",
     "_cmd_periodicity",
     "_cmd_profile",
     "_cmd_tv_denoise",

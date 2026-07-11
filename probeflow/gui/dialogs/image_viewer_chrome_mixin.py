@@ -394,11 +394,6 @@ class ImageViewerChromeMixin:
         measurements_menu.addAction(find_periodicity_action)
         # Niche / feature-analysis tools live under a Features submenu.
         features_menu = measurements_menu.addMenu("Features")
-        feature_finder_action = self._viewer_action(
-            "measure.feature_finder",
-            self._on_open_feature_finder,
-        )
-        features_menu.addAction(feature_finder_action)
         detect_maxima_action = self._viewer_action(
             "measure.feature_maxima",
             lambda: self._open_measure_tool("feature_maxima"),
@@ -414,28 +409,6 @@ class ImageViewerChromeMixin:
             self._on_open_pair_correlation,
         )
         features_menu.addAction(pair_corr_action)
-        particle_statistics_action = self._viewer_action(
-            "measure.particle_statistics",
-            lambda: self._on_open_particle_statistics(),
-        )
-        features_menu.addAction(particle_statistics_action)
-        self._viewer_action(
-            "measure.adstat_workbench",
-            lambda: self._on_open_adstat_workbench(),
-        )
-        self._viewer_action(
-            "measure.adstat_statistics",
-            self._on_open_adstat_statistics,
-        )
-        self._viewer_action(
-            "measure.adstat_sandbox",
-            self._on_open_adstat_sandbox,
-        )
-        feat_lat_action = self._viewer_action(
-            "measure.feature_lattice",
-            self._on_open_feature_lattice,
-        )
-        features_menu.addAction(feat_lat_action)
         measurements_menu.addSeparator()
         self._image_measurements.add_detected_point_menu_actions(
             measurements_menu,

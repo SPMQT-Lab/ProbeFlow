@@ -16,6 +16,7 @@ from __future__ import annotations
 from typing import Any
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -33,6 +34,7 @@ from probeflow.gui.widgets.feature_detection_panel import (
     FeatureDetectionPanel,
     PointMaskFFTPanel,
 )
+from probeflow.gui.typography import ui_font
 from probeflow.gui.widgets.line_periodicity_panel import LinePeriodicityPanel
 from probeflow.gui.widgets.measurement_table import MeasurementResultsTable
 
@@ -48,13 +50,7 @@ class ImageMeasurementsPanel(QWidget):
     angleRequested = Signal()
     updateAngleRequested = Signal()
     clearAngleRequested = Signal()
-    featureFinderRequested = Signal()
     pairCorrelationRequested = Signal()
-    particleStatisticsRequested = Signal()
-    adstatWorkbenchRequested = Signal()
-    adstatStatisticsRequested = Signal()
-    adstatSandboxRequested = Signal()
-    featureToLatticeRequested = Signal()
     latticeGridRequested = Signal()
     fftViewerRequested = Signal()
     lineProfileWidthChanged = Signal(int)
@@ -69,11 +65,11 @@ class ImageMeasurementsPanel(QWidget):
         ("Line periodicity", "line_periodicity"),
     ]
 
-    # Curated Measure-tab menu: the commonly-used tools only. The niche / ImageJ-style
-    # measurements (step height, feature maxima, point/FFT, pair correlation,
-    # feature-to-lattice) live in the Measurements top menu + command finder; line
-    # periodicity is reached from the Line-profile detail (drawing a line is when you
-    # want it). (group title, [(label, key, kind), …]); kind ∈ setup|oneshot|dialog.
+    # Curated Measure-tab menu: the commonly-used tools only. The niche /
+    # ImageJ-style measurements (step height, point/FFT) live in the
+    # Measurements top menu + command finder; line periodicity is reached from
+    # the Line-profile detail (drawing a line is when you want it).
+    # (group title, [(label, key, kind), …]); kind ∈ setup|oneshot|dialog.
     _TOOL_GROUPS = [
         ("Quick measurements", [
             ("Angle", "angle", "oneshot"),
@@ -84,11 +80,13 @@ class ImageMeasurementsPanel(QWidget):
         ("Profiles", [
             ("Line profile", "line_profile", "setup"),
         ]),
+        ("Features", [
+            ("Feature maxima…", "feature_maxima", "setup"),
+            ("Point statistics…", "pair_correlation", "dialog"),
+        ]),
         ("Tools", [
             ("FFT viewer…", "fft_viewer", "dialog"),
             ("Lattice grid…", "lattice_grid", "dialog"),
-            ("Feature finder…", "feature_finder", "dialog"),
-            ("Particle Statistics…", "particle_statistics", "dialog"),
         ]),
     ]
 
@@ -97,13 +95,7 @@ class ImageMeasurementsPanel(QWidget):
 
     _DIALOG_SIGNALS = {
         "fft_viewer": "fftViewerRequested",
-        "feature_finder": "featureFinderRequested",
         "pair_correlation": "pairCorrelationRequested",
-        "particle_statistics": "particleStatisticsRequested",
-        "adstat_workbench": "adstatWorkbenchRequested",
-        "adstat_statistics": "adstatStatisticsRequested",
-        "adstat_sandbox": "adstatSandboxRequested",
-        "feature_to_lattice": "featureToLatticeRequested",
         "lattice_grid": "latticeGridRequested",
     }
     _ONESHOT_SIGNALS = {
@@ -116,8 +108,8 @@ class ImageMeasurementsPanel(QWidget):
                     "calibration) are added to the results below.",
         "angle": "Measure the angle between two directions — e.g. step edges or "
                  "lattice rows. Click P1, P2 (the vertex), then P3 on the image; the "
-                 "angle at P2 is reported. Drag the handles to adjust, then "
-                 "“Update angle”.",
+                 "angle at P2 shows live below and follows the handles as you drag. "
+                 "Click “Add to results” to store a value.",
     }
 
     def __init__(self, parent=None):
@@ -251,11 +243,12 @@ class ImageMeasurementsPanel(QWidget):
                 btn.setDefault(False)
                 btn.setAutoDefault(False)
                 btn.clicked.connect(lambda _c=False, k=key: self._open_tool(k))
+                # A lone trailing tool keeps to one column so buttons stay a
+                # consistent width instead of stretching across the panel.
                 r, c = divmod(i, 2)
-                if i == n - 1 and n % 2 == 1:
-                    grid.addWidget(btn, r, 0, 1, 2)
-                else:
-                    grid.addWidget(btn, r, c)
+                grid.addWidget(btn, r, c)
+            if n % 2 == 1:
+                grid.addWidget(QWidget(), (n - 1) // 2, 1)
             lay.addLayout(grid)
 
         lay.addWidget(self._hline())
@@ -327,22 +320,32 @@ class ImageMeasurementsPanel(QWidget):
         self._fit_setup_stack(self._setup_stack.currentIndex())
         lay.addWidget(self._setup_stack)
 
-        # Extra controls for one-shot tools (currently the Angle “Update” action).
+        # Extra controls for one-shot tools (currently the Angle actions).
         self._detail_extra = QWidget()
         extra_lay = QVBoxLayout(self._detail_extra)
         extra_lay.setContentsMargins(0, 0, 0, 0)
         extra_lay.setSpacing(4)
-        self._update_angle_btn = QPushButton("Update angle measurement")
+        # Live readout: tracks the on-image angle as its handles are dragged,
+        # so quick comparisons don't need any extra clicks.
+        self._angle_live_lbl = QLabel("—")
+        live_font = ui_font(22, weight=QFont.Bold)
+        self._angle_live_lbl.setFont(live_font)
+        self._angle_live_lbl.setAlignment(Qt.AlignCenter)
+        self._angle_live_lbl.setToolTip(
+            "Live angle of the on-image handles. Updates as you drag; nothing "
+            "is stored until you click 'Add to results'."
+        )
+        extra_lay.addWidget(self._angle_live_lbl)
+        self._update_angle_btn = QPushButton("Add to results")
         self._update_angle_btn.setToolTip(
-            "After dragging the angle handles, rewrite the current angle measurement "
-            "with the adjusted value."
+            "Store the current angle as a new row in the results table."
         )
         self._update_angle_btn.setDefault(False)
         self._update_angle_btn.setAutoDefault(False)
         self._update_angle_btn.clicked.connect(self.updateAngleRequested.emit)
         extra_lay.addWidget(self._update_angle_btn)
         self._clear_angle_btn = QPushButton("Clear angle")
-        self._clear_angle_btn.setToolTip("Remove the angle overlay and its measurement.")
+        self._clear_angle_btn.setToolTip("Remove the angle overlay from the image.")
         self._clear_angle_btn.setDefault(False)
         self._clear_angle_btn.setAutoDefault(False)
         self._clear_angle_btn.clicked.connect(self.clearAngleRequested.emit)
@@ -401,13 +404,18 @@ class ImageMeasurementsPanel(QWidget):
             self._nav.setCurrentIndex(1)
 
     def _set_extra(self, key: str) -> None:
-        """Show the per-tool extra action (Angle → Update; Line profile → spacing)."""
-        show_update = key == "angle"
+        """Show the per-tool extra action (Angle → live/add; Line profile → spacing)."""
+        show_angle = key == "angle"
         show_period = key == "line_profile"
-        self._update_angle_btn.setVisible(show_update)
-        self._clear_angle_btn.setVisible(show_update)
+        self._angle_live_lbl.setVisible(show_angle)
+        self._update_angle_btn.setVisible(show_angle)
+        self._clear_angle_btn.setVisible(show_angle)
         self._periodicity_btn.setVisible(show_period)
-        self._detail_extra.setVisible(show_update or show_period)
+        self._detail_extra.setVisible(show_angle or show_period)
+
+    def set_live_angle(self, deg: float | None) -> None:
+        """Update the live angle readout; ``None`` shows the placeholder."""
+        self._angle_live_lbl.setText("—" if deg is None else f"{deg:.2f}°")
 
     def _open_results(self) -> None:
         self._detail_title.setText("Results")
@@ -485,13 +493,7 @@ class ImageMeasurementsPanel(QWidget):
             "angle": "Angle",
             "fft_viewer": "FFT viewer",
             "lattice_grid": "Lattice grid",
-            "feature_finder": "Feature finder",
             "pair_correlation": "Pair correlation",
-            "particle_statistics": "Particle Statistics",
-            "adstat_workbench": "AdStat workbench",
-            "adstat_statistics": "AdStat statistics",
-            "adstat_sandbox": "Model simulations",
-            "feature_to_lattice": "Feature-to-lattice",
         })
         for _group, tools in self._TOOL_GROUPS:
             for label, key, _kind in tools:

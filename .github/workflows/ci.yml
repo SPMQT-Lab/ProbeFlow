@@ -37,27 +37,13 @@ jobs:
             libxcb-render-util0 libxcb-shape0 libxcb-sync1 \
             libxcb-xfixes0 libxcb-xkb1 libxkbcommon-x11-0
 
-      - name: Install package with dev + features extras
+      - name: Install package with dev + lattice extras
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev,features]"
+          python -m pip install -e ".[dev,lattice]"
 
       - name: Run pytest
         run: pytest -v
-
-      - name: Try install optional AdStat extra
-        id: adstat_extra
-        run: |
-          if python -m pip install -e ".[adstat]"; then
-            echo "available=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "available=false" >> "$GITHUB_OUTPUT"
-            echo "AdStat extra is not available in this environment; adapter tests already skip without it."
-          fi
-
-      - name: Run AdStat adapter tests
-        if: steps.adstat_extra.outputs.available == 'true'
-        run: pytest -v tests/test_adstat_adapter.py tests/test_adstat_results_dialog.py
 
   lint:
     name: ruff

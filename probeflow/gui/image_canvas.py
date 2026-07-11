@@ -359,9 +359,21 @@ class ImageCanvas(QGraphicsView):
         self.setFixedSize(w, h)
         self.pixmap_resized.emit(w)
 
+    def _max_zoom(self) -> float:
+        """Adaptive zoom ceiling: small scans may magnify far beyond 8×.
+
+        The canvas widget grows with zoom (``setFixedSize`` in _apply_zoom),
+        so the real limit is the rendered size, not the factor — cap the
+        longest image edge at ~8192 screen px, but never below the classic 8×.
+        """
+        if self._image_size is None:
+            return 8.0
+        longest = max(self._image_size[0], self._image_size[1], 1)
+        return max(8.0, 8192.0 / longest)
+
     def zoom_by(self, factor: float) -> None:
         self._view_scale_mode = "manual"
-        self._zoom = max(0.25, min(8.0, self._zoom * factor))
+        self._zoom = max(0.25, min(self._max_zoom(), self._zoom * factor))
         self._apply_zoom()
 
     def reset_zoom(self) -> None:
@@ -397,7 +409,7 @@ class ImageCanvas(QGraphicsView):
         zoom = min(avail_w / Nx, avail_h / Ny)
         # Fit may shrink well below the manual-zoom floor (0.25) — clamping to
         # it left images larger than 4x the viewport unable to fit at all.
-        self._zoom = max(0.01, min(8.0, zoom))
+        self._zoom = max(0.01, min(self._max_zoom(), zoom))
 
     def fit_to_view(self) -> None:
         self._view_scale_mode = "fit"
@@ -1738,6 +1750,11 @@ class ImageCanvas(QGraphicsView):
                 self.roi_copy_requested.emit(active_id)
                 event.accept()
                 return
+        elif k in (Qt.Key_Delete, Qt.Key_Backspace) and self._selection is not None:
+            # No active ROI: Delete discards the quick (gold) selection.
+            self.clear_selection()
+            event.accept()
+            return
         if event.matches(QKeySequence.Paste):
             self.roi_paste_requested.emit()
             event.accept()

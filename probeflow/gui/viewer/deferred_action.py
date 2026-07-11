@@ -16,7 +16,7 @@ class DeferredPlaneAction:
     Attributes
     ----------
     action:
-        One of ``"features"``, ``"tv"``, or ``""`` (no action requested).
+        One of ``"tv"`` or ``""`` (no action requested).
     plane_idx:
         Index of the channel/plane the user had selected when they triggered
         the send action.
@@ -26,7 +26,7 @@ class DeferredPlaneAction:
     plane_idx: int = 0
 
     def is_pending(self) -> bool:
-        return self.action in ("features", "tv")
+        return self.action in ("tv",)
 
     def clear(self) -> None:
         self.action = ""

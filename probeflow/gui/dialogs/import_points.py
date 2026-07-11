@@ -45,9 +45,9 @@ _ACCEPTED_FORMATS_NOTE = (
     "Accepted: CSV/TSV position tables (comma/semicolon/tab/space delimited, "
     "#-comments and decimal commas handled; units inferred from x_px / x_nm / "
     "x_A / x_pm / x_um / x_m / x_phys or 'x (nm)'-style headers, or chosen "
-    "here), ProbeFlow Feature Finder / measurements CSV, and ProbeFlow JSON "
-    "(Feature Counting exports and saved feature-set files). A frame/slice/"
-    "image column imports as one poolable set per image."
+    "here), ProbeFlow feature / measurements CSV exports, and saved ProbeFlow "
+    "feature-set JSON files. A frame/slice/image column imports as one "
+    "poolable set per image."
 )
 
 
@@ -213,7 +213,6 @@ def _kind_label(kind: str) -> str:
     return {
         "generic_csv": "generic CSV",
         "probeflow_csv": "ProbeFlow CSV",
-        "probeflow_json": "ProbeFlow JSON",
         "feature_set_store_json": "saved feature-set JSON",
     }.get(kind, kind)
 

@@ -16,7 +16,7 @@ Future cleanup
 A small backward-compatibility shim lives in ``probeflow.gui.compat``
 (formerly ``_legacy.py``) so public ``from probeflow.gui import X`` imports
 remain stable while widgets and dialogs are transplanted into ``browse/``,
-``viewer/``, ``convert/``, ``features/``, ``terminal/``, and ``dialogs/``.
+``viewer/``, ``convert/``, and ``dialogs/``.
 Keep GUI code Qt-facing only: do not add provenance dataclasses, numerical
 kernels, measurement algorithms, readers, or writers here.
 
@@ -33,8 +33,6 @@ Several modules share the word "lattice"; they sit at different layers:
   workflows (used by the viewer and the FFT viewer).
 - ``gui/dialogs/fft_viewer_lattice_mixin.py`` — the FFT viewer's Grid /
   Correction tab logic (consumes the two above).
-- ``gui/dialogs/feature_lattice_dialog.py`` — compares detected feature
-  positions against an ideal lattice.
 
 Dialog / dock keep-alive convention
 -----------------------------------
@@ -112,7 +110,6 @@ _LEGACY_EXPORTS = {
     "BrowseToolPanel",
     "ConvertPanel",
     "ConvertSidebar",
-    "DeveloperTerminalWidget",
     "EdgeDetectionDialog",
     "FFTViewerDialog",
     "ImageViewerDialog",
@@ -125,7 +122,6 @@ _LEGACY_EXPORTS = {
     "STMBackgroundDialog",
     "ThumbnailGrid",
     "_DefinitionsDialog",
-    "_DevSidebar",
     "_TerminalPane",
 }
 
@@ -167,15 +163,13 @@ def __getattr__(name: str) -> Any:
     raise AttributeError(f"module 'probeflow.gui' has no attribute {name!r}")
 
 
-def main(*, open_survey: Any = None, browse_folder: Any = None) -> None:
+def main(*, browse_folder: Any = None) -> None:
     """Start the Qt GUI, importing PySide6 only when the GUI is launched.
 
-    When ``open_survey`` is set to a path, ProbeFlow boots straight into
-    Survey mode with that ScanFlow manifest loaded.
     When ``browse_folder`` is set, the Browse tab opens that folder on startup.
     """
 
-    _load_compat().main(open_survey=open_survey, browse_folder=browse_folder)
+    _load_compat().main(browse_folder=browse_folder)
 
 
 class _GuiCompatModule(ModuleType):
@@ -201,7 +195,6 @@ __all__ = [
     "DEFAULT_CMAP_KEY",
     "DEFAULT_CMAP_LABEL",
     "DEFAULT_CUSHION",
-    "DeveloperTerminalWidget",
     "EdgeDetectionDialog",
     "FFTViewerDialog",
     "GUI_FONT_DEFAULT",

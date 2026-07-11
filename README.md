@@ -111,15 +111,11 @@ suite. What it does today:
   statistics, step heights, distances and angles, feature points, point-mask
   FFTs, pair correlation, and lattice / grid / unit-cell measurements. ROIs save
   to a `<scan>.rois.json` sidecar.
-- **Feature analysis** *(optional)* — a Feature Counting tool for particle /
-  molecule segmentation, counting, few-shot classification, template-match
-  counting, lattice extraction, and reproducible step-edge exclusion. Requires
-  the `features` extra (OpenCV + scikit-learn).
-- **Particle Statistics** *(optional)* — test detected point patterns against
-  spatial null models (random, hard-core, measured-feature) with simulation
-  envelopes, plus a guided tutorial and free-play simulations. Model runs
-  require the `adstat` extra; treat verdicts as exploratory (see the
-  [guide](docs/adstat_user_guide.md)).
+- **Point-pattern measurements** — detect local maxima in a region and compute
+  the pair-correlation function g(r), with density, nearest-neighbour spacing,
+  and first-peak position, for points marked as ROIs or detected in the viewer.
+  SIFT-based lattice-vector extraction is optional and needs the `lattice`
+  extra (OpenCV + scikit-learn).
 - **Spectroscopy** — inspect single traces or overlays / waterfalls. Smoothing,
   derivative, normalization, outlier masking, and offsets operate on derived
   display data; the raw loaded arrays are left intact.
@@ -159,18 +155,15 @@ Pillow, PySide6, matplotlib, shapely, and scikit-image.
 Optional extras:
 
 ```bash
-python -m pip install -e ".[features]"   # particle/feature + lattice tools (OpenCV, scikit-learn)
-python -m pip install -e ".[adstat]"     # Particle Statistics engine (adstat)
-python -m pip install -e ".[clip]"       # CLIP encoder for few-shot classification (torch)
+python -m pip install -e ".[lattice]"    # SIFT lattice-vector extraction (OpenCV, scikit-learn)
 python -m pip install -e ".[gwyddion]"   # Gwyddion .gwy writer (gwyfile)
-python -m pip install -e ".[dev]"        # test tooling (pytest, vulture)
-python -m pip install -e ".[all]"        # features + adstat + gwyddion + pytest (no CLIP)
+python -m pip install -e ".[dev]"        # test + lint tooling (pytest, ruff, pre-commit)
+python -m pip install -e ".[all]"        # lattice + gwyddion + pytest
 ```
 
-The Feature Counting and lattice-extraction tools are inactive until the
-`features` extra is installed, Particle Statistics model comparisons need the
-`adstat` extra, and the CLIP feature encoder needs the `clip` extra;
-everything else works with the core install.
+Lattice-vector extraction is inactive until the `lattice` extra is installed,
+and `.gwy` export needs the `gwyddion` extra; everything else works with the
+core install.
 
 ## Using ProbeFlow from Python
 
@@ -199,8 +192,6 @@ dzdv = numeric_derivative(spec.x_array, z_smooth)
 
 - [GUI guide](docs/gui.md)
 - [Command-line guide](docs/cli.md)
-- [Particle Statistics guide](docs/adstat_user_guide.md)
-- [AdStat integration](docs/adstat_integration.md)
 - [Createc `.dat` reader notes](docs/createc_dat_reader.md)
 - [ROI manual workflow checklist](docs/roi_manual_test_checklist.md)
 - [Review and cleanup status](docs/review_status.md)

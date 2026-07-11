@@ -145,7 +145,6 @@ def collect_point_source_records(
     *,
     pixel_size_x_m: float,
     pixel_size_y_m: float,
-    feature_finder_result: Any = None,
     measurement_points: Iterable[Any] = (),
     measurement_metadata: dict[str, object] | None = None,
     roi_set: Any = None,
@@ -155,17 +154,6 @@ def collect_point_source_records(
     px_x = float(pixel_size_x_m)
     px_y = float(pixel_size_y_m)
     sources: list[PointSource] = []
-
-    ff_points = list(getattr(feature_finder_result, "points", []) or [])
-    if ff_points:
-        points_px = _points_to_array(ff_points)
-        sources.append(PointSource(
-            label="Feature result",
-            source_type="feature_finder",
-            points_px=points_px,
-            points_m=_scale_points(points_px, px_x, px_y),
-            metadata=_feature_finder_metadata(feature_finder_result, len(ff_points)),
-        ))
 
     measured_points = list(measurement_points or [])
     if measured_points:
@@ -213,7 +201,6 @@ def collect_point_sources_m(
     *,
     pixel_size_x_m: float,
     pixel_size_y_m: float,
-    feature_finder_result: Any = None,
     measurement_points: Iterable[Any] = (),
     measurement_metadata: dict[str, object] | None = None,
     roi_set: Any = None,
@@ -223,7 +210,6 @@ def collect_point_sources_m(
     return point_source_arrays_m(collect_point_source_records(
         pixel_size_x_m=pixel_size_x_m,
         pixel_size_y_m=pixel_size_y_m,
-        feature_finder_result=feature_finder_result,
         measurement_points=measurement_points,
         measurement_metadata=measurement_metadata,
         roi_set=roi_set,
@@ -235,7 +221,6 @@ def collect_point_sources_px(
     *,
     pixel_size_x_m: float = 1.0,
     pixel_size_y_m: float = 1.0,
-    feature_finder_result: Any = None,
     measurement_points: Iterable[Any] = (),
     measurement_metadata: dict[str, object] | None = None,
     roi_set: Any = None,
@@ -245,7 +230,6 @@ def collect_point_sources_px(
     return point_source_arrays_px(collect_point_source_records(
         pixel_size_x_m=pixel_size_x_m,
         pixel_size_y_m=pixel_size_y_m,
-        feature_finder_result=feature_finder_result,
         measurement_points=measurement_points,
         measurement_metadata=measurement_metadata,
         roi_set=roi_set,
@@ -287,18 +271,6 @@ def active_area_roi_area_m2(
     if mask is None:
         return None
     return float(mask.sum()) * float(pixel_size_x_m) * float(pixel_size_y_m)
-
-
-def _feature_finder_metadata(result: Any, point_count: int) -> dict[str, object]:
-    return _metadata_with_count({
-        "detection_mode": getattr(result, "mode", None),
-        "threshold_mode": getattr(result, "threshold_mode", None),
-        "threshold_low": getattr(result, "threshold_low", None),
-        "threshold_high": getattr(result, "threshold_high", None),
-        "min_distance_px": getattr(result, "min_distance_px", None),
-        "smoothing_sigma_px": getattr(result, "smoothing_sigma_px", None),
-        "message": getattr(result, "message", None),
-    }, point_count)
 
 
 def _metadata_with_count(metadata: dict[str, object], point_count: int) -> dict[str, object]:

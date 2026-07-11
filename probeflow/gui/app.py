@@ -37,13 +37,12 @@ from PySide6.QtWidgets import (
     QStatusBar, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 from probeflow.gui.utils import _open_url
-from probeflow.gui.features.tv import (
+from probeflow.gui.tv import (
     TVPanel,
     TVSidebar,
     _TVWorker,
     _TVWorkerSignals,
 )
-from probeflow.gui.terminal import DeveloperTerminalWidget
 from probeflow.gui.dialogs import (
     AboutDialog,
     SpecMappingDialog,
@@ -91,9 +90,7 @@ from probeflow.gui.workers import (
 from probeflow.gui.browse import ThumbnailGrid, BrowseInfoPanel, BrowseToolPanel
 from probeflow.gui.convert import ConvertPanel, ConvertSidebar
 from probeflow.gui.workspace_window import WorkspaceWindow
-from probeflow.gui.dataset_builder import DatasetBuilderPanel, DatasetBuilderSidebar
 from probeflow.gui.dialogs.definitions import _DefinitionsDialog
-from probeflow.gui.terminal import _DevSidebar
 from probeflow.gui.dialogs.image_viewer import ImageViewerDialog
 from probeflow.gui.dialogs import SpecViewerDialog
 
@@ -143,8 +140,7 @@ class ProbeFlowWindow(QMainWindow):
     RIGHT_INSPECTOR_MIN_W = 300
     CENTRAL_BROWSER_MIN_W = 500
 
-    def __init__(self, *, open_survey: Optional[Path] = None,
-                 browse_folder: Optional[Path] = None):
+    def __init__(self, *, browse_folder: Optional[Path] = None):
         super().__init__()
         self.setWindowTitle("ProbeFlow")
         self.setMinimumSize(1100, 720)
@@ -165,7 +161,6 @@ class ProbeFlowWindow(QMainWindow):
         self._workspace_windows: dict[str, WorkspaceWindow] = {}
         self._running  = False
         self._n_loaded = 0
-        self._pending_survey = Path(open_survey) if open_survey else None
         self._pending_browse = Path(browse_folder) if browse_folder else None
         # Spec → image mapping (populated by user via "Map spectra…" dialogs;
         # kept empty by default so we never auto-attach spectra to the wrong
@@ -181,14 +176,9 @@ class ProbeFlowWindow(QMainWindow):
         # Per-scan processing memory: path_str → (mtime_at_save, processing dict).
         # Populated when a viewer closes; restored when the same scan is reopened
         # *and* its mtime is unchanged (review gui-arch #10).  This prevents
-        # cached processing from replaying on top of stale data after ScanFlow
-        # or an external editor rewrites the file.
+        # cached processing from replaying on top of stale data after an
+        # external editor rewrites the file.
         self._saved_processing: dict[str, tuple[float | None, dict]] = {}
-
-        # Probe whether the optional Survey/ScanFlow integration is importable
-        # (review gui-arch #17).  We resolve this before ``_build_ui`` so the
-        # Tools menu and the deferred SurveyPanel construction agree.
-        self._survey_available = self._probe_survey_available()
 
         self._build_ui()
         self._apply_theme()
@@ -203,15 +193,6 @@ class ProbeFlowWindow(QMainWindow):
             except Exception:
                 pass   # non-fatal: bad path just opens to an empty Browse
 
-        # If launched with --open-survey, open the Survey window with the
-        # manifest pre-loaded (the factory wires log_message → its status bar).
-        if self._pending_survey is not None:
-            try:
-                win = self._open_workspace("survey")
-                if win is not None:
-                    self._survey_panel.load_manifest(self._pending_survey)
-            except Exception as e:
-                self._status_bar.showMessage(f"Could not open survey: {e}")
 
     # ── Per-scan processing cache (mtime-aware) ───────────────────────────────
 
@@ -227,9 +208,9 @@ class ProbeFlowWindow(QMainWindow):
     def _saved_processing_get(self, entry) -> dict | None:
         """Return cached processing for *entry* if and only if its mtime matches.
 
-        On mismatch (file rewritten on disk by ScanFlow / external editor /
-        re-save), drop the cache entry and emit a status-bar notice so the
-        user understands why their saved processing no longer applies.
+        On mismatch (file rewritten on disk by an external editor or
+        acquisition tool / re-save), drop the cache entry and emit a status-bar
+        notice so the user understands why their saved processing no longer applies.
         """
         key = str(entry.path)
         cached = self._saved_processing.get(key)
@@ -256,23 +237,6 @@ class ProbeFlowWindow(QMainWindow):
         else:
             self._saved_processing.pop(key, None)
 
-    # ── Optional Survey integration probe ─────────────────────────────────────
-    @staticmethod
-    def _probe_survey_available() -> bool:
-        """Return True iff :mod:`probeflow.gui.survey` is importable.
-
-        Used so the GUI degrades gracefully when the optional ``scanflow``
-        dependency is missing (review gui-arch #17): the Tools-menu Survey
-        action becomes disabled, the content-stack slot shows a help label,
-        and any ``--open-survey`` startup argument logs a status-bar notice
-        instead of failing.
-        """
-        try:
-            import probeflow.gui.survey  # noqa: F401
-            return True
-        except Exception:
-            return False
-
     # ── Build ──────────────────────────────────────────────────────────────────
     def _build_ui(self):
         self._build_menu_bar()
@@ -292,8 +256,8 @@ class ProbeFlowWindow(QMainWindow):
 
         # ── Center: Browse — inner splitter [BrowseToolPanel | ThumbnailGrid] ──
         # Browse is the main window's only content; every other workspace
-        # (convert, TV, dataset builder, survey, dev) opens as an independent
-        # WorkspaceWindow via _open_workspace, like Feature Counting always has.
+        # (convert, TV) opens as an independent WorkspaceWindow via
+        # _open_workspace.
         self._browse_tools = BrowseToolPanel(t, self._cfg)
         self._browse_tools.setMinimumWidth(self.LEFT_SIDEBAR_MIN_W)
         self._browse_tools.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
@@ -318,12 +282,9 @@ class ProbeFlowWindow(QMainWindow):
         self._splitter.setStretchFactor(1, 0)
         self._apply_default_splitter_sizes()
 
-        # Floating Feature Counting window (lazy-created on first open)
-        self._fc_window = None
-
-        # One application-level feature-set store shared across image viewers,
-        # Feature Counting, and file imports, so points from any source can be
-        # pooled together in Particle Statistics.
+        # One application-level feature-set store shared across image viewers
+        # and file imports, so points from any source can be pooled for the
+        # basic particle-statistics panel.
         from probeflow.measurements.feature_sets import FeatureSetStore
         self._feature_set_store = FeatureSetStore()
 
@@ -342,10 +303,10 @@ class ProbeFlowWindow(QMainWindow):
         self._browse_tools.overlay_spectra_requested.connect(self._on_overlay_selected_spectra)
         self._browse_tools.filter_changed.connect(self._on_filter_changed)
         self._browse_tools.folder_filter_changed.connect(self._on_folder_filter_changed)
+        self._browse_tools.sort_mode_changed.connect(self._grid.set_sort_mode)
         self._browse_tools.export_filtered_requested.connect(self._on_export_filtered_folder)
         self._browse_tools.thumbnail_channel_changed.connect(self._on_thumbnail_channel_changed)
         self._browse_tools.thumbnail_size_changed.connect(self._on_thumbnail_size_changed)
-        self._browse_tools.open_fc_window_requested.connect(self._open_fc_window)
         # Status bar must exist before initial browse/filter sync because those
         # calls can emit progress/completion signals immediately.
         self._status_bar = QStatusBar()
@@ -356,10 +317,12 @@ class ProbeFlowWindow(QMainWindow):
         saved_size = self._cfg.get("thumbnail_size", "large")
         if saved_size != "large":
             self._grid.set_thumbnail_size(saved_size)
-        # Sync initial filter state from the toolbar into the grid so the
-        # two agree even before the first folder is opened.
+        # Sync initial filter/sort/align state from the toolbar into the grid
+        # so the two agree even before the first folder is opened.
         self._grid.apply_filter(self._browse_tools.get_filter_mode())
         self._grid.set_folder_filter_state(self._browse_tools.get_folder_filter_state())
+        self._grid.set_sort_mode(self._browse_tools.get_sort_mode())
+        self._grid.set_thumbnail_align_rows(self._browse_tools.align_rows_cb.currentText())
 
     def _build_menu_bar(self) -> None:
         menu_bar = self.menuBar()
@@ -427,22 +390,10 @@ class ProbeFlowWindow(QMainWindow):
         # All workspaces live in one menu so the app's structure is visible at
         # a glance; each opens (or raises) its own top-level window, so users
         # can flick between a workspace and Browse without losing either.
-        # Feature Counting is deliberately NOT here — it opens as a floating
-        # tool window (Tools menu).
         workspace_menu = menu_bar.addMenu("Workspace")
         _workspace_action(workspace_menu, "Browse", "browse", "Ctrl+1")
         _workspace_action(workspace_menu, "STM File Converter", "convert", "Ctrl+2")
         _workspace_action(workspace_menu, "TV denoise", "tv", "Ctrl+4")
-        _workspace_action(workspace_menu, "Dataset Builder", "dataset_builder", "Ctrl+Shift+D")
-        survey_action = _workspace_action(
-            workspace_menu, "Survey (ScanFlow campaign)", "survey", "Ctrl+Shift+S"
-        )
-        if not self._survey_available:
-            survey_action.setEnabled(False)
-            survey_action.setToolTip(
-                "Survey mode requires the optional `scanflow` dependency."
-            )
-        _workspace_action(workspace_menu, "Developer tools", "dev", "Ctrl+5")
 
         view_menu = menu_bar.addMenu("View")
         reset_layout_action = QAction("Reset window layout", self)
@@ -510,24 +461,9 @@ class ProbeFlowWindow(QMainWindow):
             align_menu.addAction(action)
 
         tools_menu = menu_bar.addMenu("Tools")
-        # Feature Counting opens a floating window (not a workspace page), so
-        # it is a plain action here rather than a checkable mode entry.
-        fc_action = QAction("Feature Counting…", self)
-        fc_action.setShortcut(QKeySequence("Ctrl+3"))
-        fc_action.setShortcutContext(Qt.ApplicationShortcut)
-        fc_action.setToolTip(
-            "Open the floating Feature Counting window — segmentation, "
-            "template matching, classification and lattice extraction."
-        )
-        fc_action.triggered.connect(self._open_fc_window)
-        tools_menu.addAction(fc_action)
         map_action = QAction("Map Spectra to Images...", self)
         map_action.triggered.connect(self._on_map_spectra)
         tools_menu.addAction(map_action)
-        # Workspace pages (TV denoise, Dataset Builder, Survey, Developer
-        # tools) live in the Workspace menu only — the pre-merge duplicate
-        # block here registered the same shortcuts twice, which makes Qt
-        # treat them as ambiguous and fire neither.
 
         help_menu = menu_bar.addMenu("Help")
         definitions_action = QAction("Definitions", self)
@@ -778,8 +714,7 @@ class ProbeFlowWindow(QMainWindow):
         """Open (or raise) the independent window for *mode*.
 
         Windows are created lazily on first open and merely hidden on close,
-        so panel state (loaded scans, terminal session, dataset-builder
-        queue …) survives close/reopen.
+        so panel state (loaded scans, in-progress work) survives close/reopen.
         """
         win = self._workspace_windows.get(mode)
         if win is None:
@@ -797,9 +732,6 @@ class ProbeFlowWindow(QMainWindow):
         factory = {
             "convert": self._create_convert_window,
             "tv": self._create_tv_window,
-            "dev": self._create_dev_window,
-            "dataset_builder": self._create_dataset_builder_window,
-            "survey": self._create_survey_window,
         }.get(mode)
         return factory() if factory is not None else None
 
@@ -834,58 +766,6 @@ class ProbeFlowWindow(QMainWindow):
         )
         win.show_status(
             "Pick a scan in Browse, then 'Load primary scan from Browse'")
-        return win
-
-    def _create_dev_window(self) -> WorkspaceWindow:
-        t = THEMES[self._theme_name]
-        self._dev_terminal = DeveloperTerminalWidget(t)
-        self._dev_sidebar = _DevSidebar(t)
-        win = WorkspaceWindow(
-            key="dev", title="Developer Tools",
-            panel=self._dev_terminal, sidebar=self._dev_sidebar, parent=self,
-        )
-        win.show_status("Developer terminal — run shell commands and Python scripts")
-        return win
-
-    def _create_dataset_builder_window(self) -> WorkspaceWindow:
-        t = THEMES[self._theme_name]
-        self._dataset_builder_panel = DatasetBuilderPanel(t, self._cfg)
-        self._dataset_builder_sidebar = DatasetBuilderSidebar(t)
-        self._dataset_builder_sidebar.set_global_view_tray(
-            self._dataset_builder_panel.view_tray_widget())
-        self._dataset_builder_sidebar.set_current_view_tray(
-            self._dataset_builder_panel.current_view_tray_widget())
-        self._dataset_builder_panel.counts_changed.connect(
-            self._dataset_builder_sidebar.set_counts)
-        win = WorkspaceWindow(
-            key="dataset_builder", title="Dataset Builder",
-            panel=self._dataset_builder_panel,
-            sidebar=self._dataset_builder_sidebar, parent=self,
-        )
-        self._dataset_builder_panel.status_message.connect(win.show_status)
-        win.show_status("Dataset Builder - queue, propose, correct, save, export")
-        return win
-
-    def _create_survey_window(self) -> WorkspaceWindow | None:
-        # Survey integration is optional — when ``probeflow.gui.survey``
-        # cannot be imported (e.g. scanflow not installed in this venv) the
-        # menu action is disabled, and this factory degrades to a status-bar
-        # notice for any other entry path (review gui-arch #17).
-        if not self._survey_available:
-            self._status_bar.showMessage(
-                "Survey mode is unavailable — install `scanflow` to enable it."
-            )
-            return None
-        from probeflow.gui.survey import SurveyPanel
-        self._survey_panel = SurveyPanel()
-        win = WorkspaceWindow(
-            key="survey", title="Survey (ScanFlow campaign)",
-            panel=self._survey_panel, sidebar=None, parent=self,
-        )
-        self._survey_panel.log_message.connect(win.show_status)
-        win.show_status(
-            "Survey mode — open a ScanFlow survey.json, polish each feature, "
-            "then Export PPTX")
         return win
 
     def _sync_menu_actions(self) -> None:
@@ -955,6 +835,8 @@ class ProbeFlowWindow(QMainWindow):
         """Status-bar update + clear any selection-driven UI when navigating."""
         self._browse_info.clear()
         self._update_browse_status()
+        # The bias picker offers the biases actually present in this folder.
+        self._browse_tools.set_bias_options(self._grid.bias_options())
 
     def _format_browse_counts(self, counts) -> str:
         parts: list[str] = []
@@ -1012,7 +894,13 @@ class ProbeFlowWindow(QMainWindow):
                 f"{n_sel} selected / {self._n_loaded} total  |  Double-click to view full size")
 
     def _on_selection_changed(self, n_selected: int):
-        self._browse_tools.update_selection_hint(n_selected)
+        # Make the spectra multi-select discoverable: once two or more spectra
+        # are Ctrl-selected, point at the action that consumes them.
+        if n_selected >= 2 and hasattr(self, "_status_bar"):
+            self._status_bar.showMessage(
+                f"{n_selected} spectra selected — use 'Overlay selected spectra…' "
+                "to compare them."
+            )
 
     def _on_filter_changed(self, mode: str):
         self._grid.apply_filter(mode)
@@ -1189,23 +1077,8 @@ class ProbeFlowWindow(QMainWindow):
         dlg.exec()
 
     def _on_card_context_action(self, entry, action: str):
-        """Dispatch ScanCard right-click actions (Send to Features, export, show metadata)."""
-        if action == "features":
-            # Open (or raise) the floating Feature Counting window and load
-            # the scan into it off-thread — same path as its own "Load from
-            # Browse" button, so saved viewer processing is applied too.
-            self._open_fc_window()
-            plane_idx = self._fc_window._sidebar.plane_index()
-            self._fc_window._sidebar.set_status("Loading scan…")
-            worker = _ScanLoadWorker(
-                self._load_scan_plane_for_analysis, entry, plane_idx)
-            worker.signals.finished.connect(
-                lambda result, error, e=entry: self._on_fc_load_finished(e, result, error)
-            )
-            QThreadPool.globalInstance().start(worker)
-            self._status_bar.showMessage(f"{entry.stem} → Feature Counting")
-
-        elif action == "export_metadata_csv":
+        """Dispatch ScanCard right-click actions (export, show metadata)."""
+        if action == "export_metadata_csv":
             try:
                 _scan = load_scan(entry.path)
                 header = dict(getattr(_scan, "header", {}) or {})
@@ -1258,24 +1131,6 @@ class ProbeFlowWindow(QMainWindow):
             v.addWidget(close_btn)
             dlg.exec()
 
-    # ── Floating Feature Counting window ──────────────────────────────────────
-
-    def _open_fc_window(self) -> None:
-        """Open (or raise) the floating Feature Counting window."""
-        if self._fc_window is None:
-            from probeflow.gui.features.window import FeatureCountingWindow
-            theme = THEMES[self._theme_name]
-            self._fc_window = FeatureCountingWindow(
-                parent=None, theme=theme, feature_set_store=self._feature_set_store
-            )
-            self._fc_window.load_from_browse_needed.connect(
-                self._on_fc_load_from_browse)
-            self._fc_window.open_particle_statistics_needed.connect(
-                self._on_open_particle_statistics_from_features)
-        self._fc_window.show()
-        self._fc_window.raise_()
-        self._fc_window.activateWindow()
-
     def _load_scan_plane_for_analysis(
         self, entry, plane_idx: int
     ) -> tuple:
@@ -1283,8 +1138,8 @@ class ProbeFlowWindow(QMainWindow):
 
         Returns ``(arr, px_m, px_x_m, px_y_m, actual_plane_idx, scan)`` or
         raises.  The returned array is the *processed* version — identical to
-        what the user last saw in the image viewer — so Feature Counting and
-        TV-denoise work on the same data the user inspected.  ``scan`` is the
+        what the user last saw in the image viewer — so TV-denoise works on
+        the same data the user inspected.  ``scan`` is the
         loaded :class:`Scan`, carried through so analysis exports can record the
         same provenance the CLI does.
         """
@@ -1314,8 +1169,7 @@ class ProbeFlowWindow(QMainWindow):
                 processing_state = processing_state_from_gui(saved_proc)
                 if processing_state.steps:
                     # Resolve roi / mask scope steps against persisted sidecars
-                    # so scoped local filters replay here too (review:
-                    # mask-scope replay not connected through feature counting).
+                    # so scoped local filters replay here too.
                     roi_set = mask_set = None
                     try:
                         from probeflow.io.roi_sidecar import load_roi_set_sidecar
@@ -1385,75 +1239,6 @@ class ProbeFlowWindow(QMainWindow):
             analysis_scan.record_processing_state(processing_state)
 
         return arr, px_m, px_x_m, px_y_m, plane_idx, analysis_scan
-
-    def _on_open_particle_statistics_from_features(self, scan_context, set_id: str) -> None:
-        """Open (or raise) Particle Statistics for a set sent from Feature Counting."""
-        from probeflow.gui.dialogs.particle_statistics import ParticleStatisticsDialog
-
-        theme = THEMES[self._theme_name]
-        dlg = getattr(self, "_features_particle_statistics_dialog", None)
-        try:
-            if dlg is not None:
-                dlg.isVisible()
-        except RuntimeError:
-            dlg = None
-        if dlg is None:
-            dlg = ParticleStatisticsDialog(
-                scan=scan_context,
-                feature_set_store=self._feature_set_store,
-                theme=theme,
-                initial_mode="real",
-                parent=None,
-            )
-            self._features_particle_statistics_dialog = dlg
-            try:
-                dlg.destroyed.connect(
-                    lambda _obj=None: setattr(self, "_features_particle_statistics_dialog", None)
-                )
-            except Exception:
-                pass
-        else:
-            dlg.refresh_probe_context(
-                scan=scan_context, feature_set_store=self._feature_set_store
-            )
-            dlg.set_current_mode("real")
-        dlg.show()
-        dlg.raise_()
-        dlg.activateWindow()
-        if set_id:
-            dlg.select_feature_set(set_id)
-
-    def _on_fc_load_from_browse(self) -> None:
-        """Bridge: read Browse selection → load into the floating FC window (off-thread)."""
-        from probeflow.gui.models import VertFile
-        if self._fc_window is None:
-            return
-        entry = self._grid.get_primary_entry()
-        if not entry:
-            self._fc_window._sidebar.set_status(
-                "Select a scan in the Browse tab first.")
-            return
-        if isinstance(entry, VertFile):
-            self._fc_window._sidebar.set_status(
-                "Selected entry is not a topography scan.")
-            return
-        plane_idx = self._fc_window._sidebar.plane_index()
-        self._fc_window._sidebar.set_status("Loading scan…")
-        worker = _ScanLoadWorker(self._load_scan_plane_for_analysis, entry, plane_idx)
-        worker.signals.finished.connect(
-            lambda result, error, e=entry: self._on_fc_load_finished(e, result, error)
-        )
-        QThreadPool.globalInstance().start(worker)
-
-    def _on_fc_load_finished(self, entry, result, error: str) -> None:
-        """Receive the background-loaded scan and hand it to the FC window."""
-        if self._fc_window is None:
-            return
-        if error:
-            self._fc_window._sidebar.set_status(f"Could not read scan: {error}")
-            return
-        arr, px_m, px_x_m, px_y_m, plane_idx, scan = result
-        self._fc_window.load_entry(entry, plane_idx, arr, px_m, px_x_m, px_y_m, scan=scan)
 
     # ── TV-denoise tab handlers ────────────────────────────────────────────────
     def _on_tv_load_from_browse(self):
@@ -1586,8 +1371,8 @@ class ProbeFlowWindow(QMainWindow):
             if not spec and d._deferred.is_pending():
                 self._load_from_viewer(d, d._deferred.action)
         dlg.finished.connect(_on_closed)
-        # immediate_action_requested fires when user clicks "→ Feature Counting" /
-        # "→ TV Denoising" so the viewer stays open and the action runs right away.
+        # immediate_action_requested fires when user clicks "→ TV Denoising"
+        # so the viewer stays open and the action runs right away.
         # Only the image viewer exposes this signal; spectroscopy viewers don't.
         if not is_spec:
             dlg.immediate_action_requested.connect(
@@ -1640,11 +1425,7 @@ class ProbeFlowWindow(QMainWindow):
             px_m = float(np.sqrt(px_x_m * px_y_m))
         else:
             px_x_m = px_y_m = px_m = 1e-10
-        if action == "features":
-            self._open_fc_window()
-            self._fc_window.load_entry(entry, plane_idx, arr, px_m, px_x_m, px_y_m)
-            self._status_bar.showMessage(f"{entry.stem} → Feature Counting")
-        elif action == "tv":
+        if action == "tv":
             self._open_workspace("tv")
             self._tv_panel.load_entry(entry, plane_idx, arr, px_m)
             self._tv_sidebar.set_status(
@@ -1673,11 +1454,7 @@ class ProbeFlowWindow(QMainWindow):
             px_m = float(np.sqrt(px_x_m * px_y_m))
         else:
             px_x_m = px_y_m = px_m = 1e-10
-        if action == "features":
-            self._open_fc_window()
-            self._fc_window.load_entry(entry, plane_idx, arr, px_m, px_x_m, px_y_m)
-            self._status_bar.showMessage(f"{entry.stem} → Feature Counting (viewer open)")
-        elif action == "tv":
+        if action == "tv":
             self._open_workspace("tv")
             self._tv_panel.load_entry(entry, plane_idx, arr, px_m)
             self._tv_sidebar.set_status(
@@ -1774,8 +1551,6 @@ class ProbeFlowWindow(QMainWindow):
         self._browse_info.apply_theme(t)
         for win in self._workspace_windows.values():
             win.apply_theme(t)
-        if self._fc_window is not None:
-            self._fc_window.apply_theme(t)
         self._sync_menu_actions()
 
     # ── About ──────────────────────────────────────────────────────────────────
@@ -1838,9 +1613,6 @@ class ProbeFlowWindow(QMainWindow):
         turning quit into a hang.
         """
         pools = [QThreadPool.globalInstance()]
-        fc = getattr(self, "_fc_window", None)
-        if fc is not None:
-            pools.append(getattr(fc, "_preview_pool", None))
         for pool in pools:
             if pool is None:
                 continue
@@ -1864,6 +1636,7 @@ class ProbeFlowWindow(QMainWindow):
             "browse_filter":  self._browse_tools.get_filter_mode(),
             "gui_font_size":  self._gui_font_size,
             "thumbnail_size": self._browse_tools.size_cb.currentText().lower(),
+            "thumbnail_align": self._browse_tools.align_rows_cb.currentText().lower(),
         })
         # Convert widgets exist only once that workspace window has been
         # opened; load_config() already carried over the previously saved
@@ -1884,13 +1657,12 @@ class ProbeFlowWindow(QMainWindow):
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────
-def main(*, open_survey: "Optional[Path]" = None,
-         browse_folder: "Optional[Path]" = None) -> None:
+def main(*, browse_folder: "Optional[Path]" = None) -> None:
     app    = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("ProbeFlow")
     from probeflow.gui.tooltips import install_global_tooltips
     install_global_tooltips(app)
-    window = ProbeFlowWindow(open_survey=open_survey, browse_folder=browse_folder)
+    window = ProbeFlowWindow(browse_folder=browse_folder)
     if getattr(window, "_show_maximized_on_start", False):
         window.showMaximized()
     else:

@@ -42,10 +42,15 @@ class _AngleHandle(QGraphicsEllipseItem):
 
 
 class AngleOverlayItem(QGraphicsItemGroup):
-    """Manages two arm lines, three draggable handles, and a live angle readout."""
+    """Manages two arm lines, three draggable handles, and a live angle readout.
 
-    def __init__(self, p1: QPointF, p2: QPointF, p3: QPointF, scene):
+    ``on_change(deg)`` is called after every geometry change (initial placement
+    and each handle drag) so the host can show a live readout elsewhere.
+    """
+
+    def __init__(self, p1: QPointF, p2: QPointF, p3: QPointF, scene, on_change=None):
         super().__init__()
+        self._on_change = on_change
         self._h1 = _AngleHandle(p1, self._update)
         self._h2 = _AngleHandle(p2, self._update)
         self._h3 = _AngleHandle(p3, self._update)
@@ -72,6 +77,8 @@ class AngleOverlayItem(QGraphicsItemGroup):
         deg = self._angle_deg(p1, p2, p3)
         self._txt.setPlainText(f"{deg:.1f}°")
         self._txt.setPos(p2 + QPointF(8, -20))
+        if self._on_change is not None:
+            self._on_change(deg)
 
     @staticmethod
     def _angle_deg(p1: QPointF, p2: QPointF, p3: QPointF) -> float:

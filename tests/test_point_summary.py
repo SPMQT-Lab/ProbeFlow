@@ -1,4 +1,4 @@
-"""Tests for the GUI-free point-pattern summary (Particle Statistics quick stats)."""
+"""Tests for the GUI-free point-pattern summary (point-statistics quick stats)."""
 
 from __future__ import annotations
 

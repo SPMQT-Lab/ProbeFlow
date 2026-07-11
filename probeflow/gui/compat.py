@@ -25,7 +25,6 @@ from PySide6.QtWidgets import QFileDialog  # noqa: F401
 
 from probeflow.gui.app import ProbeFlowWindow, main  # noqa: F401
 from probeflow.gui.processing import ProcessingControlPanel  # noqa: F401
-from probeflow.gui.terminal import DeveloperTerminalWidget, _DevSidebar  # noqa: F401
 from probeflow.gui.dialogs import (  # noqa: F401
     AboutDialog,
     EdgeDetectionDialog,

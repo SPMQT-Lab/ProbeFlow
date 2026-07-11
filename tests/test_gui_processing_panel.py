@@ -279,10 +279,7 @@ def test_viewer_align_rows_applies_immediately(qapp, monkeypatch):
     entry = SxmFile(path=Path("/tmp/example.sxm"), stem="example", Nx=8, Ny=8)
     dlg = ImageViewerDialog(entry, [entry], "gray", THEMES["dark"])
     assert "processing.image_operations" in dlg._viewer_command_actions
-    assert "measure.particle_statistics" in dlg._viewer_command_actions
-    assert "measure.adstat_workbench" in dlg._viewer_command_actions
-    assert "measure.adstat_statistics" in dlg._viewer_command_actions
-    assert "measure.adstat_sandbox" in dlg._viewer_command_actions
+    assert "measure.particle_statistics" not in dlg._viewer_command_actions
 
     dlg._processing_panel._align_combo.setCurrentText("Mean")
 
@@ -297,253 +294,6 @@ def test_viewer_align_rows_applies_immediately(qapp, monkeypatch):
 
     dlg.close()
     dlg.deleteLater()
-
-
-def test_viewer_adstat_statistics_uses_display_scan_context(qapp, monkeypatch):
-    from probeflow.gui import ImageViewerDialog
-    import probeflow.gui.dialogs.particle_statistics as particle_module
-
-    image = np.zeros((6, 8), dtype=float)
-    mask = np.ones((6, 8), dtype=bool)
-    active_roi = object()
-    captured = {}
-
-    class FakeParticleStatisticsDialog:
-        def __init__(
-            self,
-            *,
-            point_sources,
-            scan,
-            active_area_roi,
-            active_mask,
-            image_shape,
-            feature_sets,
-            feature_set_store,
-            theme,
-            initial_mode,
-            parent,
-            context_refresh_fn,
-        ):
-            self.destroyed = SimpleNamespace(
-                connect=lambda cb: captured.__setitem__("destroyed_cb", cb)
-            )
-            captured["dialog"] = {
-                "point_sources": tuple(point_sources),
-                "scan": scan,
-                "active_area_roi": active_area_roi,
-                "active_mask": active_mask,
-                "image_shape": image_shape,
-                "feature_sets": tuple(feature_sets),
-                "feature_set_store": feature_set_store,
-                "theme": theme,
-                "initial_mode": initial_mode,
-                "parent": parent,
-                "context_refresh_fn": context_refresh_fn,
-            }
-
-        def isVisible(self):
-            return False
-
-        def refresh_probe_context(self, **kwargs):
-            captured["refresh"] = kwargs
-
-        def set_current_mode(self, mode):
-            captured["mode"] = mode
-
-        def show(self):
-            captured["shown"] = True
-
-        def raise_(self):
-            captured["raised"] = True
-
-        def activateWindow(self):
-            captured["activated"] = True
-
-    monkeypatch.setattr(particle_module, "ParticleStatisticsDialog", FakeParticleStatisticsDialog)
-
-    dlg = ImageViewerDialog.__new__(ImageViewerDialog)
-    dlg._display_arr = image
-    dlg._raw_arr = None
-    dlg._display_scan_range_m = (80e-9, 30e-9)
-    dlg._scan_range_m = (8e-9, 6e-9)
-    dlg._entries = [SimpleNamespace(path=Path("/tmp/example.sxm"))]
-    dlg._idx = 0
-    dlg._t = {"text.color": "#111111"}
-    dlg._status_lbl = _FakeStatus()
-    dlg._point_source_records = lambda: ["points"]
-    dlg._active_image_roi = lambda: active_roi
-    dlg._active_mask_array = lambda: mask
-    dlg._track_modeless_child = lambda dialog: captured.__setitem__("tracked", dialog)
-
-    dlg._on_open_adstat_statistics()
-
-    dialog = captured["dialog"]
-    assert dialog["point_sources"] == ("points",)
-    assert dialog["scan"].scan_range_m == pytest.approx((80e-9, 30e-9))
-    assert dialog["scan"].dims == (8, 6)
-    assert dialog["scan"].source_path == Path("/tmp/example.sxm")
-    assert dialog["active_area_roi"] is active_roi
-    assert dialog["active_mask"] is mask
-    assert dialog["image_shape"] == (6, 8)
-    assert captured["dialog"]["theme"] == {"text.color": "#111111"}
-    assert captured["dialog"]["initial_mode"] == "landing"
-    assert captured["dialog"]["parent"] is dlg
-    assert captured["tracked"] is dlg._particle_statistics_dialog
-    assert captured["shown"] is True
-    assert captured["raised"] is True
-    assert captured["activated"] is True
-    assert dlg._status_lbl.text == "Particle Statistics opened."
-
-
-def test_viewer_adstat_statistics_opens_workbench_without_preflight(qapp, monkeypatch):
-    from probeflow.gui import ImageViewerDialog
-    import probeflow.gui.dialogs.particle_statistics as particle_module
-
-    captured = {}
-
-    class FakeParticleStatisticsDialog:
-        def __init__(self, **kwargs):
-            self.destroyed = SimpleNamespace(connect=lambda cb: None)
-            captured["dialog"] = dict(kwargs)
-
-        def isVisible(self):
-            return False
-
-        def show(self):
-            captured["shown"] = True
-
-        def raise_(self):
-            captured["raised"] = True
-
-        def activateWindow(self):
-            captured["activated"] = True
-
-    monkeypatch.setattr(particle_module, "ParticleStatisticsDialog", FakeParticleStatisticsDialog)
-
-    dlg = ImageViewerDialog.__new__(ImageViewerDialog)
-    dlg._display_arr = np.zeros((4, 5), dtype=float)
-    dlg._raw_arr = None
-    dlg._display_scan_range_m = (5e-9, 4e-9)
-    dlg._scan_range_m = None
-    dlg._entries = []
-    dlg._idx = 0
-    dlg._t = {"text.color": "#111111"}
-    dlg._status_lbl = _FakeStatus()
-    dlg._point_source_records = lambda: []
-    dlg._active_image_roi = lambda: None
-    dlg._active_mask_array = lambda: None
-    dlg._track_modeless_child = lambda dialog: captured.__setitem__("tracked", dialog)
-
-    dlg._on_open_adstat_statistics()
-
-    assert captured["dialog"]["point_sources"] == []
-    assert captured["dialog"]["initial_mode"] == "landing"
-    assert captured["tracked"] is dlg._particle_statistics_dialog
-    assert captured["shown"] is True
-    assert dlg._status_lbl.text == "Particle Statistics opened."
-
-
-def test_viewer_particle_statistics_reopen_reuses_existing_window(qapp, monkeypatch):
-    from probeflow.gui import ImageViewerDialog
-    import probeflow.gui.dialogs.particle_statistics as particle_module
-
-    instances = []
-
-    class FakeParticleStatisticsDialog:
-        def __init__(self, **kwargs):
-            self.destroyed = SimpleNamespace(connect=lambda cb: None)
-            self.kwargs = dict(kwargs)
-            self.show_count = 0
-            self.refreshes = []
-            instances.append(self)
-
-        def isVisible(self):
-            return False
-
-        def refresh_probe_context(self, **kwargs):
-            self.refreshes.append(kwargs)
-
-        def show(self):
-            self.show_count += 1
-
-        def raise_(self):
-            pass
-
-        def activateWindow(self):
-            pass
-
-    monkeypatch.setattr(particle_module, "ParticleStatisticsDialog", FakeParticleStatisticsDialog)
-
-    dlg = ImageViewerDialog.__new__(ImageViewerDialog)
-    dlg._display_arr = np.zeros((4, 5), dtype=float)
-    dlg._raw_arr = None
-    dlg._display_scan_range_m = (5e-9, 4e-9)
-    dlg._scan_range_m = None
-    dlg._entries = []
-    dlg._idx = 0
-    dlg._t = {"text.color": "#111111"}
-    dlg._status_lbl = _FakeStatus()
-    dlg._active_image_roi = lambda: None
-    dlg._active_mask_array = lambda: None
-    dlg._track_modeless_child = lambda dialog: None
-    sources = [["first"], ["second"]]
-    dlg._point_source_records = lambda: sources.pop(0)
-
-    dlg._on_open_particle_statistics()
-    dlg._on_open_particle_statistics()
-
-    assert len(instances) == 1
-    assert instances[0].show_count == 2
-    assert instances[0].refreshes[-1]["point_sources"] == ["second"]
-    assert dlg._particle_statistics_dialog is instances[0]
-
-
-def test_viewer_adstat_sandbox_opens_isolated_dialog(qapp, monkeypatch):
-    from probeflow.gui import ImageViewerDialog
-    import probeflow.gui.dialogs.particle_statistics as particle_module
-
-    captured = {}
-
-    class FakeParticleStatisticsDialog:
-        def __init__(self, **kwargs):
-            self.destroyed = SimpleNamespace(connect=lambda cb: None)
-            captured["dialog"] = {
-                **kwargs,
-            }
-
-        def isVisible(self):
-            return False
-
-        def show(self):
-            captured["shown"] = True
-
-        def raise_(self):
-            captured["raised"] = True
-
-        def activateWindow(self):
-            captured["activated"] = True
-
-    monkeypatch.setattr(particle_module, "ParticleStatisticsDialog", FakeParticleStatisticsDialog)
-
-    dlg = ImageViewerDialog.__new__(ImageViewerDialog)
-    dlg._display_arr = None
-    dlg._raw_arr = None
-    dlg._t = {"text.color": "#111111"}
-    dlg._status_lbl = _FakeStatus()
-    dlg._track_modeless_child = lambda dialog: captured.__setitem__("tracked", dialog)
-    dlg._point_source_records = lambda: pytest.fail("sandbox must not collect real points")
-    dlg._active_image_roi = lambda: pytest.fail("sandbox must not inspect active ROI")
-
-    dlg._on_open_adstat_sandbox()
-
-    assert captured["dialog"]["theme"] == {"text.color": "#111111"}
-    assert captured["dialog"]["point_sources"] == []
-    assert captured["dialog"]["scan"] is None
-    assert captured["dialog"]["initial_mode"] == "sandbox"
-    assert captured["dialog"]["parent"] is dlg
-    assert captured["tracked"] is dlg._particle_statistics_dialog
-    assert captured["shown"] is True
-    assert dlg._status_lbl.text == "Particle Statistics opened."
 
 
 def test_viewer_stm_background_apply_records_processing_state(qapp, monkeypatch):
@@ -1651,14 +1401,12 @@ def test_viewer_feature_maxima_roi_action_uses_panel_settings(qapp):
 
 
 def test_viewer_point_source_collectors_include_measure_tab_feature_points(qapp):
-    from types import SimpleNamespace
 
     from probeflow.gui import ImageViewerDialog
     from probeflow.measurements.models import FeaturePoint
 
     dlg = ImageViewerDialog.__new__(ImageViewerDialog)
     dlg._pixel_size_xy_m = lambda: (2e-9, 3e-9)
-    dlg._feature_finder_dlg = None
     dlg._image_roi_set = None
     dlg._image_measurements = SimpleNamespace(
         feature_points=[
@@ -1683,51 +1431,12 @@ def test_viewer_point_source_collectors_include_measure_tab_feature_points(qapp)
     np.testing.assert_allclose(m_sources["Detected feature maxima"], [[8e-9, 15e-9]])
 
 
-def test_feature_finder_receives_active_area_roi_mask(qapp, monkeypatch):
-    from probeflow.core.roi import ROI, ROISet
-    from probeflow.gui import ImageViewerDialog
-    import probeflow.gui.dialogs.feature_finder as feature_finder_module
-
-    image = np.zeros((8, 8), dtype=float)
-    roi_set = ROISet(image_id="img1")
-    roi = ROI.new("rectangle", {"x": 2, "y": 1, "width": 3, "height": 4}, name="scope")
-    roi_set.add(roi)
-    roi_set.set_active(roi.id)
-    captured = {}
-
-    class FakeFeatureFinderDialog:
-        def __init__(self, *args, **kwargs):
-            captured["roi_mask"] = kwargs.get("roi_mask")
-
-    monkeypatch.setattr(
-        feature_finder_module,
-        "FeatureFinderDialog",
-        FakeFeatureFinderDialog,
-    )
-    dlg = ImageViewerDialog.__new__(ImageViewerDialog)
-    dlg._display_arr = image
-    dlg._raw_arr = None
-    dlg._image_roi_set = roi_set
-    dlg._pixel_size_xy_m = lambda: (1e-9, 1e-9)
-    dlg._channel_unit = lambda: (1.0, "", "")
-    dlg._t = {}
-    dlg._status_lbl = _FakeStatus()
-    # Tools now open via the modal-overlay helper (which needs a real QWidget);
-    # stub it since this test only checks the ROI mask handed to the dialog.
-    dlg._present_modal_tool = lambda _d, **_kw: captured.__setitem__("shown", True)
-
-    dlg._on_open_feature_finder()
-
-    expected = roi.to_mask(image.shape)
-    assert captured["shown"] is True
-    np.testing.assert_array_equal(captured["roi_mask"], expected)
 
 
 def test_legacy_measurement_context_survives_dock_conversion(qapp):
     # The legacy ``probeflow.analysis.measurements.MeasurementResult``
     # dataclass was removed in arch-backend #1 (2026-05-28); a
     # SimpleNamespace stub exercises the duck-typed adapter path.
-    from types import SimpleNamespace
     from probeflow.gui import ImageViewerDialog
 
     legacy = SimpleNamespace(
@@ -2513,3 +2222,21 @@ def test_open_viewer_tracking_reaps_destroyed_dialog():
 
     dlg.destroyed.emit()
     assert dlg not in win._open_viewers
+
+
+def test_measure_tab_menu_lists_feature_maxima_and_point_statistics():
+    """The curated Measure-tab menu must expose the point-pattern tools."""
+    from probeflow.gui.widgets.image_measurements_panel import ImageMeasurementsPanel
+
+    keys = {
+        key
+        for _group, tools in ImageMeasurementsPanel._TOOL_GROUPS
+        for _label, key, _kind in tools
+    }
+    assert "feature_maxima" in keys
+    assert "pair_correlation" in keys
+    # Point statistics opens as a dialog via the existing request signal.
+    assert (
+        ImageMeasurementsPanel._DIALOG_SIGNALS["pair_correlation"]
+        == "pairCorrelationRequested"
+    )

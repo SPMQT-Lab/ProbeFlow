@@ -25,25 +25,16 @@ from probeflow.cli.processing_ops import (
 )
 from probeflow.cli.commands.analysis import (
     _cmd_autoclip,
-    _cmd_classify,
-    _cmd_count,
     _cmd_fft_spectrum,
     _cmd_grains,
     _cmd_histogram,
     _cmd_lattice,
-    _cmd_particles,
     _cmd_periodicity,
     _cmd_profile,
     _cmd_tv_denoise,
     _cmd_unit_cell,
 )
 from probeflow.cli.commands.conversion import _cmd_dat2npy, _cmd_dat2png, _cmd_dat2sxm
-from probeflow.cli.commands.dataset_builder import (
-    _cmd_dataset_export,
-    _cmd_dataset_propose,
-    _cmd_dataset_summary,
-    _cmd_dataset_validate,
-)
 from probeflow.cli.commands.gui import _cmd_gui
 from probeflow.cli.commands.processing import (
     _cmd_pipeline,
@@ -275,66 +266,7 @@ def _build_parser() -> argparse.ArgumentParser:
     period.add_argument("--verbose", action="store_true")
     period.set_defaults(func=_cmd_periodicity)
 
-    # ── Optional feature commands: counting / lattice / denoise / classify ──
-    particles = sub.add_parser("particles",
-        help="Segment bright (or dark) particles / molecules on a scan plane")
-    particles.add_argument("input", type=Path)
-    particles.add_argument("-o", "--output", type=Path, default=None,
-        help="Optional .json output with full particle list + scan provenance")
-    particles.add_argument("--plane", type=int, default=0)
-    particles.add_argument("--threshold", choices=("otsu", "manual", "adaptive"),
-                           default="otsu")
-    particles.add_argument("--manual-value", type=float, default=None,
-        help="0-255 byte cutoff when --threshold=manual")
-    particles.add_argument("--invert", action="store_true",
-        help="Segment depressions instead of bright features")
-    particles.add_argument("--min-area", type=float, default=0.5,
-        help="Minimum particle area (nm²; default 0.5)")
-    particles.add_argument("--max-area", type=float, default=None,
-        help="Maximum particle area (nm²; default: no limit)")
-    particles.add_argument("--sigma-clip", type=float, default=2.0,
-        help="Drop particles more than this many σ from the mean area")
-    particles.add_argument("--no-sigma-clip", action="store_true",
-        help="Disable σ-clipping of particle areas")
-    particles.add_argument("--clip-low", type=float, default=1.0)
-    particles.add_argument("--clip-high", type=float, default=99.0)
-    particles.add_argument("--limit", type=int, default=20,
-        help="Max particles printed to stdout (table mode)")
-    particles.add_argument("--json", action="store_true")
-    particles.add_argument("--verbose", action="store_true")
-    # Reproducible step-edge exclusion (analysis.step_edges.step_edge_mask)
-    particles.add_argument("--exclude-step-edges", action="store_true",
-        help="Drop molecules sitting on substrate step edges (algorithmic, "
-             "reproducible alternative to hand-painting a mask)")
-    particles.add_argument("--step-angle", type=float, default=20.0,
-        help="Step slope angle in degrees (default 20)")
-    particles.add_argument("--step-molecule-size", type=float, default=1.0,
-        help="Molecule diameter in nm, suppressed before step detection (default 1.0)")
-    particles.add_argument("--step-margin", type=float, default=0.3,
-        help="Extra margin grown around the step band, nm (default 0.3)")
-    particles.add_argument("--step-min-height", type=float, default=0.0,
-        help="Only exclude at steps at least this tall, nm (0 = any steep edge)")
-    particles.add_argument("--step-max-overlap", type=float, default=0.25,
-        help="Reject a particle when more than this fraction overlaps the step band")
-    particles.set_defaults(func=_cmd_particles)
-
-    count = sub.add_parser("count",
-        help="Count features by template matching (AiSurf atom_counting)")
-    count.add_argument("input", type=Path)
-    count.add_argument("--template", type=Path, required=True,
-        help="Template image — PNG or another scan file")
-    count.add_argument("-o", "--output", type=Path, default=None,
-        help="Optional .json output with all detections")
-    count.add_argument("--plane", type=int, default=0)
-    count.add_argument("--min-corr", type=float, default=0.5,
-        help="Minimum normalised cross-correlation (0.4-0.6 typical)")
-    count.add_argument("--min-distance", type=float, default=None,
-        help="Minimum feature separation (nm); default = half template side")
-    count.add_argument("--clip-low", type=float, default=1.0)
-    count.add_argument("--clip-high", type=float, default=99.0)
-    count.add_argument("--json", action="store_true")
-    count.add_argument("--verbose", action="store_true")
-    count.set_defaults(func=_cmd_count)
+    # ── Optional commands: denoise / lattice ──
 
     tv = sub.add_parser("tv-denoise",
         help="Total-variation denoising (Huber-ROF / TV-L1)")
@@ -371,25 +303,6 @@ def _build_parser() -> argparse.ArgumentParser:
     lat.add_argument("--verbose", action="store_true")
     lat.set_defaults(func=_cmd_lattice)
 
-    classify = sub.add_parser("classify",
-        help="Few-shot classify particles against labelled samples")
-    classify.add_argument("input", type=Path)
-    classify.add_argument("--samples", type=Path, required=True,
-        help="JSON file with sample particles (each object must include "
-             "'class_name' / 'label' and all Particle fields)")
-    classify.add_argument("-o", "--output", type=Path, default=None)
-    classify.add_argument("--plane", type=int, default=0)
-    classify.add_argument("--encoder", choices=("raw", "pca_kmeans"),
-                          default="raw")
-    classify.add_argument("--threshold-method",
-                          choices=("gmm", "otsu", "distribution"),
-                          default="gmm")
-    classify.add_argument("--min-area", type=float, default=0.5)
-    classify.add_argument("--sigma-clip", type=float, default=2.0)
-    classify.add_argument("--no-sigma-clip", action="store_true")
-    classify.add_argument("--json", action="store_true")
-    classify.add_argument("--verbose", action="store_true")
-    classify.set_defaults(func=_cmd_classify)
 
     # ── line profile ──
     profile = sub.add_parser("profile",
@@ -539,90 +452,6 @@ def _build_parser() -> argparse.ArgumentParser:
     prep.add_argument("--verbose", action="store_true")
     prep.set_defaults(func=_cmd_prepare_png)
 
-    # ── Dataset Builder ──
-    dataset = sub.add_parser(
-        "dataset",
-        help="Dataset Builder queue, proposal, and frozen ML-ready export commands",
-    )
-    dataset_sub = dataset.add_subparsers(
-        dest="dataset_command",
-        required=True,
-        metavar="<dataset-command>",
-    )
-
-    ds_summary = dataset_sub.add_parser(
-        "summary",
-        help="Summarise Dataset Builder review status for a folder or scan",
-    )
-    ds_summary.add_argument("source", type=Path)
-    ds_summary.add_argument("--task", default="step_edge_mask")
-    ds_summary.add_argument("--label-name", default="step_edge")
-    ds_summary.add_argument("--plane", type=int, default=0)
-    ds_summary.add_argument("--json", action="store_true")
-    ds_summary.add_argument("--verbose", action="store_true")
-    ds_summary.set_defaults(func=_cmd_dataset_summary)
-
-    ds_propose = dataset_sub.add_parser(
-        "propose",
-        help="Generate a proposal and save it to native Dataset Builder sidecars",
-    )
-    ds_propose.add_argument("input", type=Path)
-    ds_propose.add_argument("--task", default="step_edge_mask")
-    ds_propose.add_argument("--label-name", default="step_edge")
-    ds_propose.add_argument("--plane", type=int, default=0)
-    ds_propose.add_argument(
-        "--method",
-        choices=("step_edge", "canny", "feature_points"),
-        default="step_edge",
-    )
-    ds_propose.add_argument(
-        "--param",
-        action="append",
-        default=[],
-        metavar="KEY=VALUE",
-        help="Proposal parameter override; may be passed multiple times",
-    )
-    ds_propose.add_argument(
-        "--status",
-        choices=("draft", "accepted", "uncertain", "rejected"),
-        default="draft",
-    )
-    ds_propose.add_argument("--annotator", default=None)
-    ds_propose.add_argument("--notes", default="")
-    ds_propose.add_argument("--json", action="store_true")
-    ds_propose.add_argument("--verbose", action="store_true")
-    ds_propose.set_defaults(func=_cmd_dataset_propose)
-
-    ds_export = dataset_sub.add_parser(
-        "export",
-        help="Export a frozen ML-ready dataset snapshot from native sidecars",
-    )
-    ds_export.add_argument("source", type=Path)
-    ds_export.add_argument("output", type=Path)
-    ds_export.add_argument("--task", default="step_edge_mask")
-    ds_export.add_argument("--label-name", default="step_edge")
-    ds_export.add_argument("--plane", type=int, default=0)
-    ds_export.add_argument(
-        "--status",
-        nargs="+",
-        default=["accepted"],
-        choices=("draft", "accepted", "uncertain", "rejected", "exported"),
-        help="Review statuses to include in the export",
-    )
-    ds_export.add_argument("--colormap", default="gray")
-    ds_export.add_argument("--clip-low", type=float, default=1.0)
-    ds_export.add_argument("--clip-high", type=float, default=99.0)
-    ds_export.add_argument("--force", action="store_true")
-    ds_export.add_argument("--verbose", action="store_true")
-    ds_export.set_defaults(func=_cmd_dataset_export)
-
-    ds_validate = dataset_sub.add_parser(
-        "validate",
-        help="Validate a Dataset Builder export directory",
-    )
-    ds_validate.add_argument("dataset", type=Path)
-    ds_validate.set_defaults(func=_cmd_dataset_validate)
-
     # ── info / gui ──
     info = sub.add_parser("info", help="Print .sxm header metadata")
     info.add_argument("input", type=Path)
@@ -637,8 +466,6 @@ def _build_parser() -> argparse.ArgumentParser:
     diag_z.set_defaults(func=_cmd_diag_z)
 
     gui = sub.add_parser("gui", help="Launch the ProbeFlow graphical interface")
-    gui.add_argument("--open-survey", type=Path, default=None, metavar="SURVEY_JSON",
-                     help="Pre-load a ScanFlow survey manifest into Survey mode")
     gui.add_argument("--browse", type=Path, default=None, metavar="FOLDER",
                      help="Open this folder in the Browse tab on startup "
                           "(used internally by the Restart action)")
@@ -713,9 +540,6 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: Optional[List[str]] = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
-    # Top-level shortcut: `probeflow --open-survey PATH` → `probeflow gui --open-survey PATH`.
-    if argv and (argv[0] == "--open-survey" or argv[0].startswith("--open-survey=")):
-        argv = ["gui"] + list(argv)
     parser = _build_parser()
     args = parser.parse_args(argv)
     rc = args.func(args)

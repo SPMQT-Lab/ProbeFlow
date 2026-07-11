@@ -18,24 +18,6 @@ not place parser/writer boundaries, CLI routing, GUI widgets, or raw
 ``Scan`` model ownership here.
 """
 
-from probeflow.analysis.features import (
-    Classification,
-    Detection,
-    Particle,
-    classify_particles,
-    count_features,
-    segment_particles,
-)
-from probeflow.analysis.preview import (
-    FeatureMode,
-    apply_preview_background,
-    detect_preview_features,
-    PreviewAnalysisParams,
-    PreviewFeatureRow,
-    PreviewResult,
-    preview_record,
-    run_preview,
-)
 from probeflow.analysis.lattice import (
     LatticeParams,
     LatticeResult,
@@ -54,32 +36,18 @@ from probeflow.analysis.line_periodicity import (
 from probeflow.analysis.xmgrace_export import Curve, build_agr, export_bundle
 
 __all__ = [
-    "Classification",
     "Curve",
     "PeriodicityDiagnostic",
     "PeriodicityResult",
     "estimate_line_periodicity",
     "format_period",
     "format_result_text",
-    "Detection",
-    "FeatureMode",
-    "apply_preview_background",
-    "detect_preview_features",
     "LatticeParams",
     "LatticeResult",
-    "Particle",
-    "PreviewAnalysisParams",
-    "PreviewFeatureRow",
-    "PreviewResult",
     "UnitCellResult",
     "average_unit_cell",
     "build_agr",
-    "classify_particles",
-    "count_features",
     "export_bundle",
     "extract_lattice",
-    "preview_record",
-    "run_preview",
-    "segment_particles",
     "write_lattice_pdf",
 ]

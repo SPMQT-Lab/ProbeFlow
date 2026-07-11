@@ -639,14 +639,6 @@ class ImageViewerBuildMixin:
             export_lay, "→ Send to tool", expanded=False
         )
 
-        send_feat_btn = QPushButton("→ Feature Counting")
-        send_feat_btn.setFont(ui_font(8))
-        send_feat_btn.setFixedHeight(24)
-        send_feat_btn.setToolTip(
-            "Send the current processed image to Feature Counting (viewer stays open)")
-        send_feat_btn.clicked.connect(self._on_send_to_features)
-        send_lay.addWidget(send_feat_btn)
-
         send_tv_btn = QPushButton("→ TV Denoising")
         send_tv_btn.setFont(ui_font(8))
         send_tv_btn.setFixedHeight(24)
@@ -924,24 +916,8 @@ class ImageViewerBuildMixin:
             self._on_update_angle_measurement
         )
         self._measurement_panel.clearAngleRequested.connect(self._clear_angle_overlay)
-        self._measurement_panel.featureFinderRequested.connect(self._on_open_feature_finder)
         self._measurement_panel.pairCorrelationRequested.connect(
             self._on_open_pair_correlation
-        )
-        self._measurement_panel.particleStatisticsRequested.connect(
-            self._on_open_particle_statistics
-        )
-        self._measurement_panel.adstatWorkbenchRequested.connect(
-            self._on_open_adstat_workbench
-        )
-        self._measurement_panel.adstatStatisticsRequested.connect(
-            self._on_open_adstat_statistics
-        )
-        self._measurement_panel.adstatSandboxRequested.connect(
-            self._on_open_adstat_sandbox
-        )
-        self._measurement_panel.featureToLatticeRequested.connect(
-            self._on_open_feature_lattice
         )
         self._measurement_panel.latticeGridRequested.connect(self._on_open_lattice_grid)
         self._measurement_panel.fftViewerRequested.connect(self._on_open_fft_viewer)

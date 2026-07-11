@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from types import SimpleNamespace
 
 import numpy as np
 
@@ -24,7 +23,6 @@ from probeflow.gui.roi_context import (
     selected_or_active_area_roi_context,
 )
 from probeflow.gui.viewer.tool_launch import (
-    feature_lattice_launch_context,
     lattice_grid_launch_context,
     pair_correlation_launch_context,
 )
@@ -122,35 +120,6 @@ class ImageViewerToolsMixin:
             on_close=lambda: self._clear_lattice_grid_overlay(close_panel=False),
         )
         self._sync_viewer_menu_actions()
-
-    def _on_open_feature_finder(self):
-        arr = self._display_arr if self._display_arr is not None else self._raw_arr
-        if arr is None:
-            self._status_lbl.setText("No image loaded.")
-            return
-        px_x_m, px_y_m = self._pixel_size_xy_m()
-        roi_mask = None
-        roi_ctx = selected_or_active_area_roi_context(
-            self._image_roi_set,
-            getattr(self, "_roi_panel", None),
-        )
-        if roi_ctx.roi is not None:
-            roi_mask = area_roi_mask(roi_ctx.roi, arr.shape[:2])
-        value_scale, value_unit, _ = self._channel_unit()
-        from probeflow.gui.dialogs.feature_finder import FeatureFinderDialog
-        dlg = FeatureFinderDialog(
-            arr,
-            pixel_size_x_m=px_x_m,
-            pixel_size_y_m=px_y_m,
-            roi_mask=roi_mask,
-            theme=self._t,
-            value_scale=value_scale,
-            value_unit=value_unit,
-            on_send_to_particle_statistics=self._on_send_features_to_particle_statistics,
-            parent=self,
-        )
-        self._feature_finder_dlg = dlg
-        self._present_modal_tool(dlg)
 
     def _on_open_image_operations(self) -> None:
         arr = self._display_arr if self._display_arr is not None else self._raw_arr
@@ -274,45 +243,44 @@ class ImageViewerToolsMixin:
         )
 
     def _on_angle_points_ready(self, p1, p2, p3) -> None:
-        """Create angle overlay and record result from the 3-point angle tool."""
+        """Create the angle overlay; the value shows live and stores on demand.
+
+        Nothing is written to the results table here — quick comparative
+        measurements only need the live readout, and 'Add to results' stores a
+        snapshot when the user wants one.
+        """
         from probeflow.gui.angle_overlay import AngleOverlayItem
         scene = self._zoom_lbl.scene()
         if self._angle_overlay is not None:
             self._angle_overlay.remove_from_scene(scene)
-        self._angle_overlay = AngleOverlayItem(p1, p2, p3, scene)
-        deg = self._angle_overlay.angle_deg
-        mid = self._measurement_table.next_measurement_id()
-        self._angle_measurement_id = mid
-        self._measurement_table.add_result(self._angle_measurement_result(mid, deg))
-        self._show_measurements()
+        self._angle_overlay = AngleOverlayItem(
+            p1, p2, p3, scene, on_change=self._on_angle_live_changed,
+        )
         self._sync_viewer_menu_actions()
         self._status_lbl.setText(
-            f"Angle: {deg:.2f}°  — drag handles to adjust, then 'Update angle "
-            "measurement'."
+            f"Angle: {self._angle_overlay.angle_deg:.2f}°  — drag handles to "
+            "adjust; 'Add to results' stores the value."
         )
 
+    def _on_angle_live_changed(self, deg: float) -> None:
+        """Push the overlay's current angle into the Measure-tab live readout."""
+        panel = getattr(self, "_measurement_panel", None)
+        if panel is not None:
+            panel.set_live_angle(deg)
+
     def _on_update_angle_measurement(self) -> None:
-        """Rewrite the current angle measurement with the adjusted overlay value."""
+        """Store the current overlay angle as a new results-table row."""
         if self._angle_overlay is None:
             self._status_lbl.setText(
                 "No angle on the image. Use Measure → Angle to place one first."
             )
             return
         deg = self._angle_overlay.angle_deg
-        mid = self._angle_measurement_id
-        # If the tracked measurement was cleared (or never created), add a fresh one.
-        if mid is None:
-            mid = self._measurement_table.next_measurement_id()
-            self._angle_measurement_id = mid
-            self._measurement_table.add_result(self._angle_measurement_result(mid, deg))
-            self._status_lbl.setText(f"Angle measurement {mid}: {deg:.2f}°.")
-            return
-        result = self._angle_measurement_result(mid, deg)
-        if not self._measurement_table.update_result(result):
-            # Row was removed from the table — re-add it.
-            self._measurement_table.add_result(result)
+        mid = self._measurement_table.next_measurement_id()
+        self._angle_measurement_id = mid
+        self._measurement_table.add_result(self._angle_measurement_result(mid, deg))
         self._show_measurements()
-        self._status_lbl.setText(f"Updated angle measurement {mid}: {deg:.2f}°.")
+        self._status_lbl.setText(f"Angle measurement {mid}: {deg:.2f}°.")
 
     def _on_measure_roi_stats(self) -> None:
         """Compute statistics for the active area ROI → new panel."""
@@ -401,14 +369,12 @@ class ImageViewerToolsMixin:
 
     def _point_source_records(self):
         px_x, px_y = self._pixel_size_xy_m()
-        ff_dlg = getattr(self, "_feature_finder_dlg", None)
         measure_ctrl = getattr(self, "_image_measurements", None)
         dock = getattr(self, "_roi_panel", None)
         sel_ids = list(dock.selected_roi_ids()) if dock and hasattr(dock, "selected_roi_ids") else []
         return collect_point_source_records(
             pixel_size_x_m=px_x,
             pixel_size_y_m=px_y,
-            feature_finder_result=getattr(ff_dlg, "result", None),
             measurement_points=getattr(measure_ctrl, "feature_points", []) or [],
             measurement_metadata=getattr(measure_ctrl, "feature_metadata", {}) or {},
             roi_set=self._image_roi_set,
@@ -464,50 +430,6 @@ class ImageViewerToolsMixin:
         self._present_modal_tool(dlg)
         self._status_lbl.setText("Pair correlation opened.")
 
-    def _on_open_particle_statistics(
-        self,
-        *,
-        initial_mode: str = "landing",
-        include_real_context: bool = True,
-        preserve_existing_mode: bool = True,
-    ) -> None:
-        from probeflow.gui.dialogs.particle_statistics import ParticleStatisticsDialog
-
-        context = self._particle_statistics_context(include_real_context=include_real_context)
-        existing = getattr(self, "_particle_statistics_dialog", None)
-        try:
-            if existing is not None:
-                existing.isVisible()
-        except RuntimeError:
-            existing = None
-            self._particle_statistics_dialog = None
-
-        if existing is None:
-            dlg = ParticleStatisticsDialog(
-                **context,
-                theme=self._t,
-                initial_mode=initial_mode,
-                parent=self,
-                context_refresh_fn=lambda: self._particle_statistics_context(include_real_context=True),
-            )
-            self._particle_statistics_dialog = dlg
-            self._track_modeless_child(dlg)
-            try:
-                dlg.destroyed.connect(lambda _obj=None: setattr(self, "_particle_statistics_dialog", None))
-            except Exception:
-                pass
-        else:
-            dlg = existing
-            if include_real_context:
-                dlg.refresh_probe_context(**context)
-            if not preserve_existing_mode:
-                dlg.set_current_mode(initial_mode)
-
-        dlg.show()
-        dlg.raise_()
-        dlg.activateWindow()
-        self._status_lbl.setText("Particle Statistics opened.")
-
     def _feature_set_store(self):
         """Lazily-created viewer-session store of named feature sets."""
         store = getattr(self, "_feature_set_store_obj", None)
@@ -517,143 +439,6 @@ class ImageViewerToolsMixin:
             store = FeatureSetStore()
             self._feature_set_store_obj = store
         return store
-
-    def _on_send_features_to_particle_statistics(self, result) -> None:
-        """Snapshot a Feature Finder result into the store and open Particle Statistics."""
-        arr = self._display_arr if self._display_arr is not None else self._raw_arr
-        points = list(getattr(result, "points", []) or [])
-        if arr is None or not points:
-            self._status_lbl.setText("No features to send.")
-            return
-        import numpy as np
-
-        from probeflow.measurements.feature_sets import FeatureSet
-
-        px_x_m, px_y_m = self._pixel_size_xy_m()
-        points_px = np.array([[float(p.x_px), float(p.y_px)] for p in points], dtype=float)
-        points_m = points_px * np.array([px_x_m, px_y_m], dtype=float)
-        ny, nx = arr.shape[:2]
-        image_label = self.windowTitle() or "image"
-        mode = str(getattr(result, "mode", "features") or "features")
-        feature_set = FeatureSet.from_points(
-            name=f"{image_label} · {mode} (N={len(points)})",
-            points_px=points_px,
-            points_m=points_m,
-            scan_range_m=(nx * px_x_m, ny * px_y_m),
-            image_shape=(ny, nx),
-            source_type="feature_finder",
-            image_label=image_label,
-            metadata={"detection_mode": mode},
-        )
-        set_id = self._feature_set_store().add(feature_set)
-        self._on_open_particle_statistics(
-            initial_mode="real",
-            include_real_context=True,
-            preserve_existing_mode=False,
-        )
-        dlg = getattr(self, "_particle_statistics_dialog", None)
-        if dlg is not None and hasattr(dlg, "select_feature_set"):
-            dlg.select_feature_set(set_id)
-
-    def _particle_statistics_context(self, *, include_real_context: bool) -> dict:
-        arr = self._display_arr if self._display_arr is not None else self._raw_arr
-        point_sources = self._point_source_records() if include_real_context else []
-        active_area_roi = self._active_image_roi() if include_real_context else None
-        active_mask = None
-        if include_real_context:
-            active_mask_getter = getattr(self, "_active_mask_array", None)
-            if callable(active_mask_getter):
-                active_mask = active_mask_getter()
-
-        return {
-            "point_sources": point_sources,
-            "scan": self._adstat_scan_context(arr) if include_real_context else None,
-            "active_area_roi": active_area_roi,
-            "active_mask": active_mask,
-            "image_shape": arr.shape[:2] if arr is not None and include_real_context else None,
-            "feature_sets": self._feature_set_store().all(),
-            "feature_set_store": self._feature_set_store(),
-        }
-
-    def _on_open_adstat_workbench(
-        self,
-        *,
-        initial_mode: str = "real",
-        include_real_context: bool = True,
-    ) -> None:
-        self._on_open_particle_statistics(
-            initial_mode=initial_mode,
-            include_real_context=include_real_context,
-            preserve_existing_mode=False,
-        )
-
-    def _on_open_adstat_statistics(self) -> None:
-        self._on_open_adstat_workbench(initial_mode="landing", include_real_context=True)
-
-    def _on_open_adstat_sandbox(self) -> None:
-        # Opens the free-play Model simulations (sandbox) mode, not the tutorial.
-        self._on_open_adstat_workbench(
-            initial_mode="sandbox",
-            include_real_context=False,
-        )
-
-    def _adstat_scan_context(self, arr):
-        if arr is None:
-            return None
-        scan_range = getattr(self, "_display_scan_range_m", None)
-        if scan_range is None:
-            scan_range = getattr(self, "_scan_range_m", None)
-        if scan_range is None:
-            return None
-        entries = getattr(self, "_entries", [])
-        entry = entries[self._idx] if entries else None
-        shape = arr.shape[:2]
-        return SimpleNamespace(
-            scan_range_m=(float(scan_range[0]), float(scan_range[1])),
-            dims=(int(shape[1]), int(shape[0])),
-            source_path=getattr(entry, "path", None),
-        )
-
-    def _on_open_feature_lattice(self) -> None:
-        item = getattr(self, "_lattice_grid_item", None)
-        grid = item.grid() if item is not None else None
-        arr = self._display_arr if self._display_arr is not None else self._raw_arr
-        px_x, px_y = self._pixel_size_xy_m()
-        context = feature_lattice_launch_context(
-            self._point_source_records(),
-            lattice_grid=grid,
-            image_shape=arr.shape[:2] if arr is not None else None,
-            pixel_size_x_m=px_x,
-            pixel_size_y_m=px_y,
-        )
-        if not context.ready:
-            self._status_lbl.setText(str(context.status_message))
-            return
-        _, ch_unit, _ = self._channel_unit()
-        entries = getattr(self, "_entries", [])
-        entry = entries[self._idx] if entries else None
-        from probeflow.gui.dialogs.feature_lattice_dialog import FeatureLatticeDialog
-
-        def _add(result):
-            self._add_dialog_measurement_result(result)
-
-        dlg = FeatureLatticeDialog(
-            context.sources_px,
-            lattice_origin_px=context.lattice_origin_px,
-            a_px=context.a_px,
-            b_px=context.b_px,
-            pixel_size_x_m=context.pixel_size_x_m,
-            pixel_size_y_m=context.pixel_size_y_m,
-            image_shape=context.image_shape,
-            source_label=self._source_label(),
-            source_path=str(entry.path) if entry is not None else None,
-            channel=ch_unit,
-            source_metadata=context.source_metadata,
-            on_add_result=_add,
-            theme=self._t,
-            parent=self,
-        )
-        self._present_modal_tool(dlg)
 
     def _on_open_fft_viewer(self):
         arr = self._display_arr if self._display_arr is not None else self._raw_arr

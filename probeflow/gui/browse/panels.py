@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import json
 
-from probeflow.core.browse_filters import FolderFilterState
+from probeflow.core.browse_filters import BIAS_MATCH_TOLERANCE_MV, FolderFilterState
 from probeflow.gui.typography import ui_font
 from PySide6.QtCore import Qt, QThreadPool, Signal, Slot
 from PySide6.QtGui import QColor, QCursor, QFont, QImage, QPixmap
@@ -13,7 +12,6 @@ from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
     QComboBox,
-    QDoubleSpinBox,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -61,11 +59,11 @@ class BrowseToolPanel(QWidget):
     map_spectra_requested      = Signal()
     overlay_spectra_requested  = Signal()
     filter_changed             = Signal(str)   # "all" | "images" | "spectra"
+    sort_mode_changed          = Signal(str)   # "name" | "size"
     folder_filter_changed      = Signal(object)
     export_filtered_requested  = Signal()
     thumbnail_channel_changed  = Signal(str)
     thumbnail_size_changed     = Signal(str)   # "large" | "small"
-    open_fc_window_requested   = Signal()      # floating Feature Counting window
 
     def __init__(self, t: dict, cfg: dict, parent=None):
         super().__init__(parent)
@@ -99,81 +97,6 @@ class BrowseToolPanel(QWidget):
         open_btn.setObjectName("accentBtn")
         open_btn.clicked.connect(self.open_folder_requested.emit)
         lay.addWidget(open_btn)
-
-        self._filter_toggle_btn = QPushButton("[+] Filter folder")
-        self._filter_toggle_btn.setToolTip(
-            "Show or hide the folder filters — hide scans outside a size, "
-            "completion or bias range.")
-        self._filter_toggle_btn.setFont(ui_font(9, weight=QFont.Bold))
-        self._filter_toggle_btn.setFixedHeight(26)
-        self._filter_toggle_btn.setCursor(QCursor(Qt.PointingHandCursor))
-        self._filter_toggle_btn.clicked.connect(self._toggle_folder_filters)
-        lay.addWidget(self._filter_toggle_btn)
-
-        self._folder_filter_box = QWidget()
-        filter_box_lay = QVBoxLayout(self._folder_filter_box)
-        filter_box_lay.setContentsMargins(0, 0, 0, 0)
-        filter_box_lay.setSpacing(6)
-
-        self._size_filter_btn = self._make_filter_toggle("Size (nm)")
-        self._size_filter_btn.setToolTip(
-            "Only show scans whose physical width and height fall inside "
-            "the min/max ranges below.")
-        filter_box_lay.addWidget(self._size_filter_btn)
-        self._size_min_width_nm = self._make_filter_spinbox(0.0, 1_000_000.0, 1.0, " nm")
-        self._size_min_width_nm.setToolTip(
-            "Hide scans narrower than this. 0 disables the lower bound.")
-        self._size_max_width_nm = self._make_filter_spinbox(0.0, 1_000_000.0, 1.0, " nm")
-        self._size_max_width_nm.setToolTip("Hide scans wider than this.")
-        self._size_min_height_nm = self._make_filter_spinbox(0.0, 1_000_000.0, 1.0, " nm")
-        self._size_min_height_nm.setToolTip(
-            "Hide scans shorter than this. 0 disables the lower bound.")
-        self._size_max_height_nm = self._make_filter_spinbox(0.0, 1_000_000.0, 1.0, " nm")
-        self._size_max_height_nm.setToolTip("Hide scans taller than this.")
-        self._size_max_width_nm.setValue(1_000_000.0)
-        self._size_max_height_nm.setValue(1_000_000.0)
-        filter_box_lay.addWidget(self._labeled_spin_row("Min width", self._size_min_width_nm))
-        filter_box_lay.addWidget(self._labeled_spin_row("Max width", self._size_max_width_nm))
-        filter_box_lay.addWidget(self._labeled_spin_row("Min height", self._size_min_height_nm))
-        filter_box_lay.addWidget(self._labeled_spin_row("Max height", self._size_max_height_nm))
-
-        self._completion_filter_btn = self._make_filter_toggle("Completion (%)")
-        self._completion_filter_btn.setToolTip(
-            "Only show scans that recorded at least the given fraction of "
-            "their frame — hides scans that were stopped early.")
-        filter_box_lay.addWidget(self._completion_filter_btn)
-        self._completion_min_pct = self._make_filter_spinbox(0.0, 100.0, 1.0, " %")
-        self._completion_min_pct.setToolTip(
-            "Minimum recorded fraction of the frame. Raise it to hide "
-            "partially-recorded scans; 0 shows everything.")
-        self._completion_min_pct.setValue(50.0)
-        filter_box_lay.addWidget(self._labeled_spin_row("Min completion", self._completion_min_pct))
-
-        self._bias_filter_btn = self._make_filter_toggle("Bias (mV)")
-        self._bias_filter_btn.setToolTip(
-            "Only show scans acquired with a sample bias inside the min/max "
-            "range below.")
-        filter_box_lay.addWidget(self._bias_filter_btn)
-        self._bias_min_mv = self._make_filter_spinbox(-10000.0, 10000.0, 1.0, " mV")
-        self._bias_min_mv.setToolTip("Hide scans acquired below this bias.")
-        self._bias_max_mv = self._make_filter_spinbox(-10000.0, 10000.0, 1.0, " mV")
-        self._bias_max_mv.setToolTip("Hide scans acquired above this bias.")
-        self._bias_min_mv.setValue(-500.0)
-        self._bias_max_mv.setValue(500.0)
-        filter_box_lay.addWidget(self._labeled_spin_row("Min bias", self._bias_min_mv))
-        filter_box_lay.addWidget(self._labeled_spin_row("Max bias", self._bias_max_mv))
-
-        self._export_filtered_btn = QPushButton("Export filtered folder")
-        self._export_filtered_btn.setToolTip(
-            "Copy the scans that pass the current filters into a new folder.")
-        self._export_filtered_btn.setFont(ui_font(9))
-        self._export_filtered_btn.setFixedHeight(28)
-        self._export_filtered_btn.setCursor(QCursor(Qt.PointingHandCursor))
-        self._export_filtered_btn.clicked.connect(self.export_filtered_requested.emit)
-        filter_box_lay.addWidget(self._export_filtered_btn)
-
-        self._folder_filter_box.setVisible(False)
-        lay.addWidget(self._folder_filter_box)
 
         # ── Filter toggle (All / Images / Spectra) ─────────────────────────────
         filter_row = QWidget()
@@ -215,6 +138,52 @@ class BrowseToolPanel(QWidget):
         self._filter_mode = initial
 
         lay.addWidget(filter_row)
+
+        # ── Sort & filter ─────────────────────────────────────────────────────
+        sort_lbl = QLabel("Sort by")
+        sort_lbl.setFont(ui_font(9, weight=QFont.Bold))
+        lay.addWidget(sort_lbl)
+        self.sort_cb = QComboBox()
+        self.sort_cb.addItems(["Name", "Scan size"])
+        self.sort_cb.setFont(ui_font(10))
+        self.sort_cb.setToolTip(
+            "Order of the thumbnail cards — by file name, or by physical scan "
+            "area (largest first).")
+        self.sort_cb.currentTextChanged.connect(self._on_sort_changed)
+        lay.addWidget(self.sort_cb)
+
+        bias_lbl = QLabel("Bias")
+        bias_lbl.setFont(ui_font(9, weight=QFont.Bold))
+        lay.addWidget(bias_lbl)
+        self.bias_cb = QComboBox()
+        self.bias_cb.addItem("All biases", None)
+        self.bias_cb.setFont(ui_font(10))
+        self.bias_cb.setToolTip(
+            "Show only scans acquired at one bias. The list holds the bias "
+            "values actually present in this folder.")
+        self.bias_cb.currentIndexChanged.connect(self._emit_folder_filter_state)
+        lay.addWidget(self.bias_cb)
+
+        self._hide_incomplete_cb = QCheckBox("Hide incomplete scans")
+        self._hide_incomplete_cb.setFont(ui_font(9))
+        self._hide_incomplete_cb.setCursor(QCursor(Qt.PointingHandCursor))
+        self._hide_incomplete_cb.setObjectName("folderFilterToggle")
+        self._hide_incomplete_cb.setToolTip(
+            "Hide scans that recorded less than half of their frame "
+            "(stopped early).")
+        self._hide_incomplete_cb.toggled.connect(self._emit_folder_filter_state)
+        lay.addWidget(self._hide_incomplete_cb)
+
+        self._export_filtered_btn = QPushButton("Export filtered folder")
+        self._export_filtered_btn.setToolTip(
+            "Copy the scans currently shown (after bias / completeness "
+            "filtering) into a new folder.")
+        self._export_filtered_btn.setFont(ui_font(9))
+        self._export_filtered_btn.setFixedHeight(28)
+        self._export_filtered_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self._export_filtered_btn.clicked.connect(self.export_filtered_requested.emit)
+        lay.addWidget(self._export_filtered_btn)
+
         lay.addWidget(_sep())
 
         # ── Thumbnail appearance ──────────────────────────────────────────────
@@ -256,7 +225,10 @@ class BrowseToolPanel(QWidget):
         lay.addWidget(align_lbl)
         self.align_rows_cb = QComboBox()
         self.align_rows_cb.addItems(["None", "Median", "Mean"])
-        self.align_rows_cb.setCurrentText("None")
+        saved_align = str(cfg.get("thumbnail_align", "median")).capitalize()
+        if saved_align not in ("None", "Median", "Mean"):
+            saved_align = "Median"
+        self.align_rows_cb.setCurrentText(saved_align)
         self.align_rows_cb.setFont(ui_font(10))
         self.align_rows_cb.setToolTip(
             "Preview-only thumbnail row alignment. Full-size viewer data opens raw."
@@ -299,25 +271,9 @@ class BrowseToolPanel(QWidget):
         self._overlay_spectra_btn.clicked.connect(self.overlay_spectra_requested.emit)
         lay.addWidget(self._overlay_spectra_btn)
 
-        lay.addWidget(_sep())
-
-        fc_btn = QPushButton("🔬  Feature Counting")
-        fc_btn.setFont(ui_font(10, weight=QFont.Bold))
-        fc_btn.setFixedHeight(34)
-        fc_btn.setCursor(QCursor(Qt.PointingHandCursor))
-        fc_btn.setObjectName("accentBtn")
-        fc_btn.setToolTip(
-            "Open the Feature Counting window.\n"
-            "Stays open alongside Browse so you can keep browsing\n"
-            "thumbnails while counting molecules.\n"
-            "Shortcut: Ctrl+3")
-        fc_btn.clicked.connect(self.open_fc_window_requested.emit)
-        lay.addWidget(fc_btn)
-
         lay.addStretch()
         scroll.setWidget(inner)
         outer.addWidget(scroll)
-        self._sync_folder_filter_inputs()
         self.apply_theme(self._t)
 
     # ── Slots ──────────────────────────────────────────────────────────────────
@@ -332,71 +288,11 @@ class BrowseToolPanel(QWidget):
         self._filter_mode = mode
         self.filter_changed.emit(mode)
 
-    def _make_filter_toggle(self, text: str) -> QCheckBox:
-        btn = QCheckBox(text)
-        btn.setFont(ui_font(9, weight=QFont.Bold))
-        btn.setCursor(QCursor(Qt.PointingHandCursor))
-        btn.setObjectName("folderFilterToggle")
-        btn.toggled.connect(self._sync_folder_filter_inputs)
-        btn.toggled.connect(self._emit_folder_filter_state)
-        return btn
-
-    def _make_filter_spinbox(
-        self,
-        minimum: float,
-        maximum: float,
-        step: float,
-        suffix: str,
-    ) -> QDoubleSpinBox:
-        box = QDoubleSpinBox()
-        box.setDecimals(1)
-        box.setRange(minimum, maximum)
-        box.setSingleStep(step)
-        box.setSuffix(suffix)
-        box.setFont(ui_font(9))
-        box.valueChanged.connect(self._emit_folder_filter_state)
-        return box
-
-    def _labeled_spin_row(self, label: str, box: QDoubleSpinBox) -> QWidget:
-        row = QWidget()
-        row_lay = QHBoxLayout(row)
-        row_lay.setContentsMargins(0, 0, 0, 0)
-        row_lay.setSpacing(6)
-        lbl = QLabel(label)
-        lbl.setFont(ui_font(8))
-        row_lay.addWidget(lbl)
-        row_lay.addWidget(box, 1)
-        return row
-
-    def _toggle_folder_filters(self) -> None:
-        visible = not self._folder_filter_box.isVisible()
-        self._folder_filter_box.setVisible(visible)
-        self._filter_toggle_btn.setText(
-            "[-] Filter folder" if visible else "[+] Filter folder"
-        )
-
-    def _sync_folder_filter_inputs(self) -> None:
-        # Filters are gated by their checkbox state, but their numeric values
-        # stay editable at all times so users can prepare thresholds before
-        # turning a filter on.
-        return
+    def _on_sort_changed(self, text: str) -> None:
+        self.sort_mode_changed.emit("size" if text == "Scan size" else "name")
 
     def _emit_folder_filter_state(self, *_args) -> None:
-        if not all(
-            hasattr(self, name)
-            for name in (
-                "_size_filter_btn",
-                "_completion_filter_btn",
-                "_bias_filter_btn",
-                "_size_min_width_nm",
-                "_size_max_width_nm",
-                "_size_min_height_nm",
-                "_size_max_height_nm",
-                "_completion_min_pct",
-                "_bias_min_mv",
-                "_bias_max_mv",
-            )
-        ):
+        if not hasattr(self, "bias_cb") or not hasattr(self, "_hide_incomplete_cb"):
             return
         self.folder_filter_changed.emit(self.get_folder_filter_state())
 
@@ -404,19 +300,42 @@ class BrowseToolPanel(QWidget):
     def get_filter_mode(self) -> str:
         return self._filter_mode
 
+    def get_sort_mode(self) -> str:
+        return "size" if self.sort_cb.currentText() == "Scan size" else "name"
+
     def get_folder_filter_state(self) -> FolderFilterState:
+        bias = self.bias_cb.currentData()
         return FolderFilterState(
-            size_enabled=self._size_filter_btn.isChecked(),
-            min_width_nm=float(self._size_min_width_nm.value()),
-            max_width_nm=float(self._size_max_width_nm.value()),
-            min_height_nm=float(self._size_min_height_nm.value()),
-            max_height_nm=float(self._size_max_height_nm.value()),
-            completion_enabled=self._completion_filter_btn.isChecked(),
-            min_completion_pct=float(self._completion_min_pct.value()),
-            bias_enabled=self._bias_filter_btn.isChecked(),
-            min_bias_mv=float(self._bias_min_mv.value()),
-            max_bias_mv=float(self._bias_max_mv.value()),
+            bias_value_mv=float(bias) if bias is not None else None,
+            hide_incomplete=self._hide_incomplete_cb.isChecked(),
         )
+
+    def set_bias_options(self, options: list[tuple[float, int]]) -> None:
+        """Rebuild the bias picker from ``(bias_mv, count)`` pairs.
+
+        Keeps the current selection when the same bias is still present;
+        otherwise falls back to "All biases". Emits the filter state only
+        when the effective selection changed.
+        """
+        previous = self.bias_cb.currentData()
+        self.bias_cb.blockSignals(True)
+        self.bias_cb.clear()
+        self.bias_cb.addItem("All biases", None)
+        restored_index = 0
+        for bias_mv, count in options:
+            label = f"{bias_mv:g} mV ({count})"
+            self.bias_cb.addItem(label, float(bias_mv))
+            if (
+                previous is not None
+                and abs(float(bias_mv) - float(previous)) <= BIAS_MATCH_TOLERANCE_MV
+            ):
+                restored_index = self.bias_cb.count() - 1
+        self.bias_cb.setCurrentIndex(restored_index)
+        self.bias_cb.blockSignals(False)
+        if (previous is not None) and restored_index == 0:
+            # Selection was dropped (bias absent in the new folder) — the
+            # effective filter changed, so announce it.
+            self._emit_folder_filter_state()
 
     def set_filter_mode(self, mode: str) -> None:
         if mode not in self._filter_btns:
@@ -425,14 +344,6 @@ class BrowseToolPanel(QWidget):
         btn = self._filter_btns[mode]
         if not btn.isChecked():
             btn.setChecked(True)
-
-    def update_selection_hint(self, n: int):
-        if n == 0:
-            return
-        elif n == 1:
-            return
-        else:
-            return
 
     def apply_theme(self, t: dict):
         self._t = t
@@ -459,13 +370,9 @@ class BrowseToolPanel(QWidget):
             f"border-color: {t['accent_bg']};"
             f"}}"
         )
-        for btn in (
-            getattr(self, "_size_filter_btn", None),
-            getattr(self, "_completion_filter_btn", None),
-            getattr(self, "_bias_filter_btn", None),
-        ):
-            if btn is not None:
-                btn.setStyleSheet(toggle_style)
+        btn = getattr(self, "_hide_incomplete_cb", None)
+        if btn is not None:
+            btn.setStyleSheet(toggle_style)
 
 
 # ── Browse info panel (RIGHT) ─────────────────────────────────────────────────
@@ -788,23 +695,6 @@ class BrowseInfoPanel(QWidget):
                 if s:
                     rows.append((k, s))
 
-        scanflow = dict(entry.scanflow_acquisition or {})
-        if scanflow:
-            rows.append(("SCANFLOW_SCHEMA", str(scanflow.get("schema") or "")))
-            rows.append(("SCANFLOW_RECORD_TYPE", str(scanflow.get("record_type") or "")))
-            session = scanflow.get("session") or {}
-            if isinstance(session, dict):
-                for key in ("session_id", "routine"):
-                    value = session.get(key)
-                    if value not in (None, ""):
-                        rows.append((f"SCANFLOW_SESSION_{key.upper()}", str(value)))
-            for key in ("step", "motion", "drift", "quality", "safety", "scan_parameters", "position"):
-                value = scanflow.get(key)
-                if value not in (None, {}, []):
-                    if isinstance(value, dict):
-                        rows.append((f"SCANFLOW_{key.upper()}", json.dumps(value, sort_keys=True, default=str)))
-                    else:
-                        rows.append((f"SCANFLOW_{key.upper()}", str(value)))
         self._meta_rows = rows
         self._filter_meta()
 

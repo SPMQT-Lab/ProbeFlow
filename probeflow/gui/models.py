@@ -42,7 +42,6 @@ class SxmFile:
     source_format: str            = "sxm"
     acquisition_label: Optional[str] = None
     experiment_metadata: dict     = field(default_factory=dict)
-    scanflow_acquisition: dict    = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.scan_width_nm is None and self.scan_nm is not None:
@@ -56,7 +55,6 @@ class SxmFile:
         fmt = {"createc_dat": "dat", "nanonis_sxm": "sxm", "rhk_sm4": "sm4"}.get(
             item.source_format, item.source_format)
         experiment = dict(item.metadata.get("experiment_metadata") or {})
-        scanflow = dict(item.metadata.get("scanflow_acquisition") or {})
         label = scan_mode_label(experiment)
         if item.load_error or item.shape is None:
             return cls(
@@ -65,7 +63,6 @@ class SxmFile:
                 source_format=fmt,
                 acquisition_label=label,
                 experiment_metadata=experiment,
-                scanflow_acquisition=scanflow,
             )
         Ny, Nx = item.shape
         visible_range = item.visible_scan_range or item.scan_range
@@ -88,7 +85,6 @@ class SxmFile:
             source_format=fmt,
             acquisition_label=label,
             experiment_metadata=experiment,
-            scanflow_acquisition=scanflow,
         )
 
 

@@ -198,6 +198,42 @@ class TestQuickSelectionEditing:
         finally:
             canvas.deleteLater()
 
+    def test_delete_key_clears_selection_when_no_active_roi(self, qapp):
+        from PySide6.QtCore import Qt
+        from PySide6.QtGui import QKeyEvent
+
+        canvas = _canvas_with_selection()
+        try:
+            cleared = []
+            canvas.selection_cleared.connect(lambda: cleared.append(True))
+            event = QKeyEvent(QKeyEvent.KeyPress, Qt.Key_Delete, Qt.NoModifier)
+            canvas.keyPressEvent(event)
+            assert canvas._selection is None
+            assert cleared == [True]
+        finally:
+            canvas.deleteLater()
+
+    def test_delete_key_prefers_active_roi_over_selection(self, qapp):
+        from PySide6.QtCore import Qt
+        from PySide6.QtGui import QKeyEvent
+        from probeflow.core.roi import ROI, ROISet
+
+        canvas = _canvas_with_selection()
+        try:
+            roi_set = ROISet(image_id="scan")
+            roi = ROI.new("rect", {"x": 1, "y": 1, "width": 5, "height": 5})
+            roi_set.add(roi)
+            roi_set.active_roi_id = roi.id
+            canvas._image_roi_set = roi_set
+            deletes = []
+            canvas.roi_delete_requested.connect(lambda roi_id: deletes.append(roi_id))
+            event = QKeyEvent(QKeyEvent.KeyPress, Qt.Key_Delete, Qt.NoModifier)
+            canvas.keyPressEvent(event)
+            assert deletes == [roi.id]
+            assert canvas._selection is not None  # ROI deletion wins; selection stays
+        finally:
+            canvas.deleteLater()
+
     def test_corner_handle_drag_resizes_selection(self, qapp):
         canvas = _canvas_with_selection()
         try:
@@ -266,6 +302,38 @@ class TestOutlinePensStayThin:
         assert _PEN_PREVIEW.isCosmetic()
         for pen in (roi_items._PEN_INACTIVE, roi_items._PEN_ACTIVE, roi_items._PEN_HOVER):
             assert pen.isCosmetic()
+
+
+class TestAdaptiveZoomCeiling:
+    """Small scans need far more than the classic 8x to inspect pixels."""
+
+    def _canvas_with_image(self, size: int):
+        from PySide6.QtGui import QPixmap
+        from probeflow.gui.image_canvas import ImageCanvas
+
+        canvas = ImageCanvas()
+        pm = QPixmap(size, size)
+        pm.fill()
+        canvas.set_source(pm, reset_zoom=True)
+        return canvas
+
+    def test_small_image_can_zoom_well_beyond_8x(self, qapp):
+        canvas = self._canvas_with_image(64)
+        try:
+            for _ in range(40):
+                canvas.zoom_by(2.0)
+            assert canvas.zoom() == pytest.approx(8192.0 / 64)  # 128x
+        finally:
+            canvas.deleteLater()
+
+    def test_large_image_keeps_classic_8x_cap(self, qapp):
+        canvas = self._canvas_with_image(2048)
+        try:
+            for _ in range(10):
+                canvas.zoom_by(2.0)
+            assert canvas.zoom() == pytest.approx(8.0)
+        finally:
+            canvas.deleteLater()
 
 
 class TestFitZoomFloor:

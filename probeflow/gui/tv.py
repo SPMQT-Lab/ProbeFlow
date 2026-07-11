@@ -1,8 +1,7 @@
 """TV-denoise tab — exposes probeflow.processing.tv_denoise in the GUI.
 
-Sibling to :mod:`probeflow.gui.features`. Kept separate so the optional
-TV-denoise dependencies and UI live alongside the kernel they wrap, without
-bloating the main Browse/Viewer file.
+Kept in its own module so the optional TV-denoise UI lives alongside the
+kernel it wraps, without bloating the main Browse/Viewer file.
 """
 
 from __future__ import annotations

@@ -7,6 +7,18 @@ from PySide6.QtGui import QColor
 # -- colours -----------------------------------------------------------------
 
 _COL_GRID = QColor("#89b4fa")  # blue  - lattice lines
+
+# Colours cycled through for *stored* grid layers, so several lattices can be
+# distinguished at a glance. The active (editable) grid is always _COL_GRID
+# blue; none of these repeat it.
+STORED_GRID_PALETTE: tuple[str, ...] = (
+    "#f9e2af",  # yellow
+    "#a6e3a1",  # green
+    "#f38ba8",  # pink
+    "#cba6f7",  # purple
+    "#94e2d5",  # teal
+    "#fab387",  # peach
+)
 _COL_A = QColor("#a6e3a1")  # green - a vector / handle
 _COL_B = QColor("#fab387")  # peach - b vector / handle
 _COL_ORIGIN = QColor("#f38ba8")  # red   - origin handle

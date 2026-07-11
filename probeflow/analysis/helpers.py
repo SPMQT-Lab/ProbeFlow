@@ -14,7 +14,7 @@ def missing_extra_message(pkg: str, import_name: str, purpose: str) -> str:
         f"  Active interpreter: {sys.executable}\n"
         f"  Python version:     {sys.version.split()[0]}\n"
         f"Install into THIS interpreter with:\n"
-        f"  {sys.executable} -m pip install 'probeflow[features]'\n"
+        f"  {sys.executable} -m pip install 'probeflow[lattice]'\n"
         f"(Plain `pip install ...` may target a different environment.)"
     )
 

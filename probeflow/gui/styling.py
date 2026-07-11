@@ -301,8 +301,11 @@ QPushButton {{
     color: {t['btn_fg']};
     border: none;
     border-radius: 6px;
-    padding: 0 12px;
+    padding: 0 10px;
     min-height: 26px;
+    /* One step under the body size: overrides the scattered tiny per-widget
+       fonts so button text is never dwarfed by the button box. */
+    font-size: {max(font_pt - 1, 9)}pt;
 }}
 QPushButton:hover {{ background-color: {t['hover']}; }}
 QPushButton:pressed {{ background-color: {t['sel_tint']}; }}
@@ -404,6 +407,46 @@ QLineEdit, QDoubleSpinBox, QSpinBox {{
 }}
 QLineEdit:focus, QDoubleSpinBox:focus, QSpinBox:focus {{
     border: 1px solid {t['accent_bg']};
+}}
+/* Restyling the spin-box body drops Qt's native step buttons, so give the
+   sub-controls an explicit, visible size and clear triangle arrows. */
+QSpinBox::up-button, QDoubleSpinBox::up-button {{
+    subcontrol-origin: border;
+    subcontrol-position: top right;
+    width: 18px;
+    border-left: 1px solid {t['border']};
+    border-top-right-radius: 6px;
+    background: {t['btn_bg']};
+}}
+QSpinBox::down-button, QDoubleSpinBox::down-button {{
+    subcontrol-origin: border;
+    subcontrol-position: bottom right;
+    width: 18px;
+    border-left: 1px solid {t['border']};
+    border-bottom-right-radius: 6px;
+    background: {t['btn_bg']};
+}}
+QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover,
+QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {{
+    background: {t['hover']};
+}}
+QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{
+    width: 0; height: 0;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-bottom: 5px solid {t['fg']};
+}}
+QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{
+    width: 0; height: 0;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid {t['fg']};
+}}
+QSpinBox::up-arrow:disabled, QDoubleSpinBox::up-arrow:disabled {{
+    border-bottom-color: {t['border']};
+}}
+QSpinBox::down-arrow:disabled, QDoubleSpinBox::down-arrow:disabled {{
+    border-top-color: {t['border']};
 }}
 QTextEdit {{
     background-color: {t['log_bg']};

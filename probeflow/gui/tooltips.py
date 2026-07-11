@@ -12,17 +12,41 @@ from __future__ import annotations
 import html
 
 from PySide6.QtCore import QEvent, QObject
+from PySide6.QtGui import QFontMetrics
 from PySide6.QtWidgets import QToolTip
 
 # Max tooltip width in px before text wraps to the next row.
 _WRAP_PX = 340
 
 
+def _needs_wrap(text: str) -> bool:
+    """True when some line of plain text would exceed the wrap width.
+
+    Short tooltips must keep their natural size — a fixed-width table leaves
+    a mostly-empty box around one short sentence.
+    """
+    try:
+        metrics = QFontMetrics(QToolTip.font())
+        return any(
+            metrics.horizontalAdvance(line) > _WRAP_PX
+            for line in text.splitlines()
+        )
+    except Exception:
+        return True  # be safe: cap width rather than risk a screen-wide strip
+
+
 def _wrap(text: str) -> str:
     stripped = text.lstrip()
-    # Honour tooltips that are already rich text (e.g. model formulas); just cap
-    # their width.  Plain text is escaped and its newlines become line breaks.
-    inner = text if stripped.startswith("<") else html.escape(text).replace("\n", "<br>")
+    if stripped.startswith("<"):
+        # Already rich text (e.g. model formulas): just cap the width.
+        return (
+            f'<table width="{_WRAP_PX}" border="0" cellspacing="0" cellpadding="0">'
+            f"<tr><td>{text}</td></tr></table>"
+        )
+    inner = html.escape(text).replace("\n", "<br>")
+    if not _needs_wrap(text):
+        # Fits already — rich text (so styling matches) at its natural size.
+        return f"<p style='margin:0'>{inner}</p>"
     return (
         f'<table width="{_WRAP_PX}" border="0" cellspacing="0" cellpadding="0">'
         f"<tr><td>{inner}</td></tr></table>"

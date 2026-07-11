@@ -59,7 +59,7 @@ class LinePeriodicityPanel(QWidget):
             "max_period_m": max_val * 1e-10 if max_val > 0 else None,
         }
 
-    def set_result(self, result, *, quality_ok: bool = True) -> None:
+    def set_result(self, result) -> None:
         """Update the result display after a successful run."""
         from probeflow.analysis.line_periodicity import format_period
 

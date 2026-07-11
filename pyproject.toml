@@ -28,11 +28,11 @@ dependencies = [
 
 [project.optional-dependencies]
 dev      = ["pytest", "vulture", "ruff>=0.15,<0.16", "pre-commit"]
-adstat   = ["adstat>=0.2,<0.3"]
-features = ["opencv-python", "scikit-learn"]
-clip     = ["torch", "torchvision", "openai-clip"]
+# opencv + scikit-learn power the SIFT-based lattice-vector extraction
+# (analysis/lattice.py); both are lazy-imported with a friendly install hint.
+lattice  = ["opencv-python", "scikit-learn"]
 gwyddion = ["gwyfile"]
-all      = ["adstat>=0.2,<0.3", "opencv-python", "scikit-learn", "gwyfile", "pytest"]
+all      = ["opencv-python", "scikit-learn", "gwyfile", "pytest"]
 
 [project.scripts]
 probeflow = "probeflow.cli:main"

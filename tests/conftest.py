@@ -14,7 +14,6 @@ CUSHION_DIR = REPO_ROOT / "probeflow" / "data" / "file_cushions"
 GUI_TEST_MODULES = {
     "test_gui_index_integration.py",
     "test_gui_processing_panel.py",
-    "test_gui_features.py",
     "test_viewer_window_menu.py",
     "test_roi_click_selection_canvas.py",
     "test_viewer_region_levels.py",
@@ -36,15 +35,11 @@ GUI_TEST_MODULES = {
     "test_workflow_replay.py",
     "test_spec_viewer_display.py",
     "test_canvas_selection_interactions.py",
-    "test_dataset_builder_view_tray.py",
     "test_browse_folder_filter_ui.py",
 }
 
 MIXED_QT_FIXTURE_MODULES = {
-    "test_feature_lattice.py",
     "test_pair_correlation.py",
-    "test_adstat_results_dialog.py",
-    "test_adstat_workbench_dialog.py",
     "test_fft_viewer_utils.py",
     "test_definitions_dialog.py",
     "test_lattice_grid.py",

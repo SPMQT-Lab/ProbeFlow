@@ -201,13 +201,9 @@ def _item_from_scan(
     size_bytes: Optional[int],
 ) -> ProbeFlowItem:
     from probeflow.core.metadata import read_scan_metadata
-    from probeflow.io.scanflow_acquisition import load_scanflow_scan_sidecar
     meta = read_scan_metadata(path, file_type=ft)
     extra = dict(meta.raw_header)
     extra["experiment_metadata"] = dict(meta.experiment_metadata)
-    sidecar = load_scanflow_scan_sidecar(path, missing_ok=True)
-    if sidecar is not None:
-        extra["scanflow_acquisition"] = sidecar
     return ProbeFlowItem(
         path=path,
         display_name=meta.display_name or path.stem,
@@ -450,13 +446,8 @@ def subfolder_matches_filters(
                     browse_cache.put_metadata(path, mtime_ns, size_bytes, item)
             if item is None or item.item_type != "scan" or item.load_error is not None:
                 continue
-            visible_range = item.visible_scan_range or item.scan_range
-            width_nm = visible_range[0] * 1e9 if visible_range else None
-            height_nm = visible_range[1] * 1e9 if visible_range else None
             bias_mv = item.bias * 1000.0 if item.bias is not None else None
             if scan_matches_folder_filters(
-                width_nm=width_nm,
-                height_nm=height_nm,
                 completion_pct=item.completion_pct,
                 bias_mv=bias_mv,
                 state=state,

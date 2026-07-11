@@ -55,6 +55,7 @@ from probeflow.gui.no_wheel import install_no_wheel_spinboxes
 
 from .controller import LatticeGridController
 from .graphics_item import LatticeGridItem
+from .stored_grids import StoredGrid, StoredGridList, next_stored_color
 
 # ── unit helpers ──────────────────────────────────────────────────────────────
 
@@ -110,6 +111,9 @@ class LatticeGridPanel(QWidget):
 
         self._unit_scale, self._unit_label = _choose_display_unit(calibration)
         self._updating_controls = False
+        self._stored: list[StoredGrid] = []
+        self._stored_items: list[LatticeGridItem] = []
+        self._stored_color_count = 0
 
         self._build()
         self.sync_from_model()
@@ -117,6 +121,15 @@ class LatticeGridPanel(QWidget):
     def cleanup(self) -> None:
         """Release transient viewer state owned by this panel."""
         self._clear_preview_if_active()
+        for item in self._stored_items:
+            try:
+                scene = item.scene()
+                if scene is not None:
+                    scene.removeItem(item)
+            except RuntimeError:
+                pass
+        self._stored_items = []
+        self._stored = []
         try:
             self._ctrl.set_active(False)
         except RuntimeError:
@@ -273,7 +286,17 @@ class LatticeGridPanel(QWidget):
         reset_btn.setFont(ui_font(9))
         reset_btn.setFixedHeight(24)
         reset_btn.clicked.connect(self._on_reset_origin)
-        lay.addWidget(reset_btn)
+        reset_row = QHBoxLayout()
+        reset_row.setSpacing(4)
+        reset_row.addWidget(reset_btn)
+        # Stored grid layers: park the current grid as a coloured static
+        # overlay and fit another lattice; Edit swaps a layer back in.
+        self._stored_list = StoredGridList(store_button_row=reset_row)
+        self._stored_list.store_requested.connect(self._on_store_grid)
+        self._stored_list.edit_requested.connect(self._on_edit_stored)
+        self._stored_list.remove_requested.connect(self._on_remove_stored)
+        lay.addLayout(reset_row)
+        lay.addWidget(self._stored_list)
 
         meas_grp = QGroupBox("Measured")
         meas_grp.setFont(ui_font(9))
@@ -1144,6 +1167,84 @@ class LatticeGridPanel(QWidget):
         g = self._item.grid()
         self._item.set_grid(g.reset_origin(self._image_w / 2.0, self._image_h / 2.0))
         self.sync_from_model()
+
+    # ── stored grid layers ────────────────────────────────────────────────────
+
+    def _grid_summary(self, grid) -> str:
+        try:
+            d = format_real_space_measurements(grid, self._cal)
+            return f"{d['a_length']} · {d['b_length']} · {d['angle']}"
+        except Exception:
+            return "grid"
+
+    def _grid_detail(self, grid) -> str:
+        try:
+            d = format_real_space_measurements(grid, self._cal)
+            return (
+                f"|a| = {d['a_length']}\n|b| = {d['b_length']}\n"
+                f"angle = {d['angle']}\narea = {d['area']}"
+            )
+        except Exception:
+            return ""
+
+    def _stored_entry_from(self, grid, color: str) -> StoredGrid:
+        return StoredGrid(
+            grid=replace(grid, show_handles=False, show_labels=False),
+            cells=self._item.cells,
+            line_width_px=float(self._line_width_spin.value()),
+            color=color,
+            summary=self._grid_summary(grid),
+            detail=self._grid_detail(grid),
+        )
+
+    def _on_store_grid(self) -> None:
+        scene = self._item.scene()
+        if scene is None:
+            return
+        entry = self._stored_entry_from(
+            self._item.grid(), next_stored_color(self._stored_color_count)
+        )
+        self._stored_color_count += 1
+        item = LatticeGridItem(
+            entry.grid, self._image_w, self._image_h,
+            cells=entry.cells, color=entry.color,
+        )
+        item.set_line_width(entry.line_width_px)
+        item.setZValue(45)  # under the active grid (50) so its handles stay on top
+        scene.addItem(item)
+        self._stored.append(entry)
+        self._stored_items.append(item)
+        self._stored_list.set_entries(self._stored)
+
+    def _on_edit_stored(self, index: int) -> None:
+        """Swap a stored layer into the editor; the active grid takes its slot."""
+        if not (0 <= index < len(self._stored)):
+            return
+        stored = self._stored[index]
+        active = self._item.grid()
+        parked = self._stored_entry_from(active, stored.color)
+        self._stored[index] = parked
+        self._stored_items[index].set_grid(parked.grid)
+        self._stored_items[index].set_cells(parked.cells)
+        self._stored_items[index].set_line_width(parked.line_width_px)
+        self._item.set_grid(replace(
+            stored.grid,
+            visible=active.visible,
+            show_handles=active.show_handles,
+            show_labels=active.show_labels,
+        ))
+        self._stored_list.set_entries(self._stored)
+        self.sync_from_model()
+
+    def _on_remove_stored(self, index: int) -> None:
+        if not (0 <= index < len(self._stored)):
+            return
+        item = self._stored_items.pop(index)
+        del self._stored[index]
+        scene = item.scene()
+        if scene is not None:
+            scene.removeItem(item)
+        self._stored_list.set_entries(self._stored)
 
     def _on_export_with_grid(self) -> None:
         self._export(grid_only=False)
