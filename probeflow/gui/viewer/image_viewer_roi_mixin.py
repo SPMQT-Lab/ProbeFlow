@@ -171,6 +171,9 @@ class ImageViewerRoiMixin:
             self._angle_overlay.remove_from_scene(self._zoom_lbl.scene())
             self._angle_overlay = None
             self._angle_measurement_id = None
+            panel = getattr(self, "_measurement_panel", None)
+            if panel is not None:
+                panel.set_live_angle(None)
             if hasattr(self, "_status_lbl"):
                 self._status_lbl.setText("Angle overlay cleared.")
             self._sync_viewer_menu_actions()

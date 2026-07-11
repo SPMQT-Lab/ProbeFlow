@@ -63,34 +63,46 @@ def _dialog(monkeypatch):
     return ImageViewerDialog(entry, [entry], "gray", THEMES["dark"])
 
 
-def test_update_angle_measurement_rewrites_same_row(qapp, monkeypatch):
+def test_angle_placement_shows_live_value_without_storing(qapp, monkeypatch):
+    """Placing the angle updates the live readout only; storing is explicit."""
     from PySide6.QtCore import QPointF
 
     dlg = _dialog(monkeypatch)
     try:
         # Place a right-angle overlay: P1=(0,0), vertex=(10,0), P3=(10,10) -> 90°.
         dlg._on_angle_points_ready(QPointF(0, 0), QPointF(10, 0), QPointF(10, 10))
+        assert dlg._measurement_table.results() == []  # nothing auto-stored
+        assert dlg._measurement_panel._angle_live_lbl.text() == "90.00°"
+
+        # Dragging a handle updates the live readout with no clicks.
+        # Move P3 to (0,10): arms (-10,0) and (-10,10) -> 45°.
+        dlg._angle_overlay._h3.setPos(QPointF(0, 10))
+        assert dlg._measurement_panel._angle_live_lbl.text() == "45.00°"
+        assert dlg._measurement_table.results() == []
+
+        # 'Add to results' stores a snapshot; a second click stores another.
+        dlg._on_update_angle_measurement()
         results = dlg._measurement_table.results()
         assert len(results) == 1
-        mid = results[0].measurement_id
-        assert dlg._angle_measurement_id == mid
-        assert results[0].values["angle_deg"] == pytest.approx(90.0, abs=1e-6)
-
-        # Drag P3 to (0,10): arms (-10,0) and (-10,10) -> 45°.
-        dlg._angle_overlay._h3.setPos(QPointF(0, 10))
-        dlg._on_update_angle_measurement()
-
-        results = dlg._measurement_table.results()
-        assert len(results) == 1  # updated in place, no new row
-        assert results[0].measurement_id == mid
         assert results[0].values["angle_deg"] == pytest.approx(45.0, abs=1e-6)
+
+        dlg._angle_overlay._h3.setPos(QPointF(10, 10))
+        dlg._on_update_angle_measurement()
+        results = dlg._measurement_table.results()
+        assert len(results) == 2
+        assert results[1].values["angle_deg"] == pytest.approx(90.0, abs=1e-6)
+
+        # Clearing the overlay resets the live readout.
+        dlg._clear_angle_overlay()
+        assert dlg._measurement_panel._angle_live_lbl.text() == "—"
+        assert len(dlg._measurement_table.results()) == 2  # stored rows survive
     finally:
         dlg.close()
         dlg.deleteLater()
         qapp.processEvents()
 
 
-def test_update_angle_without_overlay_is_a_noop(qapp, monkeypatch):
+def test_add_angle_without_overlay_is_a_noop(qapp, monkeypatch):
     dlg = _dialog(monkeypatch)
     try:
         assert dlg._angle_overlay is None

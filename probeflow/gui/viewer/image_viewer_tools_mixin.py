@@ -243,45 +243,44 @@ class ImageViewerToolsMixin:
         )
 
     def _on_angle_points_ready(self, p1, p2, p3) -> None:
-        """Create angle overlay and record result from the 3-point angle tool."""
+        """Create the angle overlay; the value shows live and stores on demand.
+
+        Nothing is written to the results table here — quick comparative
+        measurements only need the live readout, and 'Add to results' stores a
+        snapshot when the user wants one.
+        """
         from probeflow.gui.angle_overlay import AngleOverlayItem
         scene = self._zoom_lbl.scene()
         if self._angle_overlay is not None:
             self._angle_overlay.remove_from_scene(scene)
-        self._angle_overlay = AngleOverlayItem(p1, p2, p3, scene)
-        deg = self._angle_overlay.angle_deg
-        mid = self._measurement_table.next_measurement_id()
-        self._angle_measurement_id = mid
-        self._measurement_table.add_result(self._angle_measurement_result(mid, deg))
-        self._show_measurements()
+        self._angle_overlay = AngleOverlayItem(
+            p1, p2, p3, scene, on_change=self._on_angle_live_changed,
+        )
         self._sync_viewer_menu_actions()
         self._status_lbl.setText(
-            f"Angle: {deg:.2f}°  — drag handles to adjust, then 'Update angle "
-            "measurement'."
+            f"Angle: {self._angle_overlay.angle_deg:.2f}°  — drag handles to "
+            "adjust; 'Add to results' stores the value."
         )
 
+    def _on_angle_live_changed(self, deg: float) -> None:
+        """Push the overlay's current angle into the Measure-tab live readout."""
+        panel = getattr(self, "_measurement_panel", None)
+        if panel is not None:
+            panel.set_live_angle(deg)
+
     def _on_update_angle_measurement(self) -> None:
-        """Rewrite the current angle measurement with the adjusted overlay value."""
+        """Store the current overlay angle as a new results-table row."""
         if self._angle_overlay is None:
             self._status_lbl.setText(
                 "No angle on the image. Use Measure → Angle to place one first."
             )
             return
         deg = self._angle_overlay.angle_deg
-        mid = self._angle_measurement_id
-        # If the tracked measurement was cleared (or never created), add a fresh one.
-        if mid is None:
-            mid = self._measurement_table.next_measurement_id()
-            self._angle_measurement_id = mid
-            self._measurement_table.add_result(self._angle_measurement_result(mid, deg))
-            self._status_lbl.setText(f"Angle measurement {mid}: {deg:.2f}°.")
-            return
-        result = self._angle_measurement_result(mid, deg)
-        if not self._measurement_table.update_result(result):
-            # Row was removed from the table — re-add it.
-            self._measurement_table.add_result(result)
+        mid = self._measurement_table.next_measurement_id()
+        self._angle_measurement_id = mid
+        self._measurement_table.add_result(self._angle_measurement_result(mid, deg))
         self._show_measurements()
-        self._status_lbl.setText(f"Updated angle measurement {mid}: {deg:.2f}°.")
+        self._status_lbl.setText(f"Angle measurement {mid}: {deg:.2f}°.")
 
     def _on_measure_roi_stats(self) -> None:
         """Compute statistics for the active area ROI → new panel."""
