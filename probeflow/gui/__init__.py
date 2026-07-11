@@ -169,6 +169,11 @@ def main(*, browse_folder: Any = None) -> None:
     When ``browse_folder`` is set, the Browse tab opens that folder on startup.
     """
 
+    # Direct-launch path (probeflow.gui.main without the CLI): give the same
+    # version-drift note and crash banner the CLI entry point installs.
+    from probeflow.core.env_check import install_crash_banner, report_environment
+    report_environment()
+    install_crash_banner()
     _load_compat().main(browse_folder=browse_folder)
 
 

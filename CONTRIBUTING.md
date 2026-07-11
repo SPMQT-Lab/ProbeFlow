@@ -20,8 +20,11 @@ verified against (notably PySide6 and numpy — the two whose breaking
 releases would take the GUI down wholesale). Omit `-c constraints.txt` to
 live on latest; the weekly **dependency-canary** CI job does exactly that,
 so check its status before blaming your own changes for a fresh-environment
-breakage. When bumping a pin: run the full suite, then refresh the pin and
-the "last verified" date in the file header.
+breakage. When bumping a pin: run the full suite, then refresh the pin, the
+"last verified" date in the file header, and the `VERIFIED` table in
+`probeflow/core/env_check.py` (a test enforces they agree). The routine for
+this and the other slow-rot risks is in
+[docs/maintenance.md](docs/maintenance.md).
 
 ## Running the test suite
 

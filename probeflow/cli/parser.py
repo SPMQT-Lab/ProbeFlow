@@ -538,6 +538,11 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
+    # Version-drift is the most confusing failure class to diagnose from a
+    # user report: name it up front, and stamp any crash with the environment.
+    from probeflow.core.env_check import install_crash_banner, report_environment
+    report_environment()
+    install_crash_banner()
     if argv is None:
         argv = sys.argv[1:]
     parser = _build_parser()

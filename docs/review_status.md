@@ -135,3 +135,4 @@ first GUI-fixture test.
 - `docs/notes/roi-display-notes.md` — ROI display/interaction architecture
 - `docs/core_derisk_plan.md` — completed de-risking plan (design record)
 - `docs/refocus_plan.md` — record of the 2026-07 refocus removals
+- `docs/maintenance.md` — the "check regularly" watch-list
