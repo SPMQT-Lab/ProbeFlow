@@ -47,6 +47,10 @@ class FFTLatticeOverlay:
         self._image_w = image_w
         self._image_h = image_h
         self._artists: list = []
+        self._stored_artists: list = []
+        # Static (grid, cells, line_width, color) layers drawn under the
+        # editable grid — see the panel's "Store grid" action.
+        self._stored: list[tuple[LatticeGrid, int, float, str]] = []
         self._grid: Optional[LatticeGrid] = None
         self._cells: int = 12
         self._line_width_px: float = 1.5
@@ -98,9 +102,33 @@ class FFTLatticeOverlay:
             except Exception:
                 pass
 
+    def set_stored(self, entries: list[tuple[LatticeGrid, int, float, str]]) -> None:
+        """Replace the static stored layers: ``(grid, cells, line_width, color)``."""
+        self._stored = list(entries)
+        self._redraw_stored()
+
+    def _redraw_stored(self) -> None:
+        for art in self._stored_artists:
+            try:
+                art.remove()
+            except Exception:
+                pass
+        self._stored_artists.clear()
+        for grid, cells, line_width, color in self._stored:
+            for s_px, e_px in _grid_line_segments_px(grid, cells):
+                sq = self._px_to_q(*s_px)
+                eq = self._px_to_q(*e_px)
+                art, = self._ax.plot(
+                    [sq[0], eq[0]], [sq[1], eq[1]],
+                    color=color, lw=line_width, alpha=0.6, zorder=4,
+                )
+                self._stored_artists.append(art)
+        self._canvas.draw_idle()
+
     def clear(self) -> None:
         """Remove all overlay artists from the axes and disconnect events."""
         self._grid = None
+        self.set_stored([])
         self.redraw()       # grid=None path removes all artists + draw_idle()
         self.disconnect()
 
@@ -274,21 +302,8 @@ class FFTLatticeOverlay:
         def p2q(ix, iy):
             return self._px_to_q(ix, iy)
 
-        # Grid lines — parallel to b
-        for n in range(-c, c + 1):
-            s_px = (ox_px + n * ax_px - c * bx_px, oy_px + n * ay_px - c * by_px)
-            e_px = (ox_px + n * ax_px + c * bx_px, oy_px + n * ay_px + c * by_px)
-            sq, eq = p2q(*s_px), p2q(*e_px)
-            art, = self._ax.plot(
-                [sq[0], eq[0]], [sq[1], eq[1]],
-                color="#89b4fa", lw=self._line_width_px, alpha=0.7, zorder=5,
-            )
-            self._artists.append(art)
-
-        # Grid lines — parallel to a
-        for m in range(-c, c + 1):
-            s_px = (ox_px - c * ax_px + m * bx_px, oy_px - c * ay_px + m * by_px)
-            e_px = (ox_px + c * ax_px + m * bx_px, oy_px + c * ay_px + m * by_px)
+        # Grid lines
+        for s_px, e_px in _grid_line_segments_px(grid, c):
             sq, eq = p2q(*s_px), p2q(*e_px)
             art, = self._ax.plot(
                 [sq[0], eq[0]], [sq[1], eq[1]],
@@ -338,3 +353,23 @@ class FFTLatticeOverlay:
                 self._artists.append(art)
 
         self._canvas.draw_idle()
+
+
+def _grid_line_segments_px(grid: LatticeGrid, c: int) -> list:
+    """Endpoints (pixel coords) of every grid line for *grid* over ±c cells."""
+    ox, oy = grid.origin_px
+    ax, ay = grid.a_px
+    bx, by = grid.b_px
+    segments = []
+    # Lines parallel to b (stepping along a), then parallel to a (along b).
+    for n in range(-c, c + 1):
+        segments.append((
+            (ox + n * ax - c * bx, oy + n * ay - c * by),
+            (ox + n * ax + c * bx, oy + n * ay + c * by),
+        ))
+    for m in range(-c, c + 1):
+        segments.append((
+            (ox - c * ax + m * bx, oy - c * ay + m * by),
+            (ox + c * ax + m * bx, oy + c * ay + m * by),
+        ))
+    return segments

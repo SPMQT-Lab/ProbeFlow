@@ -25,10 +25,12 @@ from probeflow.analysis.lattice_grid import (
     LatticeGrid,
     LatticeKind,
     ReciprocalCalibration,
+    format_reciprocal_measurements,
 )
 from probeflow.gui.no_wheel import install_no_wheel_spinboxes
 
 from .fft_overlay import FFTLatticeOverlay
+from .stored_grids import StoredGrid, StoredGridList, next_stored_color
 
 # Compact width for numeric value fields so they don't stretch across the wide
 # sidebar column (keeps the two label/field pairs reading as a tidy two-up grid).
@@ -55,6 +57,8 @@ class FFTLatticePanel(QWidget):
         self._image_h = image_h
         self._external_on_change = on_change
         self._updating_controls = False
+        self._stored: list[StoredGrid] = []
+        self._stored_color_count = 0
         self._build()
         overlay.set_on_change(self._on_grid_changed)
         self.sync_from_model()
@@ -159,7 +163,16 @@ class FFTLatticePanel(QWidget):
         reset_btn.setFont(ui_font(9))
         reset_btn.setFixedHeight(24)
         reset_btn.clicked.connect(self._on_reset_origin)
-        lay.addWidget(reset_btn)
+        reset_row = QHBoxLayout()
+        reset_row.setSpacing(4)
+        reset_row.addWidget(reset_btn)
+        # Stored grid layers — same widget and workflow as the real-space tool.
+        self._stored_list = StoredGridList(store_button_row=reset_row)
+        self._stored_list.store_requested.connect(self._on_store_grid)
+        self._stored_list.edit_requested.connect(self._on_edit_stored)
+        self._stored_list.remove_requested.connect(self._on_remove_stored)
+        lay.addLayout(reset_row)
+        lay.addWidget(self._stored_list)
 
         fft_note = QLabel(
             "FFT-derived direct lattice measurements can be used for affine "
@@ -315,4 +328,62 @@ class FFTLatticePanel(QWidget):
         self._overlay.set_grid(
             grid.reset_origin(self._image_w / 2.0, self._image_h / 2.0)
         )
+
+    # ── stored grid layers ────────────────────────────────────────────────────
+
+    def _grid_summary(self, grid: LatticeGrid) -> str:
+        try:
+            d = format_reciprocal_measurements(grid, self._cal)
+            return f"{d['g1']} · {d['g2']} · {d['angle']}"
+        except Exception:
+            return "grid"
+
+    def _stored_entry_from(self, grid: LatticeGrid, color: str) -> StoredGrid:
+        return StoredGrid(
+            grid=replace(grid, show_handles=False, show_labels=False),
+            cells=int(self._cells_spin.value()),
+            line_width_px=float(self._line_width_spin.value()),
+            color=color,
+            summary=self._grid_summary(grid),
+        )
+
+    def _push_stored_to_overlay(self) -> None:
+        self._overlay.set_stored([
+            (e.grid, e.cells, e.line_width_px, e.color) for e in self._stored
+        ])
+        self._stored_list.set_entries(self._stored)
+
+    def _on_store_grid(self) -> None:
+        grid = self._overlay.grid()
+        if grid is None:
+            return
+        self._stored.append(
+            self._stored_entry_from(grid, next_stored_color(self._stored_color_count))
+        )
+        self._stored_color_count += 1
+        self._push_stored_to_overlay()
+
+    def _on_edit_stored(self, index: int) -> None:
+        """Swap a stored layer into the editor; the active grid takes its slot."""
+        if not (0 <= index < len(self._stored)):
+            return
+        active = self._overlay.grid()
+        if active is None:
+            return
+        stored = self._stored[index]
+        self._stored[index] = self._stored_entry_from(active, stored.color)
+        self._overlay.set_grid(replace(
+            stored.grid,
+            visible=active.visible,
+            show_handles=active.show_handles,
+            show_labels=active.show_labels,
+        ))
+        self._push_stored_to_overlay()
+        self.sync_from_model()
+
+    def _on_remove_stored(self, index: int) -> None:
+        if not (0 <= index < len(self._stored)):
+            return
+        del self._stored[index]
+        self._push_stored_to_overlay()
         self.sync_from_model()

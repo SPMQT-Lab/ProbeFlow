@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 
 from PySide6.QtCore import QPointF, QRectF, Signal
-from PySide6.QtGui import QBrush, QFont, QPainter, QPen
+from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import QGraphicsObject
 
 from probeflow.analysis.lattice_grid import LatticeGrid
@@ -45,6 +45,7 @@ class LatticeGridItem(QGraphicsObject):
         image_h: int,
         cells: int = 12,
         parent=None,
+        color=None,
     ):
         super().__init__(parent)
         self._grid = grid
@@ -52,6 +53,9 @@ class LatticeGridItem(QGraphicsObject):
         self._image_h = image_h
         self._cells = cells
         self._line_width_px: float = 1.5
+        # Custom line colour marks a stored (static) grid layer; the active
+        # editable grid keeps the default blue with coloured basis vectors.
+        self._color = QColor(color) if color is not None else None
 
         self.setZValue(50)
         self.setFlag(QGraphicsObject.ItemIsMovable, False)
@@ -98,7 +102,7 @@ class LatticeGridItem(QGraphicsObject):
 
         painter.setRenderHint(QPainter.Antialiasing)
 
-        pen = QPen(_COL_GRID)
+        pen = QPen(self._color if self._color is not None else _COL_GRID)
         pen.setCosmetic(True)
         pen.setWidthF(self._line_width_px)
         painter.setPen(pen)
@@ -141,13 +145,15 @@ class LatticeGridItem(QGraphicsObject):
         ax, ay = grid.a_px
         bx, by = grid.b_px
 
-        pen_a = QPen(_COL_A)
+        # Stored layers draw their basis in the layer colour so the per-handle
+        # green/peach coding stays unique to the active grid.
+        pen_a = QPen(self._color if self._color is not None else _COL_A)
         pen_a.setCosmetic(True)
         pen_a.setWidthF(2.0)
         painter.setPen(pen_a)
         painter.drawLine(QPointF(ox, oy), QPointF(ox + ax, oy + ay))
 
-        pen_b = QPen(_COL_B)
+        pen_b = QPen(self._color if self._color is not None else _COL_B)
         pen_b.setCosmetic(True)
         pen_b.setWidthF(2.0)
         painter.setPen(pen_b)
