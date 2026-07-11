@@ -304,6 +304,38 @@ class TestOutlinePensStayThin:
             assert pen.isCosmetic()
 
 
+class TestAdaptiveZoomCeiling:
+    """Small scans need far more than the classic 8x to inspect pixels."""
+
+    def _canvas_with_image(self, size: int):
+        from PySide6.QtGui import QPixmap
+        from probeflow.gui.image_canvas import ImageCanvas
+
+        canvas = ImageCanvas()
+        pm = QPixmap(size, size)
+        pm.fill()
+        canvas.set_source(pm, reset_zoom=True)
+        return canvas
+
+    def test_small_image_can_zoom_well_beyond_8x(self, qapp):
+        canvas = self._canvas_with_image(64)
+        try:
+            for _ in range(40):
+                canvas.zoom_by(2.0)
+            assert canvas.zoom() == pytest.approx(8192.0 / 64)  # 128x
+        finally:
+            canvas.deleteLater()
+
+    def test_large_image_keeps_classic_8x_cap(self, qapp):
+        canvas = self._canvas_with_image(2048)
+        try:
+            for _ in range(10):
+                canvas.zoom_by(2.0)
+            assert canvas.zoom() == pytest.approx(8.0)
+        finally:
+            canvas.deleteLater()
+
+
 class TestFitZoomFloor:
     def test_fit_zoom_can_shrink_below_manual_floor(self, qapp):
         from PySide6.QtGui import QPixmap
