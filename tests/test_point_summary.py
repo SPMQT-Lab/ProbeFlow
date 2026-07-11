@@ -139,6 +139,20 @@ def test_nn_histogram_counts_conserved_and_degenerate_input():
     assert len(edges_e) == 0 and len(counts_e) == 0
 
 
+def test_nn_histogram_near_degenerate_input_has_finite_bins():
+    """A perfect lattice's NN distances differ only by float (ULP) noise;
+    the histogram must still produce finite-width, strictly-increasing bins
+    (some numpy versions reject bins=int + a sub-ULP range)."""
+    base = 1.0
+    ulp = np.array([base, base + 2e-16, base - 1e-16, base, base + 1e-16], dtype=float)
+    edges, counts = nn_histogram_nm(ulp)
+    assert counts.sum() == ulp.size
+    assert np.all(np.isfinite(edges))
+    # Strictly increasing (would collapse to equal edges under the old guard).
+    assert np.all(edges[:-1] < edges[1:])
+    assert edges[-1] - edges[0] > 1e-3  # padded to a visible span
+
+
 def test_summary_is_frozen_dataclass():
     summary = summarize_point_pattern(
         np.array([[1e-9, 1e-9], [2e-9, 2e-9]]),

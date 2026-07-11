@@ -158,9 +158,10 @@ def nn_histogram_nm(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Equal-width histogram ``(bin_edges_nm, counts)`` of NN distances.
 
-    Bin count scales as sqrt(N), clamped to [6, max_bins]. A degenerate
-    single-valued distribution (perfect lattice) gets a padded range so at
-    least one visible bin exists. Empty input returns two empty arrays.
+    Bin count scales as sqrt(N), clamped to [6, max_bins]. A degenerate or
+    near-degenerate distribution (a perfect lattice yields NN distances equal
+    to within float noise) gets a padded range so the bins are always
+    finite-sized. Empty input returns two empty arrays.
     """
 
     distances = np.asarray(nn_distances_nm, dtype=float)
@@ -170,8 +171,15 @@ def nn_histogram_nm(
     n_bins = int(min(max_bins, max(6, math.ceil(math.sqrt(distances.size)))))
     lo = float(distances.min())
     hi = float(distances.max())
-    if not hi > lo:
+    # Pad when the span is zero *or* too narrow to split into finite-width
+    # bins. A perfect lattice's NN distances differ only by ULP noise; some
+    # numpy versions reject that as "too many bins for data range".
+    if hi - lo <= abs(hi) * 1e-9:
         pad = 0.05 * (abs(hi) if hi != 0.0 else 1.0)
         lo, hi = lo - pad, hi + pad
-    counts, edges = np.histogram(distances, bins=n_bins, range=(lo, hi))
+    # Pass explicit finite edges (not bins=int + range): the integer-bins path
+    # is the one that can raise "Cannot create N finite-sized bins"; an
+    # explicit monotonic array never does.
+    edges = np.linspace(lo, hi, n_bins + 1)
+    counts, _ = np.histogram(distances, bins=edges)
     return edges, counts
