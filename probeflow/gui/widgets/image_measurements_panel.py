@@ -63,10 +63,10 @@ class ImageMeasurementsPanel(QWidget):
         ("Line periodicity", "line_periodicity"),
     ]
 
-    # Curated Measure-tab menu: the commonly-used tools only. The niche / ImageJ-style
-    # measurements (step height, feature maxima, point/FFT, point statistics) live in
-    # the Measurements top menu + command finder; line periodicity is reached from the
-    # Line-profile detail (drawing a line is when you want it).
+    # Curated Measure-tab menu: the commonly-used tools only. The niche /
+    # ImageJ-style measurements (step height, point/FFT) live in the
+    # Measurements top menu + command finder; line periodicity is reached from
+    # the Line-profile detail (drawing a line is when you want it).
     # (group title, [(label, key, kind), …]); kind ∈ setup|oneshot|dialog.
     _TOOL_GROUPS = [
         ("Quick measurements", [
@@ -77,6 +77,10 @@ class ImageMeasurementsPanel(QWidget):
         ]),
         ("Profiles", [
             ("Line profile", "line_profile", "setup"),
+        ]),
+        ("Features", [
+            ("Feature maxima…", "feature_maxima", "setup"),
+            ("Point statistics…", "pair_correlation", "dialog"),
         ]),
         ("Tools", [
             ("FFT viewer…", "fft_viewer", "dialog"),
@@ -237,11 +241,12 @@ class ImageMeasurementsPanel(QWidget):
                 btn.setDefault(False)
                 btn.setAutoDefault(False)
                 btn.clicked.connect(lambda _c=False, k=key: self._open_tool(k))
+                # A lone trailing tool keeps to one column so buttons stay a
+                # consistent width instead of stretching across the panel.
                 r, c = divmod(i, 2)
-                if i == n - 1 and n % 2 == 1:
-                    grid.addWidget(btn, r, 0, 1, 2)
-                else:
-                    grid.addWidget(btn, r, c)
+                grid.addWidget(btn, r, c)
+            if n % 2 == 1:
+                grid.addWidget(QWidget(), (n - 1) // 2, 1)
             lay.addLayout(grid)
 
         lay.addWidget(self._hline())

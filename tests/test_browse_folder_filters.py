@@ -7,6 +7,7 @@ import pytest
 
 from probeflow.core.browse_filters import (
     FolderFilterState,
+    bias_options_from_values,
     completion_pct_from_visible_range,
     createc_visible_height_m,
     scan_matches_folder_filters,
@@ -34,56 +35,48 @@ def test_createc_first_column_strip_does_not_reduce_completion():
     assert completion_pct_from_visible_range(100e-9, 100e-9) == pytest.approx(100.0)
 
 
-def test_missing_metadata_excludes_scan_when_filter_active():
-    state = FolderFilterState(size_enabled=True, max_width_nm=100.0, max_height_nm=100.0)
+def test_bias_value_filter_matches_within_tolerance():
+    state = FolderFilterState(bias_value_mv=-25.0)
+    assert scan_matches_folder_filters(
+        completion_pct=None, bias_mv=-25.0, state=state)
+    assert scan_matches_folder_filters(
+        completion_pct=None, bias_mv=-25.4, state=state)
     assert not scan_matches_folder_filters(
-        width_nm=None,
-        height_nm=80.0,
-        completion_pct=80.0,
-        bias_mv=50.0,
-        state=state,
-    )
+        completion_pct=None, bias_mv=-26.0, state=state)
+    assert not scan_matches_folder_filters(
+        completion_pct=None, bias_mv=25.0, state=state)
 
 
-def test_size_and_bias_boundaries_are_inclusive():
-    state = FolderFilterState(
-        size_enabled=True,
-        min_width_nm=25.0,
-        max_width_nm=100.0,
-        min_height_nm=20.0,
-        max_height_nm=80.0,
-        bias_enabled=True,
-        min_bias_mv=-250.0,
-        max_bias_mv=250.0,
-    )
-    assert scan_matches_folder_filters(
-        width_nm=100.0,
-        height_nm=80.0,
-        completion_pct=None,
-        bias_mv=-250.0,
-        state=state,
-    )
-    assert scan_matches_folder_filters(
-        width_nm=100.0,
-        height_nm=80.0,
-        completion_pct=None,
-        bias_mv=250.0,
-        state=state,
-    )
+def test_bias_value_filter_hides_scans_without_bias_metadata():
+    state = FolderFilterState(bias_value_mv=100.0)
     assert not scan_matches_folder_filters(
-        width_nm=24.9,
-        height_nm=80.0,
-        completion_pct=None,
-        bias_mv=0.0,
-        state=state,
-    )
+        completion_pct=None, bias_mv=None, state=state)
+
+
+def test_hide_incomplete_hides_partial_but_keeps_unknown():
+    state = FolderFilterState(hide_incomplete=True)
     assert not scan_matches_folder_filters(
-        width_nm=100.0,
-        height_nm=19.9,
-        completion_pct=None,
-        bias_mv=0.0,
-        state=state,
-    )
+        completion_pct=30.0, bias_mv=None, state=state)
+    assert scan_matches_folder_filters(
+        completion_pct=50.0, bias_mv=None, state=state)
+    assert scan_matches_folder_filters(
+        completion_pct=100.0, bias_mv=None, state=state)
+    # Scans without completion metadata stay visible.
+    assert scan_matches_folder_filters(
+        completion_pct=None, bias_mv=None, state=state)
+
+
+def test_no_active_filters_matches_everything():
+    state = FolderFilterState()
+    assert not state.has_metadata_filters()
+    assert scan_matches_folder_filters(
+        completion_pct=None, bias_mv=None, state=state)
+
+
+def test_bias_options_group_and_count():
+    options = bias_options_from_values(
+        [-550.0, -550.2, 1000.0, None, -25.0, -550.0])
+    assert options == [(-550.0, 3), (-25.0, 1), (1000.0, 1)]
 
 
 def test_sxmfile_from_index_item_preserves_browse_filter_fields():
@@ -114,8 +107,18 @@ def test_subfolder_matches_filters_uses_indexed_scan_metadata(tmp_path):
     sub.mkdir()
     shutil.copy(src, sub / src.name)
 
-    match_state = FolderFilterState(size_enabled=True, max_width_nm=1000.0, max_height_nm=1000.0)
-    miss_state = FolderFilterState(size_enabled=True, max_width_nm=0.1, max_height_nm=0.1)
+    # A bias filter far from any real scan's bias hides the subfolder; the
+    # matching bias (read from the indexed metadata) keeps it visible.
+    from probeflow.core.indexing import index_folder_shallow
+
+    index = index_folder_shallow(sub)
+    scan_item = next(it for it in index.files if it.item_type == "scan")
+    bias_mv = scan_item.bias * 1000.0 if scan_item.bias is not None else None
+    if bias_mv is None:
+        pytest.skip("sample scan carries no bias metadata")
+
+    match_state = FolderFilterState(bias_value_mv=bias_mv)
+    miss_state = FolderFilterState(bias_value_mv=bias_mv + 1000.0)
 
     assert subfolder_matches_filters(sub, match_state) is True
     assert subfolder_matches_filters(sub, miss_state) is False

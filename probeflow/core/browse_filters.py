@@ -5,24 +5,31 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
+# A scan counts as "incomplete" when it recorded less than this fraction of
+# its frame (stopped early). Used by the hide-incomplete browse filter.
+INCOMPLETE_COMPLETION_PCT = 50.0
+
+# Two bias values within this distance (mV) are treated as the same setpoint
+# when grouping scans for the browse bias picker.
+BIAS_MATCH_TOLERANCE_MV = 0.5
+
 
 @dataclass(frozen=True)
 class FolderFilterState:
-    """Session-local browse folder filters."""
+    """Session-local browse folder filters.
 
-    size_enabled: bool = False
-    min_width_nm: Optional[float] = 0.0
-    max_width_nm: Optional[float] = None
-    min_height_nm: Optional[float] = 0.0
-    max_height_nm: Optional[float] = None
-    completion_enabled: bool = False
-    min_completion_pct: Optional[float] = None
-    bias_enabled: bool = False
-    min_bias_mv: Optional[float] = None
-    max_bias_mv: Optional[float] = None
+    ``bias_value_mv`` — show only scans acquired at this bias (within
+    ``BIAS_MATCH_TOLERANCE_MV``); ``None`` shows every bias.
+    ``hide_incomplete`` — hide scans that recorded less than
+    ``INCOMPLETE_COMPLETION_PCT`` of their frame; scans without completion
+    metadata are left visible.
+    """
+
+    bias_value_mv: Optional[float] = None
+    hide_incomplete: bool = False
 
     def has_metadata_filters(self) -> bool:
-        return bool(self.size_enabled or self.completion_enabled or self.bias_enabled)
+        return bool(self.bias_value_mv is not None or self.hide_incomplete)
 
 
 @dataclass(frozen=True)
@@ -84,47 +91,42 @@ def createc_visible_height_m(
 
 def scan_matches_folder_filters(
     *,
-    width_nm: Optional[float],
-    height_nm: Optional[float],
     completion_pct: Optional[float],
     bias_mv: Optional[float],
     state: FolderFilterState,
 ) -> bool:
     """Return True when one scan satisfies all active metadata filters."""
-    if state.size_enabled:
-        if (
-            width_nm is None
-            or height_nm is None
-            or state.min_width_nm is None
-            or state.max_width_nm is None
-            or state.min_height_nm is None
-            or state.max_height_nm is None
-        ):
+    if state.bias_value_mv is not None:
+        if bias_mv is None:
             return False
-        if float(width_nm) < float(state.min_width_nm):
-            return False
-        if float(width_nm) > float(state.max_width_nm):
-            return False
-        if float(height_nm) < float(state.min_height_nm):
-            return False
-        if float(height_nm) > float(state.max_height_nm):
+        if abs(float(bias_mv) - float(state.bias_value_mv)) > BIAS_MATCH_TOLERANCE_MV:
             return False
 
-    if state.completion_enabled:
-        if completion_pct is None or state.min_completion_pct is None:
-            return False
-        if float(completion_pct) < float(state.min_completion_pct):
-            return False
-
-    if state.bias_enabled:
-        if (
-            bias_mv is None
-            or state.min_bias_mv is None
-            or state.max_bias_mv is None
-        ):
-            return False
-        bias = float(bias_mv)
-        if bias < float(state.min_bias_mv) or bias > float(state.max_bias_mv):
+    if state.hide_incomplete and completion_pct is not None:
+        if float(completion_pct) < INCOMPLETE_COMPLETION_PCT:
             return False
 
     return True
+
+
+def bias_options_from_values(
+    bias_values_mv: list[Optional[float]],
+) -> list[tuple[float, int]]:
+    """Group scan biases into distinct picker options.
+
+    Returns ``(bias_mv, count)`` pairs sorted by bias, grouping values within
+    ``BIAS_MATCH_TOLERANCE_MV`` of each other (each group is represented by
+    its first-seen value). ``None`` entries are ignored.
+    """
+    options: list[tuple[float, int]] = []
+    for value in bias_values_mv:
+        if value is None:
+            continue
+        bias = float(value)
+        for i, (existing, count) in enumerate(options):
+            if abs(bias - existing) <= BIAS_MATCH_TOLERANCE_MV:
+                options[i] = (existing, count + 1)
+                break
+        else:
+            options.append((bias, 1))
+    return sorted(options, key=lambda pair: pair[0])

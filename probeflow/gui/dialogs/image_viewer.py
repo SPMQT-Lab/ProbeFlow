@@ -214,7 +214,12 @@ class ImageViewerDialog(
 
         # ── ROI keyboard actions ──────────────────────────────────────────────
         if k == Qt.Key_Delete and not event.modifiers():
-            self._delete_active_image_roi()
+            if self._active_image_roi() is None and self._has_quick_selection():
+                # No active ROI: Delete discards the quick (gold) selection.
+                self._clear_quick_selection()
+                self._status_lbl.setText("Selection cleared.")
+            else:
+                self._delete_active_image_roi()
             event.accept()
             return
 

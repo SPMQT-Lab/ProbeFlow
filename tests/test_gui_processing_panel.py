@@ -2222,3 +2222,21 @@ def test_open_viewer_tracking_reaps_destroyed_dialog():
 
     dlg.destroyed.emit()
     assert dlg not in win._open_viewers
+
+
+def test_measure_tab_menu_lists_feature_maxima_and_point_statistics():
+    """The curated Measure-tab menu must expose the point-pattern tools."""
+    from probeflow.gui.widgets.image_measurements_panel import ImageMeasurementsPanel
+
+    keys = {
+        key
+        for _group, tools in ImageMeasurementsPanel._TOOL_GROUPS
+        for _label, key, _kind in tools
+    }
+    assert "feature_maxima" in keys
+    assert "pair_correlation" in keys
+    # Point statistics opens as a dialog via the existing request signal.
+    assert (
+        ImageMeasurementsPanel._DIALOG_SIGNALS["pair_correlation"]
+        == "pairCorrelationRequested"
+    )

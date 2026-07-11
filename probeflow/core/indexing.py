@@ -446,13 +446,8 @@ def subfolder_matches_filters(
                     browse_cache.put_metadata(path, mtime_ns, size_bytes, item)
             if item is None or item.item_type != "scan" or item.load_error is not None:
                 continue
-            visible_range = item.visible_scan_range or item.scan_range
-            width_nm = visible_range[0] * 1e9 if visible_range else None
-            height_nm = visible_range[1] * 1e9 if visible_range else None
             bias_mv = item.bias * 1000.0 if item.bias is not None else None
             if scan_matches_folder_filters(
-                width_nm=width_nm,
-                height_nm=height_nm,
                 completion_pct=item.completion_pct,
                 bias_mv=bias_mv,
                 state=state,

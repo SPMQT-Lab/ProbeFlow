@@ -124,6 +124,7 @@ class ThumbnailGrid(QWidget):
         self._primary:        Optional[str]                    = None
         self._thumbnail_colormap: str                          = DEFAULT_CMAP_KEY
         self._thumbnail_processing: dict                       = {}
+        self._sort_mode: str                                   = "name"
         self._per_scan_processing: dict                        = {}  # path_str → processing dict
         self._thumbnail_clip: tuple[float, float]              = (1.0, 99.0)
         self._thumbnail_channel: str                           = THUMBNAIL_CHANNEL_DEFAULT
@@ -252,8 +253,8 @@ class ThumbnailGrid(QWidget):
 
         folder_entries = [_FE.from_index(s) for s in index.subfolders]
         # Folders sort alphabetically already (from indexing layer); files
-        # follow, sorted by stem like the legacy view.
-        file_entries = sorted(sxm_entries + vert_entries, key=lambda e: e.stem)
+        # follow in the user-selected sort order (name by default).
+        file_entries = self._sorted_files(sxm_entries + vert_entries)
         entries: list[Union[SxmFile, VertFile, FolderEntry]] = list(folder_entries) + list(file_entries)
 
         self._refresh_btn.setEnabled(True)
@@ -365,8 +366,6 @@ class ThumbnailGrid(QWidget):
 
     def _scan_matches_folder_filters(self, entry: SxmFile) -> bool:
         return scan_matches_folder_filters(
-            width_nm=entry.scan_width_nm,
-            height_nm=entry.scan_height_nm,
             completion_pct=entry.completion_pct,
             bias_mv=entry.bias_mv,
             state=self._folder_filter_state,
@@ -829,6 +828,11 @@ class ThumbnailGrid(QWidget):
         if isinstance(entry, FolderEntry):
             return
         key = self._key_for(entry)
+        # Multi-select exists for pooling spectra (Overlay selected spectra);
+        # images have no multi-file action, so Ctrl+click on an image behaves
+        # like a plain click instead of building a selection that does nothing.
+        if ctrl and not isinstance(entry, VertFile):
+            ctrl = False
         if ctrl:
             # toggle this card in/out of selection
             if key in self._selected:
@@ -923,10 +927,57 @@ class ThumbnailGrid(QWidget):
         self._refresh_folder_filtering()
         self._schedule_visible_thumbnail_refresh(delay_ms=0)
 
+    def _sorted_files(self, file_entries: list) -> list:
+        """Order file entries by the active sort mode.
+
+        ``name`` sorts by stem. ``size`` sorts by physical scan area, largest
+        first; entries without a known size (spectra, unreadable scans) keep
+        name order at the end.
+        """
+        if self._sort_mode != "size":
+            return sorted(file_entries, key=lambda e: e.stem)
+
+        def key(e):
+            width = getattr(e, "scan_width_nm", None)
+            height = getattr(e, "scan_height_nm", None)
+            if width is None or height is None:
+                return (1, 0.0, e.stem)
+            return (0, -float(width) * float(height), e.stem)
+
+        return sorted(file_entries, key=key)
+
+    def set_sort_mode(self, mode: str) -> None:
+        """Re-order the cards by ``name`` or ``size`` without re-indexing."""
+        mode = mode if mode in ("name", "size") else "name"
+        if mode == self._sort_mode:
+            return
+        self._sort_mode = mode
+        if not self._entries:
+            return
+        folders = [e for e in self._entries if isinstance(e, FolderEntry)]
+        files = [e for e in self._entries if not isinstance(e, FolderEntry)]
+        self._entries = folders + self._sorted_files(files)
+        self._relayout_filtered()
+        self._schedule_visible_thumbnail_refresh(delay_ms=0)
+
+    def bias_options(self) -> list[tuple[float, int]]:
+        """Distinct ``(bias_mv, count)`` pairs for the scans in this folder."""
+        from probeflow.core.browse_filters import bias_options_from_values
+
+        return bias_options_from_values([
+            entry.bias_mv
+            for entry in self._entries
+            if isinstance(entry, SxmFile)
+        ])
+
     def _is_entry_visible(self, entry) -> bool:
-        if isinstance(entry, FolderEntry):
-            return self._folder_visibility.get(Path(entry.path), True)
         mode = self._filter_mode
+        if isinstance(entry, FolderEntry):
+            # Folder cards belong to folder browsing: in the Images/Spectra
+            # views only the matching files show.
+            if mode in ("images", "spectra"):
+                return False
+            return self._folder_visibility.get(Path(entry.path), True)
         if mode == "images":
             if not isinstance(entry, SxmFile):
                 return False

@@ -303,6 +303,7 @@ class ProbeFlowWindow(QMainWindow):
         self._browse_tools.overlay_spectra_requested.connect(self._on_overlay_selected_spectra)
         self._browse_tools.filter_changed.connect(self._on_filter_changed)
         self._browse_tools.folder_filter_changed.connect(self._on_folder_filter_changed)
+        self._browse_tools.sort_mode_changed.connect(self._grid.set_sort_mode)
         self._browse_tools.export_filtered_requested.connect(self._on_export_filtered_folder)
         self._browse_tools.thumbnail_channel_changed.connect(self._on_thumbnail_channel_changed)
         self._browse_tools.thumbnail_size_changed.connect(self._on_thumbnail_size_changed)
@@ -316,10 +317,12 @@ class ProbeFlowWindow(QMainWindow):
         saved_size = self._cfg.get("thumbnail_size", "large")
         if saved_size != "large":
             self._grid.set_thumbnail_size(saved_size)
-        # Sync initial filter state from the toolbar into the grid so the
-        # two agree even before the first folder is opened.
+        # Sync initial filter/sort/align state from the toolbar into the grid
+        # so the two agree even before the first folder is opened.
         self._grid.apply_filter(self._browse_tools.get_filter_mode())
         self._grid.set_folder_filter_state(self._browse_tools.get_folder_filter_state())
+        self._grid.set_sort_mode(self._browse_tools.get_sort_mode())
+        self._grid.set_thumbnail_align_rows(self._browse_tools.align_rows_cb.currentText())
 
     def _build_menu_bar(self) -> None:
         menu_bar = self.menuBar()
@@ -832,6 +835,8 @@ class ProbeFlowWindow(QMainWindow):
         """Status-bar update + clear any selection-driven UI when navigating."""
         self._browse_info.clear()
         self._update_browse_status()
+        # The bias picker offers the biases actually present in this folder.
+        self._browse_tools.set_bias_options(self._grid.bias_options())
 
     def _format_browse_counts(self, counts) -> str:
         parts: list[str] = []
@@ -1625,6 +1630,7 @@ class ProbeFlowWindow(QMainWindow):
             "browse_filter":  self._browse_tools.get_filter_mode(),
             "gui_font_size":  self._gui_font_size,
             "thumbnail_size": self._browse_tools.size_cb.currentText().lower(),
+            "thumbnail_align": self._browse_tools.align_rows_cb.currentText().lower(),
         })
         # Convert widgets exist only once that workspace window has been
         # opened; load_config() already carried over the previously saved

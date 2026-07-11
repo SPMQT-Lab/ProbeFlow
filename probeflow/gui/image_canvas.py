@@ -1738,6 +1738,11 @@ class ImageCanvas(QGraphicsView):
                 self.roi_copy_requested.emit(active_id)
                 event.accept()
                 return
+        elif k in (Qt.Key_Delete, Qt.Key_Backspace) and self._selection is not None:
+            # No active ROI: Delete discards the quick (gold) selection.
+            self.clear_selection()
+            event.accept()
+            return
         if event.matches(QKeySequence.Paste):
             self.roi_paste_requested.emit()
             event.accept()

@@ -198,6 +198,42 @@ class TestQuickSelectionEditing:
         finally:
             canvas.deleteLater()
 
+    def test_delete_key_clears_selection_when_no_active_roi(self, qapp):
+        from PySide6.QtCore import Qt
+        from PySide6.QtGui import QKeyEvent
+
+        canvas = _canvas_with_selection()
+        try:
+            cleared = []
+            canvas.selection_cleared.connect(lambda: cleared.append(True))
+            event = QKeyEvent(QKeyEvent.KeyPress, Qt.Key_Delete, Qt.NoModifier)
+            canvas.keyPressEvent(event)
+            assert canvas._selection is None
+            assert cleared == [True]
+        finally:
+            canvas.deleteLater()
+
+    def test_delete_key_prefers_active_roi_over_selection(self, qapp):
+        from PySide6.QtCore import Qt
+        from PySide6.QtGui import QKeyEvent
+        from probeflow.core.roi import ROI, ROISet
+
+        canvas = _canvas_with_selection()
+        try:
+            roi_set = ROISet(image_id="scan")
+            roi = ROI.new("rect", {"x": 1, "y": 1, "width": 5, "height": 5})
+            roi_set.add(roi)
+            roi_set.active_roi_id = roi.id
+            canvas._image_roi_set = roi_set
+            deletes = []
+            canvas.roi_delete_requested.connect(lambda roi_id: deletes.append(roi_id))
+            event = QKeyEvent(QKeyEvent.KeyPress, Qt.Key_Delete, Qt.NoModifier)
+            canvas.keyPressEvent(event)
+            assert deletes == [roi.id]
+            assert canvas._selection is not None  # ROI deletion wins; selection stays
+        finally:
+            canvas.deleteLater()
+
     def test_corner_handle_drag_resizes_selection(self, qapp):
         canvas = _canvas_with_selection()
         try:
