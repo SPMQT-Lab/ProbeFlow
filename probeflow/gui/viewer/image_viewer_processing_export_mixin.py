@@ -982,6 +982,27 @@ class ImageViewerProcessingExportMixin:
             return
         self._apply_crop((int(col_min), int(row_min), int(col_max), int(row_max)))
 
+    def _on_remove_spots_auto(self) -> None:
+        """Whole-image spot removal: detect outlier pixels, interpolate them."""
+        from PySide6.QtWidgets import QInputDialog
+        threshold, ok = QInputDialog.getDouble(
+            self, "Remove Spots (automatic)",
+            "Sensitivity (robust sigmas from the local median;\n"
+            "lower values flag more pixels as spots):",
+            6.0, 2.0, 20.0, 1,
+        )
+        if not ok:
+            return
+        ops = list(self._processing.get("geometric_ops") or [])
+        ops.append({"op": "remove_spots_auto", "params": {
+            "threshold_mad": float(threshold), "window_px": 5,
+        }})
+        self._processing["geometric_ops"] = ops
+        self._refresh_processing_display()
+        self._status_lbl.setText(
+            f"Removed spots automatically ({threshold:.1f} robust sigmas)."
+        )
+
     def _on_rotate_arbitrary(self) -> None:
         from PySide6.QtWidgets import QInputDialog
         angle, ok = QInputDialog.getDouble(

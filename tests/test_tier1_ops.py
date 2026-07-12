@@ -195,6 +195,52 @@ def test_interpolate_masked_shape_mismatch_step_is_skipped():
     assert out.shape == (8, 8)
 
 
+def test_remove_spots_auto_repairs_spikes_only():
+    from probeflow.processing.repair import remove_spots_auto
+
+    rng = np.random.default_rng(3)
+    arr = rng.normal(0.0, 1.0, size=(24, 24))
+    clean = arr.copy()
+    spikes = [(4, 5), (10, 17), (20, 8)]
+    for y, x in spikes:
+        arr[y, x] = 60.0  # far beyond 6 robust sigmas
+    out = remove_spots_auto(arr, threshold_mad=6.0, window_px=3)
+    for y, x in spikes:
+        assert abs(out[y, x]) < 10.0, (y, x, out[y, x])
+    # Non-spike pixels are untouched.
+    untouched = np.ones(arr.shape, dtype=bool)
+    for y, x in spikes:
+        untouched[y, x] = False
+    assert np.allclose(out[untouched], clean[untouched])
+
+
+def test_remove_spots_auto_leaves_clean_and_degenerate_images_alone():
+    from probeflow.processing.repair import remove_spots_auto
+
+    flat = np.full((12, 12), 2.5)
+    assert np.array_equal(remove_spots_auto(flat), flat)  # zero MAD
+    all_nan = np.full((6, 6), np.nan)
+    assert np.all(np.isnan(remove_spots_auto(all_nan)))
+    rng = np.random.default_rng(4)
+    noise = rng.normal(size=(20, 20))
+    out = remove_spots_auto(noise, threshold_mad=8.0)
+    assert np.allclose(out, noise)  # 8-sigma on clean noise: nothing flagged
+
+
+def test_remove_spots_auto_via_state_and_adapter():
+    arr = np.zeros((16, 16))
+    arr[8, 8] = 100.0
+    state = processing_state_from_gui({
+        "geometric_ops": [
+            {"op": "remove_spots_auto",
+             "params": {"threshold_mad": 6.0, "window_px": 3}},
+        ],
+    })
+    assert [s.op for s in state.steps] == ["remove_spots_auto"]
+    out = apply_processing_state(arr, state)
+    assert abs(out[8, 8]) < 1.0
+
+
 # ── GUI adapter mapping ───────────────────────────────────────────────────────
 
 def test_adapter_maps_median_size():

@@ -811,7 +811,7 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
     ),
     _DefinitionEntry(
         title="Remove spots (interpolate under mask)",
-        params=("mask or area ROI",),
+        params=("mask or area ROI", "automatic: threshold_mad, window_px"),
         summary=(
             "Replaces the data inside a marked region with a smooth membrane "
             "interpolated from the surrounding pixels (Laplace interpolation — "
@@ -821,7 +821,10 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
         in_practice=(
             "Mark the defect with an area ROI (right-click → 'Remove spots') or "
             "a mask from Advanced Edge Detection (Masks section → 'Remove "
-            "spots'). The repair is a recorded processing step: undoable, "
+            "spots'). For whole-image cleanup, Processing → 'Remove spots "
+            "(automatic)' finds pixels deviating from their local median by "
+            "more than the chosen number of robust sigmas and repairs just "
+            "those. Every variant is a recorded processing step: undoable, "
             "replayable, and honest in the export provenance."
         ),
         equations=(

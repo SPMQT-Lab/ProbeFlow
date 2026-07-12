@@ -108,6 +108,14 @@ VIEWER_COMMANDS: tuple[ViewerCommand, ...] = (
         aliases=("crop", "cut", "trim", "extract region"),
     ),
     ViewerCommand(
+        "processing.remove_spots_auto", "Remove spots (automatic)...",
+        "Processing",
+        status_tip="Detect outlier pixels across the whole image and "
+                   "interpolate them away.",
+        aliases=("despot", "despeckle", "spots", "glitches", "outliers",
+                 "clean image"),
+    ),
+    ViewerCommand(
         "image.type_8bit", "8-bit (256 levels)", "Image",
         status_tip="Quantize image to 8-bit precision (256 levels, same physical range).",
         aliases=("8 bit", "8bit", "quantize 8", "reduce precision"),

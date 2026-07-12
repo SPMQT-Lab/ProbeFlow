@@ -97,6 +97,7 @@ _MINIMAL_PARAMS: dict[str, dict] = {
     "crop": {"x0": 1, "y0": 1, "x1": 6, "y1": 6},
     "median_smooth": {"size_px": 3},
     "interpolate_masked": {"frozen_mask": _FROZEN_MASK_8x8},
+    "remove_spots_auto": {"threshold_mad": 6.0, "window_px": 3},
     "image_threshold": {"mode": "clip", "lower": 0.0, "upper": 1.0},
     "quantize_bit_depth": {"bits": 8},
 }

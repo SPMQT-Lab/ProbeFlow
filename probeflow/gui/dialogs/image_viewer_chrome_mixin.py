@@ -237,6 +237,11 @@ class ImageViewerChromeMixin:
             self._on_preview_bad_lines,
         )
         processing_menu.addAction(bad_lines_top_action)
+        remove_spots_action = self._viewer_action(
+            "processing.remove_spots_auto",
+            self._on_remove_spots_auto,
+        )
+        processing_menu.addAction(remove_spots_action)
         image_ops_action = self._viewer_action(
             "processing.image_operations",
             self._on_open_image_operations,
@@ -253,7 +258,7 @@ class ImageViewerChromeMixin:
         )
         self._add_combo_menu(
             processing_menu, "Smooth", self._processing_panel._smooth_combo,
-            ["None", "Gaussian"],
+            ["None", "Gaussian", "Median"],
         )
         self._add_combo_menu(
             processing_menu, "Hi-pass", self._processing_panel._highpass_combo,

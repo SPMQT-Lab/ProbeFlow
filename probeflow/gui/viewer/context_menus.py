@@ -221,6 +221,11 @@ def _add_transform_menu(menu: QMenu, viewer) -> None:
     shear_act.triggered.connect(viewer._on_shear)
     transform_menu.addAction(shear_act)
 
+    transform_menu.addSeparator()
+    crop_act = _cmd_action("image.crop_selection")
+    crop_act.triggered.connect(viewer._on_crop_to_selection)
+    transform_menu.addAction(crop_act)
+
     menu.addMenu(transform_menu)
 
 

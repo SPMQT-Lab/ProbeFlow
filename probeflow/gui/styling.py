@@ -259,6 +259,45 @@ def _sep():
     return line
 
 
+def _arrow_image_path(direction: str, color: str) -> str:
+    """Path of a small theme-coloured triangle PNG for spin-box arrows.
+
+    QSS cannot draw sub-control arrows from borders on every Qt build, and
+    the SVG image plugin is not guaranteed either — so the arrows are tiny
+    QPainter-rendered PNGs (universally supported), generated once per
+    (direction, colour) into a temp cache. QSS ``url()`` needs a real file
+    path, so an on-disk cache is the portable option.
+    """
+    import hashlib
+    import tempfile
+    from pathlib import Path
+
+    safe = hashlib.sha1(f"{direction}-{color}".encode()).hexdigest()[:10]
+    cache_dir = Path(tempfile.gettempdir()) / "probeflow-qss"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    path = cache_dir / f"arrow_{direction}_{safe}.png"
+    if not path.exists():
+        from PySide6.QtCore import QPointF
+        from PySide6.QtGui import QColor, QImage, QPainter, QPolygonF
+
+        # Draw at 2x and let QSS scale down: crisp on HiDPI displays.
+        img = QImage(20, 18, QImage.Format_ARGB32)
+        img.fill(0)
+        painter = QPainter(img)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(QColor(0, 0, 0, 0))
+        painter.setBrush(QColor(color))
+        if direction == "up":
+            pts = [QPointF(2, 14), QPointF(18, 14), QPointF(10, 4)]
+        else:
+            pts = [QPointF(2, 4), QPointF(18, 4), QPointF(10, 14)]
+        painter.drawPolygon(QPolygonF(pts))
+        painter.end()
+        img.save(str(path), "PNG")
+    # QSS url() wants forward slashes on every platform.
+    return path.as_posix()
+
+
 def _build_qss(t: dict, font_pt: int = GUI_FONT_SIZES[GUI_FONT_DEFAULT]) -> str:
     return f"""
 QMainWindow, QWidget {{
@@ -431,22 +470,18 @@ QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {{
     background: {t['hover']};
 }}
 QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{
-    width: 0; height: 0;
-    border-left: 4px solid transparent;
-    border-right: 4px solid transparent;
-    border-bottom: 5px solid {t['fg']};
+    image: url({_arrow_image_path("up", t['fg'])});
+    width: 10px; height: 9px;
 }}
 QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{
-    width: 0; height: 0;
-    border-left: 4px solid transparent;
-    border-right: 4px solid transparent;
-    border-top: 5px solid {t['fg']};
+    image: url({_arrow_image_path("down", t['fg'])});
+    width: 10px; height: 9px;
 }}
 QSpinBox::up-arrow:disabled, QDoubleSpinBox::up-arrow:disabled {{
-    border-bottom-color: {t['border']};
+    image: url({_arrow_image_path("up", t['border'])});
 }}
 QSpinBox::down-arrow:disabled, QDoubleSpinBox::down-arrow:disabled {{
-    border-top-color: {t['border']};
+    image: url({_arrow_image_path("down", t['border'])});
 }}
 QTextEdit {{
     background-color: {t['log_bg']};

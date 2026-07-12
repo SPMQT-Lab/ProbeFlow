@@ -1017,6 +1017,12 @@ def apply_processing_state(
                 )
             else:
                 a = _proc.interpolate_masked(a, mask)
+        elif step.op == "remove_spots_auto":
+            a = _proc.remove_spots_auto(
+                a,
+                threshold_mad=float(p.get("threshold_mad", 6.0)),
+                window_px=int(p.get("window_px", 5)),
+            )
         elif step.op == "image_threshold":
             lower = float(p["lower"]) if p.get("lower") is not None else None
             upper = float(p["upper"]) if p.get("upper") is not None else None

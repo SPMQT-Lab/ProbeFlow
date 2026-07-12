@@ -55,6 +55,7 @@ _SUPPORTED_OPS: frozenset[str] = frozenset({
     "scale_image",
     "crop",
     "interpolate_masked",
+    "remove_spots_auto",
     "image_threshold",
     "quantize_bit_depth",
 })

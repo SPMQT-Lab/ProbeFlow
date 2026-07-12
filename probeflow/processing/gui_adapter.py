@@ -648,6 +648,11 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
             except (KeyError, TypeError, ValueError) as exc:
                 _warn_skipped_step("crop", str(exc) or "invalid crop bounds")
                 continue
+        elif op_name == "remove_spots_auto":
+            _append_step(ProcessingStep("remove_spots_auto", {
+                "threshold_mad": float(op_params.get("threshold_mad", 6.0)),
+                "window_px": int(op_params.get("window_px", 5)),
+            }))
         elif op_name == "image_threshold":
             thr_params: dict = {"mode": str(op_params.get("mode", "clip"))}
             if op_params.get("lower") is not None:

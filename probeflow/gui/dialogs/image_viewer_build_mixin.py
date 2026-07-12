@@ -453,6 +453,43 @@ class ImageViewerBuildMixin:
 
         processing_lay.addWidget(_sep())
 
+        # ── Transform (same recorded geometric ops as Image → Transform and
+        # the canvas right-click; here so the sidebar covers the everyday set
+        # without a trip to the menu bar) ──────────────────────────────────────
+        _transform_hdr = QLabel("Transform")
+        _transform_hdr.setFont(ui_font(7, weight=QFont.Bold))
+        processing_lay.addWidget(_transform_hdr)
+        transform_grid = QGridLayout()
+        transform_grid.setContentsMargins(0, 0, 0, 0)
+        transform_grid.setHorizontalSpacing(3)
+        transform_grid.setVerticalSpacing(3)
+        _transform_buttons = [
+            ("Flip H", lambda: self._on_geometric_op("flip_horizontal"),
+             "Mirror left-right."),
+            ("Flip V", lambda: self._on_geometric_op("flip_vertical"),
+             "Mirror top-bottom."),
+            ("Rot 90°", lambda: self._on_geometric_op("rotate_90_cw"),
+             "Rotate 90° clockwise (lossless)."),
+            ("Rot 180°", lambda: self._on_geometric_op("rotate_180"),
+             "Rotate 180° (lossless)."),
+            ("Rotate…", self._on_rotate_arbitrary,
+             "Rotate by an arbitrary angle (interpolated; drops ROIs)."),
+            ("Crop to sel.", self._on_crop_to_selection,
+             "Crop to the current selection or active area ROI."),
+        ]
+        for i, (label, slot, tip) in enumerate(_transform_buttons):
+            btn = QPushButton(label)
+            btn.setFixedHeight(24)
+            btn.setToolTip(tip)
+            btn.setDefault(False)
+            btn.setAutoDefault(False)
+            btn.clicked.connect(lambda _c=False, s=slot: s())
+            row, col = divmod(i, 3)
+            transform_grid.addWidget(btn, row, col)
+        processing_lay.addLayout(transform_grid)
+
+        processing_lay.addWidget(_sep())
+
         # ── Zero reference | ROI filter scope (compact 2-column row) ──────────
         zs_row = QHBoxLayout()
         zs_row.setSpacing(6)

@@ -12,6 +12,56 @@ from __future__ import annotations
 import numpy as np
 
 
+def remove_spots_auto(
+    arr: np.ndarray,
+    threshold_mad: float = 6.0,
+    window_px: int = 5,
+) -> np.ndarray:
+    """Detect outlier pixels across the whole image and interpolate them away.
+
+    A pixel is a "spot" when it deviates from its local median (a
+    ``window_px`` median filter) by more than ``threshold_mad`` robust
+    standard deviations of the residual (MAD × 1.4826). The detected pixels
+    are then repaired with :func:`interpolate_masked` — one click instead of
+    hand-marking every glitch.
+
+    Conservative by construction: on a defect-free image the residual is
+    noise, its MAD measures that noise, and a 6-sigma threshold flags
+    essentially nothing. A zero MAD (constant image) means nothing to do.
+    """
+    from probeflow.processing.filters import median_smooth
+
+    arr = np.asarray(arr, dtype=np.float64).copy()
+    finite = np.isfinite(arr)
+    if not finite.any():
+        return arr
+    threshold_mad = float(threshold_mad)
+    if threshold_mad <= 0:
+        return arr
+    reference = median_smooth(arr, size_px=int(window_px))
+    residual = arr - reference
+    res_finite = residual[np.isfinite(residual)]
+    if res_finite.size == 0:
+        return arr
+    mad = 1.4826 * float(np.median(np.abs(res_finite - np.median(res_finite))))
+    if mad <= 0.0:
+        # Noise-free data (or spikes so sparse the median deviation is zero):
+        # fall back to the mean absolute residual so isolated spikes on an
+        # otherwise clean surface are still caught. Zero here means the image
+        # matches its local median everywhere — nothing to repair.
+        mad = 1.4826 * float(np.mean(np.abs(res_finite)))
+        if mad <= 0.0:
+            return arr
+    mask = np.zeros(arr.shape, dtype=bool)
+    with np.errstate(invalid="ignore"):
+        mask[np.isfinite(residual)] = (
+            np.abs(residual[np.isfinite(residual)]) > threshold_mad * mad
+        )
+    if not mask.any():
+        return arr
+    return interpolate_masked(arr, mask)
+
+
 def interpolate_masked(arr: np.ndarray, mask: np.ndarray) -> np.ndarray:
     """Replace the pixels under *mask* by Laplace interpolation.
 
