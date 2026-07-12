@@ -104,7 +104,10 @@ def choose_display_unit(si_unit: str, values: np.ndarray) -> tuple[float, str]:
     if prefixes is None:
         return 1.0, si_unit
 
-    nonzero = arr[arr != 0]
+    finite = arr[np.isfinite(arr)]
+    if finite.size == 0:
+        return 1.0, si_unit
+    nonzero = finite[finite != 0]
     if nonzero.size == 0:
         return _ZERO_VALUE_DISPLAY_DEFAULTS.get(si_unit, (1.0, si_unit))
     magnitude = float(np.median(np.abs(nonzero)))

@@ -160,6 +160,28 @@ def test_roi_bounds_and_crop_contract():
     assert np.all(crop == 1.0)
 
 
+def test_roi_crop_rejects_empty_out_of_image_selection():
+    roi = rect_roi(x=200, y=200, w=5, h=8)
+
+    with pytest.raises(ValueError, match="selects no pixels"):
+        roi.crop(np.zeros(SHAPE))
+
+
+@pytest.mark.parametrize(
+    "field,value,error",
+    [
+        ("kind", "rectangel", "Unsupported ROI kind"),
+        ("coord_system", "screen", "Unsupported ROI coordinate system"),
+    ],
+)
+def test_roi_from_dict_rejects_unknown_enum_values(field, value, error):
+    payload = rect_roi(x=1, y=1, w=2, h=2).to_dict()
+    payload[field] = value
+
+    with pytest.raises(ValueError, match=error):
+        ROI.from_dict(payload)
+
+
 def test_lossless_transforms_preserve_expected_coordinates_and_identity():
     cases = [
         ("flip_horizontal", rect_roi(x=10, y=10, w=20, h=20), (100, 100), {"x": 70.0, "y": 10.0, "width": 20.0}),

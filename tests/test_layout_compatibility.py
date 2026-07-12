@@ -48,7 +48,6 @@ OLD_WRAPPER_MODULES = tuple(
         "sxm_io",
         "validation",
         "writers",
-        "xmgrace_export",
     )
 )
 

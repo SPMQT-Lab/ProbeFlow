@@ -2,9 +2,21 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import numpy as np
 
 from probeflow.gui import rendering as R
+
+
+def test_render_scan_image_rejects_negative_plane_index(monkeypatch):
+    scan = SimpleNamespace(
+        n_planes=2,
+        planes=[np.zeros((2, 2)), np.ones((2, 2))],
+    )
+    monkeypatch.setattr(R, "load_scan", lambda _path: scan)
+
+    assert R.render_scan_image(scan_path="scan.sxm", plane_idx=-1) is None
 
 
 def _arr():

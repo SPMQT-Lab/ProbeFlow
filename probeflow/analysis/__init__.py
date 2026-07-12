@@ -32,10 +32,7 @@ from probeflow.analysis.line_periodicity import (
     format_period,
     format_result_text,
 )
-from probeflow.analysis.xmgrace_export import Curve, build_agr, export_bundle
-
 __all__ = [
-    "Curve",
     "PeriodicityDiagnostic",
     "PeriodicityResult",
     "estimate_line_periodicity",
@@ -45,8 +42,6 @@ __all__ = [
     "LatticeResult",
     "UnitCellResult",
     "average_unit_cell",
-    "build_agr",
-    "export_bundle",
     "extract_lattice",
     "write_lattice_pdf",
 ]

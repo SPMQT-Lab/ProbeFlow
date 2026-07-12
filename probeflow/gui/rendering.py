@@ -305,7 +305,7 @@ def render_scan_image(
             if scan_path is None:
                 return None
             scan = load_scan(scan_path)
-            if plane_idx >= scan.n_planes:
+            if plane_idx < 0 or plane_idx >= scan.n_planes:
                 return None
             arr = scan.planes[plane_idx]
         if arr is None:

@@ -228,6 +228,33 @@ def test_sidebar_merges_roi_mask_and_orders_tabs(qapp, monkeypatch):
         qapp.processEvents()
 
 
+def test_viewer_entry_selection_distinguishes_matching_stems():
+    from probeflow.gui import SxmFile
+    from probeflow.gui.dialogs.image_viewer import _viewer_entry_index
+
+    dat = SxmFile(path=Path("/tmp/scan.dat"), stem="scan")
+    sxm = SxmFile(path=Path("/tmp/scan.sxm"), stem="scan")
+    equivalent_sxm = SxmFile(path=Path("/tmp/scan.sxm"), stem="scan")
+
+    assert _viewer_entry_index(sxm, [dat, sxm]) == 1
+    assert _viewer_entry_index(equivalent_sxm, [dat, sxm]) == 1
+
+
+def test_threshold_dialog_applies_equal_band_for_constant_image(qapp):
+    from probeflow.gui.dialogs.threshold_dialog import ThresholdDialog
+
+    dialog = ThresholdDialog(np.full((3, 3), 1.25))
+    applied = []
+    dialog.applied.connect(applied.append)
+    try:
+        dialog._do_apply()
+        assert applied == [{"mode": "clip", "lower": 1.25, "upper": 1.25}]
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
+
+
 def test_format_gaussian_readout_pure():
     from probeflow.gui.processing import format_gaussian_readout
 

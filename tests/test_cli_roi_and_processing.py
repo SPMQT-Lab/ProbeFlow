@@ -174,6 +174,27 @@ class TestResolveInlineRoi:
         assert roi is not None
         assert roi.kind == "line"
 
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"roi_rect": [0.0, float("nan"), 5.0, 5.0]},
+            {"roi_polygon": [0.0, 0.0, 5.0, 0.0, float("inf"), 5.0]},
+            {"roi_line": [0.0, 0.0, float("-inf"), 5.0]},
+        ],
+    )
+    def test_nonfinite_inline_coordinates_return_logged_error(
+        self, kwargs, caplog
+    ):
+        with caplog.at_level(logging.ERROR):
+            roi, error = resolve_inline_roi(
+                _ns(**kwargs),
+                allow_line="roi_line" in kwargs,
+            )
+
+        assert roi is None
+        assert error is True
+        assert any("finite" in record.getMessage() for record in caplog.records)
+
 
 # ─── processing commands (smoke tests) ───────────────────────────────────────
 

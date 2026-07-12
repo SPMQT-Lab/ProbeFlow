@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 
 import numpy as np
@@ -34,7 +36,19 @@ def test_csv_has_header_rows_and_formats_values():
 
 def test_csv_escapes_commas_in_labels():
     text = point_stats_csv_text([("a, b", 1, "")])
-    assert "a; b,1," in text
+    rows = list(csv.reader(io.StringIO(text)))
+    assert rows[1] == ["a, b", "1", ""]
+
+
+def test_csv_quotes_newlines_and_commas_in_all_fields():
+    text = point_stats_csv_text([("line\nbreak", "1,000", "nm,scaled")])
+
+    rows = list(csv.reader(io.StringIO(text)))
+
+    assert rows == [
+        ["quantity", "value", "unit"],
+        ["line\nbreak", "1,000", "nm,scaled"],
+    ]
 
 
 def test_json_roundtrips_scalars_and_curves():
@@ -53,3 +67,15 @@ def test_json_roundtrips_scalars_and_curves():
 def test_json_without_curves_omits_the_key():
     obj = json.loads(point_stats_json_text(_scalars()))
     assert "curves" not in obj
+
+
+def test_json_converts_numpy_scalars_recursively():
+    text = point_stats_json_text(
+        [("Points", np.int64(3), "")],
+        {"curve": {"metadata": {"peak": np.float32(1.5)}}},
+    )
+
+    obj = json.loads(text)
+
+    assert obj["statistics"][0]["value"] == 3
+    assert obj["curves"]["curve"]["metadata"]["peak"] == 1.5

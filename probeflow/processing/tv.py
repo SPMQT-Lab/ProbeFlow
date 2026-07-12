@@ -21,12 +21,12 @@ def _nabla_apply(x: np.ndarray, Ny: int, Nx: int, comp: str) -> np.ndarray:
     Returns a flattened (2*N,) vector with the x- and y-gradient stacked.
     """
     img = x.reshape(Ny, Nx)
-    if comp in ("both", "x"):
+    if comp in ("both", "x") and Nx > 1:
         gx = np.zeros_like(img)
         gx[:, :-1] = img[:, 1:] - img[:, :-1]
     else:
         gx = np.zeros_like(img)
-    if comp in ("both", "y"):
+    if comp in ("both", "y") and Ny > 1:
         gy = np.zeros_like(img)
         gy[:-1, :] = img[1:, :] - img[:-1, :]
     else:
@@ -41,14 +41,14 @@ def _nabla_T_apply(p: np.ndarray, Ny: int, Nx: int, comp: str) -> np.ndarray:
     py = p[N:].reshape(Ny, Nx)
 
     div = np.zeros((Ny, Nx))
-    if comp in ("both", "x"):
+    if comp in ("both", "x") and Nx > 1:
         # x-component of -div
         d = np.zeros_like(px)
         d[:, 0] = px[:, 0]
         d[:, 1:-1] = px[:, 1:-1] - px[:, :-2]
         d[:, -1] = -px[:, -2]
         div -= d
-    if comp in ("both", "y"):
+    if comp in ("both", "y") and Ny > 1:
         d = np.zeros_like(py)
         d[0, :] = py[0, :]
         d[1:-1, :] = py[1:-1, :] - py[:-2, :]

@@ -86,6 +86,23 @@ def test_detect_local_maxima_rejects_flat_background_plateaus():
     assert (points[0].x_px, points[0].y_px) == (10.0, 10.0)
 
 
+@pytest.mark.parametrize(
+    "axis,value",
+    [
+        ("x", 0.0),
+        ("x", float("nan")),
+        ("y", -1.0),
+        ("y", float("inf")),
+    ],
+)
+def test_detect_local_maxima_rejects_invalid_pixel_calibration(axis, value):
+    kwargs = {"pixel_size_x": 1.0, "pixel_size_y": 1.0}
+    kwargs[f"pixel_size_{axis}"] = value
+
+    with pytest.raises(ValueError, match=f"pixel_size_{axis}"):
+        detect_local_maxima(np.ones((3, 3)), **kwargs)
+
+
 def test_feature_point_exports_and_summary():
     image = _gaussian_image([(8, 8, 2.0)])
     points = detect_local_maxima(

@@ -61,6 +61,15 @@ class TestTvDenoiseErrors:
         with pytest.raises(ValueError):
             tv_denoise(np.zeros((8, 8)), method="huber_rof", nabla_comp="z")
 
+    @pytest.mark.parametrize("shape", [(1, 5), (5, 1), (1, 1)])
+    def test_singleton_dimensions_are_valid_2d_images(self, shape):
+        arr = np.arange(np.prod(shape), dtype=np.float64).reshape(shape)
+
+        result = tv_denoise(arr, method="huber_rof", max_iter=5)
+
+        assert result.shape == shape
+        assert np.isfinite(result).all()
+
 
 class TestIterationContract:
     """Regression for review numerical #2 — tv_denoise must respect

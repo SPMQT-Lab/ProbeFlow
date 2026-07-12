@@ -74,6 +74,11 @@ def summarize_point_pattern(
     points = np.asarray(points_m, dtype=float).reshape(-1, 2)
     n_total = int(len(points))
     messages: list[str] = []
+    finite_rows = np.isfinite(points).all(axis=1)
+    n_nonfinite = int(n_total - np.count_nonzero(finite_rows))
+    if n_nonfinite:
+        messages.append(f"Ignored {n_nonfinite} point(s) with non-finite coordinates.")
+    points = points[finite_rows]
 
     px_x_m = px_y_m = None
     if scan_range_m is not None and image_shape is not None:
@@ -93,7 +98,7 @@ def summarize_point_pattern(
             messages.append("Region mask ignored: shape does not match the image.")
         else:
             mask_arr = candidate
-    if mask_arr is not None and n_total:
+    if mask_arr is not None and len(points):
         cols = np.floor(points[:, 0] / px_x_m).astype(int)
         rows = np.floor(points[:, 1] / px_y_m).astype(int)
         in_bounds = (
@@ -102,7 +107,7 @@ def summarize_point_pattern(
             & (rows >= 0)
             & (rows < mask_arr.shape[0])
         )
-        inside = np.zeros(n_total, dtype=bool)
+        inside = np.zeros(len(points), dtype=bool)
         inside[in_bounds] = mask_arr[rows[in_bounds], cols[in_bounds]]
         kept = points[inside]
     n_in_region = int(len(kept))

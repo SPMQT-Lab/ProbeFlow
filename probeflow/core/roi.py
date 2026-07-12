@@ -265,6 +265,8 @@ class ROI:
     def crop(self, array: np.ndarray) -> np.ndarray:
         """Return the rectangular crop of *array* covering this ROI's bounding box."""
         shape = array.shape[:2]
+        if not self.to_mask(shape).any():
+            raise ValueError(f"ROI {self.name!r} selects no pixels in image shape {shape}")
         r0, r1, c0, c1 = self.bounds(shape)
         return array[r0:r1 + 1, c0:c1 + 1]
 
@@ -284,12 +286,22 @@ class ROI:
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "ROI":
         """Reconstruct from the dict produced by :meth:`to_dict`."""
+        kind = str(d["kind"])
+        supported_kinds = {
+            "rectangle", "ellipse", "polygon", "freehand", "line", "point",
+            "multipolygon",
+        }
+        if kind not in supported_kinds:
+            raise ValueError(f"Unsupported ROI kind: {kind!r}")
+        coord_system = str(d.get("coord_system", "pixel"))
+        if coord_system not in {"pixel", "physical"}:
+            raise ValueError(f"Unsupported ROI coordinate system: {coord_system!r}")
         return cls(
             id=str(d["id"]),
             name=str(d["name"]),
-            kind=str(d["kind"]),   # type: ignore[arg-type]
+            kind=kind,   # type: ignore[arg-type]
             geometry=_geometry_from_serialisable(dict(d["geometry"])),
-            coord_system=str(d.get("coord_system", "pixel")),   # type: ignore[arg-type]
+            coord_system=coord_system,   # type: ignore[arg-type]
             linked_file=d.get("linked_file"),
         )
 

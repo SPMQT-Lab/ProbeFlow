@@ -37,6 +37,11 @@ def _display_range_from_finite(finite: np.ndarray) -> tuple[float, float]:
     return display_min, display_max
 
 
+def _threshold_bounds_valid(lower: float, upper: float) -> bool:
+    """Inclusive threshold bounds are valid unless they are reversed."""
+    return lower <= upper
+
+
 # ── Scientific-notation spinbox ───────────────────────────────────────────────
 
 class _SciSpinBox(QDoubleSpinBox):
@@ -289,7 +294,7 @@ class ThresholdDialog(QDialog):
 
     def _do_preview(self) -> None:
         """Fire the live preview if the current bounds form a valid range."""
-        if self._lo >= self._hi:
+        if not _threshold_bounds_valid(self._lo, self._hi):
             return   # invalid or collapsed range — skip silently
 
         highlight = self._highlight_cb.currentData()   # str colour key or None
@@ -347,7 +352,7 @@ class ThresholdDialog(QDialog):
         return QPixmap.fromImage(qimg)
 
     def _do_apply(self) -> None:
-        if self._lo >= self._hi:
+        if not _threshold_bounds_valid(self._lo, self._hi):
             # Degenerate range — nothing meaningful to apply; let the user fix it.
             return
         self.applied.emit(self._current_params())
@@ -372,7 +377,7 @@ class ThresholdDialog(QDialog):
         """Min slider released → clamp to stay below _hi, sync spinbox, preview."""
         lo = self._hist.sl_to_si(v)   # scale=1.0 → SI == physical
         # Clamp: min slider must stay strictly below the current upper bound.
-        if lo >= self._hi:
+        if lo > self._hi:
             lo = self._hi - abs(self._hi - self._vmin) * 1e-6 or self._hi - 1e-15
         self._lo = lo
         self._lower_spin.blockSignals(True)
@@ -385,7 +390,7 @@ class ThresholdDialog(QDialog):
         """Max slider released → clamp to stay above _lo, sync spinbox, preview."""
         hi = self._hist.sl_to_si(v)
         # Clamp: max slider must stay strictly above the current lower bound.
-        if hi <= self._lo:
+        if hi < self._lo:
             hi = self._lo + abs(self._vmax - self._lo) * 1e-6 or self._lo + 1e-15
         self._hi = hi
         self._upper_spin.blockSignals(True)
@@ -403,7 +408,7 @@ class ThresholdDialog(QDialog):
         """
         lo = self._lower_spin.value()
         hi = self._upper_spin.value()
-        if lo >= hi:
+        if not _threshold_bounds_valid(lo, hi):
             # Revert the spinbox that was just edited back to the last valid value
             # so the display stays consistent with self._lo / self._hi.
             sender = self.sender()

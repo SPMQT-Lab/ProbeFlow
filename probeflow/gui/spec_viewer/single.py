@@ -79,6 +79,20 @@ from .shared import (
     _trace_key,
 )
 
+
+_FIGURE_EXPORT_FILTER = (
+    "PDF files (*.pdf);;SVG files (*.svg);;PNG files (*.png)"
+)
+
+
+def _save_figure(fig: Figure, path: str | Path) -> Path:
+    """Save the current Matplotlib figure in a supported portable format."""
+    output = Path(path)
+    if output.suffix.lower() not in {".pdf", ".svg", ".png"}:
+        raise ValueError("Figure output must use a .pdf, .svg, or .png extension")
+    fig.savefig(output, dpi=300, bbox_inches="tight")
+    return output
+
 class SpecViewerDialog(QDialog):
     """Full-size viewer for a spectroscopy file (Createc .VERT or Nanonis .dat).
 
@@ -461,14 +475,12 @@ class SpecViewerDialog(QDialog):
         self._export_txt_btn.clicked.connect(self._export_txt)
         btn_row.addWidget(self._export_txt_btn)
 
-        self._export_grace_btn = _plain_button("Export xmgrace…")
-        self._export_grace_btn.setFixedWidth(160)
-        self._export_grace_btn.setToolTip(
-            "Render via xmgrace (Helvetica default). "
-            "Produces three files in the chosen folder: "
-            ".agr (re-editable Grace project), .png, and .pdf.")
-        self._export_grace_btn.clicked.connect(self._export_xmgrace)
-        btn_row.addWidget(self._export_grace_btn)
+        self._export_figure_btn = _plain_button("Export figure…")
+        self._export_figure_btn.setFixedWidth(140)
+        self._export_figure_btn.setToolTip(
+            "Save the displayed plot as PDF, SVG, or high-resolution PNG.")
+        self._export_figure_btn.clicked.connect(self._export_figure)
+        btn_row.addWidget(self._export_figure_btn)
 
         btn_row.addStretch()
         close_btn = _plain_button("Close")
@@ -1167,65 +1179,29 @@ class SpecViewerDialog(QDialog):
         except Exception as exc:
             self._status.setText(f"TXT export error: {exc}")
 
-    def _export_xmgrace(self) -> None:
-        if self._spec is None:
-            self._status.setText("Nothing to export — spectrum failed to load.")
+    def _export_figure(self) -> None:
+        if self._fig is None:
+            self._status.setText("Nothing to export — no plot is displayed.")
             return
-        displayed = self._current_displayed_spectra()
-        if not displayed:
-            self._status.setText("Tick at least one channel before exporting.")
+        out_path, selected = QFileDialog.getSaveFileName(
+            self,
+            "Export displayed spectrum figure",
+            str(Path.home() / f"{self._entry.stem}.pdf"),
+            _FIGURE_EXPORT_FILTER,
+        )
+        if not out_path:
             return
-        out_dir = QFileDialog.getExistingDirectory(
-            self, "Choose output folder for xmgrace export",
-            str(Path.home()))
-        if not out_dir:
-            return
-        try:
-            from probeflow.analysis.xmgrace_export import Curve, export_bundle
-        except ImportError as exc:
-            self._status.setText(f"xmgrace export unavailable: {exc}")
-            return
-        first_x = displayed[0].x_display
-        if any(d.x_display.shape != first_x.shape or not np.allclose(d.x_display, first_x)
-               for d in displayed[1:]):
-            self._status.setText(
-                "xmgrace export needs matching displayed x values; use CSV/JSON/TXT.")
-            return
-
-        units = {d.y_unit for d in displayed}
-        if len(units) == 1:
-            y_label = f"value ({displayed[0].y_unit})" if displayed[0].y_unit else "value"
-        else:
-            y_label = "value"
-        curves = [
-            Curve(
-                name=d.y_channel,
-                y=d.y_display,
-                legend=f"{Path(d.source_file).stem}: {d.y_label} ({d.y_unit})"
-                       if d.y_unit else f"{Path(d.source_file).stem}: {d.y_label}",
+        path = Path(out_path)
+        if not path.suffix:
+            suffix = ".svg" if selected.startswith("SVG") else (
+                ".png" if selected.startswith("PNG") else ".pdf"
             )
-            for d in displayed
-        ]
+            path = path.with_suffix(suffix)
         try:
-            paths = export_bundle(
-                Path(out_dir),
-                self._entry.stem,
-                first_x,
-                curves,
-                x_label=displayed[0].x_label,
-                y_label=y_label,
-                title=self._entry.stem,
-                subtitle="ProbeFlow xmgrace export",
-                font="Helvetica",
-            )
-        except FileNotFoundError as exc:
-            self._status.setText(f"Export error: {exc}")
-            return
+            saved = _save_figure(self._fig, path)
+            self._status.setText(f"Figure → {saved}")
         except Exception as exc:
-            self._status.setText(f"xmgrace failed: {exc}")
-            return
-        names = ", ".join(p.name for p in paths.values())
-        self._status.setText(f"Exported to {out_dir}: {names}")
+            self._status.setText(f"Figure export error: {exc}")
 
     # ── Raw-data table ──────────────────────────────────────────────────
 

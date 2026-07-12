@@ -7,9 +7,16 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 import probeflow.cli as cli
 from probeflow.cli import _legacy
-from probeflow.cli.commands.conversion import _cmd_dat2npy, _cmd_dat2png, _cmd_dat2sxm
+from probeflow.cli.commands.conversion import (
+    _cmd_dat2npy,
+    _cmd_dat2png,
+    _cmd_dat2sxm,
+    _run_converter,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -19,6 +26,30 @@ def test_dat2npy_is_available_through_legacy_cli_exports():
     assert _legacy._cmd_dat2npy is _cmd_dat2npy
     assert cli._cmd_dat2npy is _cmd_dat2npy
     assert "_cmd_dat2npy" in _legacy.__all__
+
+
+def test_converter_restores_process_argv_after_success():
+    original = sys.argv
+    seen = []
+
+    def converter():
+        seen.append(list(sys.argv))
+        return 0
+
+    assert _run_converter(converter, "dat-npy", ["--", "--input", "scan.dat"]) == 0
+    assert seen == [["dat-npy", "--input", "scan.dat"]]
+    assert sys.argv is original
+
+
+def test_converter_restores_process_argv_after_failure():
+    original = sys.argv
+
+    def converter():
+        raise RuntimeError("conversion failed")
+
+    with pytest.raises(RuntimeError, match="conversion failed"):
+        _run_converter(converter, "dat-sxm", ["scan.dat"])
+    assert sys.argv is original
 
 
 def test_dat2sxm_batch_returns_nonzero_when_file_fails(tmp_path):

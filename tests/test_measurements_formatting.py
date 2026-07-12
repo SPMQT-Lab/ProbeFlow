@@ -133,6 +133,20 @@ class TestChooseDisplayUnit:
         scale, unit = choose_display_unit("m", np.zeros(10))
         assert unit == "nm"
 
+    def test_nonfinite_samples_do_not_hide_finite_scale(self):
+        values = np.array([200e-9, 500e-9, np.nan, np.inf, -np.inf])
+
+        scale, unit = choose_display_unit("m", values)
+
+        assert unit == "nm"
+        assert scale == 1e9
+
+    def test_only_nonfinite_samples_fall_back_to_si_unit(self):
+        scale, unit = choose_display_unit("A", np.array([np.nan, np.inf]))
+
+        assert unit == "A"
+        assert scale == 1.0
+
     def test_unknown_si_unit_pass_through(self):
         scale, unit = choose_display_unit("Hz", np.array([1.0]))
         assert unit == "Hz"

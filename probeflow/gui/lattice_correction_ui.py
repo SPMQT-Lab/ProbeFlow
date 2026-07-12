@@ -79,7 +79,13 @@ def structure_from_dict(data: object) -> KnownStructure | None:
         unit = str(data.get("unit", "Å")).strip() or "Å"
     except Exception:
         return None
-    if not name or a_nm <= 0.0 or b_nm <= 0.0 or not (1.0 <= angle_deg <= 179.0):
+    if (
+        not name
+        or not all(math.isfinite(value) for value in (a_nm, b_nm, angle_deg))
+        or a_nm <= 0.0
+        or b_nm <= 0.0
+        or not (1.0 <= angle_deg <= 179.0)
+    ):
         return None
     return KnownStructure(name, symmetry, a_nm, b_nm, angle_deg, unit)
 

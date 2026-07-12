@@ -688,6 +688,13 @@ def shear(
     interpolation
         ``'nearest'``, ``'bilinear'`` (default), or ``'bicubic'``.
     """
+    shear_x = float(shear_x)
+    shear_y = float(shear_y)
+    if not np.isfinite(shear_x) or not np.isfinite(shear_y):
+        raise ValueError("shear_x and shear_y must be finite")
+    determinant = 1.0 - shear_x * shear_y
+    if abs(determinant) < 1e-12:
+        raise ValueError("Shear matrix is singular or near-singular")
     matrix = np.array([[1.0, shear_x], [shear_y, 1.0]], dtype=np.float64)
     return affine_lattice_correction(
         arr, matrix,

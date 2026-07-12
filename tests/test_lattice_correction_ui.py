@@ -14,6 +14,7 @@ from probeflow.gui.lattice_correction_ui import (
     delete_structure,
     ideal_lattice_from_structure,
     piezo_constant_recommendation,
+    structure_from_dict,
     structure_from_period,
     structures_from_config,
     structures_to_config,
@@ -25,6 +26,16 @@ def test_empty_config_returns_default_structure():
     structures = structures_from_config({})
 
     assert structures == [DEFAULT_STRUCTURE]
+
+
+@pytest.mark.parametrize("bad_value", [float("nan"), float("inf"), float("-inf")])
+def test_structure_config_rejects_nonfinite_dimensions(bad_value):
+    assert structure_from_dict({
+        "name": "invalid",
+        "a_nm": bad_value,
+        "b_nm": 0.246,
+        "angle_deg": 60.0,
+    }) is None
 
 
 def test_structure_round_trip_preserves_unrelated_config():

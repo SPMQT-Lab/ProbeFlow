@@ -11,6 +11,8 @@ Dependencies are numpy + stdlib only.
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 from typing import Any
 
@@ -32,11 +34,24 @@ def point_stats_csv_text(scalars: list[tuple[str, Any, str]]) -> str:
     values render as an empty cell so a missing (e.g. uncalibrated) quantity is
     still represented.
     """
-    lines = ["quantity,value,unit"]
+    out = io.StringIO(newline="")
+    writer = csv.writer(out, lineterminator="\n")
+    writer.writerow(["quantity", "value", "unit"])
     for label, value, unit in scalars:
-        safe = str(label).replace(",", ";")
-        lines.append(f"{safe},{_fmt_csv(value)},{unit}")
-    return "\n".join(lines) + "\n"
+        writer.writerow([str(label), _fmt_csv(value), str(unit)])
+    return out.getvalue()
+
+
+def _jsonable(value: Any) -> Any:
+    if isinstance(value, np.ndarray):
+        return [_jsonable(item) for item in value.tolist()]
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, dict):
+        return {str(key): _jsonable(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(item) for item in value]
+    return value
 
 
 def point_stats_json_text(
@@ -50,14 +65,18 @@ def point_stats_json_text(
     """
     obj: dict[str, Any] = {
         "statistics": [
-            {"quantity": label, "value": value, "unit": unit}
+            {
+                "quantity": str(label),
+                "value": _jsonable(value),
+                "unit": str(unit),
+            }
             for label, value, unit in scalars
         ]
     }
     if curves:
         obj["curves"] = {
             name: {
-                key: (val.tolist() if isinstance(val, np.ndarray) else val)
+                key: _jsonable(val)
                 for key, val in columns.items()
             }
             for name, columns in curves.items()

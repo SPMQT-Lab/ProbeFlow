@@ -7,6 +7,7 @@ GUI refactor (now re-exported via ``probeflow.gui.compat``).
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any, Optional
 
 import numpy as np
@@ -71,6 +72,18 @@ from probeflow.gui.viewer.image_viewer_tools_mixin import ImageViewerToolsMixin
 from probeflow.gui.dialogs.stm_background import STMBackgroundDialog
 
 
+def _viewer_entry_index(entry: SxmFile, entries: list[SxmFile]) -> int:
+    """Locate an entry without conflating files that share a stem."""
+    for index, candidate in enumerate(entries):
+        if candidate is entry:
+            return index
+    target_path = Path(entry.path)
+    for index, candidate in enumerate(entries):
+        if Path(candidate.path) == target_path:
+            return index
+    return 0
+
+
 class ImageViewerDialog(
     ImageViewerBuildMixin,
     ImageViewerChromeMixin,
@@ -112,7 +125,7 @@ class ImageViewerDialog(
         # propagate back to thumbnails.
         self._viewer_colormap = colormap
         self._t          = t
-        self._idx        = next((i for i, e in enumerate(entries) if e.stem == entry.stem), 0)
+        self._idx = _viewer_entry_index(entry, entries)
         self._pool       = QThreadPool.globalInstance()
         self._token      = object()
         self._clip_low   = clip_low

@@ -114,6 +114,26 @@ def test_no_calibration_gives_none_area_but_real_nn():
     assert "calibration" in summary.message
 
 
+def test_nonfinite_points_are_excluded_with_an_explanation():
+    points_m = np.array([
+        [1e-9, 1e-9],
+        [np.nan, 2e-9],
+        [3e-9, np.inf],
+        [4e-9, 1e-9],
+    ])
+
+    summary = summarize_point_pattern(
+        points_m,
+        scan_range_m=(5e-9, 5e-9),
+        image_shape=(5, 5),
+    )
+
+    assert summary.n_total == 4
+    assert summary.n_in_region == 2
+    assert summary.nn_mean_nm == pytest.approx(3.0)
+    assert "Ignored 2 point(s)" in summary.message
+
+
 def test_duplicate_points_report_zero_nn_min():
     points_m = np.array([[1e-9, 1e-9], [1e-9, 1e-9], [3e-9, 1e-9]])
     summary = summarize_point_pattern(

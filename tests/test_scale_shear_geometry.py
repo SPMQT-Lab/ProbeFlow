@@ -24,6 +24,7 @@ import pytest
 
 from probeflow.core.mask import ImageMask, MaskSet
 from probeflow.core.roi import ROI, ROISet
+from probeflow.processing.geometry import shear
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -119,6 +120,19 @@ class TestMaskResamplingOps:
             mask.transform("bogus_op", {}, SHAPE)
 
 
+@pytest.mark.parametrize(
+    "shear_x,shear_y,error",
+    [
+        (1.0, 1.0, "singular"),
+        (float("nan"), 0.0, "finite"),
+        (0.0, float("inf"), "finite"),
+    ],
+)
+def test_shear_kernel_rejects_invalid_matrices(shear_x, shear_y, error):
+    with pytest.raises(ValueError, match=error):
+        shear(np.ones((4, 4)), shear_x=shear_x, shear_y=shear_y)
+
+
 # ── Viewer wiring ─────────────────────────────────────────────────────────────
 
 @pytest.fixture
@@ -191,6 +205,24 @@ def _viewer_host(qapp):
     host._image_mask_set.add(ImageMask.new(raster, name="m1"))
     canvas.set_selection("rectangle", {"x": 2, "y": 2, "width": 8, "height": 8})
     return host, canvas
+
+
+def test_shear_dialog_keeps_singular_settings_open(qapp):
+    from probeflow.gui.dialogs.shear_dialog import ShearDialog
+
+    dialog = ShearDialog()
+    applied = []
+    dialog.applied.connect(applied.append)
+    dialog._shear_x_spin.setValue(1.0)
+    dialog._shear_y_spin.setValue(1.0)
+    try:
+        dialog._do_apply()
+        assert applied == []
+        assert "singular" in dialog._error_lbl.text().lower()
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
 
 
 class TestViewerScaleShearWiring:

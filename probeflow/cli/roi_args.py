@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from pathlib import Path
 from typing import Any
 
@@ -66,6 +67,19 @@ def resolve_inline_roi(
         return None, True
     if specified == 0:
         return None, False
+
+    inline_values = None
+    if has_rect:
+        inline_values = args.roi_rect
+    elif has_poly:
+        inline_values = args.roi_polygon
+    elif has_line:
+        inline_values = args.roi_line
+    if inline_values is not None and not all(
+        math.isfinite(float(value)) for value in inline_values
+    ):
+        log.error("ROI coordinates must all be finite numbers")
+        return None, True
 
     if has_named:
         roi = load_named_roi(

@@ -20,6 +20,20 @@ from probeflow.io.spectroscopy import SpecData
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 
+def test_native_figure_export_supports_vector_and_raster_formats(tmp_path):
+    from matplotlib.figure import Figure
+    from probeflow.gui.spec_viewer.single import _save_figure
+
+    fig = Figure()
+    ax = fig.subplots()
+    ax.plot([0.0, 1.0], [1.0, 2.0])
+
+    for suffix in (".pdf", ".svg", ".png"):
+        path = tmp_path / f"spectrum{suffix}"
+        assert _save_figure(fig, path) == path
+        assert path.stat().st_size > 0
+
+
 @pytest.fixture
 def qapp():
     try:

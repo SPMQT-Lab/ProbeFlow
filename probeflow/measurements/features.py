@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import numpy as np
@@ -31,6 +32,12 @@ def detect_local_maxima(
     arr = np.asarray(image, dtype=np.float64)
     if arr.ndim != 2:
         raise ValueError("detect_local_maxima expects a 2-D image")
+    for name, value in (
+        ("pixel_size_x", pixel_size_x),
+        ("pixel_size_y", pixel_size_y),
+    ):
+        if not math.isfinite(float(value)) or float(value) <= 0.0:
+            raise ValueError(f"{name} must be a positive finite value")
     work = arr.copy()
     finite = np.isfinite(work)
     if not np.any(finite):

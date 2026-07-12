@@ -65,6 +65,10 @@ class ShearDialog(QDialog):
         self._interp_cb.addItem("Bicubic", "bicubic")
         form.addRow("Interpolation:", self._interp_cb)
 
+        self._error_lbl = QLabel("")
+        self._error_lbl.setWordWrap(True)
+        self._error_lbl.setStyleSheet("color: #c62828;")
+
         btn_row = QHBoxLayout()
         btn_row.addStretch()
         apply_btn = QPushButton("Apply")
@@ -78,12 +82,21 @@ class ShearDialog(QDialog):
         root = QVBoxLayout(self)
         root.addWidget(info_lbl)
         root.addLayout(form)
+        root.addWidget(self._error_lbl)
         root.addLayout(btn_row)
 
     def _do_apply(self) -> None:
+        shear_x = self._shear_x_spin.value()
+        shear_y = self._shear_y_spin.value()
+        if abs(1.0 - shear_x * shear_y) < 1e-12:
+            self._error_lbl.setText(
+                "This shear combination is singular. Adjust X or Y before applying."
+            )
+            return
+        self._error_lbl.clear()
         params = {
-            "shear_x": self._shear_x_spin.value(),
-            "shear_y": self._shear_y_spin.value(),
+            "shear_x": shear_x,
+            "shear_y": shear_y,
             "interpolation": self._interp_cb.currentData(),
         }
         self.applied.emit(params)
