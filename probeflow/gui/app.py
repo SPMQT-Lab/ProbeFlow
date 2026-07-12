@@ -71,7 +71,6 @@ from probeflow.gui.styling import (
 )
 from probeflow.gui.typography import ui_family
 from probeflow.gui.models import (
-    FolderEntry,
     SxmFile,
     VertFile,
     scan_image_folder,
@@ -858,41 +857,6 @@ class ProbeFlowWindow(QMainWindow):
             parts.append(f"{counts.hidden_items} hidden")
         return ", ".join(parts)
 
-    def _update_browse_status(self):
-        entries = self._grid.get_entries()
-        n_folders = sum(1 for e in entries if isinstance(e, FolderEntry))
-        n_sxm     = sum(1 for e in entries if isinstance(e, SxmFile))
-        n_vert    = sum(1 for e in entries if isinstance(e, VertFile))
-        self._n_loaded = n_sxm + n_vert
-        cur = self._grid.current_dir()
-        parts: list[str] = []
-        if n_folders:
-            parts.append(f"{n_folders} folder{'s' if n_folders != 1 else ''}")
-        if n_sxm:
-            parts.append(f"{n_sxm} scan{'s' if n_sxm != 1 else ''}")
-        if n_vert:
-            parts.append(f"{n_vert} spec{'s' if n_vert != 1 else ''}")
-        desc = ", ".join(parts) if parts else "0 items"
-        loc = cur.name if cur else "?"
-        self._status_bar.showMessage(
-            f"{loc}: {desc} — Double-click a folder to navigate, a scan to view")
-
-    def _on_entry_select(self, entry):
-        if isinstance(entry, VertFile):
-            self._browse_info.show_vert_entry(entry)
-            n_sel = len(self._grid.get_selected())
-            sweep = entry.sweep_type.replace("_", " ")
-            self._status_bar.showMessage(
-                f"{entry.stem}  |  {sweep}  |  {entry.n_points} pts  |  "
-                f"{n_sel} selected / {self._n_loaded} total  |  Double-click to view")
-        else:
-            cmap_key, _, proc = self._grid.get_card_state(entry)
-            self._browse_info.show_entry(entry, cmap_key, proc)
-            n_sel = len(self._grid.get_selected())
-            self._status_bar.showMessage(
-                f"{entry.stem}  |  {entry.Nx}×{entry.Ny} px  |  "
-                f"{n_sel} selected / {self._n_loaded} total  |  Double-click to view full size")
-
     def _on_selection_changed(self, n_selected: int):
         # Make the spectra multi-select discoverable: once two or more spectra
         # are Ctrl-selected, point at the action that consumes them.
@@ -902,22 +866,6 @@ class ProbeFlowWindow(QMainWindow):
                 "to compare them."
             )
 
-    def _on_filter_changed(self, mode: str):
-        self._grid.apply_filter(mode)
-        entries = self._grid.get_entries()
-        n_sxm  = sum(1 for e in entries if isinstance(e, SxmFile))
-        n_vert = sum(1 for e in entries if isinstance(e, VertFile))
-        img_word  = "image"    if n_sxm  == 1 else "images"
-        spec_word = "spectrum" if n_vert == 1 else "spectra"
-        if mode == "images":
-            msg = f"{n_sxm} {img_word}  ({n_vert} {spec_word} hidden)"
-        elif mode == "spectra":
-            msg = f"{n_vert} {spec_word}  ({n_sxm} {img_word} hidden)"
-        else:
-            msg = f"{n_sxm} {img_word}, {n_vert} {spec_word}"
-        self._status_bar.showMessage(msg)
-
-    # Updated browse-filter/status handlers for metadata folder filtering.
     def _update_browse_status(self):
         counts = self._grid.get_filter_counts()
         self._n_loaded = counts.visible_scans + counts.visible_spectra
@@ -925,7 +873,7 @@ class ProbeFlowWindow(QMainWindow):
         desc = self._format_browse_counts(counts)
         loc = cur.name if cur else "?"
         self._status_bar.showMessage(
-            f"{loc}: {desc} â€” Double-click a folder to navigate, a scan to view")
+            f"{loc}: {desc} — Double-click a folder to navigate, a scan to view")
 
     def _on_entry_select(self, entry):
         if entry is None:
@@ -944,7 +892,7 @@ class ProbeFlowWindow(QMainWindow):
         self._browse_info.show_entry(entry, cmap_key, proc)
         n_sel = len(self._grid.get_selected())
         self._status_bar.showMessage(
-            f"{entry.stem}  |  {entry.Nx}Ã—{entry.Ny} px  |  "
+            f"{entry.stem}  |  {entry.Nx}×{entry.Ny} px  |  "
             f"{n_sel} selected / {self._n_loaded} total  |  Double-click to view full size")
 
     def _on_filter_changed(self, mode: str):

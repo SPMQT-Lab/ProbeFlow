@@ -209,6 +209,46 @@ def test_grid_shows_filtering_status_during_async_folder_filter(qapp):
     assert "Filtering tmp..." == grid._path_lbl.text()
 
 
+def test_browse_status_handlers_use_unicode_without_shadowed_legacy_copies(qapp):
+    from probeflow.core.browse_filters import FilterMatchCounts
+    from probeflow.gui.app import ProbeFlowWindow
+
+    messages: list[str] = []
+    shown: list[tuple] = []
+    counts = FilterMatchCounts(total_scans=1, visible_scans=1)
+    grid = SimpleNamespace(
+        get_filter_counts=lambda: counts,
+        current_dir=lambda: Path("/tmp/scans"),
+        get_selected=lambda: {"scan"},
+        get_card_state=lambda entry: ("gray", (1.0, 99.0), {}),
+    )
+    window = SimpleNamespace(
+        _grid=grid,
+        _status_bar=SimpleNamespace(showMessage=messages.append),
+        _browse_info=SimpleNamespace(
+            show_entry=lambda *args: shown.append(args),
+            show_vert_entry=lambda entry: None,
+            clear=lambda: None,
+        ),
+        _n_loaded=1,
+    )
+    window._format_browse_counts = lambda value: ProbeFlowWindow._format_browse_counts(
+        window, value
+    )
+
+    ProbeFlowWindow._update_browse_status(window)
+    assert messages[-1] == (
+        "scans: 1 scan — Double-click a folder to navigate, a scan to view"
+    )
+
+    entry = _scan_entry("scan", 10.0, 10.0)
+    ProbeFlowWindow._on_entry_select(window, entry)
+    assert shown and shown[-1][0] is entry
+    assert "64×64 px" in messages[-1]
+    assert "â€”" not in messages[-1]
+    assert "Ã—" not in messages[-1]
+
+
 def test_sort_by_size_orders_largest_first_with_spectra_last(qapp):
     grid = _quiet_grid(qapp)
     small = _scan_entry("a_small", 10.0, 10.0)
