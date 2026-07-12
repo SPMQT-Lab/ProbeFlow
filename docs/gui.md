@@ -68,6 +68,22 @@ In the STM background dialog:
 4. Click **Apply**. The subtraction is recorded in the processing
    history (undo with `Ctrl+Z`), and exports carry the full provenance.
 
+## Cleaning up defects
+
+Three everyday repairs, all recorded (and undoable) processing steps:
+
+* **Median filter (despeckle)** — Process tab → Smooth → *Median*.
+  Removes salt-and-pepper noise and single-pixel tip glitches without
+  blurring step edges (unlike Gaussian smoothing).
+* **Remove spots** — mark a tip change, dirt speck, or glitch with an
+  area ROI (right-click → *Remove spots*) or a mask from Advanced Edge
+  Detection (Masks section → *Remove spots*). The region is replaced by
+  a smooth surface interpolated from its surroundings.
+* **Crop** — draw a rectangle selection (or right-click an area ROI →
+  *Crop image to this region*), then **Image → Transform → Crop to
+  selection**. The scale bar, FFT axes, ROIs, and masks all follow the
+  new extent; pixel size is unchanged.
+
 ## Performing an FFT
 
 Open **Measurements → FFT viewer...** (`Ctrl+Shift+F`, or the **FFT**

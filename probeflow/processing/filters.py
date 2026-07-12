@@ -9,6 +9,7 @@ import numpy as np
 from scipy.ndimage import (
     gaussian_filter,
     laplace as _nd_laplace,
+    median_filter,
 )
 from scipy.signal import windows as _sp_windows
 
@@ -258,6 +259,39 @@ def gaussian_smooth(arr: np.ndarray, sigma_px: float = 1.0) -> np.ndarray:
     if not nan_mask.any():
         return gaussian_filter(arr, sigma=sigma_px, mode="reflect")
     smoothed = _nan_normalized_gaussian(arr, sigma_px)
+    smoothed[nan_mask] = np.nan
+    return smoothed
+
+
+def median_smooth(arr: np.ndarray, size_px: int = 3) -> np.ndarray:
+    """
+    Apply a 2-D median filter (despeckle).
+
+    size_px — square window edge in pixels (odd, >= 3; even values are
+    bumped up by one).  The standard remover for salt-and-pepper noise,
+    single-pixel spikes, and small tip glitches: unlike a Gaussian it
+    preserves step edges, at the cost of rounding features smaller than
+    the window.
+
+    NaN pixels are excluded from each window's median and preserved in the
+    output (parity with :func:`gaussian_smooth`'s NaN handling).
+    """
+    size_px = int(size_px)
+    if size_px < 3:
+        size_px = 3
+    if size_px % 2 == 0:
+        size_px += 1
+    arr = arr.astype(np.float64, copy=True)
+    nan_mask = ~np.isfinite(arr)
+    if nan_mask.all():
+        return arr
+    if not nan_mask.any():
+        return median_filter(arr, size=size_px, mode="reflect")
+    # NaN-aware path: nanmedian per window (slower; only taken when needed).
+    from scipy.ndimage import generic_filter
+
+    with np.errstate(all="ignore"):
+        smoothed = generic_filter(arr, np.nanmedian, size=size_px, mode="reflect")
     smoothed[nan_mask] = np.nan
     return smoothed
 

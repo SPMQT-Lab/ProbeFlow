@@ -91,6 +91,16 @@ class MaskManagerPanel(QWidget):
         vrow.addWidget(self._export_btn)
         lay.addWidget(convert_row)
 
+        self._repair_btn = _btn("Remove spots (interpolate under mask)",
+                                self._on_repair)
+        self._repair_btn.setToolTip(
+            "Replace the data under the selected mask with a smooth surface "
+            "interpolated from the surroundings — the standard fix for tip "
+            "changes, dirt, and glitches. Recorded as a processing step "
+            "(undoable, replayable)."
+        )
+        lay.addWidget(self._repair_btn)
+
         self._list = QListWidget()
         self._list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self._list.setSelectionMode(QAbstractItemView.SingleSelection)
@@ -202,6 +212,11 @@ class MaskManagerPanel(QWidget):
         mask_id = self._selected_id()
         if mask_id is not None:
             self._cb.get("export_mask", lambda _id: None)(mask_id)
+
+    def _on_repair(self) -> None:
+        mask_id = self._selected_id()
+        if mask_id is not None:
+            self._cb.get("repair_under_mask", lambda _id: None)(mask_id)
 
 
 def _btn(text: str, slot) -> QPushButton:

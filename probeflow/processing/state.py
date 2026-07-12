@@ -637,6 +637,8 @@ def apply_processing_state(
             )
         elif step.op == "smooth":
             a = _proc.gaussian_smooth(a, sigma_px=float(p.get("sigma_px", 1.0)))
+        elif step.op == "median_smooth":
+            a = _proc.median_smooth(a, size_px=int(p.get("size_px", 3)))
         elif step.op == "gaussian_high_pass":
             a = _proc.gaussian_high_pass(
                 a,
@@ -973,6 +975,48 @@ def apply_processing_state(
                 int(p["new_width"]),
                 order=int(p.get("order", 1)),
             )
+        elif step.op == "crop":
+            try:
+                a = _proc.crop(
+                    a,
+                    int(p["x0"]), int(p["y0"]),
+                    int(p["x1"]), int(p["y1"]),
+                )
+            except (KeyError, TypeError, ValueError) as exc:
+                # Bounds that no longer intersect the (possibly reshaped)
+                # image must not abort a replay of the remaining steps.
+                import warnings
+                warnings.warn(
+                    f"crop step skipped: {exc}", UserWarning, stacklevel=2,
+                )
+        elif step.op == "interpolate_masked":
+            mask = None
+            frozen_mask = p.get("frozen_mask")
+            frozen_geometry = p.get("frozen_geometry")
+            if frozen_mask is not None:
+                mask = _mask_from_frozen(frozen_mask)
+            elif frozen_geometry is not None:
+                roi_obj = _roi_from_frozen_geometry(frozen_geometry)
+                if roi_obj is not None:
+                    mask = roi_obj.to_mask(a.shape)
+            if mask is None:
+                import warnings
+                warnings.warn(
+                    "interpolate_masked step has no resolvable frozen_mask / "
+                    "frozen_geometry — step skipped.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+            elif np.asarray(mask).shape != a.shape[:2]:
+                import warnings
+                warnings.warn(
+                    "interpolate_masked mask shape does not match the image "
+                    "(a geometric op may have reshaped it) — step skipped.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+            else:
+                a = _proc.interpolate_masked(a, mask)
         elif step.op == "image_threshold":
             lower = float(p["lower"]) if p.get("lower") is not None else None
             upper = float(p["upper"]) if p.get("upper") is not None else None
@@ -1017,6 +1061,7 @@ _SHAPE_CHANGING_PIXEL_SIZE_PRESERVING: frozenset[str] = frozenset({
     "rotate_arbitrary",
     "shear",
     "affine_lattice_correction",
+    "crop",
 })
 
 _SHAPE_CHANGING_EXTENT_PRESERVING: frozenset[str] = frozenset({

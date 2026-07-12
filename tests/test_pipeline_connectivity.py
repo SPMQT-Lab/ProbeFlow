@@ -28,6 +28,16 @@ from probeflow.processing.gui_adapter import processing_state_from_gui
 
 # ── minimal dispatch params for each supported op ─────────────────────────────
 
+def _make_frozen_mask_8x8() -> dict:
+    from probeflow.core.mask import _pack_bool
+
+    mask = np.zeros((8, 8), dtype=bool)
+    mask[3:5, 3:5] = True
+    return {"data": _pack_bool(mask), "shape": [8, 8]}
+
+
+_FROZEN_MASK_8x8 = _make_frozen_mask_8x8()
+
 _MINIMAL_PARAMS: dict[str, dict] = {
     "remove_bad_lines": {
         "threshold_mad": 5.0, "method": "mad", "polarity": "bright",
@@ -84,6 +94,9 @@ _MINIMAL_PARAMS: dict[str, dict] = {
     "rotate_arbitrary": {"angle_degrees": 0.0, "order": 1},
     "shear": {"shear_x": 0.0, "shear_y": 0.0, "interpolation": "bilinear"},
     "scale_image": {"new_height": 8, "new_width": 8, "order": 1},
+    "crop": {"x0": 1, "y0": 1, "x1": 6, "y1": 6},
+    "median_smooth": {"size_px": 3},
+    "interpolate_masked": {"frozen_mask": _FROZEN_MASK_8x8},
     "image_threshold": {"mode": "clip", "lower": 0.0, "upper": 1.0},
     "quantize_bit_depth": {"bits": 8},
 }

@@ -102,6 +102,12 @@ VIEWER_COMMANDS: tuple[ViewerCommand, ...] = (
         aliases=("shear x", "shear y", "distort", "skew"),
     ),
     ViewerCommand(
+        "image.crop_selection", "Crop to selection", "Image",
+        status_tip="Crop the image to the current selection (or the active "
+                   "area ROI). Calibration, ROIs, and masks follow.",
+        aliases=("crop", "cut", "trim", "extract region"),
+    ),
+    ViewerCommand(
         "image.type_8bit", "8-bit (256 levels)", "Image",
         status_tip="Quantize image to 8-bit precision (256 levels, same physical range).",
         aliases=("8 bit", "8bit", "quantize 8", "reduce precision"),

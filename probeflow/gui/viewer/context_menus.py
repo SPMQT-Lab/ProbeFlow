@@ -131,6 +131,18 @@ def _add_area_roi_actions(menu: QMenu, viewer, roi_id: str) -> None:
         lambda: viewer._image_measurements.detect_feature_maxima_for_roi(roi_id)
     )
 
+    menu.addSeparator()
+
+    act_repair = menu.addAction("Remove spots (interpolate this region)")
+    act_repair.setToolTip(
+        "Replace the data inside this ROI with a smooth surface interpolated "
+        "from the surroundings — for tip changes, dirt, and glitches."
+    )
+    act_repair.triggered.connect(lambda: viewer._commit_repair_under_roi(roi_id))
+
+    act_crop = menu.addAction("Crop image to this region")
+    act_crop.triggered.connect(lambda: viewer._on_crop_to_roi(roi_id))
+
 
 def _add_line_roi_actions(menu: QMenu, viewer, roi_id: str) -> None:
     act_profile = menu.addAction("Show line profile")

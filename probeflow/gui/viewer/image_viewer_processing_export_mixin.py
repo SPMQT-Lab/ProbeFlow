@@ -193,6 +193,57 @@ class ImageViewerProcessingExportMixin:
             f"Committed {len(specs)} region filter(s) (frozen selection)."
         )
 
+    def _commit_repair_under_mask(self, mask_id: str) -> None:
+        """"Remove spots": interpolate the data under a mask (frozen raster)."""
+        mask_set = getattr(self, "_image_mask_set", None)
+        mask_obj = mask_set.get(mask_id) if mask_set is not None else None
+        if mask_obj is None:
+            return
+        from probeflow.core.mask import _pack_bool
+
+        data = mask_obj.data
+        entry = {
+            "frozen_mask": {
+                "data": _pack_bool(data),
+                "shape": [int(data.shape[0]), int(data.shape[1])],
+            },
+            # The raster is in the *current display* frame — record the
+            # geometric-op count so replay re-inserts this step at the same
+            # pipeline position (parity with the scoped-filter commits).
+            "after_geometric_ops": len(self._processing.get("geometric_ops") or []),
+        }
+        repairs = list(self._processing.get("repair_ops") or [])
+        repairs.append(entry)
+        self._processing["repair_ops"] = repairs
+        self._refresh_processing_display()
+        self._status_lbl.setText(
+            f"Removed spots: interpolated data under mask '{mask_obj.name}'."
+        )
+
+    def _commit_repair_under_roi(self, roi_id: str) -> None:
+        """"Remove spots": interpolate the data under an area ROI (frozen)."""
+        roi = (
+            self._image_roi_set.get(roi_id)
+            if self._image_roi_set is not None else None
+        )
+        if roi is None:
+            return
+        entry = {
+            "frozen_geometry": {
+                "kind": roi.kind,
+                "geometry": dict(roi.geometry),
+                "coord_system": roi.coord_system,
+            },
+            "after_geometric_ops": len(self._processing.get("geometric_ops") or []),
+        }
+        repairs = list(self._processing.get("repair_ops") or [])
+        repairs.append(entry)
+        self._processing["repair_ops"] = repairs
+        self._refresh_processing_display()
+        self._status_lbl.setText(
+            f"Removed spots: interpolated data under '{roi.name}'."
+        )
+
     def _strip_committed_filter_keys(self) -> None:
         """Remove just-committed panel filters and resync the panel widgets."""
         from probeflow.processing.gui_adapter import ROI_ELIGIBLE_FILTER_TRIGGER_KEYS
@@ -855,6 +906,81 @@ class ImageViewerProcessingExportMixin:
         ops.append({"op": op_name, "params": {}})
         self._processing["geometric_ops"] = ops
         self._refresh_processing_display()
+
+    def _crop_bounds_from_selection_or_roi(self) -> tuple[int, int, int, int] | None:
+        """Inclusive (x0, y0, x1, y1) crop bounds from the quick selection,
+        else the active area ROI's bounding box. None when neither exists."""
+        shape = self._current_array_shape()
+        if shape is None:
+            return None
+        from probeflow.core.roi import AREA_ROI_KINDS, ROI
+
+        sel = (
+            self._active_quick_selection()
+            if hasattr(self, "_active_quick_selection") else None
+        )
+        roi_obj = None
+        if sel is not None:
+            roi_obj = ROI(id="selection", name="selection",
+                          kind=sel["kind"], geometry=dict(sel["geometry"]))
+        else:
+            active = (
+                self._active_image_roi()
+                if hasattr(self, "_active_image_roi") else None
+            )
+            if active is not None and active.kind in AREA_ROI_KINDS:
+                roi_obj = active
+        if roi_obj is None:
+            return None
+        try:
+            row_min, row_max, col_min, col_max = roi_obj.bounds(shape)
+        except Exception:
+            return None
+        if (row_min, row_max, col_min, col_max) == (0, 0, 0, 0):
+            return None
+        return int(col_min), int(row_min), int(col_max), int(row_max)
+
+    def _apply_crop(self, bounds: tuple[int, int, int, int]) -> None:
+        """Record a crop op and carry ROIs/masks/selection into the new frame."""
+        x0, y0, x1, y1 = bounds
+        params = {"x0": x0, "y0": y0, "x1": x1, "y1": y1}
+        # The selection did its job — clear it rather than leaving a marquee
+        # spanning the whole cropped image.
+        if hasattr(self, "_clear_quick_selection"):
+            self._clear_quick_selection()
+        self._transform_image_roi_set_for_display_op("crop", params)
+        ops = list(self._processing.get("geometric_ops") or [])
+        ops.append({"op": "crop", "params": params})
+        self._processing["geometric_ops"] = ops
+        self._refresh_processing_display()
+        self._status_lbl.setText(
+            f"Cropped to {x1 - x0 + 1} × {y1 - y0 + 1} px."
+        )
+
+    def _on_crop_to_selection(self) -> None:
+        """Crop the image to the quick selection / active area ROI bounds."""
+        bounds = self._crop_bounds_from_selection_or_roi()
+        if bounds is None:
+            self._status_lbl.setText(
+                "Draw a selection (or activate an area ROI) to crop to."
+            )
+            return
+        self._apply_crop(bounds)
+
+    def _on_crop_to_roi(self, roi_id: str) -> None:
+        """Crop the image to a specific area ROI's bounding box."""
+        roi = (
+            self._image_roi_set.get(roi_id)
+            if self._image_roi_set is not None else None
+        )
+        shape = self._current_array_shape()
+        if roi is None or shape is None:
+            return
+        row_min, row_max, col_min, col_max = roi.bounds(shape)
+        if (row_min, row_max, col_min, col_max) == (0, 0, 0, 0):
+            self._status_lbl.setText("ROI covers no pixels — nothing to crop to.")
+            return
+        self._apply_crop((int(col_min), int(row_min), int(col_max), int(row_max)))
 
     def _on_rotate_arbitrary(self) -> None:
         from PySide6.QtWidgets import QInputDialog

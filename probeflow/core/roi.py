@@ -477,8 +477,10 @@ class ROI:
         y0 = int(params["y0"])
         x1 = int(params["x1"])
         y1 = int(params["y1"])
-        crop_w = x1 - x0
-        crop_h = y1 - y0
+        # Inclusive bounds (matching ImageMask.transform and processing.crop):
+        # a crop x0..x1 keeps x1 - x0 + 1 columns.
+        crop_w = x1 - x0 + 1
+        crop_h = y1 - y0 + 1
         if crop_w <= 0 or crop_h <= 0:
             return None
 

@@ -533,10 +533,39 @@ def blend_forward_backward(
 #     round-tripping unreliable. The caller (apply_processing_state) warns and
 #     removes any roi steps when rotate_arbitrary is encountered in the state.
 #
-# - crop (future):
+# - crop:
 #     ROI geometry is transformed to the new coordinate system. ROIs entirely
 #     outside the crop are dropped; ROIs partially outside are clipped.
+#     (Implemented — see ``crop`` below and ``ROI.transform("crop", …)``.)
 # ═════════════════════════════════════════════════════════════════════════════
+
+def crop(arr: np.ndarray, x0: int, y0: int, x1: int, y1: int) -> np.ndarray:
+    """Crop to the inclusive pixel bounds ``[y0..y1] × [x0..x1]``.
+
+    The bounds convention matches ``ROI.transform("crop", …)`` and
+    ``ImageMask.transform("crop", …)`` so array, ROIs, and masks stay
+    pixel-aligned through one shared parameter set. Bounds are clamped to
+    the image; a crop that would be empty raises ``ValueError`` (an empty
+    image would poison every downstream step).
+
+    Pixel size is preserved — the physical extent shrinks with the pixel
+    count (``_SHAPE_CHANGING_PIXEL_SIZE_PRESERVING`` in ``state.py``).
+    """
+    ny, nx = arr.shape[:2]
+    x0, y0, x1, y1 = int(x0), int(y0), int(x1), int(y1)
+    if x1 < x0:
+        x0, x1 = x1, x0
+    if y1 < y0:
+        y0, y1 = y1, y0
+    if x1 < 0 or y1 < 0 or x0 > nx - 1 or y0 > ny - 1:
+        raise ValueError(
+            f"crop bounds ({x0}, {y0})..({x1}, {y1}) select no pixels "
+            f"of a {nx}x{ny} image"
+        )
+    x0, x1 = max(0, x0), min(x1, nx - 1)
+    y0, y1 = max(0, y0), min(y1, ny - 1)
+    return arr[y0:y1 + 1, x0:x1 + 1].astype(np.float64, copy=True)
+
 
 def flip_horizontal(arr: np.ndarray) -> np.ndarray:
     """Flip the scan left-to-right (mirror about the vertical axis)."""

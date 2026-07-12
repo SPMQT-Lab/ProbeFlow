@@ -28,6 +28,7 @@ NUMERIC_PROC_KEYS: tuple[str, ...] = (
     "plane_bg",
     "stm_background",
     "smooth_sigma",
+    "median_size",
     "highpass_sigma",
     "edge_method",
     "fft_mode",
@@ -44,6 +45,7 @@ NUMERIC_PROC_KEYS: tuple[str, ...] = (
     "arithmetic_ops",
     "roi_filter_ops",
     "mask_filter_ops",
+    "repair_ops",
 )
 
 # Marker recorded on scope (roi/mask) steps so provenance is honest that the
@@ -69,6 +71,7 @@ _FILTER_OPS_PASSTHROUGH: frozenset[str] = frozenset({
 # global step on the next Apply.
 ROI_ELIGIBLE_FILTER_TRIGGER_KEYS: tuple[str, ...] = (
     "smooth_sigma",
+    "median_size",
     "highpass_sigma",
     "edge_method",
     "fft_mode",
@@ -89,6 +92,8 @@ def roi_eligible_filter_specs(gui_state: dict) -> list[tuple[str, dict]]:
     specs: list[tuple[str, dict]] = []
     if s.get("smooth_sigma"):
         specs.append(("smooth", {"sigma_px": float(s["smooth_sigma"])}))
+    if s.get("median_size"):
+        specs.append(("median_smooth", {"size_px": int(s["median_size"])}))
     if s.get("highpass_sigma"):
         specs.append(("gaussian_high_pass", {"sigma_px": float(s["highpass_sigma"])}))
     if s.get("edge_method"):
@@ -128,6 +133,7 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
     roi_scope = gui_state.get("processing_scope") == "roi"
     roi_eligible = {
         "smooth",
+        "median_smooth",
         "gaussian_high_pass",
         "edge_detect",
         "fourier_filter",
@@ -227,6 +233,10 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
     smooth_sigma = gui_state.get("smooth_sigma")
     if smooth_sigma:
         _append_step(ProcessingStep("smooth", {"sigma_px": float(smooth_sigma)}))
+
+    median_size = gui_state.get("median_size")
+    if median_size:
+        _append_step(ProcessingStep("median_smooth", {"size_px": int(median_size)}))
 
     highpass_sigma = gui_state.get("highpass_sigma")
     if highpass_sigma:
@@ -427,6 +437,42 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
             }
         scope_steps.append((_scope_position(spec), ProcessingStep("mask", params)))
 
+    # Repair ops ("remove spots"): interpolate the data under a frozen mask
+    # raster or frozen ROI geometry. Frame-stamped like the scoped filters —
+    # the region was captured in the display frame at commit time, so the
+    # step must replay at the same position among the geometric ops.
+    for spec in gui_state.get("repair_ops") or []:
+        if not isinstance(spec, dict):
+            continue
+        frozen_mask = spec.get("frozen_mask")
+        frozen_geometry = spec.get("frozen_geometry")
+        has_frozen_mask = (
+            isinstance(frozen_mask, dict)
+            and frozen_mask.get("data") is not None
+            and frozen_mask.get("shape") is not None
+        )
+        has_frozen_geometry = isinstance(frozen_geometry, dict)
+        if not has_frozen_mask and not has_frozen_geometry:
+            _warn_skipped_step(
+                "repair_ops", "entry has neither frozen_mask nor frozen_geometry"
+            )
+            continue
+        params = {}
+        if has_frozen_mask:
+            params["frozen_mask"] = {
+                "data": str(frozen_mask["data"]),
+                "shape": [int(v) for v in frozen_mask["shape"]],
+            }
+        else:
+            params["frozen_geometry"] = {
+                "kind": str(frozen_geometry.get("kind", "")),
+                "geometry": dict(frozen_geometry.get("geometry", {})),
+                "coord_system": str(frozen_geometry.get("coord_system", "pixel")),
+            }
+        scope_steps.append(
+            (_scope_position(spec), ProcessingStep("interpolate_masked", params))
+        )
+
     # Arithmetic ops: scoped entries that froze their geometry replay at
     # their commit position via the scope-step interleave (parity with
     # roi_filter_ops — the step must not retarget when the live ROI later
@@ -591,6 +637,17 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
                 "new_width": int(op_params["new_width"]),
                 "order": int(op_params.get("order", 1)),
             }))
+        elif op_name == "crop":
+            try:
+                _append_step(ProcessingStep("crop", {
+                    "x0": int(op_params["x0"]),
+                    "y0": int(op_params["y0"]),
+                    "x1": int(op_params["x1"]),
+                    "y1": int(op_params["y1"]),
+                }))
+            except (KeyError, TypeError, ValueError) as exc:
+                _warn_skipped_step("crop", str(exc) or "invalid crop bounds")
+                continue
         elif op_name == "image_threshold":
             thr_params: dict = {"mode": str(op_params.get("mode", "clip"))}
             if op_params.get("lower") is not None:

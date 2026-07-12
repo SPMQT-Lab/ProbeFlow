@@ -954,6 +954,7 @@ class ImageViewerBuildMixin:
                 "convert_to_roi":      self._convert_mask_to_rois,
                 "add_mask_stats":      self._add_active_mask_stats,
                 "export_mask":         self._export_mask_to_file,
+                "repair_under_mask":   self._commit_repair_under_mask,
             },
             parent=self,
         )

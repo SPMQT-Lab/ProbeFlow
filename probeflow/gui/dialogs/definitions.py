@@ -320,6 +320,32 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
         ),
     ),
     _DefinitionEntry(
+        title="Median filter (despeckle)",
+        params=("size_px",),
+        summary=(
+            "Replaces each pixel by the median of its size_px × size_px "
+            "neighbourhood. Because the median ignores extreme values, single "
+            "bright/dark pixels and small spikes vanish completely instead of "
+            "being smeared — the standard despeckle for salt-and-pepper noise "
+            "and tip glitches."
+        ),
+        in_practice=(
+            "Prefer this over Gaussian smoothing when the problem is isolated "
+            "spikes rather than broadband noise: it removes them without "
+            "blurring step edges. A 3 px window handles single-pixel spikes; "
+            "grow it only for larger defects."
+        ),
+        equations=(
+            "z'_i,j = median{ z_k,l : |k-i| <= s, |l-j| <= s },  s = size_px // 2\n"
+            "(NaN pixels are excluded from each window and preserved in place)",
+        ),
+        cautions=(
+            "Features smaller than the window are rounded off or removed — a "
+            "large window on atomic-resolution data will eat the atoms. The "
+            "window size is forced odd so the output grid stays centred.",
+        ),
+    ),
+    _DefinitionEntry(
         title="Gaussian high-pass",
         params=("sigma_px",),
         summary=(
@@ -756,6 +782,58 @@ _DEFINITION_ENTRIES: tuple[_DefinitionEntry, ...] = (
             "those are dropped — re-draw them afterwards. And any interpolated "
             "transform nudges pixel values slightly, so avoid stacking several if "
             "you need quantitative heights.",
+        ),
+    ),
+    _DefinitionEntry(
+        title="Crop to selection",
+        params=("x0", "y0", "x1", "y1"),
+        summary=(
+            "Cuts the image down to a rectangular pixel region — the bounding "
+            "box of your selection or of an area ROI. Lossless: the kept pixels "
+            "are untouched, each keeps its physical size, and the scale bar, "
+            "FFT axes, and pixel→nm conversions follow the new extent."
+        ),
+        in_practice=(
+            "Draw a rectangle selection (or right-click an area ROI → 'Crop "
+            "image to this region'), then Image → Transform → Crop to "
+            "selection. ROIs and masks move into the new frame; anything "
+            "entirely outside the crop is dropped."
+        ),
+        equations=(
+            "z' = z[y0..y1, x0..x1]   (inclusive bounds)\n"
+            "physical extent: width' = width * Nx'/Nx,  height' = height * Ny'/Ny",
+        ),
+        cautions=(
+            "Cropping discards data for the rest of the session's processing "
+            "chain — the raw file is untouched, and Undo restores the previous "
+            "state. Non-rectangular selections crop to their bounding box.",
+        ),
+    ),
+    _DefinitionEntry(
+        title="Remove spots (interpolate under mask)",
+        params=("mask or area ROI",),
+        summary=(
+            "Replaces the data inside a marked region with a smooth membrane "
+            "interpolated from the surrounding pixels (Laplace interpolation — "
+            "a 'soap film' stretched across the hole). The standard repair for "
+            "tip changes, dirt specks, and glitches."
+        ),
+        in_practice=(
+            "Mark the defect with an area ROI (right-click → 'Remove spots') or "
+            "a mask from Advanced Edge Detection (Masks section → 'Remove "
+            "spots'). The repair is a recorded processing step: undoable, "
+            "replayable, and honest in the export provenance."
+        ),
+        equations=(
+            "solve  ∇²z' = 0  inside the region,\n"
+            "with the surrounding finite pixels as boundary values\n"
+            "(interior values always lie between their neighbours)",
+        ),
+        cautions=(
+            "The filled region is fabricated data — smooth by construction, "
+            "never containing real features. Use it to stop defects from "
+            "skewing backgrounds and statistics, not to 'clean up' regions you "
+            "then measure. Regions ringed entirely by NaN are left unchanged.",
         ),
     ),
     _DefinitionEntry(

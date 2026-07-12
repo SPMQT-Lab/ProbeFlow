@@ -277,17 +277,25 @@ class ProcessingControlPanel(QWidget):
 
         _col_lbl("Filters", L)
 
-        self._smooth_combo = _combo_row("Smooth:", ["None", "Gaussian"], L, 54)
+        self._smooth_combo = _combo_row(
+            "Smooth:", ["None", "Gaussian", "Median"], L, 54)
         self._smooth_combo.setToolTip(
-            "Gaussian blur to suppress noise. Larger sigma (px) smooths more, but "
-            "also blurs genuine fine features. The kernel spans ±4σ; σ may be "
-            "sub-pixel (down to 0.2 px) for gentle denoising."
+            "Noise suppression. Gaussian blurs everything (larger sigma smooths "
+            "more but blurs fine features; the kernel spans ±4σ and σ may be "
+            "sub-pixel). Median replaces each pixel by its window median — the "
+            "standard despeckle for salt-and-pepper noise and single-pixel tip "
+            "glitches; it preserves step edges but rounds features smaller than "
+            "the window."
         )
         self._smooth_sigma_w, self._smooth_sigma_sl, _ = _sub_slider(
             "sigma:", 2, 200, _SMOOTH_SIGMA_SCALE, "{v:.1f}px",
             scale=_SMOOTH_SIGMA_SCALE)
         L.addWidget(self._smooth_sigma_w)
         self._smooth_sigma_w.setVisible(False)
+        self._median_size_w, self._median_size_sl, _ = _sub_slider(
+            "size:", 3, 15, 3, "{v}px")
+        L.addWidget(self._median_size_w)
+        self._median_size_w.setVisible(False)
         # Physical readout: σ/FWHM/kernel extent in nm (when calibrated) or px.
         self._smooth_readout_lbl = QLabel()
         self._smooth_readout_lbl.setFont(ui_font(7))
@@ -297,8 +305,9 @@ class ProcessingControlPanel(QWidget):
         self._smooth_sigma_sl.valueChanged.connect(
             lambda _v: self._update_smooth_readout())
         self._smooth_combo.currentIndexChanged.connect(
-            lambda i: (self._smooth_sigma_w.setVisible(i != 0),
-                       self._smooth_readout_lbl.setVisible(i != 0),
+            lambda i: (self._smooth_sigma_w.setVisible(i == 1),
+                       self._median_size_w.setVisible(i == 2),
+                       self._smooth_readout_lbl.setVisible(i == 1),
                        self._update_smooth_readout()))
         self._update_smooth_readout()
 
@@ -370,7 +379,10 @@ class ProcessingControlPanel(QWidget):
             ),
             "smooth_sigma": (
                 self._smooth_sigma_sl.value() / _SMOOTH_SIGMA_SCALE
-                if smooth_i != 0 else None
+                if smooth_i == 1 else None
+            ),
+            "median_size": (
+                int(self._median_size_sl.value()) if smooth_i == 2 else None
             ),
             "highpass_sigma": self._highpass_sigma_sl.value() if highpass_i != 0 else None,
             "edge_method": edge_map[edge_i],
@@ -403,10 +415,14 @@ class ProcessingControlPanel(QWidget):
             state.get("remove_bad_lines_max_adjacent_bad_lines", 1)))
 
         sigma = state.get("smooth_sigma")
+        median_size = state.get("median_size")
         if sigma:
             self._smooth_combo.setCurrentIndex(1)
             self._smooth_sigma_sl.setValue(
                 int(round(float(sigma) * _SMOOTH_SIGMA_SCALE)))
+        elif median_size:
+            self._smooth_combo.setCurrentIndex(2)
+            self._median_size_sl.setValue(int(median_size))
         else:
             self._smooth_combo.setCurrentIndex(0)
 

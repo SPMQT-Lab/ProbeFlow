@@ -29,6 +29,7 @@ _SUPPORTED_OPS: frozenset[str] = frozenset({
     "stm_background",
     "facet_level",
     "smooth",
+    "median_smooth",
     "gaussian_high_pass",
     "edge_detect",
     "fourier_filter",
@@ -52,12 +53,15 @@ _SUPPORTED_OPS: frozenset[str] = frozenset({
     "rotate_arbitrary",
     "shear",
     "scale_image",
+    "crop",
+    "interpolate_masked",
     "image_threshold",
     "quantize_bit_depth",
 })
 
 _ROI_ELIGIBLE_OPS: frozenset[str] = frozenset({
     "smooth",
+    "median_smooth",
     "gaussian_high_pass",
     "edge_detect",
     "fourier_filter",

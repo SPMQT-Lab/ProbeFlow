@@ -216,6 +216,10 @@ class ImageViewerChromeMixin:
         transform_menu.addAction(
             self._viewer_action("image.shear", self._on_shear)
         )
+        transform_menu.addSeparator()
+        transform_menu.addAction(
+            self._viewer_action("image.crop_selection", self._on_crop_to_selection)
+        )
 
         processing_menu = menu_bar.addMenu("Processing")
         plane_action = self._viewer_action(
