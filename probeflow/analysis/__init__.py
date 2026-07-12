@@ -13,9 +13,8 @@ domain-specific results (e.g. :class:`LatticeResult`,
 Boundary rules
 --------------
 Keep measurement algorithms here.  Provenance dataclasses (linear history
-or the experimental ``ScanGraph``) belong in ``probeflow.provenance``.  Do
-not place parser/writer boundaries, CLI routing, GUI widgets, or raw
-``Scan`` model ownership here.
+records) belong in ``probeflow.provenance``.  Do not place parser/writer
+boundaries, CLI routing, GUI widgets, or raw ``Scan`` model ownership here.
 """
 
 from probeflow.analysis.lattice import (

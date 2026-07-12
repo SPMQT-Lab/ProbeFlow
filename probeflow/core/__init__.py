@@ -9,16 +9,13 @@ metadata, validation, indexing, source identity, and ROIs.  An eventual
 
 Provenance attached to a ``Scan`` is the linear
 :class:`probeflow.provenance.records.ProcessingHistory` model — that's the
-representation every export sidecar writes and every reader parses.  An
-experimental DAG-style ``ScanGraph`` lives in ``probeflow.provenance.graph``
-(see arch-backend #6); core may eventually adopt it but does not today.
+representation every export sidecar writes and every reader parses.
 
 Boundary rules
 --------------
 Keep parser/writer implementations in ``probeflow.io`` and array algorithms
 in ``probeflow.processing`` / ``probeflow.analysis``.  Provenance records
-(linear or graph-shaped) live in ``probeflow.provenance``; ``core`` does
-not define them.
+live in ``probeflow.provenance``; ``core`` does not define them.
 """
 
 from probeflow.core.scan_model import PLANE_CANON_NAMES, PLANE_CANON_UNITS, Scan

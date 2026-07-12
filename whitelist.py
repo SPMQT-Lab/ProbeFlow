@@ -55,16 +55,6 @@ ImageCanvas.set_active_roi_id                    # type: ignore[attr-defined]
 ImageCanvas.add_roi_item                         # type: ignore[attr-defined]
 ImageCanvas.set_selection_tool                   # type: ignore[attr-defined]
 
-# ── Plugin API — designed for external consumers ──────────────────────────────
-
-from probeflow.plugins.registry import PluginRegistry  # noqa: F401
-PluginRegistry.register                          # type: ignore[attr-defined]
-
-from probeflow.plugins import api as _api        # noqa: F401
-_api.PluginOperation.function                    # type: ignore[attr-defined]
-_api.PluginOperation.input_types                 # type: ignore[attr-defined]
-_api.PluginOperation.output_types                # type: ignore[attr-defined]
-
 # ── gui/__init__.py lazy-loader ───────────────────────────────────────────────
 # __getattr__ on a module is a documented Python pattern for lazy imports.
 from probeflow.gui import __getattr__            # noqa: F401

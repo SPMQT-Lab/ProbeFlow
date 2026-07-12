@@ -7,10 +7,18 @@ import subprocess
 import sys
 from pathlib import Path
 
-from probeflow.cli.commands.conversion import _cmd_dat2png, _cmd_dat2sxm
+import probeflow.cli as cli
+from probeflow.cli import _legacy
+from probeflow.cli.commands.conversion import _cmd_dat2npy, _cmd_dat2png, _cmd_dat2sxm
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_dat2npy_is_available_through_legacy_cli_exports():
+    assert _legacy._cmd_dat2npy is _cmd_dat2npy
+    assert cli._cmd_dat2npy is _cmd_dat2npy
+    assert "_cmd_dat2npy" in _legacy.__all__
 
 
 def test_dat2sxm_batch_returns_nonzero_when_file_fails(tmp_path):

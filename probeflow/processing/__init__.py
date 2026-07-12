@@ -16,9 +16,9 @@ The resulting steps are appended to the scan's
 Boundary rules
 --------------
 Keep this package focused on operation functions, state adapters, and thin
-wrappers around existing kernels.  Provenance dataclasses (linear history or
-the experimental ``ScanGraph``) belong in ``probeflow.provenance``.  Do not
-add GUI widgets, vendor parsers, or writer implementations here.
+wrappers around existing kernels.  Provenance history records belong in
+``probeflow.provenance``.  Do not add GUI widgets, vendor parsers, or writer
+implementations here.
 """
 
 from probeflow.processing import image as _impl

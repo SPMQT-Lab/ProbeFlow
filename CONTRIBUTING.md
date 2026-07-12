@@ -74,15 +74,11 @@ and what does **not**. Read these before adding new code:
   `ProcessingState` model.
 - `probeflow/analysis/` — grain/feature detection, lattice extraction,
   pair correlation, spectroscopy plotting.
-- `probeflow/provenance/` — export provenance now; future scan-graph
-  dataclasses (`ImageNode`, `MeasurementNode`, etc.).
+- `probeflow/provenance/` — processing history and export provenance.
 - `probeflow/gui/` — PySide6 widgets and dialogs only. **Not** numerical
   kernels, **not** vendor parsers, **not** model definitions.
 - `probeflow/cli/` — orchestration over the canonical APIs above.
   **Not** model definitions, **not** numerical kernels, **not** GUI.
-- `probeflow/plugins/` — future plugin registry; do not migrate in-tree
-  ops here yet.
-
 If a change crosses a boundary, prefer adding a small adapter in the
 caller over moving domain code into a foreign package.
 

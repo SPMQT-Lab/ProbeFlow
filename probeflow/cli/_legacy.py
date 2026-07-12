@@ -69,6 +69,7 @@ from probeflow.cli.commands.analysis import (
     _cmd_unit_cell,
 )
 from probeflow.cli.commands.conversion import (
+    _cmd_dat2npy,
     _cmd_dat2sxm,
     _cmd_dat2png,
 )
@@ -113,7 +114,7 @@ __all__ = [
     "_cmd_tv_denoise",
     "_cmd_lattice", "_cmd_profile",
     "_cmd_histogram", "_cmd_fft_spectrum", "_cmd_unit_cell",
-    "_cmd_dat2sxm", "_cmd_dat2png",
+    "_cmd_dat2sxm", "_cmd_dat2png", "_cmd_dat2npy",
     "_cmd_gui",
     "_cmd_pipeline", "_cmd_prepare_png", "_cmd_plane_bg",
     "_cmd_sxm2png", "_cmd_info", "_cmd_convert", "_cmd_diag_z",

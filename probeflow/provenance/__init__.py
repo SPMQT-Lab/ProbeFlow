@@ -16,24 +16,11 @@ This is what every export, GUI History panel, and CLI provenance flag actually
 uses today (see :func:`processing_history_from_scan`,
 :func:`append_processing_state`, :func:`build_export_record`).
 
-Experimental graph model (`probeflow.provenance.graph`)
--------------------------------------------------------
-``probeflow.provenance.graph`` contains a richer DAG-style alternate
-representation (:class:`ScanGraph` with :class:`ImageNode` /
-:class:`MeasurementNode` vertices, virtual-image recipes, ``materialize_image``
-re-execution).  It is **not wired to any production code path** — the linear
-``ProcessingHistory`` model above is the source of truth.  The graph module
-is kept and exercised by its own tests so that a future migration can build
-on a working baseline, but it is intentionally *not* re-exported from this
-package's top-level namespace; import directly from
-``probeflow.provenance.graph`` if you need it (review arch-backend #6).
-
 Boundary rules
 --------------
-Keep history records and any future graph node dataclasses inside this
-package.  Do not define them in ``processing`` or ``analysis``; those
-packages should expose algorithms that can be wrapped by provenance-aware
-adapters.
+Keep history records inside this package.  Do not define them in
+``processing`` or ``analysis``; those packages should expose algorithms that
+can be wrapped by provenance-aware adapters.
 """
 
 from probeflow.provenance import export as _impl
