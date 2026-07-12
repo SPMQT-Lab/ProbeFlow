@@ -360,8 +360,13 @@ class TestHardCombinations:
         assert_wysiwyg_replays(viewer)
 
         viewer._on_undo_processing()
+        assert viewer._processing.get("smooth_sigma") == pytest.approx(2.0)
+        assert not viewer._processing.get("geometric_ops")
         assert_wysiwyg_replays(viewer)
         viewer._on_redo_processing()
+        assert [op["op"] for op in viewer._processing["geometric_ops"]] == [
+            "flip_horizontal",
+        ]
         assert_wysiwyg_replays(viewer)
 
     def test_channel_switch_reapplies_pipeline(self, viewer):

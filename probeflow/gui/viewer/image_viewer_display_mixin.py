@@ -14,11 +14,18 @@ from probeflow.gui.viewer import export_histogram
 
 class ImageViewerDisplayMixin:
     def _on_set_zero_plane_mode_toggled(self, checked: bool):
+        if checked:
+            # The three clicks are one logical processing action. Capture the
+            # state before the first point, then push it only when point 3
+            # commits the plane.
+            self._set_zero_undo_snapshot = self._capture_proc_undo_snapshot()
+            self._set_zero_undo_snapshot["zero_mode"] = False
         msg = self._zero_ctrl.toggle(checked, self._set_selection_tool)
         self._zoom_lbl.set_set_zero_mode(checked)
         if msg:
             self._status_lbl.setText(msg)
         if not checked:
+            self._set_zero_undo_snapshot = None
             self._refresh_zero_markers()
 
     def _on_set_zero_pick(self, frac_x: float, frac_y: float):
@@ -27,6 +34,9 @@ class ImageViewerDisplayMixin:
         # the click fraction into that frame and stamps the geometric-op
         # count so replay anchors the plane on the clicked features.
         arr = self._display_arr if self._display_arr is not None else self._raw_arr
+        undo_snapshot = getattr(self, "_set_zero_undo_snapshot", None)
+        if undo_snapshot is None:
+            undo_snapshot = self._capture_proc_undo_snapshot()
         rerender, msg = self._zero_ctrl.on_canvas_pick(
             frac_x, frac_y,
             arr,
@@ -36,6 +46,8 @@ class ImageViewerDisplayMixin:
         if msg:
             self._status_lbl.setText(msg)
         if rerender:
+            self._push_proc_undo_snapshot(undo_snapshot)
+            self._set_zero_undo_snapshot = None
             if self._set_zero_plane_btn.isChecked():
                 self._set_zero_plane_btn.setChecked(False)
             # Re-levelling moves the data baseline; a manual contrast window
@@ -400,9 +412,10 @@ class ImageViewerDisplayMixin:
             return
         base_state = copy.deepcopy(self._processing)
         base_state.pop("align_rows", None)
-        coalesced_align_undo = self._proc_undo_ctrl.try_coalesce(base_state)
+        base_snapshot = self._capture_proc_undo_snapshot(processing=base_state)
+        coalesced_align_undo = self._proc_undo_ctrl.try_coalesce(base_snapshot)
         if not coalesced_align_undo:
-            self._proc_undo_ctrl.push(self._processing)
+            self._push_proc_undo_snapshot()
         if align_value is None:
             self._processing.pop("align_rows", None)
             label = "None"
@@ -410,7 +423,9 @@ class ImageViewerDisplayMixin:
             self._processing["align_rows"] = align_value
             label = str(align_value).replace("_", " ").title()
         if coalesced_align_undo:
-            self._proc_undo_ctrl.discard_last_undo_if_eq(self._processing)
+            self._proc_undo_ctrl.discard_last_undo_if_eq(
+                self._capture_proc_undo_snapshot()
+            )
         self._clear_bad_line_preview()
         self._refresh_processing_display()
         if hasattr(self, "_status_lbl"):

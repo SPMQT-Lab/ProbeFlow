@@ -173,6 +173,7 @@ class ImageMask:
                 return None
             new_data = sub
         elif op in ("rotate_arbitrary", "scale_image", "shear",
+                    "linear_undistort",
                     "affine_lattice_correction"):
             # Resampling / shape-changing ops invalidate the raster, exactly
             # as the docstring promises (the previous code raised ValueError

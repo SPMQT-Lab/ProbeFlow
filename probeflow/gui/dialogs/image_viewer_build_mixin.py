@@ -573,15 +573,15 @@ class ImageViewerBuildMixin:
         ar_row.addWidget(proc_reset_btn, 1)
         processing_lay.addLayout(ar_row)
 
-        # ── Undo / Redo — restore previous processing snapshots ───────────────
+        # ── Undo / Redo — restore previous viewer-edit snapshots ─────────────
         ur_row = QHBoxLayout()
         ur_row.setSpacing(4)
         self._proc_undo_btn = QPushButton("↶ Undo")
         self._proc_undo_btn.setFont(ui_font(8))
         self._proc_undo_btn.setFixedHeight(24)
         self._proc_undo_btn.setToolTip(
-            "Restore the processing state from before the last Apply / Reset "
-            "(Ctrl+Z).")
+            "Restore the image and overlay state from before the last "
+            "processing action (Ctrl+Z).")
         self._proc_undo_btn.clicked.connect(self._on_undo_processing)
         self._proc_redo_btn = QPushButton("Redo ↷")
         self._proc_redo_btn.setFont(ui_font(8))

@@ -9,11 +9,11 @@ _DEPTH = 50
 
 
 class ProcessingUndoController:
-    """Owns the undo/redo stacks for image processing state.
+    """Owns the undo/redo stacks for viewer-edit snapshots.
 
-    Callers push a snapshot before mutating ``_processing`` (Apply / Reset),
-    then pop it on Undo or Redo.  The controller drives button-enabled state
-    and syncs the viewer menu after every stack change.
+    The viewer supplies JSON-like dictionaries containing processing plus any
+    coordinate-coupled overlay state. Keeping this controller payload-agnostic
+    avoids coupling the stack to ROI, mask, or Qt types.
     """
 
     def __init__(
@@ -38,11 +38,19 @@ class ProcessingUndoController:
     def can_redo(self) -> bool:
         return bool(self._redo_stack)
 
+    def peek_undo(self) -> dict | None:
+        """Return the next undo snapshot without modifying either stack."""
+        return self._undo_stack[-1] if self._undo_stack else None
+
+    def peek_redo(self) -> dict | None:
+        """Return the next redo snapshot without modifying either stack."""
+        return self._redo_stack[-1] if self._redo_stack else None
+
     # ── Stack operations ──────────────────────────────────────────────────────
 
-    def push(self, processing: dict) -> None:
-        """Deep-copy *processing* onto the undo stack and clear redo."""
-        self._undo_stack.append(copy.deepcopy(processing))
+    def push(self, snapshot: dict) -> None:
+        """Deep-copy *snapshot* onto the undo stack and clear redo."""
+        self._undo_stack.append(copy.deepcopy(snapshot))
         if len(self._undo_stack) > _DEPTH:
             self._undo_stack.pop(0)
         self._redo_stack.clear()

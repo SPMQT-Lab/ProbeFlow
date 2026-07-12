@@ -8,12 +8,14 @@ and consumed by downstream statistics / background exclusion.
 
 from __future__ import annotations
 
+import copy
 import logging
 
 import numpy as np
 
 from probeflow.gui.roi_context import area_roi_mask
 from probeflow.gui.viewer import load_mask_set, save_mask_set
+from probeflow.gui.viewer.geometric_ops import processing_changes_coordinate_frame
 
 _log = logging.getLogger(__name__)
 
@@ -24,25 +26,33 @@ class ImageViewerMaskMixin:
     def _load_image_mask_set(self, entry) -> None:
         """Load masks from the ``<stem>.masks.json`` sidecar, else an empty set."""
         self._image_mask_set, err = load_mask_set(entry.path)
+        self._raw_image_mask_payload = copy.deepcopy(self._image_mask_set.to_dict())
+        self._processed_mask_edits_pending = False
         if err and hasattr(self, "_status_lbl"):
             # Mirror of the ROI loader: a corrupt sidecar must be surfaced,
             # not read as "no masks".
             self._status_lbl.setText(err)
-        self._refresh_mask_overlay()
-        if hasattr(self, "_mask_panel"):
-            self._mask_panel.refresh(self._image_mask_set)
+        self._refresh_image_mask_set_ui()
 
     def _save_image_mask_set(self) -> None:
         if self._image_mask_set is None:
+            return
+        if processing_changes_coordinate_frame(getattr(self, "_processing", {})):
+            self._processed_mask_edits_pending = True
+            warn = getattr(self, "_warn_processed_overlay_edit", None)
+            if callable(warn):
+                warn("mask")
             return
         entry = self._entries[self._idx]
         err = save_mask_set(self._image_mask_set, entry.path)
         if err and hasattr(self, "_status_lbl"):
             self._status_lbl.setText(err)
+        elif err is None:
+            self._raw_image_mask_payload = copy.deepcopy(self._image_mask_set.to_dict())
+            self._processed_mask_edits_pending = False
 
-    def _on_image_mask_set_changed(self) -> None:
-        """Persist, refresh the overlay/manager, and re-run mask-aware display."""
-        self._save_image_mask_set()
+    def _refresh_image_mask_set_ui(self) -> None:
+        """Refresh the overlay/manager and re-run mask-aware display."""
         self._refresh_mask_overlay()
         if hasattr(self, "_mask_panel"):
             self._mask_panel.refresh(self._image_mask_set)
@@ -53,6 +63,11 @@ class ImageViewerMaskMixin:
             except Exception:
                 _log.warning("Measurement refresh after mask change failed; "
                              "readout may show stale statistics", exc_info=True)
+
+    def _on_image_mask_set_changed(self) -> None:
+        """Refresh the live mask model and persist it when in the raw frame."""
+        self._refresh_image_mask_set_ui()
+        self._save_image_mask_set()
 
     # ── Active mask access (consumed by stats / background) ────────────────────
 

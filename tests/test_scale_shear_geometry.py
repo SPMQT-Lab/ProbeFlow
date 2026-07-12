@@ -10,7 +10,7 @@ saves vector geometry, unlike masks), and shear didn't even warn. Policy now:
 * ``shear`` — ROIs, masks, and the selection are invalidated, matching the
   rotate_arbitrary precedent (a rectangle cannot represent a sheared shape).
 
-Also pins the ImageMask.transform doc/code mismatch fix: scale/shear/affine
+Also pins the ImageMask.transform doc/code mismatch fix: scale/shear/undistort/affine
 now return None (invalidate) as documented instead of raising ValueError.
 """
 
@@ -102,6 +102,7 @@ class TestMaskResamplingOps:
         ("scale_image", SCALE),
         ("shear", SHEAR),
         ("rotate_arbitrary", {"angle_degrees": 10.0}),
+        ("linear_undistort", {"shear_x": 1.0, "scale_y": 1.0}),
         ("affine_lattice_correction", {"matrix": [[1, 0], [0, 1]]}),
     ])
     def test_resampling_ops_invalidate_not_raise(self, op, params):
@@ -145,6 +146,7 @@ def _viewer_host(qapp):
     from probeflow.gui.viewer.image_viewer_selection_mixin import (
         ImageViewerSelectionMixin,
     )
+    from probeflow.gui.viewer.processing_undo import ProcessingUndoController
 
     canvas = ImageCanvas()
     pm = QPixmap(64, 64)
@@ -161,6 +163,9 @@ def _viewer_host(qapp):
             self.statuses: list[str] = []
             self._status_lbl = SimpleNamespace(setText=self.statuses.append)
             self.refreshes = 0
+            self._proc_undo_ctrl = ProcessingUndoController(
+                None, None, self._sync_viewer_menu_actions
+            )
 
         def _refresh_processing_display(self):
             self.refreshes += 1

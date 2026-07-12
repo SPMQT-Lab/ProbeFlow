@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import copy
+
 from probeflow.core import AREA_ROI_KINDS
 from probeflow.gui.models import SxmFile
+from probeflow.gui.viewer.geometric_ops import processing_changes_coordinate_frame
 from probeflow.gui.viewer import (
     activate_roi,
     active_roi,
@@ -55,37 +58,52 @@ class ImageViewerRoiMixin:
     def _load_image_roi_set(self, entry: "SxmFile") -> None:
         """Load ROIs from <stem>.rois.json sidecar if it exists, else create empty set."""
         self._image_roi_set, err = load_roi_set(entry.path)
+        self._raw_image_roi_payload = copy.deepcopy(self._image_roi_set.to_dict())
+        self._processed_roi_edits_pending = False
         if err and hasattr(self, "_status_lbl"):
             # A corrupt sidecar must not be silent: the user would otherwise
             # see "no ROIs" and possibly overwrite the damaged file on the
             # next save without ever knowing their ROIs were there.
             self._status_lbl.setText(err)
-        self._zoom_lbl.set_roi_set(self._image_roi_set)
-        if hasattr(self, "_roi_panel"):
-            self._roi_panel.refresh(self._image_roi_set)
-        self._sync_viewer_menu_actions()
+        self._refresh_image_roi_set_ui()
 
     def _save_image_roi_set(self) -> None:
         """Persist the current ROISet to its sidecar file."""
         if self._image_roi_set is None:
             return
+        if processing_changes_coordinate_frame(getattr(self, "_processing", {})):
+            self._processed_roi_edits_pending = True
+            warn = getattr(self, "_warn_processed_overlay_edit", None)
+            if callable(warn):
+                warn("ROI")
+            return
         entry = self._entries[self._idx]
         err = save_roi_set(self._image_roi_set, entry.path)
         if err and hasattr(self, "_status_lbl"):
             self._status_lbl.setText(err)
+        elif err is None:
+            self._raw_image_roi_payload = copy.deepcopy(self._image_roi_set.to_dict())
+            self._processed_roi_edits_pending = False
 
-    def _on_image_roi_set_changed(self) -> None:
+    def _refresh_image_roi_set_ui(self) -> None:
         self._zoom_lbl.set_roi_set(self._image_roi_set)
-        self._save_image_roi_set()
         if hasattr(self, "_roi_panel"):
             self._roi_panel.refresh(self._image_roi_set)
-        self._sync_line_profile_visibility()
-        self._sync_viewer_menu_actions()
+        if hasattr(self, "_sync_line_profile_visibility"):
+            self._sync_line_profile_visibility()
+        if hasattr(self, "_sync_viewer_menu_actions"):
+            self._sync_viewer_menu_actions()
         # In per-ROI contrast scope the sliders follow the active area ROI, so
         # refresh them (and re-composite) whenever the active ROI changes.
         if getattr(self, "_display_scope", "global") == "roi":
-            self._update_display_sliders()
-            self._refresh_viewer_pixmap(reset_zoom=False)
+            if hasattr(self, "_update_display_sliders"):
+                self._update_display_sliders()
+            if hasattr(self, "_refresh_viewer_pixmap"):
+                self._refresh_viewer_pixmap(reset_zoom=False)
+
+    def _on_image_roi_set_changed(self) -> None:
+        self._refresh_image_roi_set_ui()
+        self._save_image_roi_set()
 
     def _on_pixel_hovered(self, col: int, row: int, val) -> None:
         if not hasattr(self, "_coord_lbl"):

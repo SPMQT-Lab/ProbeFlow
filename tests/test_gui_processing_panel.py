@@ -285,7 +285,7 @@ def test_viewer_align_rows_applies_immediately(qapp, monkeypatch):
 
     assert dlg._processing["align_rows"] == "mean"
     assert refreshes[-1]["align_rows"] == "mean"
-    assert dlg._proc_undo_ctrl._undo_stack[-1] == {}
+    assert dlg._proc_undo_ctrl._undo_stack[-1]["processing"] == {}
 
     dlg._processing_panel._align_combo.setCurrentText("None")
 
@@ -902,6 +902,15 @@ def test_viewer_zero_plane_workflow_remains_available(qapp, monkeypatch):
     assert dlg._processing["set_zero_plane_points"] == [(0, 0), (4, 4), (9, 9)]
     assert "set_zero_xy" not in dlg._processing
     assert dlg._set_zero_plane_btn.isChecked() is False
+
+    dlg._on_undo_processing()
+    assert "set_zero_plane_points" not in dlg._processing
+    assert dlg._zero_ctrl.points == []
+    assert dlg._set_zero_plane_btn.isChecked() is False
+
+    dlg._on_redo_processing()
+    assert dlg._processing["set_zero_plane_points"] == [(0, 0), (4, 4), (9, 9)]
+    assert dlg._zero_ctrl.points == [(0, 0), (4, 4), (9, 9)]
 
     dlg.close()
     dlg.deleteLater()

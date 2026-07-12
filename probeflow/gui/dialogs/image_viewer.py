@@ -128,10 +128,9 @@ class ImageViewerDialog(
         self._processing = dict(processing) if processing else {}
         self._processing_roi_error: str = ""
         self._processing_error: str = ""
-        # Undo / redo stacks for processing state. Each entry is a deep copy
-        # of the full processing dict at a prior point. Apply / Reset push
-        # the previous state onto _undo_stack and clear _redo_stack; the
-        # Undo / Redo buttons swap between the two.
+        # Undo / redo stacks for viewer-edit snapshots. Each entry includes
+        # processing plus coordinate-coupled ROI/mask/selection state so a
+        # geometric edit is restored atomically.
         self._proc_undo_btn = None
         self._proc_redo_btn = None
         # Mutable mapping shared with the parent window: spec_stem → image_stem.
@@ -273,7 +272,10 @@ class ImageViewerDialog(
         if hasattr(self, "_processing_panel"):
             self._clear_bad_line_preview()
         self._load_current_source(entry, reset_zoom=reset_zoom)
+        self._project_raw_overlays_to_processing()
         self._refresh_display_array(reset_zoom_if_shape_changed=not reset_zoom)
+        self._refresh_image_roi_set_ui()
+        self._refresh_image_mask_set_ui()
         self._refresh_histogram_and_markers(entry)
         self._refresh_viewer_pixmap(reset_zoom=reset_zoom)
         self._sync_line_profile_visibility()
@@ -471,6 +473,10 @@ class ImageViewerDialog(
         self._rebuild_processing_history()
         self._refresh_histogram_and_markers(entry)
         self._refresh_viewer_pixmap(reset_zoom=False)
+        # Shape-changing processing updates the display array after masks have
+        # been transformed. Re-evaluate the active raster against the new shape
+        # so a valid cropped/flipped mask is not left hidden by the old frame.
+        self._refresh_mask_overlay()
         self._sync_line_profile_visibility()
 
     def _on_bad_line_preview_settings_changed(self) -> None:

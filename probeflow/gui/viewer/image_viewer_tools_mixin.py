@@ -99,6 +99,8 @@ class ImageViewerToolsMixin:
             self._refresh_viewer_pixmap(reset_zoom=False)
 
         def _apply_lattice_correction(op_name: str, op_params: dict) -> None:
+            self._push_proc_undo_snapshot(include_overlays=True)
+            self._transform_image_roi_set_for_display_op(op_name, op_params)
             ops = list(self._processing.get("geometric_ops") or [])
             ops.append({"op": op_name, "params": op_params})
             self._processing["geometric_ops"] = ops
@@ -458,6 +460,8 @@ class ImageViewerToolsMixin:
             self._refresh_viewer_pixmap(reset_zoom=False)
 
         def _apply_fft_correction(op_name: str, op_params: dict) -> None:
+            self._push_proc_undo_snapshot(include_overlays=True)
+            self._transform_image_roi_set_for_display_op(op_name, op_params)
             ops = list(self._processing.get("geometric_ops") or [])
             ops.append({"op": op_name, "params": op_params})
             self._processing["geometric_ops"] = ops
@@ -542,9 +546,15 @@ class ImageViewerToolsMixin:
         if dlg.exec() != QDialog.Accepted:
             return
         peaks = dlg.selected_peaks()
+        previous_peaks = list(self._processing.get("periodic_notches") or [])
+        previous_radius = self._processing.get("periodic_notch_radius")
+        next_radius = dlg.radius_px() if peaks else None
+        if peaks == previous_peaks and next_radius == previous_radius:
+            return
+        self._push_proc_undo_snapshot()
         if peaks:
             self._processing["periodic_notches"] = peaks
-            self._processing["periodic_notch_radius"] = dlg.radius_px()
+            self._processing["periodic_notch_radius"] = next_radius
             self._status_lbl.setText(f"Periodic FFT filter: {len(peaks)} peak(s) selected.")
         else:
             self._processing.pop("periodic_notches", None)

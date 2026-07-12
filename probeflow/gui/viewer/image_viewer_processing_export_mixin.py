@@ -23,6 +23,11 @@ from probeflow.gui.viewer.processed_export import (
     save_processed_image,
     save_provenance_json,
 )
+from probeflow.gui.viewer.geometric_ops import (
+    coordinate_frame_ops,
+    processing_changes_coordinate_frame,
+    project_overlay_sets_for_processing,
+)
 from probeflow.processing.gui_adapter import processing_state_from_gui
 from probeflow.processing.state import (
     apply_processing_state,
@@ -33,6 +38,7 @@ from probeflow.provenance import build_export_record, display_lines
 
 class ImageViewerProcessingExportMixin:
     def _on_apply_processing(self):
+        old_frame_ops = coordinate_frame_ops(self._processing)
         panel_state = self._processing_panel.state()
         panel_state.update(self._advanced_processing_state())
         has_local_filter = self._processing_has_roi_aware_local_filter(panel_state)
@@ -54,9 +60,6 @@ class ImageViewerProcessingExportMixin:
                     "area ROI or clear the scope (Esc) to process the whole image."
                 )
                 return
-        # Snapshot for undo before any mutation. Validation has passed; this
-        # apply is going to change the state.
-        self._push_proc_undo_snapshot()
         preserve = {
             key: self._processing[key]
             for key in (
@@ -77,6 +80,13 @@ class ImageViewerProcessingExportMixin:
             )
             if key in self._processing
         }
+        prospective_processing = dict(panel_state)
+        prospective_processing.update(preserve)
+        # Snapshot for undo before any mutation. If Apply crosses a coordinate-
+        # frame boundary, the disposable overlay models must travel with it.
+        self._push_proc_undo_snapshot(include_overlays=bool(
+            old_frame_ops or coordinate_frame_ops(prospective_processing)
+        ))
         self._processing = panel_state
         self._processing.update(preserve)
         if selection is not None:
@@ -89,8 +99,12 @@ class ImageViewerProcessingExportMixin:
         # back-compat with previously saved states).
         self._processing.pop("processing_scope", None)
         self._processing.pop("processing_roi_id", None)
+        if coordinate_frame_ops(self._processing) != old_frame_ops:
+            self._project_raw_overlays_to_processing()
         self._clear_bad_line_preview()
         self._refresh_processing_display()
+        self._refresh_image_roi_set_ui()
+        self._refresh_image_mask_set_ui()
 
     def _active_roi_filter_scope_id(self) -> "str | None":
         """Return the ROI id explicitly set as filter scope, if it still exists."""
@@ -212,6 +226,7 @@ class ImageViewerProcessingExportMixin:
             # pipeline position (parity with the scoped-filter commits).
             "after_geometric_ops": len(self._processing.get("geometric_ops") or []),
         }
+        self._push_proc_undo_snapshot()
         repairs = list(self._processing.get("repair_ops") or [])
         repairs.append(entry)
         self._processing["repair_ops"] = repairs
@@ -236,6 +251,7 @@ class ImageViewerProcessingExportMixin:
             },
             "after_geometric_ops": len(self._processing.get("geometric_ops") or []),
         }
+        self._push_proc_undo_snapshot()
         repairs = list(self._processing.get("repair_ops") or [])
         repairs.append(entry)
         self._processing["repair_ops"] = repairs
@@ -253,6 +269,48 @@ class ImageViewerProcessingExportMixin:
         self._processing_panel.set_state(self._processing)
         self._set_advanced_processing_state(self._processing)
 
+    def _overlays_are_in_processed_frame(self) -> bool:
+        return processing_changes_coordinate_frame(self._processing)
+
+    def _warn_processed_overlay_edit(self, kind: str) -> None:
+        message = (
+            f"{kind} changes in a geometrically transformed view are session-only; "
+            "raw-coordinate sidecars were not changed. Reset or undo the geometry "
+            "before making edits that need to persist."
+        )
+        if hasattr(self, "_roi_status_lbl"):
+            self._roi_status_lbl.setText(message)
+        elif hasattr(self, "_status_lbl"):
+            self._status_lbl.setText(message)
+
+    def _restore_raw_overlay_models(self, *, refresh: bool = True) -> None:
+        """Restore disposable display models from canonical raw-frame payloads."""
+        roi_payload = getattr(self, "_raw_image_roi_payload", None)
+        mask_payload = getattr(self, "_raw_image_mask_payload", None)
+        if roi_payload is not None:
+            from probeflow.core.roi import ROISet
+            self._image_roi_set = ROISet.from_dict(copy.deepcopy(roi_payload))
+        if mask_payload is not None:
+            from probeflow.core.mask import MaskSet
+            self._image_mask_set = MaskSet.from_dict(copy.deepcopy(mask_payload))
+        self._processed_roi_edits_pending = False
+        self._processed_mask_edits_pending = False
+        if refresh:
+            self._refresh_image_roi_set_ui()
+            self._refresh_image_mask_set_ui()
+
+    def _project_raw_overlays_to_processing(self) -> None:
+        """Build live display-frame overlays without mutating sidecar payloads."""
+        if self._raw_arr is None:
+            return
+        self._restore_raw_overlay_models(refresh=False)
+        project_overlay_sets_for_processing(
+            self._image_roi_set,
+            self._image_mask_set,
+            self._processing,
+            self._raw_arr.shape[:2],
+        )
+
     def _on_reset_processing(self):
         """Clear all processing for the current image and reload raw data."""
         has_zero = bool(self._zero_ctrl.points)
@@ -260,8 +318,11 @@ class ImageViewerProcessingExportMixin:
             self._status_lbl.setText("Already showing the original — nothing to reset.")
             return
         # Snapshot for undo before clearing.
-        self._push_proc_undo_snapshot()
+        self._push_proc_undo_snapshot(
+            include_overlays=self._overlays_are_in_processed_frame()
+        )
         self._processing = {}
+        self._restore_raw_overlay_models(refresh=False)
         self._processing_panel.set_state({})
         self._set_advanced_processing_state({})
         self._clear_bad_line_preview()
@@ -276,28 +337,145 @@ class ImageViewerProcessingExportMixin:
         self._refresh_zero_markers()
         self._status_lbl.setText("Reset: showing original on-disk data.")
         self._refresh_processing_display()
+        self._refresh_image_roi_set_ui()
+        self._refresh_image_mask_set_ui()
 
     # ── Processing undo / redo ────────────────────────────────────────────────
 
-    def _push_proc_undo_snapshot(self) -> None:
-        self._proc_undo_ctrl.push(self._processing)
+    def _proc_undo_image_key(self) -> str | None:
+        entries = getattr(self, "_entries", None)
+        idx = getattr(self, "_idx", None)
+        if entries is None or idx is None or not (0 <= idx < len(entries)):
+            return None
+        return str(entries[idx].path)
+
+    def _capture_proc_undo_snapshot(
+        self,
+        *,
+        processing: dict | None = None,
+        include_overlays: bool = False,
+    ) -> dict:
+        """Capture processing and optionally coordinate-coupled model state.
+
+        Geometric operations mutate ROIs, masks, and the quick selection to
+        keep them aligned with the displayed image. A processing-only snapshot
+        would therefore make Undo show the original pixels under transformed
+        overlays. Store JSON-compatible model payloads so snapshots compare
+        safely (``numpy`` arrays inside ``MaskSet`` do not).
+        """
+        roi_set = getattr(self, "_image_roi_set", None) if include_overlays else None
+        mask_set = getattr(self, "_image_mask_set", None) if include_overlays else None
+        zero_ctrl = getattr(self, "_zero_ctrl", None)
+        zero_btn = getattr(self, "_set_zero_plane_btn", None)
+        selection = (
+            self._active_quick_selection()
+            if hasattr(self, "_active_quick_selection") else None
+        )
+        return {
+            "_viewer_edit_snapshot": 1,
+            "image_key": self._proc_undo_image_key(),
+            "includes_overlays": bool(include_overlays),
+            "processing": copy.deepcopy(
+                self._processing if processing is None else processing
+            ),
+            "roi_set": copy.deepcopy(roi_set.to_dict()) if roi_set is not None else None,
+            "mask_set": copy.deepcopy(mask_set.to_dict()) if mask_set is not None else None,
+            "quick_selection": copy.deepcopy(selection),
+            "roi_filter_scope_id": getattr(self, "_roi_filter_scope_id", None),
+            "zero_points": zero_ctrl.points if zero_ctrl is not None else [],
+            "zero_mode": bool(zero_btn.isChecked()) if zero_btn is not None else False,
+        }
+
+    def _push_proc_undo_snapshot(
+        self,
+        snapshot: dict | None = None,
+        *,
+        include_overlays: bool = False,
+    ) -> None:
+        self._proc_undo_ctrl.push(
+            snapshot if snapshot is not None else self._capture_proc_undo_snapshot(
+                include_overlays=include_overlays
+            )
+        )
 
     def _restore_processing_state(self, state: dict) -> None:
-        """Apply a snapshot to ``self._processing`` and resync the GUI."""
-        self._processing = copy.deepcopy(state)
+        """Apply a viewer-edit snapshot and resync processing plus overlays."""
+        is_viewer_snapshot = state.get("_viewer_edit_snapshot") == 1
+        same_image = (
+            is_viewer_snapshot
+            and state.get("image_key") == self._proc_undo_image_key()
+        )
+        restore_overlays = (
+            same_image and bool(state.get("includes_overlays", False))
+        )
+        processing = state.get("processing", {}) if is_viewer_snapshot else state
+        self._processing = copy.deepcopy(processing)
+
+        if restore_overlays:
+            from probeflow.core.mask import MaskSet
+            from probeflow.core.roi import ROISet
+
+            roi_payload = state.get("roi_set")
+            mask_payload = state.get("mask_set")
+            self._image_roi_set = (
+                ROISet.from_dict(copy.deepcopy(roi_payload))
+                if roi_payload is not None else None
+            )
+            self._image_mask_set = (
+                MaskSet.from_dict(copy.deepcopy(mask_payload))
+                if mask_payload is not None else None
+            )
+        if same_image:
+            self._roi_filter_scope_id = state.get("roi_filter_scope_id")
+            selection = state.get("quick_selection")
+            if selection is None:
+                self._clear_quick_selection()
+            else:
+                self._zoom_lbl.set_selection(
+                    str(selection["kind"]), dict(selection["geometry"])
+                )
+
+            zero_ctrl = getattr(self, "_zero_ctrl", None)
+            zero_btn = getattr(self, "_set_zero_plane_btn", None)
+            if zero_ctrl is not None:
+                zero_ctrl.restore_points(list(state.get("zero_points") or []))
+            if zero_btn is not None:
+                previous = zero_btn.blockSignals(True)
+                zero_btn.setChecked(bool(state.get("zero_mode", False)))
+                zero_btn.blockSignals(previous)
+                self._zoom_lbl.set_set_zero_mode(zero_btn.isChecked())
+
         self._processing_panel.set_state(self._processing)
         self._set_advanced_processing_state(self._processing)
         self._refresh_processing_display()
 
+        if restore_overlays:
+            # Refresh and persist the restored canonical model state only after
+            # the display array has returned to the matching coordinate frame.
+            if self._image_roi_set is not None:
+                self._refresh_image_roi_set_ui()
+            if self._image_mask_set is not None:
+                self._refresh_image_mask_set_ui()
+        if same_image:
+            self._refresh_zero_markers()
+
     def _on_undo_processing(self) -> None:
-        state = self._proc_undo_ctrl.undo(self._processing)
+        target = self._proc_undo_ctrl.peek_undo()
+        current = self._capture_proc_undo_snapshot(
+            include_overlays=bool(target and target.get("includes_overlays"))
+        )
+        state = self._proc_undo_ctrl.undo(current)
         if state is None:
             return
         self._restore_processing_state(state)
         self._status_lbl.setText("Undo: restored previous processing.")
 
     def _on_redo_processing(self) -> None:
-        state = self._proc_undo_ctrl.redo(self._processing)
+        target = self._proc_undo_ctrl.peek_redo()
+        current = self._capture_proc_undo_snapshot(
+            include_overlays=bool(target and target.get("includes_overlays"))
+        )
+        state = self._proc_undo_ctrl.redo(current)
         if state is None:
             return
         self._restore_processing_state(state)
@@ -819,6 +997,7 @@ class ImageViewerProcessingExportMixin:
         self._present_modal_tool(dlg)
 
     def _on_threshold_applied(self, params: dict) -> None:
+        self._push_proc_undo_snapshot()
         ops = list(self._processing.get("geometric_ops") or [])
         ops.append({"op": "image_threshold", "params": params})
         self._processing["geometric_ops"] = ops
@@ -846,6 +1025,7 @@ class ImageViewerProcessingExportMixin:
         # cannot (invalidated with a status message) and the quick selection
         # scales like the ROIs — same path as flips/rotations, which used to
         # bypass scale entirely and leave every overlay silently mislocated.
+        self._push_proc_undo_snapshot(include_overlays=True)
         self._transform_image_roi_set_for_display_op("scale_image", params)
         ops = list(self._processing.get("geometric_ops") or [])
         ops.append({"op": "scale_image", "params": params})
@@ -876,6 +1056,7 @@ class ImageViewerProcessingExportMixin:
             (len(roi_set.rois) if roi_set is not None else 0)
             + (len(mask_set.masks) if mask_set is not None else 0)
         )
+        self._push_proc_undo_snapshot(include_overlays=True)
         self._transform_image_roi_set_for_display_op("shear", params)
         ops = list(self._processing.get("geometric_ops") or [])
         ops.append({"op": "shear", "params": params})
@@ -893,6 +1074,7 @@ class ImageViewerProcessingExportMixin:
         if arr is None:
             self._status_lbl.setText("No image loaded.")
             return
+        self._push_proc_undo_snapshot()
         ops = list(self._processing.get("geometric_ops") or [])
         ops.append({"op": "quantize_bit_depth", "params": {"bits": bits}})
         self._processing["geometric_ops"] = ops
@@ -901,6 +1083,7 @@ class ImageViewerProcessingExportMixin:
         self._status_lbl.setText(f"Converted to {bits}-bit ({n:,} levels).")
 
     def _on_geometric_op(self, op_name: str) -> None:
+        self._push_proc_undo_snapshot(include_overlays=True)
         self._transform_image_roi_set_for_display_op(op_name)
         ops = list(self._processing.get("geometric_ops") or [])
         ops.append({"op": op_name, "params": {}})
@@ -944,6 +1127,7 @@ class ImageViewerProcessingExportMixin:
         """Record a crop op and carry ROIs/masks/selection into the new frame."""
         x0, y0, x1, y1 = bounds
         params = {"x0": x0, "y0": y0, "x1": x1, "y1": y1}
+        self._push_proc_undo_snapshot(include_overlays=True)
         # The selection did its job — clear it rather than leaving a marquee
         # spanning the whole cropped image.
         if hasattr(self, "_clear_quick_selection"):
@@ -993,6 +1177,7 @@ class ImageViewerProcessingExportMixin:
         )
         if not ok:
             return
+        self._push_proc_undo_snapshot()
         ops = list(self._processing.get("geometric_ops") or [])
         ops.append({"op": "remove_spots_auto", "params": {
             "threshold_mad": float(threshold), "window_px": 5,
@@ -1012,6 +1197,7 @@ class ImageViewerProcessingExportMixin:
         )
         if not ok:
             return
+        self._push_proc_undo_snapshot(include_overlays=True)
         self._transform_image_roi_set_for_display_op(
             "rotate_arbitrary",
             {"angle_degrees": angle},
@@ -1030,26 +1216,31 @@ class ImageViewerProcessingExportMixin:
             self._status_lbl.setText if hasattr(self, "_status_lbl") else None
         )
         array_shape = self._current_array_shape()
+        roi_refresh = getattr(self, "_refresh_image_roi_set_ui", None)
+        if not callable(roi_refresh) or not hasattr(self, "_zoom_lbl"):
+            roi_refresh = getattr(self, "_on_image_roi_set_changed", None)
         transform_roi_set_for_display_op(
             self._image_roi_set,
             op_name,
             params,
             array_shape,
             status_fn=status_fn,
-            roi_changed_fn=self._on_image_roi_set_changed,
+            roi_changed_fn=roi_refresh,
         )
         # Masks are rasters and must follow the same geometric op, or a
         # same-shape flip/180°-rotate would leave them silently stale.
         mask_set = getattr(self, "_image_mask_set", None)
-        mask_changed_fn = getattr(self, "_on_image_mask_set_changed", None)
-        if mask_set is not None and mask_changed_fn is not None:
+        mask_refresh = getattr(self, "_refresh_image_mask_set_ui", None)
+        if not callable(mask_refresh):
+            mask_refresh = getattr(self, "_on_image_mask_set_changed", None)
+        if mask_set is not None and callable(mask_refresh):
             transform_mask_set_for_display_op(
                 mask_set,
                 op_name,
                 params,
                 array_shape,
                 status_fn=status_fn,
-                mask_changed_fn=mask_changed_fn,
+                mask_changed_fn=mask_refresh,
             )
         # The quick selection is geometry too — transform it (or drop it if the
         # op invalidates it) so the marquee never sits over the wrong pixels.
