@@ -230,6 +230,21 @@ class TestApplyToPlane:
         scan = _apply_to_plane(first_sample_dat, 0, plain)
         assert scan.processing_history == []
 
+    def test_state_op_receives_scan_pixel_calibration(self, first_sample_dat, monkeypatch):
+        captured = {}
+
+        def fake_facet(arr, threshold_deg=3.0, *, pixel_size_x_m=1.0,
+                       pixel_size_y_m=1.0):
+            captured["pixel_sizes"] = (pixel_size_x_m, pixel_size_y_m)
+            return np.asarray(arr, dtype=float)
+
+        monkeypatch.setattr("probeflow.processing.facet_level", fake_facet)
+        scan = _apply_to_plane(first_sample_dat, 0, _op_facet_level(3.0))
+        nx, ny = scan.dims
+        expected = (scan.scan_range_m[0] / nx, scan.scan_range_m[1] / ny)
+
+        np.testing.assert_allclose(captured["pixel_sizes"], expected)
+
 
 # ─── factory ops ─────────────────────────────────────────────────────────────
 

@@ -29,6 +29,14 @@ _SNIFF_SUFFIXES: frozenset[str] = frozenset({
 })
 
 
+def has_supported_suffix(path) -> bool:
+    """Return whether *path* can contain a currently supported probe file."""
+    try:
+        return Path(path).suffix.lower() in _SNIFF_SUFFIXES
+    except (TypeError, ValueError):
+        return False
+
+
 class FileType(Enum):
     CREATEC_IMAGE = "createc_image"
     CREATEC_SPEC = "createc_spec"
@@ -67,7 +75,7 @@ def sniff_file_type(path) -> FileType:
     """
     try:
         p = Path(path)
-        if p.suffix.lower() not in _SNIFF_SUFFIXES:
+        if not has_supported_suffix(p):
             return FileType.UNKNOWN
         with p.open("rb") as fh:
             head = fh.read(_SNIFF_BYTES)

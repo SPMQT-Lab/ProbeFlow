@@ -20,7 +20,7 @@ from typing import Any, Optional
 
 from probeflow.core.browse_filters import FolderFilterState, scan_matches_folder_filters
 from probeflow.core.common import _f
-from probeflow.core.file_type import FileType, sniff_file_type
+from probeflow.core.file_type import FileType, has_supported_suffix, sniff_file_type
 
 # Folder names to always skip when walking.
 _SKIP_DIRS: frozenset[str] = frozenset({
@@ -361,6 +361,8 @@ def _peek_subfolder(
             except OSError:
                 continue
             if is_file:
+                if not has_supported_suffix(e.name):
+                    continue
                 if files_examined >= max_files:
                     capped = True
                     break
@@ -420,6 +422,8 @@ def subfolder_matches_filters(
                 queue.append((Path(entry.path), depth + 1))
                 continue
             if not is_file:
+                continue
+            if not has_supported_suffix(entry.name):
                 continue
             if files_examined >= max_files:
                 return False

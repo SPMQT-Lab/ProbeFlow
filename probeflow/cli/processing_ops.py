@@ -145,10 +145,22 @@ def _apply_to_plane(
             f"Plane {plane_idx} not present — file has {scan.n_planes} plane(s)"
         )
     old_shape = scan.planes[plane_idx].shape
-    scan.planes[plane_idx] = op(scan.planes[plane_idx])
+    if isinstance(op, _Op) and op.state is not None:
+        from probeflow.processing.state import apply_processing_state_with_calibration
+
+        scan.planes[plane_idx], new_range = apply_processing_state_with_calibration(
+            scan.planes[plane_idx],
+            op.state,
+            scan_range_m=scan.scan_range_m,
+            strict=True,
+        )
+        if new_range is not None:
+            scan.scan_range_m = new_range
+    else:
+        scan.planes[plane_idx] = op(scan.planes[plane_idx])
     new_shape = scan.planes[plane_idx].shape
     if isinstance(op, _Op):
-        if new_shape != old_shape:
+        if op.state is None and new_shape != old_shape:
             new_range = _update_scan_range_for_op(
                 op.name, scan.scan_range_m, old_shape, new_shape,
             )

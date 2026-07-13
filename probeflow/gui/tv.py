@@ -43,27 +43,28 @@ def _sep() -> QFrame:
 
 
 class _TVWorkerSignals(QObject):
-    finished = Signal(object, str)   # denoised-or-None, error-or-""
+    finished = Signal(object, str, object)  # result, error, run identity
 
 
 class _TVWorker(QRunnable):
     """Run tv_denoise off the GUI thread."""
 
     def __init__(self, arr: np.ndarray, params: dict,
-                 signals: _TVWorkerSignals):
+                 signals: _TVWorkerSignals, run_identity=None):
         super().__init__()
         self._arr     = arr
         self._params  = params
         self._signals = signals
+        self._run_identity = run_identity
 
     @Slot()
     def run(self):
         try:
             from probeflow.processing import tv_denoise
             out = tv_denoise(self._arr, **self._params)
-            self._signals.finished.emit(out, "")
+            self._signals.finished.emit(out, "", self._run_identity)
         except Exception as exc:
-            self._signals.finished.emit(None, str(exc))
+            self._signals.finished.emit(None, str(exc), self._run_identity)
 
 
 class TVPanel(QWidget):

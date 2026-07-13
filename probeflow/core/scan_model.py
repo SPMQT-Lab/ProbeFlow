@@ -176,13 +176,12 @@ class Scan:
 
     @processing_history.setter
     def processing_history(self, entries: list[dict] | None) -> None:
-        from probeflow.processing.history import processing_state_from_history
-        self._processing_state = processing_state_from_history(entries)
-        self._processing_history_timestamps = [
-            entry.get("timestamp") if isinstance(entry, dict) else None
-            for entry in (entries or [])
-            if isinstance(entry, dict) and entry.get("op")
-        ]
+        from probeflow.processing.history import (
+            processing_state_and_timestamps_from_history,
+        )
+        state, timestamps = processing_state_and_timestamps_from_history(entries)
+        self._processing_state = state
+        self._processing_history_timestamps = timestamps
 
     @property
     def n_planes(self) -> int:

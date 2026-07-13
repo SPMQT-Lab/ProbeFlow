@@ -124,6 +124,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Polynomial order (1=plane, 2=quadratic, 3=cubic, 4=quartic)")
     plane_bg.add_argument("--step-tolerance", action="store_true",
         help="Exclude step-edge pixels from the polynomial fit")
+    plane_bg.add_argument("--step-threshold-deg", type=float, default=3.0,
+        help="Maximum physical surface slope retained by --step-tolerance (degrees)")
     plane_bg.add_argument("--fit-roi", type=str, default=None, metavar="NAME_OR_ID",
         help="Fit background to pixels within this persisted ROI only")
     plane_bg.add_argument("--fit-roi-rect", type=float, nargs=4,

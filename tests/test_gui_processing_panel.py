@@ -2057,6 +2057,7 @@ def test_viewer_save_png_action_uses_export_checkboxes(qapp, monkeypatch, tmp_pa
 
     assert saved_calls[0][1]["add_scalebar"] is False
     assert saved_calls[0][1]["include_provenance"] is False
+    assert saved_calls[0][1]["scan_range_m"] == dlg._processed_scan_range_m()
     assert "Saved" in dlg._status_lbl.text()
 
     dlg.close()
@@ -2195,6 +2196,9 @@ def test_tv_load_from_browse_reuses_processed_scan_helper(qapp, monkeypatch):
         def plane_index(self):
             return 3
 
+        def set_running(self, _running):
+            pass
+
         def set_status(self, text):
             statuses.append(text)
 
@@ -2229,6 +2233,126 @@ def test_tv_load_from_browse_reuses_processed_scan_helper(qapp, monkeypatch):
     assert loaded[0][2] is processed
     assert loaded[0][3] == 2.5e-10
     assert "Loaded example" in statuses[-1]
+
+
+def test_tv_completion_is_ignored_after_a_different_scan_is_loaded():
+    """A late worker must not attach scan A's pixels to scan B."""
+    from probeflow.gui.app import ProbeFlowWindow
+
+    old = np.zeros((3, 3))
+    current = np.ones((3, 3))
+
+    class FakePanel:
+        result = None
+
+        def current_array(self): return current
+        def current_plane_idx(self): return 2
+        def set_denoised(self, result): self.result = result
+
+    class FakeSidebar:
+        running_calls = []
+
+        def set_running(self, running): self.running_calls.append(running)
+        def set_status(self, _text): pass
+
+    win = ProbeFlowWindow.__new__(ProbeFlowWindow)
+    win._tv_panel = FakePanel()
+    win._tv_sidebar = FakeSidebar()
+    win._tv_run_generation = 8
+
+    ProbeFlowWindow._on_tv_finished(
+        win, np.full((3, 3), 9.0), "", (7, id(old), 0)
+    )
+
+    assert win._tv_panel.result is None
+    assert win._tv_sidebar.running_calls == []
+
+
+def test_tv_completion_is_accepted_for_current_run():
+    from probeflow.gui.app import ProbeFlowWindow
+
+    current = np.ones((3, 3))
+    result = np.full((3, 3), 2.0)
+
+    class FakePanel:
+        denoised = None
+
+        def current_array(self): return current
+        def current_plane_idx(self): return 1
+        def set_denoised(self, value): self.denoised = value
+
+    class FakeSidebar:
+        running = True
+
+        def set_running(self, running): self.running = running
+        def set_status(self, _text): pass
+
+    win = ProbeFlowWindow.__new__(ProbeFlowWindow)
+    win._tv_panel = FakePanel()
+    win._tv_sidebar = FakeSidebar()
+    win._tv_run_generation = 4
+
+    ProbeFlowWindow._on_tv_finished(win, result, "", (4, id(current), 1))
+
+    assert win._tv_panel.denoised is result
+    assert win._tv_sidebar.running is False
+
+
+def test_roi_histogram_uses_only_finite_pixels(monkeypatch, qapp):
+    from PySide6.QtWidgets import QMessageBox
+    from probeflow.gui.viewer.roi_analysis import show_roi_histogram
+
+    messages = []
+    monkeypatch.setattr(
+        QMessageBox,
+        "information",
+        lambda _parent, title, text: messages.append((title, text)),
+    )
+    roi = SimpleNamespace(
+        name="mixed",
+        to_mask=lambda _shape: np.ones((2, 2), dtype=bool),
+    )
+
+    show_roi_histogram(
+        roi,
+        np.array([[1.0, np.nan], [3.0, np.inf]]),
+        lambda: (1.0, "m", "Height"),
+    )
+
+    assert "2 finite" in messages[0][1]
+    assert "Min:  1 m" in messages[0][1]
+    assert "Max:  3 m" in messages[0][1]
+    assert "Mean: 2 m" in messages[0][1]
+
+
+def test_roi_manager_disables_area_algebra_for_line_rois(qapp):
+    from probeflow.core.roi import ROI, ROISet
+    from probeflow.gui.roi_manager_dock import ROIManagerPanel
+
+    roi_set = ROISet(image_id="img")
+    line = ROI.new("line", {"x1": 0, "y1": 0, "x2": 5, "y2": 5})
+    rect = ROI.new("rectangle", {"x": 1, "y": 1, "width": 3, "height": 3})
+    roi_set.add(line)
+    roi_set.add(rect)
+    panel = ROIManagerPanel(
+        lambda: roi_set,
+        {"get_image_shape": lambda: (10, 10)},
+    )
+    panel.refresh(roi_set)
+
+    panel._list.item(0).setSelected(True)
+    panel._on_item_selection_changed()
+    assert panel._invert_btn.isEnabled() is False
+    panel._on_invert()
+    assert len(roi_set.rois) == 2
+
+    panel._list.item(1).setSelected(True)
+    panel._on_item_selection_changed()
+    assert panel._combine_btn.isEnabled() is False
+    panel._on_combine()
+    assert len(roi_set.rois) == 2
+
+    panel.deleteLater()
 
 
 def test_open_viewer_tracking_reaps_destroyed_dialog():

@@ -55,18 +55,19 @@ def _plane_meta(
     meta["ProbeFlow scan width (m)"] = float(scan.scan_range_m[0])
     meta["ProbeFlow scan height (m)"] = float(scan.scan_range_m[1])
     meta["ProbeFlow num planes"] = int(scan.n_planes)
-    meta["ProbeFlow export provenance"] = json.dumps(provenance.to_dict(), sort_keys=True)
-    meta["ProbeFlow processing state"] = json.dumps(
-        provenance.processing_state,
-        sort_keys=True,
-    )
-    meta["ProbeFlow processing state hash"] = str(provenance.processing_state_hash)
-    meta["ProbeFlow processing steps"] = int(
-        len(provenance.processing_state.get("steps", []))
-    )
-    meta["ProbeFlow source id"] = str(provenance.source_id or "")
-    meta["ProbeFlow channel id"] = str(provenance.channel_id or "")
-    meta["ProbeFlow artifact id"] = str(provenance.artifact_id or "")
+    if provenance is not None:
+        meta["ProbeFlow export provenance"] = json.dumps(provenance.to_dict(), sort_keys=True)
+        meta["ProbeFlow processing state"] = json.dumps(
+            provenance.processing_state,
+            sort_keys=True,
+        )
+        meta["ProbeFlow processing state hash"] = str(provenance.processing_state_hash)
+        meta["ProbeFlow processing steps"] = int(
+            len(provenance.processing_state.get("steps", []))
+        )
+        meta["ProbeFlow source id"] = str(provenance.source_id or "")
+        meta["ProbeFlow channel id"] = str(provenance.channel_id or "")
+        meta["ProbeFlow artifact id"] = str(provenance.artifact_id or "")
     return meta
 
 
@@ -156,7 +157,7 @@ def write_gwy(
     container["/0/data"] = field
     container["/0/data/title"] = str(plane_name)
     container["/0/data/visible"] = True
-    if include_meta and provenance is not None:
+    if include_meta:
         container["/0/meta"] = _plane_meta(
             GwyContainer,
             scan,

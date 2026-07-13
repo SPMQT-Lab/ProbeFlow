@@ -96,16 +96,26 @@ def test_channel_detection_and_trim_contract():
     stack = np.ones((2, 8, 4), dtype=np.float32)
     stack[:, 6:, :] = 0.0
     trimmed, new_Ny = trim_stack(stack)
-    assert new_Ny < 8
+    assert new_Ny == 6
     assert trimmed.shape[1] == new_Ny
 
     untrimmed, untrimmed_Ny = trim_stack(np.ones((2, 4, 4), dtype=np.float32))
     assert untrimmed_Ny == 4
     assert untrimmed.shape[1] == 4
 
-    zero_trimmed, zero_Ny = trim_stack(np.zeros((2, 4, 4), dtype=np.float32))
-    assert zero_Ny >= 1
-    assert zero_trimmed.shape[1] == zero_Ny
+    # A zero-valued topography row is legitimate when another acquired channel
+    # confirms that the row exists; the old channel-0 heuristic dropped it.
+    channel_zero = np.ones((2, 4, 4), dtype=np.float32)
+    channel_zero[0, 3, :] = 0.0
+    zero_trimmed, zero_Ny = trim_stack(channel_zero)
+    assert zero_Ny == 4
+    assert zero_trimmed.shape == channel_zero.shape
+
+    # With no acquired sample in any channel there is no defensible trim point.
+    all_zero = np.zeros((2, 4, 4), dtype=np.float32)
+    unplaced, unplaced_Ny = trim_stack(all_zero)
+    assert unplaced_Ny == 4
+    assert unplaced.shape == all_zero.shape
 
 
 def test_clip_and_uint8_helpers_contract():

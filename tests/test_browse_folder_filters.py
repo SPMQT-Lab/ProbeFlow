@@ -122,3 +122,25 @@ def test_subfolder_matches_filters_uses_indexed_scan_metadata(tmp_path):
 
     assert subfolder_matches_filters(sub, match_state) is True
     assert subfolder_matches_filters(sub, miss_state) is False
+
+
+def test_subfolder_filter_budget_ignores_unsupported_files(tmp_path):
+    src_root = Path(__file__).resolve().parents[1] / "test_data"
+    src = next(src_root.glob("*.sxm"), None) or next(src_root.glob("*.dat"))
+    sub = tmp_path / "sample_input"
+    sub.mkdir()
+    for i in range(10):
+        (sub / f"log_{i:02d}.txt").write_text("not probe data")
+    scan_path = sub / f"zz_scan{src.suffix}"
+    shutil.copy(src, scan_path)
+
+    from probeflow.core.indexing import index_folder_shallow
+    item = next(it for it in index_folder_shallow(sub).files if it.item_type == "scan")
+    if item.bias is None:
+        pytest.skip("sample scan carries no bias metadata")
+
+    assert subfolder_matches_filters(
+        sub,
+        FolderFilterState(bias_value_mv=item.bias * 1000.0),
+        max_files=1,
+    ) is True

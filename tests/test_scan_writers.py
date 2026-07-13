@@ -101,6 +101,35 @@ class TestGwy:
         dat_scan.save_gwy(via_save, plane_idx=1)
         assert via_save.read_bytes()[:4] == b"GWYP"
 
+    def test_basic_metadata_does_not_require_provenance(self, dat_scan, tmp_path, monkeypatch):
+        import probeflow.io.writers.gwy as gwy_writer
+
+        class FakeContainer(dict):
+            last = None
+
+            def tofile(self, _path):
+                FakeContainer.last = self
+
+        class FakeDataField:
+            def __init__(self, data, **kwargs):
+                self.data = data
+                self.kwargs = kwargs
+
+        monkeypatch.setattr(
+            gwy_writer, "_import_gwyfile", lambda: (FakeContainer, FakeDataField)
+        )
+
+        gwy_writer.write_gwy(
+            dat_scan,
+            tmp_path / "metadata_only.gwy",
+            include_meta=True,
+            include_provenance=False,
+        )
+
+        meta = FakeContainer.last["/0/meta"]
+        assert meta["ProbeFlow plane name"] == dat_scan.plane_names[0]
+        assert "ProbeFlow export provenance" not in meta
+
 
 class TestSaveScanDispatch:
     def test_unknown_suffix_raises(self, dat_scan, tmp_path):

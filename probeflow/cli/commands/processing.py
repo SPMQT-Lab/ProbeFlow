@@ -16,7 +16,6 @@ from probeflow.cli.processing_ops import (
     _Op,
     _parse_processing_steps,
     _processing_state_from_ops,
-    _record_op,
     _write_output,
 )
 
@@ -40,9 +39,19 @@ def _cmd_pipeline(args) -> int:
     if args.plane >= scan.n_planes:
         log.error("Plane %d not present (file has %d)", args.plane, scan.n_planes)
         return 1
-    for op in ops:
-        scan.planes[args.plane] = op(scan.planes[args.plane])
-        _record_op(scan, op.name, op.params)
+    state = _processing_state_from_ops(ops)
+    if state.steps:
+        from probeflow.processing.state import apply_processing_state_with_calibration
+
+        scan.planes[args.plane], new_range = apply_processing_state_with_calibration(
+            scan.planes[args.plane],
+            state,
+            scan_range_m=scan.scan_range_m,
+            strict=True,
+        )
+        if new_range is not None:
+            scan.scan_range_m = new_range
+        scan.record_processing_state(state)
     try:
         _write_output(args, scan, default_suffix=".sxm")
     except Exception as exc:
@@ -104,6 +113,7 @@ def _cmd_prepare_png(args) -> int:
             mask_set = None
         new_plane, new_range = apply_processing_state_with_calibration(
             plane, state, roi_set, mask_set=mask_set, scan_range_m=raw_range,
+            strict=True,
         )
         scan.planes[args.plane] = new_plane
         if new_range is not None:
@@ -212,7 +222,11 @@ def _cmd_plane_bg(args) -> int:
 
     params_hist: dict = {"order": args.order}
     if args.step_tolerance:
+        step_threshold_deg = float(getattr(args, "step_threshold_deg", 3.0))
         params_hist["step_tolerance"] = True
+        params_hist["step_threshold_deg"] = step_threshold_deg
+    else:
+        step_threshold_deg = 3.0
     if fit_roi is not None:
         params_hist["fit_roi"] = getattr(fit_roi, "name", "inline")
     if apply_roi is not None:
@@ -221,6 +235,8 @@ def _cmd_plane_bg(args) -> int:
         params_hist["exclude_roi"] = getattr(exclude_roi, "name", "inline")
 
     def _bg_op(a: np.ndarray) -> np.ndarray:
+        from probeflow.cli.processing_ops import _pixel_sizes_m_from_scan
+        psx, psy = _pixel_sizes_m_from_scan(scan)
         return _proc.subtract_background(
             a,
             order=args.order,
@@ -228,6 +244,9 @@ def _cmd_plane_bg(args) -> int:
             apply_roi=apply_roi,
             exclude_roi=exclude_roi,
             step_tolerance=args.step_tolerance,
+            step_threshold_deg=step_threshold_deg,
+            pixel_size_x_m=psx,
+            pixel_size_y_m=psy,
         )
 
     op = _Op("plane_bg", params_hist, fn=_bg_op)

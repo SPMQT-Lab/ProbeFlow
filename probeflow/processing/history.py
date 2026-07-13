@@ -54,7 +54,16 @@ def processing_state_from_history(
     an *empty* state — a replay would reproduce the raw image while claiming
     to be processed.
     """
+    state, _timestamps = processing_state_and_timestamps_from_history(history)
+    return state
+
+
+def processing_state_and_timestamps_from_history(
+    history: list[dict[str, Any]] | tuple[dict[str, Any], ...] | None,
+) -> tuple[ProcessingState, list[str | None]]:
+    """Normalize replayable steps and their timestamps in the same pass."""
     steps: list[ProcessingStep] = []
+    timestamps: list[str | None] = []
     for entry in history or ():
         if not isinstance(entry, dict):
             continue
@@ -76,7 +85,9 @@ def processing_state_from_history(
                 }
             params = dict(params)
         steps.append(ProcessingStep(op, deepcopy(params)))
-    return ProcessingState(steps=steps)
+        timestamp = entry.get("timestamp")
+        timestamps.append(str(timestamp) if timestamp is not None else None)
+    return ProcessingState(steps=steps), timestamps
 
 
 def processing_state_dict_from_history(

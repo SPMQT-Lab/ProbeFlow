@@ -156,6 +156,34 @@ def test_arithmetic_image_shape_mismatch_raises(monkeypatch):
         apply_processing_state(np.ones((2, 2)), state)
 
 
+def test_arithmetic_image_fingerprint_rejects_changed_operand(tmp_path, monkeypatch):
+    from probeflow.core.source_identity import sha256_file
+
+    source = tmp_path / "operand.sxm"
+    source.write_bytes(b"original operand")
+    state = ProcessingState(steps=[
+        ProcessingStep("arithmetic", {
+            "operation": "add",
+            "operand_type": "image",
+            "source_path": str(source),
+            "plane_idx": 0,
+            "source_fingerprint": {
+                "file_size_bytes": source.stat().st_size,
+                "sha256": sha256_file(source),
+            },
+        }),
+    ])
+    monkeypatch.setattr(
+        "probeflow.core.scan_loader.load_scan",
+        lambda _path: _scan_with_plane(np.ones((2, 2))),
+    )
+
+    source.write_bytes(b"replacement operand")
+
+    with pytest.raises(ValueError, match="operand has changed"):
+        apply_processing_state(np.ones((2, 2)), state)
+
+
 def test_generated_arithmetic_checkerboard_pattern_values():
     pattern = generate_arithmetic_pattern(
         (4, 4),
@@ -1005,6 +1033,34 @@ class TestApplyProcessingStateWithCalibration:
         )
         assert out.shape != (6, 6)
         assert new_range is None
+
+    def test_strict_mode_rejects_a_skipped_crop(self):
+        from probeflow.processing.state import apply_processing_state_with_calibration
+
+        state = ProcessingState(steps=[
+            ProcessingStep("crop", {"x0": 100, "y0": 100, "x1": 110, "y1": 110}),
+        ])
+
+        with pytest.raises(ValueError, match="Strict processing rejected warning"):
+            apply_processing_state_with_calibration(
+                np.ones((8, 8)),
+                state,
+                scan_range_m=(8e-9, 8e-9),
+                strict=True,
+            )
+
+    def test_preview_mode_still_allows_a_skipped_crop(self):
+        from probeflow.processing.state import apply_processing_state_with_calibration
+
+        state = ProcessingState(steps=[
+            ProcessingStep("crop", {"x0": 100, "y0": 100, "x1": 110, "y1": 110}),
+        ])
+        with pytest.warns(UserWarning, match="crop step skipped"):
+            out, new_range = apply_processing_state_with_calibration(
+                np.ones((8, 8)), state, scan_range_m=(8e-9, 8e-9),
+            )
+        assert out.shape == (8, 8)
+        assert new_range == (8e-9, 8e-9)
 
     def test_apply_processing_state_to_scan_updates_scan_range_after_rotate(self):
         """The GUI-export entry point must update scan.scan_range_m too."""

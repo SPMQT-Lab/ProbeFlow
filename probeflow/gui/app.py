@@ -753,6 +753,7 @@ class ProbeFlowWindow(QMainWindow):
         self._tv_sidebar = TVSidebar(t)
         self._tv_pool = QThreadPool.globalInstance()
         self._tv_signals = _TVWorkerSignals()
+        self._tv_run_generation = 0
         self._tv_signals.finished.connect(self._on_tv_finished)
         self._tv_sidebar.load_from_browse_requested.connect(
             self._on_tv_load_from_browse)
@@ -1205,6 +1206,10 @@ class ProbeFlowWindow(QMainWindow):
         except Exception as exc:
             self._tv_sidebar.set_status(f"Could not read scan: {exc}")
             return
+        # Invalidate any worker that is still finishing the previously loaded
+        # image. Its result must never be attached to this entry.
+        self._tv_run_generation = getattr(self, "_tv_run_generation", 0) + 1
+        self._tv_sidebar.set_running(False)
         self._tv_panel.load_entry(entry, plane_idx, arr, px_m)
         self._tv_sidebar.set_status(
             f"Loaded {entry.stem} (plane {plane_idx}). Adjust parameters and Run.")
@@ -1215,12 +1220,28 @@ class ProbeFlowWindow(QMainWindow):
             self._tv_sidebar.set_status("Load a scan first.")
             return
         params = self._tv_sidebar.params()
+        self._tv_run_generation = getattr(self, "_tv_run_generation", 0) + 1
+        run_identity = (
+            self._tv_run_generation,
+            id(arr),
+            self._tv_panel.current_plane_idx(),
+        )
         self._tv_sidebar.set_running(True)
         self._tv_sidebar.set_status(f"Running TV-denoise ({params['method']})…")
-        worker = _TVWorker(arr, params, self._tv_signals)
+        worker = _TVWorker(arr, params, self._tv_signals, run_identity)
         self._tv_pool.start(worker)
 
-    def _on_tv_finished(self, result, error: str):
+    def _on_tv_finished(self, result, error: str, run_identity=None):
+        current_arr = self._tv_panel.current_array()
+        expected = (
+            getattr(self, "_tv_run_generation", 0),
+            id(current_arr),
+            self._tv_panel.current_plane_idx(),
+        )
+        if run_identity != expected:
+            # A different entry/plane was loaded, or a newer run was started.
+            # Ignore this completion without changing the current run's UI.
+            return
         self._tv_sidebar.set_running(False)
         if error:
             self._tv_sidebar.set_status(f"TV-denoise failed: {error}")

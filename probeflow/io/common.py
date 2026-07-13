@@ -155,19 +155,22 @@ def detect_channels(payload: bytes, Ny: int, Nx: int) -> Tuple[np.ndarray, int]:
 
 def trim_stack(stack: np.ndarray) -> Tuple[np.ndarray, int]:
     """
-    Remove trailing incomplete scan rows using channel 0 as a reference.
+    Remove trailing scan lines that did not reach the final column.
+
+    A zero in one channel is a valid DAC value and cannot by itself mark an
+    incomplete acquisition.  The legacy Createc fallback therefore requires a
+    completed scan line to reach the final column in at least one stored
+    channel. Callers with vendor completion metadata should use that first.
     Returns (trimmed_stack, new_Ny).
     """
-    ch0 = stack[0]
-    Ny, Nx = ch0.shape
-    valid = np.logical_and(~np.isnan(ch0), ch0 != 0)
-    rows, cols = np.where(valid)
+    Ny = stack.shape[1]
+    final_column = stack[:, :, -1]
+    completed_row = np.any(np.isfinite(final_column) & (final_column != 0), axis=0)
+    rows = np.flatnonzero(completed_row)
     if rows.size == 0:
         return stack, Ny
     last_row = int(rows.max())
-    last_col = int(cols[rows == last_row].max())
-    new_Ny = (last_row + 1) if last_col == (Nx - 1) else last_row
-    new_Ny = max(1, new_Ny)
+    new_Ny = last_row + 1
     return stack[:, :new_Ny, :], new_Ny
 
 
