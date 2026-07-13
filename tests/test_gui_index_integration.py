@@ -743,12 +743,16 @@ class TestSpecViewerRawData:
         dlg.close()
         dlg.deleteLater()
 
-    def test_overlay_dialog_exports_long_csv(self, qapp):
+    def test_overlay_dialog_exports_long_csv(self, qapp, tmp_path):
         from probeflow.gui import SpecOverlayDialog, THEMES
+        from tests.synthetic_files import write_createc_vert
+
+        a = write_createc_vert(tmp_path / "a.VERT", sweep="time", bias_mv=-50.0)
+        b = write_createc_vert(tmp_path / "b.VERT", sweep="time", bias_mv=-300.0)
 
         entries = [
-            VertFile(path=TESTDATA / "createc_ivt_telegraph_300mv_a.VERT", stem="a"),
-            VertFile(path=TESTDATA / "createc_ivt_telegraph_300mv_b.VERT", stem="b"),
+            VertFile(path=a, stem="a"),
+            VertFile(path=b, stem="b"),
         ]
         dlg = SpecOverlayDialog(entries, THEMES["dark"])
 
@@ -762,12 +766,16 @@ class TestSpecViewerRawData:
         dlg.close()
         dlg.deleteLater()
 
-    def test_overlay_dialog_skips_incompatible_x_axes(self, qapp):
+    def test_overlay_dialog_skips_incompatible_x_axes(self, qapp, tmp_path):
         from probeflow.gui import SpecOverlayDialog, THEMES
+        from tests.synthetic_files import write_createc_vert
+
+        time = write_createc_vert(tmp_path / "time.VERT", sweep="time")
+        bias = write_createc_vert(tmp_path / "bias.VERT", sweep="bias")
 
         entries = [
-            VertFile(path=TESTDATA / "createc_ivt_telegraph_300mv_a.VERT", stem="time"),
-            VertFile(path=TESTDATA / "createc_vert_didz_image_state.VERT", stem="bias"),
+            VertFile(path=time, stem="time"),
+            VertFile(path=bias, stem="bias"),
         ]
         dlg = SpecOverlayDialog(entries, THEMES["dark"])
 
@@ -893,7 +901,7 @@ class TestBrowserIndexContracts:
         assert entries[0].Nx == 512
         assert "I: ?" in _card_meta_str(
             SxmFile(
-                path=TESTDATA / "createc_scan_island_60nm.dat",
+                path=TESTDATA / "createc_scan_11nm.dat",
                 stem="createc_scan_island_60nm",
                 Nx=511,
                 Ny=512,
@@ -947,17 +955,21 @@ class TestBrowserIndexContracts:
         errors = [item for item in items if item.load_error]
         scan_names = {entry.path.name for entry in sxm_list}
 
-        assert "createc_scan_step_20nm.dat" in scan_names
-        assert "createc_scan_terrace_109nm.dat" in scan_names
-        assert "sxm_moire_10nm.sxm" in scan_names
-        assert len(vert_list) >= 3
+        assert scan_names == {
+            "createc_scan_11nm.dat",
+            "createc_afm.dat",
+            "createc_terrace.dat",
+            "nanonis.sxm",
+            "rhk.sm4",
+        }
+        assert vert_list == []
         assert errors == []
 
 
 class TestSpecViewerLifetime:
     TESTDATA = Path(__file__).resolve().parents[1] / "test_data"
 
-    def test_static_unit_controls_survive_load_cleanup(self):
+    def test_static_unit_controls_survive_load_cleanup(self, tmp_path):
         try:
             import shiboken6
             from PySide6.QtWidgets import QApplication
@@ -972,7 +984,9 @@ class TestSpecViewerLifetime:
             except Exception as exc:
                 pytest.skip(f"QApplication unavailable: {exc}")
 
-        spec_path = self.TESTDATA / "createc_ivt_telegraph_300mv_a.VERT"
+        from tests.synthetic_files import write_createc_vert
+
+        spec_path = write_createc_vert(tmp_path / "spectrum.VERT", sweep="time")
         entry = VertFile(path=spec_path, stem=spec_path.stem)
         dlg = SpecViewerDialog(entry, THEMES["light"])
 

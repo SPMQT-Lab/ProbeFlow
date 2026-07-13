@@ -18,8 +18,8 @@ from probeflow.cli.processing_ops import (
 from probeflow.core.scan_model import Scan
 
 TEST_DATA = Path(__file__).parent.parent / "test_data"
-SAMPLE_DAT = TEST_DATA / "createc_scan_close_100nm.dat"
-SAMPLE_SXM = TEST_DATA / "sxm_moire_10nm.sxm"
+SAMPLE_DAT = TEST_DATA / "createc_terrace.dat"
+SAMPLE_SXM = TEST_DATA / "nanonis.sxm"
 
 
 def _require(path: Path) -> None:

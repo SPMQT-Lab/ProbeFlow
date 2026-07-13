@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import numpy as np
 import pytest
 
@@ -11,20 +9,14 @@ from probeflow.io.readers.nanonis_spec import read_nanonis_spec
 from probeflow.io.spectroscopy import SpecMetadata, read_spec_file, read_spec_metadata
 
 
-TESTDATA = Path(__file__).resolve().parents[1] / "test_data"
-
-KELVIN = TESTDATA / "nanonis_kelvin_parabola_500mv.dat"
-STS    = TESTDATA / "nanonis_sts_15mv.dat"
-
-
-@pytest.fixture(scope="module")
-def kelvin_spec():
-    return read_nanonis_spec(KELVIN)
+@pytest.fixture
+def kelvin_spec(nanonis_spec):
+    return read_nanonis_spec(nanonis_spec)
 
 
-@pytest.fixture(scope="module")
-def sts_spec():
-    return read_nanonis_spec(STS)
+@pytest.fixture
+def sts_spec(nanonis_spec):
+    return read_nanonis_spec(nanonis_spec)
 
 
 class TestParseBasics:
@@ -180,22 +172,18 @@ class TestPosition:
 
 
 class TestDispatcher:
-    def test_read_spec_file_routes_nanonis(self):
-        spec = read_spec_file(STS)
+    def test_read_spec_file_routes_nanonis(self, nanonis_spec):
+        spec = read_spec_file(nanonis_spec)
         assert spec.metadata["sweep_type"] == "bias_sweep"
         assert "Current [AVG]" in spec.channels
 
-    def test_read_spec_file_routes_createc_vert(self):
-        # Existing Createc files should still go through the VERT reader.
-        vert = TESTDATA / "createc_ivt_telegraph_300mv_a.VERT"
-        if not vert.exists():
-            pytest.skip("missing .VERT fixture")
-        spec = read_spec_file(vert)
+    def test_read_spec_file_routes_createc_vert(self, createc_time_spec):
+        spec = read_spec_file(createc_time_spec)
         assert "I" in spec.channels
         assert "Z" in spec.channels
 
-    def test_read_spec_metadata_routes_nanonis(self, sts_spec):
-        meta = read_spec_metadata(STS)
+    def test_read_spec_metadata_routes_nanonis(self, sts_spec, nanonis_spec):
+        meta = read_spec_metadata(nanonis_spec)
         assert isinstance(meta, SpecMetadata)
         assert meta.source_format == "nanonis_dat_spectrum"
         assert meta.metadata["sweep_type"] == sts_spec.metadata["sweep_type"]
@@ -207,14 +195,16 @@ class TestDispatcher:
             for ch in meta.channel_info
         }["Current [AVG]"].startswith("Current [AVG]")
 
-    def test_read_spec_metadata_has_position_and_bias(self):
-        meta = read_spec_metadata(STS)
+    def test_read_spec_metadata_has_position_and_bias(self, nanonis_spec):
+        meta = read_spec_metadata(nanonis_spec)
         assert meta.position[0] != 0.0
         assert meta.position[1] != 0.0
-        assert meta.bias == pytest.approx(-15e-3)
+        assert meta.bias == pytest.approx(0.05)
 
-    def test_full_and_metadata_reads_include_matching_source_fingerprint(self, sts_spec):
-        meta = read_spec_metadata(STS)
+    def test_full_and_metadata_reads_include_matching_source_fingerprint(
+        self, sts_spec, nanonis_spec
+    ):
+        meta = read_spec_metadata(nanonis_spec)
         full_source = sts_spec.metadata["source"]
         metadata_source = meta.metadata["source"]
 

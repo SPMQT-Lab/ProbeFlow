@@ -17,18 +17,17 @@ from probeflow.io.converters.createc_dat_to_sxm import construct_hdr
 
 
 TESTDATA = Path(__file__).resolve().parents[1] / "test_data"
-_CREATEC_STEP    = TESTDATA / "createc_scan_step_20nm.dat"
-_CREATEC_TERRACE = TESTDATA / "createc_scan_terrace_109nm.dat"
-_CREATEC_OVERVIEW = TESTDATA / "createc_scan_overview_240nm_pos.dat"
-_NANONIS_SXM     = TESTDATA / "sxm_moire_10nm.sxm"
-_CREATEC_VERT    = TESTDATA / "createc_ivt_telegraph_300mv_a.VERT"
+_CREATEC_STEP    = TESTDATA / "createc_scan_11nm.dat"
+_CREATEC_TERRACE = TESTDATA / "createc_terrace.dat"
+_CREATEC_OVERVIEW = TESTDATA / "createc_scan_11nm.dat"
+_NANONIS_SXM     = TESTDATA / "nanonis.sxm"
 
 
 # ── Test A: Createc metadata matches loaded scan ──────────────────────────────
 
 class TestCreatecMetadataMatchesScan:
     @pytest.mark.parametrize("path,expected_shape", [
-        (_CREATEC_STEP,    (330, 511)),
+        (_CREATEC_STEP,    (512, 511)),
         (_CREATEC_TERRACE, (512, 511)),
     ])
     def test_createc_metadata_matches_loaded_scan_and_known_post_fix_dimensions(self, path, expected_shape):
@@ -79,9 +78,9 @@ class TestNanonisMetadataMatchesScan:
 # ── Test D: spectroscopy files are rejected ───────────────────────────────────
 
 class TestSpectroscopyRejected:
-    def test_createc_vert_raises(self):
+    def test_createc_vert_raises(self, createc_time_spec):
         with pytest.raises(ValueError, match="spectroscopy"):
-            read_scan_metadata(_CREATEC_VERT)
+            read_scan_metadata(createc_time_spec)
 
 
 # ── Test E: unknown files are rejected ───────────────────────────────────────
@@ -176,16 +175,12 @@ class TestCreatecSetpointExtraction:
         assert setpoint is None
 
     def test_newer_createc_fixture_uses_setpoint_header(self):
-        meta = read_scan_metadata(TESTDATA / "createc_scan_overview_240nm_pos.dat")
-        assert meta.setpoint == pytest.approx(1.01e-10)
+        meta = read_scan_metadata(TESTDATA / "createc_terrace.dat")
+        assert meta.setpoint == pytest.approx(8.8e-11)
 
     def test_createc_preview_fixture_uses_setpoint_header(self):
-        meta = read_scan_metadata(TESTDATA / "createc_scan_preview_120nm.dat")
-        assert meta.setpoint == pytest.approx(1.01e-10)
-
-    def test_createc_zero_setpoint_fixture_remains_unknown(self):
-        meta = read_scan_metadata(TESTDATA / "createc_scan_island_60nm.dat")
-        assert meta.setpoint is None
+        meta = read_scan_metadata(TESTDATA / "createc_scan_11nm.dat")
+        assert meta.setpoint == pytest.approx(3.0e-10)
 
     def test_constant_df_afm_does_not_report_setpoint_as_current(self):
         # FBChannel=4, PLLOn=1: SetPoint (7.000) is a Δf in Hz, not a current.
@@ -207,14 +202,14 @@ class TestCreatecSetpointExtraction:
         assert setpoint == pytest.approx(1.01e-10)
 
     def test_qplus_afm_fixture_reports_df_setpoint_not_current(self):
-        meta = read_scan_metadata(TESTDATA / "createc_scan_qplus_10ch_afm.dat")
+        meta = read_scan_metadata(TESTDATA / "createc_afm.dat")
         assert meta.setpoint is None
         assert meta.feedback_setpoint == pytest.approx(7.0)
         assert meta.feedback_setpoint_unit == "Hz"
         assert meta.feedback_setpoint_label == "Δf setpoint"
 
     def test_stm_fixture_has_no_feedback_setpoint(self):
-        meta = read_scan_metadata(TESTDATA / "createc_scan_overview_240nm_pos.dat")
+        meta = read_scan_metadata(TESTDATA / "createc_terrace.dat")
         assert meta.feedback_setpoint is None
 
 
@@ -236,10 +231,10 @@ class TestNanonisSetpointExtraction:
         # / PLLOn=1.  Writing that into Z-CONTROLLER as "7.000E+0 A" would
         # propagate the bogus 7e+12 pA tunnel current, so the converter must label
         # the controller with the frequency-shift channel instead.
-        dat_meta = read_scan_metadata(TESTDATA / "createc_scan_qplus_10ch_afm.dat")
+        dat_meta = read_scan_metadata(TESTDATA / "createc_afm.dat")
         sxm_hdr = construct_hdr(
             dict(dat_meta.raw_header),
-            TESTDATA / "createc_scan_qplus_10ch_afm.dat",
+            TESTDATA / "createc_afm.dat",
             num_chan=4,
         )
 

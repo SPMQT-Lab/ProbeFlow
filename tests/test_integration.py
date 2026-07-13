@@ -239,10 +239,12 @@ class TestConvertDatToSxm:
         content = sxm.read_bytes()
         assert b":SCANIT_END:" in content
 
-    def test_all_sample_files(self, sample_dat_files, tmp_path, cushion_dir):
+    def test_all_supported_sample_files(
+        self, sxm_convertible_dat_files, tmp_path, cushion_dir
+    ):
         errors = {}
         out_dir = tmp_path / "sxm_out"
-        for dat in sample_dat_files:
+        for dat in sxm_convertible_dat_files:
             try:
                 convert_dat_to_sxm(dat, out_dir, cushion_dir)
             except Exception as exc:

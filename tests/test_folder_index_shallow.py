@@ -52,21 +52,26 @@ def test_files_are_only_at_immediate_level():
         assert item.path.parent == TESTDATA
 
 
-def test_subfolders_listed():
-    idx = index_folder_shallow(TESTDATA)
+def test_subfolders_listed(tmp_path):
+    (tmp_path / "sample").mkdir()
+    idx = index_folder_shallow(tmp_path)
     names = {sub.name for sub in idx.subfolders}
-    # test_data/ ships with sample_input/, output_png/, output_sxm/
-    assert "sample_input" in names
+    assert names == {"sample"}
     assert all(isinstance(sub, SubfolderEntry) for sub in idx.subfolders)
 
 
-def test_subfolder_sample_paths_are_scan_files():
-    idx = index_folder_shallow(TESTDATA)
-    sample_input = next(s for s in idx.subfolders if s.name == "sample_input")
-    assert sample_input.n_scans >= 1
+def test_subfolder_sample_paths_are_scan_files(tmp_path):
+    import shutil
+
+    sample = tmp_path / "sample"
+    sample.mkdir()
+    shutil.copy(TESTDATA / "nanonis.sxm", sample / "nanonis.sxm")
+    idx = index_folder_shallow(tmp_path)
+    sample_entry = next(s for s in idx.subfolders if s.name == "sample")
+    assert sample_entry.n_scans >= 1
     # Up to 3 sample paths, each should point to a real scan file under that folder
-    assert 0 < len(sample_input.sample_scan_paths) <= 3
-    for p in sample_input.sample_scan_paths:
+    assert 0 < len(sample_entry.sample_scan_paths) <= 3
+    for p in sample_entry.sample_scan_paths:
         assert p.exists()
         assert p.suffix.lower() in (".dat", ".sxm")
 

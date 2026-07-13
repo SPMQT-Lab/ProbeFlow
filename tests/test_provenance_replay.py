@@ -29,7 +29,7 @@ import pytest
 from probeflow.processing.history import processing_state_from_history
 
 TEST_DATA = Path(__file__).parent.parent / "test_data"
-SCAN_FIXTURE = TEST_DATA / "createc_scan_terrace_109nm.dat"
+SCAN_FIXTURE = TEST_DATA / "createc_terrace.dat"
 
 
 class TestRecordFormatReconstruction:

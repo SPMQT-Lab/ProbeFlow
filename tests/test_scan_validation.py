@@ -13,9 +13,9 @@ from probeflow.core.validation import validate_scan
 
 
 TESTDATA = Path(__file__).resolve().parents[1] / "test_data"
-_CREATEC_STEP    = TESTDATA / "createc_scan_step_20nm.dat"
-_CREATEC_TERRACE = TESTDATA / "createc_scan_terrace_109nm.dat"
-_NANONIS_SXM     = TESTDATA / "sxm_moire_10nm.sxm"
+_CREATEC_STEP    = TESTDATA / "createc_scan_11nm.dat"
+_CREATEC_TERRACE = TESTDATA / "createc_terrace.dat"
+_NANONIS_SXM     = TESTDATA / "nanonis.sxm"
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -40,7 +40,7 @@ def _minimal_scan(**overrides) -> Scan:
 
 class TestRealCreatecFixtures:
     @pytest.mark.parametrize("path,expected_shape", [
-        (_CREATEC_STEP,    (330, 511)),
+        (_CREATEC_STEP,    (512, 511)),
         (_CREATEC_TERRACE, (512, 511)),
     ])
     def test_validates_without_error(self, path, expected_shape):
@@ -48,7 +48,7 @@ class TestRealCreatecFixtures:
         validate_scan(scan)  # must not raise
 
     @pytest.mark.parametrize("path,expected_shape", [
-        (_CREATEC_STEP,    (330, 511)),
+        (_CREATEC_STEP,    (512, 511)),
         (_CREATEC_TERRACE, (512, 511)),
     ])
     def test_post_fix_dimensions(self, path, expected_shape):

@@ -422,7 +422,7 @@ class ImageViewerToolsMixin:
             pixel_size_x_m=context.pixel_size_x_m,
             pixel_size_y_m=context.pixel_size_y_m,
             source_label=self._source_label(),
-            source_path=str(entry.path) if entry is not None else None,
+            source_path=entry.path.name if entry is not None else None,
             channel=ch_unit,
             source_metadata=context.source_metadata,
             on_add_result=_add,

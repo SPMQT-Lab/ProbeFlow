@@ -132,7 +132,7 @@ def test_scan_export_provenance_contract(tmp_path):
     )
     data = prov.to_dict()
 
-    assert prov.source_file == "/data/test.dat"
+    assert prov.source_file == "test.dat"
     assert prov.source_format == "dat"
     assert prov.channel_index == 0
     assert prov.channel_name == "Custom"
@@ -168,7 +168,7 @@ def test_scan_export_provenance_contract(tmp_path):
         output_path=out,
     ).to_dict()
     assert built["export_kind"] == "prepared_png"
-    assert built["output_path"] == str(out)
+    assert built["output_path"] == out.name
     assert built["source_id"]
     assert built["channel_id"]
     assert built["artifact_id"]
@@ -375,7 +375,7 @@ def test_prepared_png_warning_contract(tmp_path):
 def test_cli_png_sidecar_contract(tmp_path):
     from probeflow.cli import main as cli_main
 
-    src = Path(__file__).resolve().parents[1] / "test_data" / "sxm_moire_10nm.sxm"
+    src = Path(__file__).resolve().parents[1] / "test_data" / "nanonis.sxm"
     out = tmp_path / "moire.png"
     assert cli_main(["sxm2png", str(src), "-o", str(out), "--no-scalebar"]) == 0
 
@@ -391,7 +391,7 @@ def test_cli_png_sidecar_contract(tmp_path):
 def test_cli_pipeline_and_prepare_png_provenance_contract(tmp_path):
     from probeflow.cli import main as cli_main
 
-    src = Path(__file__).resolve().parents[1] / "test_data" / "sxm_moire_10nm.sxm"
+    src = Path(__file__).resolve().parents[1] / "test_data" / "nanonis.sxm"
     pipeline_out = tmp_path / "moire_processed.png"
     rc = cli_main([
         "pipeline",

@@ -13,6 +13,7 @@ from typing import Iterable
 import numpy as np
 
 from probeflow.measurements.models import FeaturePoint, MeasurementResult, Scalar
+from probeflow.core.source_identity import privacy_safe_path, sanitize_export_data
 
 
 def _utc_now() -> str:
@@ -33,7 +34,7 @@ def measurement_to_flat_dict(result: MeasurementResult) -> dict[str, Scalar]:
         "measurement_id": result.measurement_id,
         "kind": result.kind,
         "source_label": result.source_label,
-        "source_path": result.source_path,
+        "source_path": privacy_safe_path(result.source_path),
         "channel": result.channel,
         "x_unit": result.x_unit,
         "y_unit": result.y_unit,
@@ -174,6 +175,7 @@ def _clean_scalar(value: object) -> Scalar:
 
 def _measurement_to_json_dict(result: MeasurementResult) -> dict[str, object]:
     row = asdict(result)
+    row["source_path"] = privacy_safe_path(result.source_path)
     row["values"] = {
         key: _clean_scalar(value)
         for key, value in result.values.items()
@@ -182,4 +184,4 @@ def _measurement_to_json_dict(result: MeasurementResult) -> dict[str, object]:
         key: _clean_scalar(value)
         for key, value in result.context.items()
     }
-    return row
+    return sanitize_export_data(row)

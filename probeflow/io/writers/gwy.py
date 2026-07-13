@@ -18,6 +18,7 @@ from probeflow.provenance.export import (
     write_provenance_sidecars,
 )
 from probeflow.core.scan_model import Scan
+from probeflow.core.source_identity import privacy_safe_path, sanitize_export_data
 
 
 def _import_gwyfile():
@@ -45,7 +46,7 @@ def _plane_meta(
     """Build a small metadata container for the exported plane."""
     meta = GwyContainer()
     meta["ProbeFlow source path"] = (
-        str(scan.source_path) if scan.source_path is not None else ""
+        privacy_safe_path(scan.source_path) if scan.source_path is not None else ""
     )
     meta["ProbeFlow source format"] = str(scan.source_format)
     meta["ProbeFlow plane index"] = int(plane_idx)
@@ -58,7 +59,7 @@ def _plane_meta(
     if provenance is not None:
         meta["ProbeFlow export provenance"] = json.dumps(provenance.to_dict(), sort_keys=True)
         meta["ProbeFlow processing state"] = json.dumps(
-            provenance.processing_state,
+            sanitize_export_data(provenance.processing_state),
             sort_keys=True,
         )
         meta["ProbeFlow processing state hash"] = str(provenance.processing_state_hash)

@@ -223,6 +223,37 @@ class TestRoundTrip:
             finite = np.isfinite(a) & np.isfinite(b)
             assert np.allclose(a[finite], b[finite], atol=0, rtol=0)
 
+    def test_rewrite_redacts_identity_and_directory_header_fields(self, tmp_path):
+        post_len, pre_len = _cushion_tail_lens()
+        header = (
+            b":NANONIS_VERSION:\n2\n"
+            b":SCAN_PIXELS:\n2 2\n"
+            b":SCAN_RANGE:\n1.0E-9 1.0E-9\n"
+            b":SCAN_DIR:\ndown\n"
+            b":SCAN_FILE:\n/Users/alice/private/scan.sxm\n"
+            b":Username:\nalice\n"
+            b":NanonisMain>Session Path:\nC:\\Users\\alice\\session\n"
+            b":DATA_INFO:\n"
+            b"\tChannel\tName\tUnit\tDirection\tCalibration\tOffset\n"
+            b"\t14\tZ\tm\tforward\t1.0\t0.0\n"
+            b":SCANIT_END:\n"
+        )
+        payload = np.arange(4, dtype=">f4").reshape(2, 2).tobytes()
+        source = tmp_path / "source.sxm"
+        source.write_bytes(header + b"\x00" * (post_len + pre_len) + payload)
+        out = tmp_path / "out.sxm"
+
+        _, planes = read_all_sxm_planes(source)
+        write_sxm_with_planes(source, out, planes)
+        safe = parse_sxm_header(out)
+
+        assert safe["SCAN_FILE"] == "scan.sxm"
+        assert safe["Username"] == ""
+        assert safe["NanonisMain>Session Path"] == "session"
+        assert "/Users/" not in out.read_bytes().split(b":SCANIT_END:", 1)[0].decode(
+            "latin-1"
+        )
+
 
 class TestWriteSxmSafetyGuards:
     """Regression tests for review IO #1: write_sxm_with_planes must

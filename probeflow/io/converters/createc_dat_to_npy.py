@@ -18,12 +18,16 @@ from probeflow.io.readers.createc_scan import (
 )
 from probeflow.io.readers.createc_dat import decoded_scan_range_m
 from probeflow.provenance.export import write_provenance_sidecars
+from probeflow.core.source_identity import (
+    privacy_safe_path,
+    sanitize_export_data,
+    sanitize_header_for_export,
+)
 
 log = logging.getLogger(__name__)
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_INPUT_DIR = REPO_ROOT / "test_data" / "sample_input"
-DEFAULT_OUTPUT_DIR = REPO_ROOT / "test_data" / "output_npy"
+DEFAULT_INPUT_DIR = Path.cwd()
+DEFAULT_OUTPUT_DIR = Path.cwd() / "probeflow_output" / "npy"
 DATA_SUBDIR_NAME = "npy"
 
 
@@ -104,7 +108,7 @@ class _BundleProvenance:
     source_header: dict
 
     def to_dict(self) -> dict:
-        return {
+        return sanitize_export_data({
             "artifact_type": self.artifact_type,
             "source_path": self.source_path,
             "source_format": self.source_format,
@@ -123,7 +127,7 @@ class _BundleProvenance:
             "parser_warnings": list(self.parser_warnings),
             "planes": [dict(p) for p in self.planes],
             "source_header": dict(self.source_header),
-        }
+        })
 
 
 def _basis_note(basis: str) -> str:
@@ -149,7 +153,7 @@ def _saved_unit_for_basis(public_unit: str, basis: str) -> str:
 
 def _format_raw_header(report) -> str:
     lines: list[str] = []
-    for key, val in report.header.items():
+    for key, val in sanitize_header_for_export(report.header).items():
         lines.append(f"{key}: {val}")
     return "\n".join(lines) + ("\n" if lines else "")
 
@@ -221,10 +225,10 @@ def build_createc_dat_npy_bundle(
 
     provenance = _BundleProvenance(
         artifact_type="createc_dat_npy_bundle",
-        source_path=str(dat_path.resolve()),
+        source_path=privacy_safe_path(dat_path) or dat_path.name,
         source_format="dat",
         basis=basis,
-        bundle_dir=str(bundle_dir),
+        bundle_dir=bundle_dir.name,
         bundle_name=bundle_dir.name,
         raw_definition=_basis_note(basis),
         scan_pixels=(int(report.decoded_Nx), int(report.decoded_Ny)),
@@ -337,11 +341,11 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--input-dir", dest="input_dir", default=None,
-        help="Path to a .dat file or directory of .dat files (default: data/sample_input)",
+        help="Path to a .dat file or directory of .dat files (default: current directory)",
     )
     p.add_argument(
         "--output-dir", dest="output_dir", default=None,
-        help="Output directory for per-file NumPy bundle folders (default: data/output_npy)",
+        help="Output directory for per-file NumPy bundle folders (default: probeflow_output/npy)",
     )
     p.add_argument(
         "--basis",

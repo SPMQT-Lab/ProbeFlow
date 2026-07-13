@@ -22,18 +22,14 @@ TESTDATA = REPO / "test_data"
 OUT = REPO / "docs" / "images"
 
 BROWSE_FIXTURES = [
-    "createc_scan_terrace_109nm.dat",
-    "createc_scan_atomic_11nm.dat",
-    "createc_scan_hires_atomic_9nm.dat",
-    "createc_scan_island_60nm.dat",
-    "createc_scan_molecular_30nm_pos.dat",
-    "createc_scan_step_20nm.dat",
-    "createc_scan_overview_240nm_pos.dat",
-    "createc_scan_qplus_10ch_afm.dat",
-    "sxm_moire_10nm.sxm",
+    "createc_scan_11nm.dat",
+    "createc_afm.dat",
+    "createc_terrace.dat",
+    "nanonis.sxm",
+    "rhk.sm4",
 ]
 
-VIEWER_FIXTURE = "createc_scan_terrace_109nm.dat"
+VIEWER_FIXTURE = "createc_terrace.dat"
 
 
 def _settle(app, seconds: float = 2.0) -> None:

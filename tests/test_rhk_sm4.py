@@ -34,7 +34,7 @@ from probeflow.io.readers.rhk_sm4 import (
 from probeflow.processing.image import subtract_background
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-REAL_SM4 = REPO_ROOT / "test_data" / "VT260430_0004.sm4"
+REAL_SM4 = REPO_ROOT / "test_data" / "rhk.sm4"
 
 
 def _pack_object(typ: int, offset: int, size: int) -> bytes:
@@ -373,9 +373,9 @@ def test_sm4_image_uses_normal_thumbnail_and_processing_paths(tmp_path):
     assert img.size[0] <= 64 and img.size[1] <= 64
 
 
-# ── Real-file tests (VT260430_0004.sm4) ──────────────────────────────────────
+# ── Real-file tests (rhk.sm4) ──────────────────────────────────────
 
-@pytest.mark.skipif(not REAL_SM4.exists(), reason="VT260430_0004.sm4 fixture not present")
+@pytest.mark.skipif(not REAL_SM4.exists(), reason="rhk.sm4 fixture not present")
 class TestRealSM4:
     def test_reads_four_image_pages(self):
         sm4 = read_rhk_sm4(REAL_SM4)

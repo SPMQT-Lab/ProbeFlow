@@ -18,9 +18,9 @@ from probeflow.cli.commands.analysis import (
 from probeflow.cli.commands.conversion import _cmd_dat2sxm
 
 TEST_DATA = Path(__file__).parent.parent / "test_data"
-SAMPLE_DAT = TEST_DATA / "createc_scan_close_100nm.dat"
-ATOMIC_DAT = TEST_DATA / "createc_scan_atomic_11nm.dat"
-SAMPLE_SXM = TEST_DATA / "sxm_moire_10nm.sxm"
+SAMPLE_DAT = TEST_DATA / "createc_terrace.dat"
+ATOMIC_DAT = TEST_DATA / "createc_scan_11nm.dat"
+SAMPLE_SXM = TEST_DATA / "nanonis.sxm"
 
 
 @pytest.fixture(autouse=True)

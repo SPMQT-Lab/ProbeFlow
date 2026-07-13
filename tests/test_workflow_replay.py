@@ -34,8 +34,7 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-SAMPLE_SXM = (Path(__file__).resolve().parent.parent
-              / "test_data" / "sample_input" / "A250320.191933.sxm")
+SAMPLE_SXM = Path(__file__).resolve().parent.parent / "test_data" / "nanonis.sxm"
 
 pytestmark = pytest.mark.skipif(
     not SAMPLE_SXM.exists(), reason="sample SXM not present")

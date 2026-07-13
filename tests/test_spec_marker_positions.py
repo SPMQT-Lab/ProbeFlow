@@ -14,8 +14,6 @@ Covers the 2026-07-06 spectroscopy display review findings:
 
 from __future__ import annotations
 
-import shutil
-from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -23,10 +21,6 @@ import pytest
 
 from probeflow.analysis.spec_plot import _parse_sxm_angle_rad
 from probeflow.gui.viewer.spec_overlay import SpecOverlayController
-
-TEST_DATA = Path(__file__).parent.parent / "test_data"
-VERT_FIXTURE = TEST_DATA / "A180201.124928.VERT"
-
 
 class _ZoomLblStub:
     def __init__(self):
@@ -41,9 +35,11 @@ def _fake_spec(position):
 
 
 def _controller_with_folder(tmp_path, spec_stems, image_stem="scan1"):
-    """Copy the real VERT fixture under each stem so sniff_file_type passes."""
+    """Generate anonymous VERT files under each stem so sniffing passes."""
+    from tests.synthetic_files import write_createc_vert
+
     for stem in spec_stems:
-        shutil.copy(VERT_FIXTURE, tmp_path / f"{stem}.VERT")
+        write_createc_vert(tmp_path / f"{stem}.VERT", sweep="time")
     zoom = _ZoomLblStub()
     spec_image_map = {stem: image_stem for stem in spec_stems}
     ctrl = SpecOverlayController(zoom, spec_image_map)

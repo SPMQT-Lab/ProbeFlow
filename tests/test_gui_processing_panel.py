@@ -1568,13 +1568,13 @@ def test_viewer_feature_maxima_exports_point_mask_and_fft(qapp, monkeypatch, tmp
 
     mask_text = mask_path.read_text(encoding="utf-8")
     assert "# export_type,probeflow_feature_point_mask" in mask_text
-    assert "# source_path,/tmp/example.sxm" in mask_text
+    assert "# source_path,example.sxm" in mask_text
     assert "# threshold_mode,absolute" in mask_text
     assert "# radius_px,1" in mask_text
     assert "1" in mask_text
     fft_text = fft_path.read_text(encoding="utf-8")
     assert "# export_type,probeflow_point_mask_fft" in fft_text
-    assert "# source_path,/tmp/example.sxm" in fft_text
+    assert "# source_path,example.sxm" in fft_text
     assert "# mask_shape_y,8" in fft_text
     assert "qx,qy,magnitude,unit" in fft_text
     assert "cycles/nm" in fft_text

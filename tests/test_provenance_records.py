@@ -44,9 +44,47 @@ def test_source_record_creation():
     data = record.to_dict()
 
     assert data["source_filename"] == "scan.dat"
+    assert data["source_path"] == "scan.dat"
     assert data["source_file_type"] == "Createc .dat"
     assert data["channel"] == "FT"
     assert data["file_hash"] == "abc123"
+
+
+def test_export_serialization_redacts_local_paths_and_identity_fields(tmp_path):
+    from probeflow.core.source_identity import build_source_identity, sanitize_export_data
+
+    source = tmp_path / "scan.dat"
+    source.write_bytes(b"fixture")
+    identity = build_source_identity(
+        source,
+        source_format="dat",
+        item_type="scan",
+    )
+    assert identity["source_path"] == "scan.dat"
+
+    safe = sanitize_export_data({
+        "source_path": "/Users/alice/private/scan.dat",
+        "export_path": r"C:\Users\bob\Desktop\figure.png",
+        "processing_state": {
+            "steps": [{"params": {"source_path": "/home/carol/operand.sxm"}}],
+        },
+        "source_header": {
+            "Username / Username": "alice",
+            "ActDriveDir": r"V:\Data\alice\project",
+            "LastMemoFile": r"C:\Users\alice\memo.txt",
+        },
+    })
+
+    assert safe["source_path"] == "scan.dat"
+    assert safe["export_path"] == "figure.png"
+    assert safe["processing_state"]["steps"][0]["params"]["source_path"] == "operand.sxm"
+    assert safe["source_header"]["Username / Username"] == ""
+    assert safe["source_header"]["ActDriveDir"] == "project"
+    assert safe["source_header"]["LastMemoFile"] == "memo.txt"
+    serialized = json.dumps(safe)
+    assert "/Users/" not in serialized
+    assert "/home/" not in serialized
+    assert "alice" not in serialized
 
 
 def test_processing_step_append_records_state_ids(tmp_path):
@@ -287,7 +325,7 @@ def test_probeflow_sidecar_preserves_rois_for_lookup(tmp_path):
     write_png(scan, out, provenance=prov, add_scalebar=False)
 
     data = json.loads(out.with_suffix(".probeflow.json").read_text(encoding="utf-8"))
-    assert data["rois"]["image_id"] == str(scan.source_path)
+    assert data["rois"]["image_id"] == scan.source_path.name
     loaded, used = load_roi_set_sidecar(out)
     assert used == out.with_suffix(".probeflow.json")
     assert loaded.get_by_name("terrace").id == roi.id

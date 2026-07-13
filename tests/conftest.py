@@ -8,8 +8,17 @@ import sys
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-SAMPLE_DIR = REPO_ROOT / "test_data" / "sample_input"
+SAMPLE_DIR = REPO_ROOT / "test_data"
 CUSHION_DIR = REPO_ROOT / "probeflow" / "data" / "file_cushions"
+SAMPLE_DAT_NAMES = (
+    "createc_scan_11nm.dat",
+    "createc_afm.dat",
+    "createc_terrace.dat",
+)
+SXM_CONVERTIBLE_DAT_NAMES = (
+    "createc_scan_11nm.dat",
+    "createc_terrace.dat",
+)
 
 GUI_TEST_MODULES = {
     "test_gui_index_integration.py",
@@ -206,16 +215,58 @@ def _drain_qt_between_tests(request):
 
 @pytest.fixture
 def sample_dat_files():
-    files = sorted(SAMPLE_DIR.glob("*.dat"))
+    files = [SAMPLE_DIR / name for name in SAMPLE_DAT_NAMES]
+    files = [path for path in files if path.exists()]
     assert files, f"No .dat files found in {SAMPLE_DIR}"
     return files
 
 
 @pytest.fixture
+def sxm_convertible_dat_files():
+    files = [SAMPLE_DIR / name for name in SXM_CONVERTIBLE_DAT_NAMES]
+    assert all(path.exists() for path in files)
+    return files
+
+
+@pytest.fixture
 def first_sample_dat(sample_dat_files):
-    return sample_dat_files[0]
+    terrace = SAMPLE_DIR / "createc_terrace.dat"
+    assert terrace in sample_dat_files
+    return terrace
 
 
 @pytest.fixture
 def cushion_dir():
     return CUSHION_DIR
+
+
+@pytest.fixture
+def createc_time_spec(tmp_path):
+    from tests.synthetic_files import write_createc_vert
+
+    return write_createc_vert(tmp_path / "time_trace.VERT", sweep="time")
+
+
+@pytest.fixture
+def createc_bias_spec(tmp_path):
+    from tests.synthetic_files import write_createc_vert
+
+    return write_createc_vert(tmp_path / "bias_sweep.VERT", sweep="bias")
+
+
+@pytest.fixture
+def nanonis_spec(tmp_path):
+    from tests.synthetic_files import write_nanonis_spec
+
+    return write_nanonis_spec(tmp_path / "nanonis_spec.dat")
+
+
+@pytest.fixture
+def spectrum_dir(tmp_path):
+    from tests.synthetic_files import write_createc_vert, write_nanonis_spec
+
+    write_createc_vert(tmp_path / "time_a.VERT", sweep="time", bias_mv=-50.0)
+    write_createc_vert(tmp_path / "time_b.VERT", sweep="time", bias_mv=-300.0)
+    write_createc_vert(tmp_path / "bias.VERT", sweep="bias")
+    write_nanonis_spec(tmp_path / "nanonis_spec.dat")
+    return tmp_path

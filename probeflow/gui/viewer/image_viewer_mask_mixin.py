@@ -167,10 +167,10 @@ class ImageViewerMaskMixin:
         from probeflow.core.mask import MaskSet
         entry = self._entries[self._idx]
         if self._image_mask_set is None:
-            self._image_mask_set = MaskSet(image_id=str(entry.path))
+            self._image_mask_set = MaskSet(image_id=entry.path.name)
         # Record source context so a mask made from a processed channel is not
         # mistaken for raw-data-derived later (it only matches by shape).
-        image_mask.parameters.setdefault("source_path", str(entry.path))
+        image_mask.parameters.setdefault("source_path", entry.path.name)
         image_mask.parameters.setdefault("source_channel", self._edge_source_channel())
         image_mask.parameters.setdefault("data_basis", "processed_image")
         self._image_mask_set.add(image_mask)

@@ -17,6 +17,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from probeflow.core.source_identity import privacy_safe_path, sanitize_export_data
+
 from probeflow.provenance.records import (
     ExportRecord,
     ProcessingHistory,
@@ -88,7 +90,7 @@ class ExportProvenance:
 
     def to_dict(self) -> dict:
         """Return a JSON-compatible dict of all provenance fields."""
-        return {
+        return sanitize_export_data({
             "source_file":       self.source_file,
             "source_format":     self.source_format,
             "item_type":         self.item_type,
@@ -113,11 +115,11 @@ class ExportProvenance:
             "processing_history": self.processing_history,
             "export_record":      self.export_record,
             "warning":            self.warning,
-        }
+        })
 
     def to_export_record_dict(self) -> dict[str, Any]:
         if self.export_record is not None:
-            return _copy.deepcopy(self.export_record)
+            return sanitize_export_data(_copy.deepcopy(self.export_record))
         history = None
         if self.processing_history is not None:
             try:
@@ -154,7 +156,7 @@ class ExportProvenance:
         if self.warning and self.warning not in data["warnings"]:
             data["warnings"].insert(0, self.warning)
             data["warning"] = self.warning
-        return data
+        return sanitize_export_data(data)
 
     # ── Convenience constructor ───────────────────────────────────────────────
 
@@ -175,11 +177,7 @@ class ExportProvenance:
         """
         # Source identity
         source_path_obj = getattr(scan, "source_path", None)
-        source_file = (
-            source_path_obj.as_posix()
-            if hasattr(source_path_obj, "as_posix")
-            else str(source_path_obj) if source_path_obj else None
-        )
+        source_file = privacy_safe_path(source_path_obj)
         source_format = getattr(scan, "source_format", None)
 
         # Array shape for the selected channel
@@ -370,7 +368,7 @@ def build_scan_export_provenance(
         probeflow_version=prov.probeflow_version,
         export_timestamp=prov.export_timestamp,
         export_kind=str(export_kind),
-        output_path=out_str,
+        output_path=privacy_safe_path(out_str),
         source_id=prov.source_id,
         channel_id=prov.channel_id,
         processing_state_hash=processing_state_hash(ps_dict),
@@ -543,11 +541,11 @@ def export_record_dict_from_provenance(
 
     if out_path is not None:
         data = _copy.deepcopy(data)
-        data["export_path"] = str(out_path)
+        data["export_path"] = privacy_safe_path(out_path)
     if export_format is not None:
         data = _copy.deepcopy(data)
         data["export_format"] = str(export_format).lower()
-    return data
+    return sanitize_export_data(data)
 
 
 def human_summary_from_provenance(provenance) -> str:
@@ -596,7 +594,7 @@ def write_provenance_sidecars(
         )
         try:
             with open(tmp_fd, "w", encoding="utf-8") as fh:
-                _json.dump(payload, fh, indent=2, default=str)
+                _json.dump(sanitize_export_data(payload), fh, indent=2, default=str)
             Path(tmp_path).replace(path)
         except Exception:
             try:

@@ -14,7 +14,7 @@ import pytest
 
 from probeflow.io.sxm_io import orient_plane, sxm_dims, sxm_scan_range
 
-_NANONIS_SCAN = Path(__file__).resolve().parents[1] / "test_data" / "sxm_moire_10nm.sxm"
+_NANONIS_SCAN = Path(__file__).resolve().parents[1] / "test_data" / "nanonis.sxm"
 
 
 # ── orient_plane ──────────────────────────────────────────────────────────────

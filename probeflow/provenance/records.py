@@ -18,6 +18,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from probeflow.core.source_identity import privacy_safe_path, sanitize_export_data
+
 
 SCHEMA_VERSION = 1
 
@@ -98,7 +100,7 @@ class SourceRecord:
     file_hash: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        return sanitize_export_data({
             "source_filename": self.source_filename,
             "source_path": self.source_path,
             "source_file_type": self.source_file_type,
@@ -107,7 +109,7 @@ class SourceRecord:
             "loader_version": self.loader_version,
             "metadata": _json_safe(self.metadata),
             "file_hash": self.file_hash,
-        }
+        })
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "SourceRecord":
@@ -150,7 +152,7 @@ class ProvenanceStep:
     warnings: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        return sanitize_export_data({
             "step_id": self.step_id,
             "operation_id": self.operation_id,
             "operation_name": self.operation_name,
@@ -160,7 +162,7 @@ class ProvenanceStep:
             "output_state_id": self.output_state_id,
             "timestamp": self.timestamp,
             "warnings": list(self.warnings),
-        }
+        })
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ProvenanceStep":
@@ -292,7 +294,7 @@ class ExportRecord:
         warnings = list(self.warnings)
         if self.warning and self.warning not in warnings:
             warnings.insert(0, self.warning)
-        return {
+        return sanitize_export_data({
             "record_type": "probeflow_export",
             "schema_version": int(self.schema_version),
             "export_path": self.export_path,
@@ -306,7 +308,7 @@ class ExportRecord:
             "rois": _json_safe(self.rois),
             "masks": _json_safe(self.masks),
             "summary": self.summary,
-        }
+        })
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ExportRecord":
@@ -407,7 +409,7 @@ def source_record_from_scan(
 
     return SourceRecord(
         source_filename=path.name if path is not None else None,
-        source_path=path.as_posix() if path is not None else None,
+        source_path=privacy_safe_path(path),
         source_file_type=str(file_type) if file_type is not None else None,
         channel=channel_name,
         loader_name=loader_name,
@@ -552,7 +554,7 @@ def build_export_record(
     if conversion == "dat_to_sxm" and processed_warning:
         summary = f"{summary}\n\n{processed_warning}"
     return ExportRecord(
-        export_path=str(export_path) if export_path is not None else None,
+        export_path=privacy_safe_path(export_path),
         export_format=str(export_format).lower(),
         source_info=history.source_record,
         processing_history=export_history,

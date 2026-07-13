@@ -7,6 +7,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from probeflow.core.mask import MaskSet
+from probeflow.core.source_identity import privacy_safe_path
+
 
 def load_mask_set(image_path: Path | str):
     """Load a MaskSet from the sidecar next to *image_path*, or return an empty one.
@@ -16,17 +19,16 @@ def load_mask_set(image_path: Path | str):
     string so the caller can tell the user their saved masks did not load
     (review: a damaged sidecar was completely invisible at viewer open).
     """
-    from probeflow.core.mask import MaskSet
     from probeflow.io.mask_sidecar import load_mask_set_sidecar
 
     image_path = Path(image_path)
     try:
         loaded, _sidecar = load_mask_set_sidecar(image_path, missing_ok=True)
     except Exception as exc:
-        return (MaskSet(image_id=str(image_path)),
+        return (MaskSet(image_id=privacy_safe_path(image_path) or image_path.name),
                 f"Could not load mask sidecar: {exc}")
 
-    return (loaded or MaskSet(image_id=str(image_path))), None
+    return (loaded or MaskSet(image_id=privacy_safe_path(image_path) or image_path.name)), None
 
 
 def save_mask_set(mask_set, image_path: Path | str) -> str | None:

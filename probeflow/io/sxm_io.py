@@ -30,6 +30,7 @@ from typing import List, Optional, Tuple
 import numpy as np
 
 from probeflow.core.resources import FILE_CUSHIONS_DIR
+from probeflow.core.source_identity import sanitize_header_for_export
 
 # ── Binary layout ────────────────────────────────────────────────────────────
 # Cushion byte lengths are read lazily to avoid repeated file I/O.
@@ -368,20 +369,20 @@ def sxm_payload_plane_count(
 
 # ── Writing a modified .sxm ──────────────────────────────────────────────────
 
-def _patch_comment_in_header(header_bytes: bytes, new_comment: str) -> bytes:
-    """Replace the :COMMENT: value in an SXM header byte block.
+def _patch_value_in_header(header_bytes: bytes, key: str, new_value: str) -> bytes:
+    """Replace one ``:KEY:`` value in an SXM header byte block.
 
-    Locates the existing value (everything between ``:COMMENT:\\n`` and the
-    next ``:KEY:`` line) and replaces it with *new_comment*.  The function is
-    a no-op when no ``:COMMENT:`` section is found.
+    Locates the existing value (everything between the marker line and the
+    next ``:KEY:`` line) and replaces it with *new_value*. The function is a
+    no-op when the requested section is absent.
     """
-    enc = new_comment.encode("latin-1", errors="replace")
-    marker = b":COMMENT:"
+    enc = str(new_value).encode("latin-1", errors="replace")
+    marker = f":{key}:".encode("latin-1", errors="replace")
     idx = header_bytes.find(marker)
     if idx < 0:
         return header_bytes
 
-    # Skip to the byte immediately after ":COMMENT:\n"
+    # Skip to the byte immediately after the marker line.
     nl_idx = header_bytes.find(b"\n", idx + len(marker))
     if nl_idx < 0:
         return header_bytes
@@ -402,6 +403,12 @@ def _patch_comment_in_header(header_bytes: bytes, new_comment: str) -> bytes:
         pos = next_start
 
     return header_bytes[:value_start] + enc + b"\n" + header_bytes[pos:]
+
+
+def _patch_comment_in_header(header_bytes: bytes, new_comment: str) -> bytes:
+    """Replace the ``:COMMENT:`` value in an SXM header byte block."""
+
+    return _patch_value_in_header(header_bytes, "COMMENT", new_comment)
 
 
 def write_sxm_with_planes(
@@ -449,6 +456,15 @@ def write_sxm_with_planes(
     plane_bytes = Ny * Nx * 4
 
     header_prefix = raw[:offset]
+    safe_hdr = sanitize_header_for_export(hdr)
+    for key, old_value in hdr.items():
+        safe_value = safe_hdr.get(key)
+        if safe_value != old_value:
+            header_prefix = _patch_value_in_header(
+                header_prefix,
+                str(key),
+                "" if safe_value is None else str(safe_value),
+            )
     if comment_override is not None:
         header_prefix = _patch_comment_in_header(header_prefix, comment_override)
 

@@ -13,8 +13,8 @@ from probeflow.core.scan_model import Scan
 
 
 TESTDATA = Path(__file__).resolve().parents[1] / "test_data"
-_CREATEC_4CH = TESTDATA / "createc_scan_terrace_109nm.dat"
-_NANONIS_SXM = TESTDATA / "sxm_moire_10nm.sxm"
+_CREATEC_4CH = TESTDATA / "createc_terrace.dat"
+_NANONIS_SXM = TESTDATA / "nanonis.sxm"
 
 
 # ─── Fixtures ────────────────────────────────────────────────────────────────
@@ -75,21 +75,12 @@ class TestScanContract:
         w_m, h_m = scan.scan_range_m
         assert w_m > 0 and h_m > 0
 
-    def test_two_channel_dat_flags_synthetic(self, sample_dat_files):
-        # At least one of the two bundled samples is a 2-channel file; that
-        # one should have synthetic backward planes flagged.
-        had_synthetic = False
-        for dat in sample_dat_files:
-            scan = load_scan(dat)
-            if any(scan.plane_synthetic):
-                had_synthetic = True
-                # Synthetic planes are always the backward ones (indices 1, 3)
-                assert scan.plane_synthetic[1] == scan.plane_synthetic[3]
-                assert scan.plane_synthetic[0] is False
-                assert scan.plane_synthetic[2] is False
-        # The 2-channel file in the bundled sample set must be picked up.
-        assert had_synthetic, \
-            "Expected at least one sample .dat to be 2-channel (synthetic bwd)"
+    def test_two_channel_dat_flags_synthetic(self, tmp_path):
+        from tests.synthetic_files import write_legacy_two_channel_dat
+
+        dat = write_legacy_two_channel_dat(tmp_path / "two_channel.dat")
+        scan = load_scan(dat)
+        assert scan.plane_synthetic == [False, True, False, True]
 
 
 # ─── save_sxm round-trips ────────────────────────────────────────────────────
@@ -319,8 +310,8 @@ class TestBackwardOrientation:
 
 # ─── Createc first-column artifact ──────────────────────────────────────────
 
-_CREATEC_STEP   = TESTDATA / "createc_scan_step_20nm.dat"
-_CREATEC_TERRACE = TESTDATA / "createc_scan_terrace_109nm.dat"
+_CREATEC_STEP   = TESTDATA / "createc_scan_11nm.dat"
+_CREATEC_TERRACE = TESTDATA / "createc_terrace.dat"
 
 
 class TestCreatecFirstColumnArtifact:

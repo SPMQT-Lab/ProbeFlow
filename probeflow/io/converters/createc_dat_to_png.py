@@ -18,12 +18,12 @@ from probeflow.io.common import (
 )
 from probeflow.processing.display import array_to_uint8
 from probeflow.core.scan_loader import load_scan
+from probeflow.core.source_identity import sanitize_header_for_export
 
 log = logging.getLogger(__name__)
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_INPUT_DIR = REPO_ROOT / "test_data" / "sample_input"
-DEFAULT_OUTPUT_DIR = REPO_ROOT / "test_data" / "output_png"
+DEFAULT_INPUT_DIR = Path.cwd()
+DEFAULT_OUTPUT_DIR = Path.cwd() / "probeflow_output" / "png"
 
 
 def dat_to_hdr_imgs(
@@ -42,7 +42,7 @@ def dat_to_hdr_imgs(
                 f"{dat_path.name}: missing DATA marker — not a valid Createc .dat file"
             ) from exc
         raise
-    hdr = scan.header
+    hdr = sanitize_header_for_export(scan.header)
     Nx, Ny = scan.dims
     synthetic = list(getattr(scan, "plane_synthetic", []) or [])
     num_chan = 2 if scan.n_planes >= 4 and any(synthetic) else scan.n_planes
@@ -106,11 +106,11 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--input-dir", dest="input_dir", default=None,
-        help="Path to a .dat file or directory of .dat files (default: data/sample_input)",
+        help="Path to a .dat file or directory of .dat files (default: current directory)",
     )
     p.add_argument(
         "--output-dir", dest="output_dir", default=None,
-        help="Output directory for per-file PNG folders (default: data/output_png)",
+        help="Output directory for per-file PNG folders (default: probeflow_output/png)",
     )
     p.add_argument(
         "--clip-low", dest="clip_low", type=float, default=1.0,

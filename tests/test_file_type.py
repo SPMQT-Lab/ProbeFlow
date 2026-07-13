@@ -15,16 +15,11 @@ TESTDATA = Path(__file__).resolve().parents[1] / "test_data"
 # Expected mapping from each test data file to its FileType.
 # This drives the full sniffing roundtrip check.
 _EXPECTED = {
-    "createc_scan_step_20nm.dat":     FileType.CREATEC_IMAGE,
-    "createc_scan_terrace_109nm.dat": FileType.CREATEC_IMAGE,
-    "createc_scan_qplus_10ch_afm.dat": FileType.CREATEC_IMAGE,
-    "createc_ivt_telegraph_300mv_a.VERT": FileType.CREATEC_SPEC,
-    "createc_ivt_telegraph_300mv_b.VERT": FileType.CREATEC_SPEC,
-    "createc_ivt_telegraph_450mv.VERT":   FileType.CREATEC_SPEC,
-    "createc_vert_didz_image_state.VERT": FileType.CREATEC_SPEC,
-    "nanonis_kelvin_parabola_500mv.dat":  FileType.NANONIS_SPEC,
-    "nanonis_sts_15mv.dat":         FileType.NANONIS_SPEC,
-    "sxm_moire_10nm.sxm":                 FileType.NANONIS_IMAGE,
+    "createc_scan_11nm.dat": FileType.CREATEC_IMAGE,
+    "createc_terrace.dat": FileType.CREATEC_IMAGE,
+    "createc_afm.dat": FileType.CREATEC_IMAGE,
+    "nanonis.sxm": FileType.NANONIS_IMAGE,
+    "rhk.sm4": FileType.RHK_SM4_IMAGE,
 }
 
 
@@ -39,12 +34,16 @@ def test_sniff_known_files(fname: str, expected: FileType) -> None:
 
 def test_sniff_createc_dat_is_image() -> None:
     """The Createc .dat regression cases both classify as CREATEC_IMAGE."""
-    assert sniff_file_type(TESTDATA / "createc_scan_step_20nm.dat") == FileType.CREATEC_IMAGE
+    assert sniff_file_type(TESTDATA / "createc_scan_11nm.dat") == FileType.CREATEC_IMAGE
 
 
-def test_sniff_nanonis_dat_is_spec() -> None:
+def test_sniff_nanonis_dat_is_spec(nanonis_spec) -> None:
     """Nanonis .dat spectroscopy is NOT confused with a Createc .dat image."""
-    assert sniff_file_type(TESTDATA / "nanonis_sts_15mv.dat") == FileType.NANONIS_SPEC
+    assert sniff_file_type(nanonis_spec) == FileType.NANONIS_SPEC
+
+
+def test_sniff_createc_vert_is_spec(createc_time_spec) -> None:
+    assert sniff_file_type(createc_time_spec) == FileType.CREATEC_SPEC
 
 
 def test_sniff_missing_file_returns_unknown(tmp_path: Path) -> None:

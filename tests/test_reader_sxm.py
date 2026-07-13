@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-_NANONIS_SCAN = Path(__file__).resolve().parents[1] / "test_data" / "sxm_moire_10nm.sxm"
+_NANONIS_SCAN = Path(__file__).resolve().parents[1] / "test_data" / "nanonis.sxm"
 
 pytestmark = pytest.mark.skipif(
     not _NANONIS_SCAN.exists(),

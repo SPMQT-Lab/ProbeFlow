@@ -54,8 +54,8 @@ class TestEstimateSpeed:
         assert estimate_fast_scan_speed_m_per_s(None) is None
 
     @pytest.mark.parametrize("fname", [
-        "sxm_moire_10nm.sxm",            # Nanonis: Scan>speed forw. (m/s)
-        "createc_scan_atomic_11nm.dat",  # Createc: Sec/line:
+        "nanonis.sxm",            # Nanonis: Scan>speed forw. (m/s)
+        "createc_scan_11nm.dat",  # Createc: Sec/line:
     ])
     def test_real_sample_headers(self, fname):
         from pathlib import Path

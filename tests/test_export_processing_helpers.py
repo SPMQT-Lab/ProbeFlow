@@ -387,11 +387,10 @@ class TestApplyProcessingStateMultipleOps:
 class TestSxmCommentAfterProcessing:
     @pytest.fixture
     def sample_sxm(self):
-        p = Path(__file__).parent.parent / "test_data" / "sample_input" / "sxm"
-        files = sorted(p.glob("*.sxm"))
-        if not files:
-            pytest.skip("No sample .sxm files found")
-        return files[0]
+        p = Path(__file__).parent.parent / "test_data" / "nanonis.sxm"
+        if not p.exists():
+            pytest.skip("No sample .sxm file found")
+        return p
 
     def test_comment_contains_source_and_ops_after_helper(self, sample_sxm, tmp_path):
         scan = load_scan(sample_sxm)

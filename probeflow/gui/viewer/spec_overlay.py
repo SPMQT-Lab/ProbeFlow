@@ -207,7 +207,7 @@ def _build_spec_roi_set(entry, markers: list[dict], scan_shape):
     """Build a ROISet with one point ROI per marker; returns None on error."""
     try:
         from probeflow.core.roi import ROI, ROISet
-        roi_set = ROISet(image_id=str(entry.path))
+        roi_set = ROISet(image_id=entry.path.name)
         shape = scan_shape or (1, 1)
         for m in markers:
             frac_x = float(m.get("frac_x", 0.5))

@@ -113,7 +113,7 @@ class TestPatchCommentInHeader:
 class TestSxmSourcedComment:
     @pytest.fixture
     def sample_sxm(self):
-        p = Path(__file__).parent.parent / "test_data" / "sample_input" / "sxm"
+        p = Path(__file__).parent.parent / "test_data" / ""
         files = sorted(p.glob("*.sxm"))
         if not files:
             pytest.skip("No sample .sxm files found")
@@ -226,7 +226,7 @@ class TestDatSourcedComment:
         assert reloaded.dims == scan.dims
 
     def test_renamed_dat_output_readable_by_probeflow_reader(self, tmp_path):
-        dat = Path(__file__).parent.parent / "test_data" / "createc_scan_atomic_11nm.dat"
+        dat = Path(__file__).parent.parent / "test_data" / "createc_scan_11nm.dat"
         scan = load_scan(dat)
         out = tmp_path / "renamed-dat.sxm"
 

@@ -22,14 +22,14 @@ from probeflow.io.readers.createc_dat import (
     read_createc_dat_report,
 )
 from probeflow.core.scan_loader import load_scan
+from probeflow.core.source_identity import privacy_safe_path, sanitize_header_for_export
 from probeflow.io.writers.sxm import write_sxm
 from probeflow.core.resources import FILE_CUSHIONS_DIR
 
 log = logging.getLogger(__name__)
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_INPUT_DIR = REPO_ROOT / "test_data" / "sample_input"
-DEFAULT_OUTPUT_DIR = REPO_ROOT / "test_data" / "output_sxm"
+DEFAULT_INPUT_DIR = Path.cwd()
+DEFAULT_OUTPUT_DIR = Path.cwd() / "probeflow_output" / "sxm"
 DEFAULT_CUSHION_DIR = FILE_CUSHIONS_DIR
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -258,7 +258,7 @@ def construct_hdr(
         "REC_TEMP":        str(temperature),
         "ACQ_TIME":        str(total_time),
         "SCAN_PIXELS":     f"{numx}       {numy}",
-        "SCAN_FILE":       str(dat_path),
+        "SCAN_FILE":       privacy_safe_path(dat_path) or dat_path.name,
         "SCAN_TIME":       f"{dur_sci}             {dur_sci}",
         "SCAN_RANGE":      f"{lx_m}           {ly_m}",
         "SCAN_OFFSET":     f"{ox_m}         {oy_m}",
@@ -278,7 +278,7 @@ def construct_hdr(
         "Clip_percentile_Lower":  str(clip_low),
         "Clip_percentile_Higher": str(clip_high),
     }
-    hdr.update(dat_hdr)
+    hdr.update(sanitize_header_for_export(dat_hdr))
     return hdr
 
 
@@ -604,11 +604,11 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--input-dir", dest="input_dir", default=None,
-        help="Path to a .dat file or directory of .dat files (default: data/sample_input)",
+        help="Path to a .dat file or directory of .dat files (default: current directory)",
     )
     p.add_argument(
         "--output-dir", dest="output_dir", default=None,
-        help="Output directory for .sxm files (default: data/output_sxm)",
+        help="Output directory for .sxm files (default: probeflow_output/sxm)",
     )
     p.add_argument(
         "--cushion-dir", dest="cushion_dir", default=None,

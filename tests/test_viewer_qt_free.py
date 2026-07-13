@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch
 
 # ── ViewerScanData ────────────────────────────────────────────────────────────
 
-SAMPLE_SXM = Path(__file__).parent.parent / "test_data" / "sample_input" / "A250320.191933.sxm"
+SAMPLE_SXM = Path(__file__).parent.parent / "test_data" / "nanonis.sxm"
 
 
 @pytest.mark.skipif(not SAMPLE_SXM.exists(), reason="sample SXM not present")

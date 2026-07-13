@@ -15,7 +15,7 @@ from probeflow.core.roi import ROI, ROISet
 
 
 TEST_DATA = Path(__file__).parent.parent / "test_data"
-SAMPLE_DAT = TEST_DATA / "createc_scan_close_100nm.dat"
+SAMPLE_DAT = TEST_DATA / "createc_terrace.dat"
 
 
 @pytest.fixture

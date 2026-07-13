@@ -11,15 +11,11 @@ from probeflow.core.indexing import index_folder
 
 
 TESTDATA = Path(__file__).resolve().parents[1] / "test_data"
-_CREATEC_STEP    = TESTDATA / "createc_scan_step_20nm.dat"
-_CREATEC_TERRACE = TESTDATA / "createc_scan_terrace_109nm.dat"
-_CREATEC_QPLUS_10CH = TESTDATA / "createc_scan_qplus_10ch_afm.dat"
-_NANONIS_SXM     = TESTDATA / "sxm_moire_10nm.sxm"
-_CREATEC_VERT    = TESTDATA / "createc_ivt_telegraph_300mv_a.VERT"
-_CREATEC_DIDZ_VERT = TESTDATA / "createc_vert_didz_image_state.VERT"
-_NANONIS_SPEC    = TESTDATA / "nanonis_sts_15mv.dat"
-
-_CREATEC_SCAN_SHAPES = {(64, 63), (256, 255), (330, 511), (512, 511), (1024, 1023)}
+_CREATEC_STEP    = TESTDATA / "createc_scan_11nm.dat"
+_CREATEC_TERRACE = TESTDATA / "createc_terrace.dat"
+_CREATEC_QPLUS_10CH = TESTDATA / "createc_afm.dat"
+_NANONIS_SXM     = TESTDATA / "nanonis.sxm"
+_CREATEC_SCAN_SHAPES = {(256, 255), (512, 511)}
 
 
 # ── Test A: Createc scan fixtures ─────────────────────────────────────────────
@@ -28,7 +24,7 @@ class TestCreatecScans:
     def test_createc_scans_present(self):
         items = index_folder(TESTDATA)
         dat_items = [it for it in items if it.source_format == "createc_dat"]
-        assert len(dat_items) == 13
+        assert len(dat_items) == 3
 
     def test_item_type_is_scan(self):
         items = index_folder(TESTDATA)
@@ -230,46 +226,26 @@ class TestProbeFlowItemContract:
             assert it.size_bytes is not None
             assert it.size_bytes > 0
 
-    def test_spectrum_items_present(self):
-        items = index_folder(TESTDATA)
+    def test_spectrum_items_present(self, spectrum_dir):
+        items = index_folder(spectrum_dir)
         spectra = [it for it in items if it.item_type == "spectrum"]
-        assert len(spectra) >= 3  # at least the three .VERT files
+        assert len(spectra) == 4
 
-    def test_spectrum_measurement_metadata_present(self):
-        items = index_folder(TESTDATA)
+    def test_spectrum_measurement_metadata_present(self, spectrum_dir):
+        items = index_folder(spectrum_dir)
         spectra = [it for it in items if it.source_format == "createc_vert"]
         assert spectra
         assert all("measurement_family" in it.metadata for it in spectra)
 
-    def test_didz_vert_fixture_indexed(self):
-        items = index_folder(TESTDATA)
-        item = next(it for it in items if it.path == _CREATEC_DIDZ_VERT)
-        assert item.metadata["measurement_family"] == "iz"
-        assert item.metadata["derivative_label"] == "dI/dz"
-        assert item.metadata["height_channel"] == "Z feedback"
-        assert "Z feedback" in item.channels
-        assert "Raw column 9" not in item.channels
-        assert item.metadata["channel_roles"]["Z feedback"] == [
-            "z_feedback",
-            "height_counts",
-        ]
-        assert any(
-            ch["source_name"] == "Raw column 9"
-            and ch["key"] == "Z feedback"
-            for ch in item.metadata["channel_info"]
-        )
-
-    def test_spectrum_indexing_does_not_call_full_reader(self, tmp_path, monkeypatch):
-        shutil.copy(_CREATEC_VERT, tmp_path / _CREATEC_VERT.name)
-        shutil.copy(_NANONIS_SPEC, tmp_path / _NANONIS_SPEC.name)
+    def test_spectrum_indexing_does_not_call_full_reader(self, spectrum_dir, monkeypatch):
 
         def fail_full_reader(*_args, **_kwargs):
             raise AssertionError("index_folder should use read_spec_metadata")
 
         monkeypatch.setattr("probeflow.io.spectroscopy.read_spec_file", fail_full_reader)
-        items = index_folder(tmp_path)
+        items = index_folder(spectrum_dir)
         spectra = [it for it in items if it.item_type == "spectrum"]
-        assert len(spectra) == 2
+        assert len(spectra) == 4
         assert all(it.load_error is None for it in spectra)
         assert {it.source_format for it in spectra} == {
             "createc_vert",

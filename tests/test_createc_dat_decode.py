@@ -18,8 +18,8 @@ from probeflow.io.readers.createc_dat import (
 from probeflow.core.scan_loader import load_scan
 
 TESTDATA = Path(__file__).resolve().parents[1] / "test_data"
-QPLUS_10CH_DAT = TESTDATA / "createc_scan_qplus_10ch_afm.dat"
-CREATEC_SCAN_FIXTURES = sorted(TESTDATA.glob("createc_scan_*.dat"))
+QPLUS_10CH_DAT = TESTDATA / "createc_afm.dat"
+CREATEC_SCAN_FIXTURES = sorted(TESTDATA.glob("createc_*.dat"))
 
 
 def test_report_records_trim_first_column_and_tail(first_sample_dat):
@@ -60,16 +60,7 @@ def test_report_preserves_legacy_channel_detection_order(sample_dat_files):
             == 4
         )
     ]
-    two_channel = [
-        path
-        for path in sample_dat_files
-        if (
-            read_createc_dat_report(path, include_raw=False).detected_channel_count
-            == 2
-        )
-    ]
     assert four_channel, "sample data should include a legacy 4-channel DAT"
-    assert two_channel, "sample data should include a legacy 2-channel DAT"
 
 
 def test_scale_channels_for_scan_applies_channel_scale_factors(first_sample_dat):
@@ -88,16 +79,11 @@ def test_scale_channels_for_scan_applies_channel_scale_factors(first_sample_dat)
 
 
 def test_2_channel_dat_roundtrip_preserves_synthetic_backward(
-    sample_dat_files, tmp_path, cushion_dir
+    tmp_path, cushion_dir
 ):
-    two_channel = next(
-        path
-        for path in sample_dat_files
-        if (
-            read_createc_dat_report(path, include_raw=False).detected_channel_count
-            == 2
-        )
-    )
+    from tests.synthetic_files import write_legacy_two_channel_dat
+
+    two_channel = write_legacy_two_channel_dat(tmp_path / "two_channel.dat")
 
     direct = load_scan(two_channel)
     convert_dat_to_sxm(two_channel, tmp_path, cushion_dir)

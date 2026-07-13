@@ -7,10 +7,8 @@ from probeflow.core.loaders import identify_scan_file, identify_spectrum_file
 
 
 TESTDATA = Path(__file__).resolve().parents[1] / "test_data"
-_CREATEC_SCAN = TESTDATA / "createc_scan_step_20nm.dat"
-_CREATEC_SPEC = TESTDATA / "createc_ivt_telegraph_300mv_a.VERT"
-_NANONIS_SCAN = TESTDATA / "sxm_moire_10nm.sxm"
-_NANONIS_SPEC = TESTDATA / "nanonis_sts_15mv.dat"
+_CREATEC_SCAN = TESTDATA / "createc_scan_11nm.dat"
+_NANONIS_SCAN = TESTDATA / "nanonis.sxm"
 
 
 class TestIdentifyScanFile:
@@ -26,21 +24,21 @@ class TestIdentifyScanFile:
         assert sig.file_type == FileType.NANONIS_IMAGE
         assert sig.source_format == "sxm"
 
-    def test_rejects_spectroscopy(self):
+    def test_rejects_spectroscopy(self, nanonis_spec):
         with pytest.raises(ValueError, match="spectroscopy.*scan sniff stage"):
-            identify_scan_file(_NANONIS_SPEC)
+            identify_scan_file(nanonis_spec)
 
 
 class TestIdentifySpectrumFile:
-    def test_identifies_createc_spec(self):
-        sig = identify_spectrum_file(_CREATEC_SPEC)
-        assert sig.path == _CREATEC_SPEC
+    def test_identifies_createc_spec(self, createc_time_spec):
+        sig = identify_spectrum_file(createc_time_spec)
+        assert sig.path == createc_time_spec
         assert sig.file_type == FileType.CREATEC_SPEC
         assert sig.item_type == "spectrum"
         assert sig.source_format == "createc_vert"
 
-    def test_identifies_nanonis_spec(self):
-        sig = identify_spectrum_file(_NANONIS_SPEC)
+    def test_identifies_nanonis_spec(self, nanonis_spec):
+        sig = identify_spectrum_file(nanonis_spec)
         assert sig.file_type == FileType.NANONIS_SPEC
         assert sig.source_format == "nanonis_dat_spectrum"
 

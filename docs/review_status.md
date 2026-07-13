@@ -84,7 +84,7 @@ Known gaps / follow-ups, ordered roughly by value:
 2. **`.npy` bundle sidecar key convention** — `original_shape` /
    `decoded_shape` are `(Nx, Ny)` while each plane's `shape` is
    `(rows, cols)`; rename to `*_pixels` while the format is young and
-   regenerate the sample bundles under `test_data/output_raw_npy/`.
+   regenerate temporary NumPy bundles during the conversion tests.
 3. **Reversible `.dat` conversion — investigated, deferred (2026-07-07).**
    There is no Createc `.dat` writer, and the reader is deliberately lossy
    (drops the artifact column and appendix, trims partial rows, converts

@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Iterable, Optional
 
 from probeflow.io.common import check_output_available
+from probeflow.core.source_identity import privacy_safe_path, sanitize_export_data
 
 
 def _encode(obj):
@@ -66,7 +67,7 @@ def write_json(
         w_m, h_m = scan.scan_range_m
         Nx, Ny = scan.dims
         meta.update({
-            "source_path": str(scan.source_path),
+            "source_path": privacy_safe_path(scan.source_path),
             "source_format": scan.source_format,
             "scan_range_m": [float(w_m), float(h_m)],
             "pixels": [int(Nx), int(Ny)],
@@ -103,7 +104,7 @@ def write_json(
     )
     try:
         with open(tmp_fd, "w", encoding="utf-8") as f:
-            json.dump(payload, f, indent=2, default=_encode)
+            json.dump(sanitize_export_data(payload), f, indent=2, default=_encode)
         Path(tmp_path).replace(out_path)
     except Exception:
         try:

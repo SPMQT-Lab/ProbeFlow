@@ -12,42 +12,75 @@ import pytest
 from probeflow.io.readers.createc_vert import read_createc_vert_report
 from probeflow.io.spectroscopy import SpecData, SpecMetadata, parse_spec_header, read_spec_file, read_spec_metadata
 
-DATA_DIR = Path(__file__).resolve().parent.parent / "test_data"
-
-VERT_TIME_TRACE  = DATA_DIR / "A180201.152542.M0001.VERT"
-VERT_BIAS_SWEEP  = DATA_DIR / "A180201.151737.M0001.VERT"
-VERT_TT_50MV     = DATA_DIR / "A180201.124928.VERT"       # time trace, -50 mV
-VERT_TT_450MV    = DATA_DIR / "A180208.194656.M0003.VERT"  # time trace, -450 mV
-VERT_DIDZ_FIXTURE = DATA_DIR / "createc_vert_didz_image_state.VERT"
-
-
 # ─── Fixtures ────────────────────────────────────────────────────────────────
 
 @pytest.fixture(scope="module")
-def time_trace_spec():
-    return read_spec_file(VERT_TIME_TRACE)
+def vert_time_trace(tmp_path_factory):
+    from tests.synthetic_files import write_createc_vert
+
+    return write_createc_vert(
+        tmp_path_factory.mktemp("vert") / "time_trace.VERT", sweep="time"
+    )
 
 
 @pytest.fixture(scope="module")
-def bias_sweep_spec():
-    return read_spec_file(VERT_BIAS_SWEEP)
+def vert_bias_sweep(tmp_path_factory):
+    from tests.synthetic_files import write_createc_vert
+
+    return write_createc_vert(
+        tmp_path_factory.mktemp("vert") / "bias_sweep.VERT", sweep="bias"
+    )
 
 
 @pytest.fixture(scope="module")
-def tt_50mv_spec():
-    return read_spec_file(VERT_TT_50MV)
+def vert_tt_50mv(tmp_path_factory):
+    from tests.synthetic_files import write_createc_vert
+
+    return write_createc_vert(
+        tmp_path_factory.mktemp("vert") / "tt_50mv.VERT",
+        sweep="time",
+        bias_mv=-50.0,
+    )
 
 
 @pytest.fixture(scope="module")
-def tt_450mv_spec():
-    return read_spec_file(VERT_TT_450MV)
+def vert_tt_450mv(tmp_path_factory):
+    from tests.synthetic_files import write_createc_vert
+
+    return write_createc_vert(
+        tmp_path_factory.mktemp("vert") / "tt_450mv.VERT",
+        sweep="time",
+        bias_mv=-450.0,
+    )
+
+
+@pytest.fixture(scope="module")
+def time_trace_spec(vert_time_trace):
+    return read_spec_file(vert_time_trace)
+
+
+@pytest.fixture(scope="module")
+def bias_sweep_spec(vert_bias_sweep):
+    return read_spec_file(vert_bias_sweep)
+
+
+@pytest.fixture(scope="module")
+def tt_50mv_spec(vert_tt_50mv):
+    return read_spec_file(vert_tt_50mv)
+
+
+@pytest.fixture(scope="module")
+def tt_450mv_spec(vert_tt_450mv):
+    return read_spec_file(vert_tt_450mv)
 
 
 # ─── parse_spec_header ───────────────────────────────────────────────────────
 
 class TestParseSpecHeader:
-    def test_real_header_contains_required_createc_fields_with_physical_ranges(self):
-        hdr = parse_spec_header(VERT_TIME_TRACE)
+    def test_header_contains_required_createc_fields_with_physical_ranges(
+        self, vert_time_trace
+    ):
+        hdr = parse_spec_header(vert_time_trace)
         assert isinstance(hdr, dict)
         assert len(hdr) > 10
         assert "DAC-Type" in hdr
@@ -59,15 +92,17 @@ class TestParseSpecHeader:
         assert "SpecFreq" in hdr
         assert float(hdr["SpecFreq"]) > 0
 
-    def test_header_parser_stops_at_data_marker_on_large_data_file(self):
-        hdr = parse_spec_header(VERT_BIAS_SWEEP)
+    def test_header_parser_stops_at_data_marker(self, vert_bias_sweep):
+        hdr = parse_spec_header(vert_bias_sweep)
         assert "DAC-Type" in hdr
         assert "DATA" not in hdr
 
 
 class TestReadSpecMetadata:
-    def test_metadata_fast_path_matches_full_reader_without_loading_arrays(self, bias_sweep_spec):
-        meta = read_spec_metadata(VERT_BIAS_SWEEP)
+    def test_metadata_fast_path_matches_full_reader_without_loading_arrays(
+        self, bias_sweep_spec, vert_bias_sweep
+    ):
+        meta = read_spec_metadata(vert_bias_sweep)
         assert isinstance(meta, SpecMetadata)
         assert not hasattr(meta, "x_array")
         assert not hasattr(meta, "channels_data")
@@ -86,8 +121,10 @@ class TestReadSpecMetadata:
         assert metadata_source["file_size_bytes"] > 0
         assert metadata_source["data_offset"] is not None
 
-    def test_time_trace_metadata_classification_matches_full_reader(self, time_trace_spec):
-        meta = read_spec_metadata(VERT_TIME_TRACE)
+    def test_time_trace_metadata_classification_matches_full_reader(
+        self, time_trace_spec, vert_time_trace
+    ):
+        meta = read_spec_metadata(vert_time_trace)
         assert meta.metadata["sweep_type"] == "time_trace"
         assert meta.metadata["sweep_type"] == time_trace_spec.metadata["sweep_type"]
         assert meta.metadata["n_points"] == time_trace_spec.metadata["n_points"]
@@ -96,11 +133,11 @@ class TestReadSpecMetadata:
 # ─── Createc VERT report layer ───────────────────────────────────────────────
 
 class TestCreatecVertReport:
-    def test_real_fixture_report_has_source_and_points(self):
-        report = read_createc_vert_report(VERT_BIAS_SWEEP)
+    def test_fixture_report_has_source_and_points(self, vert_bias_sweep):
+        report = read_createc_vert_report(vert_bias_sweep)
         assert report.file_version in {"ParVERT30", "ParVERT32"}
-        assert report.raw_table_shape == (5000, 4)
-        assert report.spec_total_points == 5000
+        assert report.raw_table_shape == (25, 4)
+        assert report.spec_total_points == 25
         assert report.source["source_format"] == "createc_vert"
         assert report.source["item_type"] == "spectrum"
         assert len(report.source["sha256"]) == 64
@@ -108,10 +145,10 @@ class TestCreatecVertReport:
         assert report.raw_columns is not None
         assert set(("idx", "V", "Z", "I")).issubset(report.raw_columns)
 
-    def test_metadata_fast_path_omits_arrays_but_keeps_summary(self):
-        report = read_createc_vert_report(VERT_BIAS_SWEEP, include_arrays=False)
+    def test_metadata_fast_path_omits_arrays_but_keeps_summary(self, vert_bias_sweep):
+        report = read_createc_vert_report(vert_bias_sweep, include_arrays=False)
         assert report.raw_columns is None
-        assert report.raw_table_shape == (5000, 4)
+        assert report.raw_table_shape == (25, 4)
         assert [info.canonical_name for info in report.channel_info] == ["V", "Z", "I"]
         assert [info.unit for info in report.channel_info] == ["V", "m", "A"]
         assert report.bias_min_mv == pytest.approx(-300.0, abs=10.0)
@@ -292,21 +329,21 @@ class TestCreatecVertReport:
 # ─── read_spec_file — time trace ─────────────────────────────────────────────
 
 class TestReadSpecFileTimeTrace:
-    def test_real_time_trace_fixture_contract(self, time_trace_spec):
+    def test_time_trace_fixture_contract(self, time_trace_spec):
         assert isinstance(time_trace_spec, SpecData)
         assert time_trace_spec.metadata["sweep_type"] == "time_trace"
         assert time_trace_spec.metadata["measurement_family"] == "sts"
-        assert time_trace_spec.metadata["n_points"] == 5000
+        assert time_trace_spec.metadata["n_points"] == 25
         assert time_trace_spec.x_unit == "s"
         assert "Time" in time_trace_spec.x_label
-        assert time_trace_spec.x_array.shape == (5000,)
+        assert time_trace_spec.x_array.shape == (25,)
         assert np.all(np.diff(time_trace_spec.x_array) >= 0)
         assert time_trace_spec.x_array[0] == pytest.approx(0.0)
-        assert time_trace_spec.x_array[-1] == pytest.approx(4.999, rel=1e-3)
+        assert time_trace_spec.x_array[-1] == pytest.approx(0.024)
         for ch in ("I", "Z", "V"):
             assert ch in time_trace_spec.channels
         for arr in time_trace_spec.channels.values():
-            assert arr.shape == (5000,)
+            assert arr.shape == (25,)
         z = time_trace_spec.channels["Z"]
         assert z.min() > -20e-10  # >-20 Å
         assert z.max() < 20e-10   # <+20 Å
@@ -324,26 +361,28 @@ class TestReadSpecFileTimeTrace:
 # ─── read_spec_file — bias sweep ─────────────────────────────────────────────
 
 class TestReadSpecFileBiasSweep:
-    def test_createc_vert_position_uses_dat_lateral_scale_convention(self, bias_sweep_spec):
-        hdr = parse_spec_header(VERT_BIAS_SWEEP)
+    def test_createc_vert_position_uses_dat_lateral_scale_convention(
+        self, bias_sweep_spec, vert_bias_sweep
+    ):
+        hdr = parse_spec_header(vert_bias_sweep)
         expected_x = float(hdr["OffsetX"]) * float(hdr["Dacto[A]xy"]) * 1e-9
         expected_y = float(hdr["OffsetY"]) * float(hdr["Dacto[A]xy"]) * 1e-9
         assert bias_sweep_spec.position == pytest.approx((expected_x, expected_y))
 
-    def test_real_bias_sweep_fixture_contract(self, bias_sweep_spec):
+    def test_bias_sweep_fixture_contract(self, bias_sweep_spec):
         assert isinstance(bias_sweep_spec, SpecData)
         assert bias_sweep_spec.metadata["sweep_type"] == "bias_sweep"
         assert bias_sweep_spec.metadata["measurement_family"] == "sts"
         assert bias_sweep_spec.metadata["derivative_label"] is None
         assert bias_sweep_spec.x_unit == "V"
         assert "Bias" in bias_sweep_spec.x_label
-        assert bias_sweep_spec.x_array.shape == (5000,)
+        assert bias_sweep_spec.x_array.shape == (25,)
         x = bias_sweep_spec.x_array
         assert x.min() == pytest.approx(-0.300, abs=0.01)
         assert x.max() == pytest.approx(-0.050, abs=0.01)
         for ch in ("I", "Z", "V"):
             assert ch in bias_sweep_spec.channels
-            assert bias_sweep_spec.channels[ch].shape == (5000,)
+            assert bias_sweep_spec.channels[ch].shape == (25,)
         i = bias_sweep_spec.channels["I"]
         assert float(i.max() - i.min()) > 0
         assert 1e-12 < float(np.abs(i).max()) < 1e-6
@@ -418,28 +457,27 @@ class TestReadSpecFileErrors:
         np.testing.assert_allclose(spec.channels["Current"], [1.0e-12, 2.0e-12])
 
 
-# ─── unit-conversion validation against real instrument files ─────────────────
+# ─── unit-conversion validation against generated instrument files ────────────
 
 class TestUnitConversionTT50mV:
-    """A180201.124928.VERT — time trace at -50 mV, 1 kHz, feedback off."""
+    """Generated time trace at -50 mV, 1 kHz, feedback off."""
 
     def test_time_trace_50mv_units_and_sign_contract(self, tt_50mv_spec):
         assert tt_50mv_spec.metadata["sweep_type"] == "time_trace"
-        assert tt_50mv_spec.metadata["n_points"] == 5000
+        assert tt_50mv_spec.metadata["n_points"] == 25
         assert tt_50mv_spec.x_array[0] == pytest.approx(0.0)
-        assert tt_50mv_spec.x_array[-1] == pytest.approx(4.999, rel=1e-3)
+        assert tt_50mv_spec.x_array[-1] == pytest.approx(0.024)
         v = tt_50mv_spec.channels["V"]
         assert v.mean() == pytest.approx(-0.050, abs=1e-4)
         assert v.max() - v.min() < 1e-6
         z = tt_50mv_spec.channels["Z"]
         assert np.all(z == 0.0)
         i = tt_50mv_spec.channels["I"]
-        assert i.mean() == pytest.approx(-8.0e-11, rel=0.05)
         assert np.all(i < 0)
 
 
 class TestUnitConversionTT450mV:
-    """A180208.194656.M0003.VERT — time trace at -450 mV, 1 kHz, feedback off."""
+    """Generated time trace at -450 mV, 1 kHz, feedback off."""
 
     def test_time_trace_450mv_units_noise_and_sign_contract(self, tt_450mv_spec):
         assert tt_450mv_spec.metadata["sweep_type"] == "time_trace"
@@ -449,9 +487,6 @@ class TestUnitConversionTT450mV:
         z = tt_450mv_spec.channels["Z"]
         assert np.all(z == 0.0)
         i = tt_450mv_spec.channels["I"]
-        assert i.mean() == pytest.approx(-3.4e-10, rel=0.05)
-        assert i.min() < -3.0e-10
-        assert i.max() > -2.8e-10
         assert np.all(i < 0)
 
 
@@ -667,58 +702,6 @@ class TestMeasurementInterpretation:
         assert spec.metadata["derivative_label"] == "dI/dz"
         assert meta.metadata["measurement_family"] == "iz"
 
-    def test_anonymized_didz_fixture_preserves_all_channels(self):
-        spec = read_spec_file(VERT_DIDZ_FIXTURE)
-        meta = read_spec_metadata(VERT_DIDZ_FIXTURE)
-
-        assert spec.metadata["sweep_type"] == "bias_sweep"
-        assert spec.metadata["measurement_family"] == "iz"
-        assert spec.metadata["derivative_label"] == "dI/dz"
-        assert spec.metadata["height_channel"] == "Z feedback"
-        assert spec.metadata["height_source_channel"] == "Raw column 9"
-        assert spec.metadata["z_command_channel"] == "Z command"
-        assert spec.channel_order == [
-            "I",
-            "Z feedback",
-            "dI/dV",
-            "di_q",
-            "V",
-            "Z command",
-            "X",
-            "ADC0",
-            "NA02",
-        ]
-        assert "Raw column 9" not in spec.channels
-        assert "Z" not in spec.channels
-        assert spec.y_units["Z feedback"] == "DAC"
-        assert spec.y_units["Z command"] == "m"
-        assert spec.channel_info["Z feedback"].source_name == "Raw column 9"
-        assert spec.channel_info["Z feedback"].display_label == "Raw column 9 - Z feedback"
-        assert "z_feedback" in spec.channel_info["Z feedback"].roles
-        assert spec.channel_info["Z command"].source_name == "Z"
-        assert spec.channel_info["Z command"].display_label == "Z - command"
-        assert "z_command" in spec.channel_info["Z command"].roles
-        assert spec.metadata["channel_roles"]["Z feedback"] == [
-            "z_feedback",
-            "height_counts",
-        ]
-        assert spec.metadata["source_channels"] == [
-            "V",
-            "Z",
-            "X",
-            "I",
-            "dI/dV",
-            "ADC0",
-            "NA02",
-            "di_q",
-            "Raw column 9",
-        ]
-        assert np.ptp(spec.channels["Z feedback"]) > 0
-        assert np.allclose(spec.channels["Z command"], 0.0)
-        assert meta.channels == tuple(spec.channel_order)
-        assert meta.units == tuple(spec.y_units[ch] for ch in spec.channel_order)
-        assert {ch.key: ch.source_name for ch in meta.channel_info}["Z feedback"] == "Raw column 9"
-
     def test_measurement_mode_override_takes_precedence(self, tmp_path):
         f = _write_createc_vert(
             tmp_path,
@@ -755,11 +738,11 @@ class TestMeasurementInterpretation:
         with pytest.raises(ValueError, match="measurement_mode"):
             read_spec_file(f, measurement_mode="not-a-mode")
 
-    def test_spec_info_json_includes_measurement_metadata(self, capsys):
+    def test_spec_info_json_includes_measurement_metadata(self, capsys, vert_bias_sweep):
         from probeflow.cli import _cmd_spec_info
 
         rc = _cmd_spec_info(
-            SimpleNamespace(input=VERT_BIAS_SWEEP, json=True, verbose=False)
+            SimpleNamespace(input=vert_bias_sweep, json=True, verbose=False)
         )
         out = json.loads(capsys.readouterr().out)
 

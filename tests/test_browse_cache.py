@@ -118,10 +118,10 @@ def test_shallow_index_second_pass_hits_cache(cache_dir, monkeypatch):
     assert idx2.files == idx1.files
 
 
-REAL_SM4 = TESTDATA / "VT260430_0004.sm4"
+REAL_SM4 = TESTDATA / "rhk.sm4"
 
 
-@pytest.mark.skipif(not REAL_SM4.exists(), reason="VT260430_0004.sm4 fixture not present")
+@pytest.mark.skipif(not REAL_SM4.exists(), reason="rhk.sm4 fixture not present")
 def test_end_to_end_sm4_browse_pipeline(cache_dir, monkeypatch):
     """Exercise the real browse pipeline on a real SM4 file (index + thumbnail)."""
     from probeflow.gui.rendering import load_thumbnail_plane, render_scan_image

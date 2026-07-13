@@ -23,36 +23,30 @@ import pytest
 
 TESTDATA = Path(__file__).resolve().parent.parent / "test_data"
 
-VERT_FIXTURES = sorted(TESTDATA.glob("*.VERT"))
-DAT_SCAN_FIXTURES = sorted(TESTDATA.glob("createc_scan_*.dat"))
-NANONIS_SPEC_FIXTURES = sorted(
-    p for p in TESTDATA.glob("nanonis_*.dat") if p.is_file())
-SXM_FIXTURE = TESTDATA / "sxm_moire_10nm.sxm"
-SM4_FIXTURE = TESTDATA / "VT260430_0004.sm4"
+DAT_SCAN_FIXTURES = sorted(TESTDATA.glob("createc_*.dat"))
+SXM_FIXTURE = TESTDATA / "nanonis.sxm"
+SM4_FIXTURE = TESTDATA / "rhk.sm4"
 
 
 # ── Metadata ↔ full-parse agreement across the real corpus ────────────────────
 
 class TestMetadataFullAgreement:
-    @pytest.mark.parametrize(
-        "path", VERT_FIXTURES, ids=lambda p: p.name)
-    def test_vert_corpus(self, path):
+    def test_vert_corpus(self, createc_time_spec, createc_bias_spec):
         from probeflow.io.readers.createc_vert import read_createc_vert_report
 
-        full = read_createc_vert_report(path, include_arrays=True)
-        meta = read_createc_vert_report(path, include_arrays=False)
-        assert meta.raw_table_shape == full.raw_table_shape
-        assert meta.column_names == full.column_names
-        assert meta.bias_min_mv == pytest.approx(full.bias_min_mv)
-        assert meta.bias_max_mv == pytest.approx(full.bias_max_mv)
+        for path in (createc_time_spec, createc_bias_spec):
+            full = read_createc_vert_report(path, include_arrays=True)
+            meta = read_createc_vert_report(path, include_arrays=False)
+            assert meta.raw_table_shape == full.raw_table_shape
+            assert meta.column_names == full.column_names
+            assert meta.bias_min_mv == pytest.approx(full.bias_min_mv)
+            assert meta.bias_max_mv == pytest.approx(full.bias_max_mv)
 
-    @pytest.mark.parametrize(
-        "path", NANONIS_SPEC_FIXTURES, ids=lambda p: p.name)
-    def test_nanonis_spec_corpus(self, path):
+    def test_nanonis_spec_corpus(self, nanonis_spec):
         from probeflow.io.spectroscopy import read_spec_file, read_spec_metadata
 
-        full = read_spec_file(path)
-        meta = read_spec_metadata(path)
+        full = read_spec_file(nanonis_spec)
+        meta = read_spec_metadata(nanonis_spec)
         assert meta.metadata["n_points"] == full.metadata["n_points"]
         assert tuple(meta.channels) == tuple(full.channel_order)
 
@@ -70,11 +64,10 @@ class TestMetadataFullAgreement:
 
 # ── Createc VERT: corruption and truncation ───────────────────────────────────
 
-@pytest.mark.skipif(not VERT_FIXTURES, reason="no VERT fixtures")
 class TestVertCorruption:
     @pytest.fixture
-    def vert_bytes(self):
-        return VERT_FIXTURES[0].read_bytes()
+    def vert_bytes(self, createc_bias_spec):
+        return createc_bias_spec.read_bytes()
 
     def _write(self, tmp_path, data: bytes) -> Path:
         p = tmp_path / "mutated.VERT"
@@ -124,8 +117,8 @@ class TestVertCorruption:
 
         text = vert_bytes.decode("latin-1")
         head, _, _tail = text.rpartition("\n")
-        # Drop the last 100 lines cleanly.
-        kept = "\n".join(head.splitlines()[:-100]) + "\n"
+        # Drop the last five lines cleanly.
+        kept = "\n".join(head.splitlines()[:-5]) + "\n"
         p = self._write(tmp_path, kept.encode("latin-1"))
 
         for include in (True, False):
@@ -263,11 +256,10 @@ class TestNanonisSpecEdges:
         assert spec.metadata["n_points"] == 40
         assert spec.channels["Current"].shape == (40,)
 
-    @pytest.mark.skipif(not NANONIS_SPEC_FIXTURES, reason="no fixtures")
-    def test_truncation_fails_in_both_paths(self, tmp_path):
+    def test_truncation_fails_in_both_paths(self, tmp_path, nanonis_spec):
         from probeflow.io.spectroscopy import read_spec_file, read_spec_metadata
 
-        raw = NANONIS_SPEC_FIXTURES[0].read_bytes()
+        raw = nanonis_spec.read_bytes()
         p = tmp_path / "trunc.dat"
         p.write_bytes(raw[: int(len(raw) * 0.95)])
         with pytest.raises(ValueError):
