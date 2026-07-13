@@ -18,6 +18,19 @@ for scripting and batch work.
 
 ## Get started
 
+### Standalone downloads
+
+No Python setup is required for the desktop builds:
+
+- **macOS 15+ on Apple silicon:** [download ProbeFlow as a `.dmg`](https://github.com/SPMQT-Lab/ProbeFlow/releases/download/v1.0.0-rc1/ProbeFlow-1.0.0-rc1-macOS-arm64.dmg)
+- **Windows 10/11 on x64 (testing):** [download the ProbeFlow `.exe` installer](https://github.com/SPMQT-Lab/ProbeFlow/releases/download/v1.0.0-rc1/ProbeFlow-1.0.0-rc1-Windows-x64-Setup.exe)
+
+These release-candidate builds are unsigned, so macOS or Windows may ask you
+to confirm that you trust the download. Checksums and installation notes are
+available on the [ProbeFlow 1.0.0 RC 1 release page](https://github.com/SPMQT-Lab/ProbeFlow/releases/tag/v1.0.0-rc1).
+
+### Install from source
+
 Python 3.11 or newer is required.
 
 ```bash
