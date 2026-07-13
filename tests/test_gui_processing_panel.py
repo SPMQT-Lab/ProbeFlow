@@ -2179,6 +2179,15 @@ def test_viewer_direct_data_export_actions_dispatch_current_view_writer(
     dlg.deleteLater()
 
 
+def test_tv_attribution_marks_feature_as_experimental_and_links_upstream():
+    from probeflow.gui.tv import AISURF_PROJECT_URL, TV_ATTRIBUTION_HTML
+
+    assert AISURF_PROJECT_URL in TV_ATTRIBUTION_HTML
+    assert "adapted from" in TV_ATTRIBUTION_HTML
+    assert "not been rigorously validated" in TV_ATTRIBUTION_HTML
+    assert "testing purposes" in TV_ATTRIBUTION_HTML
+
+
 def test_tv_load_from_browse_reuses_processed_scan_helper(qapp, monkeypatch):
     from probeflow.gui import SxmFile
     from probeflow.gui.app import ProbeFlowWindow

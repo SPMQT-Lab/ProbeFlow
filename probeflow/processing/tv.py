@@ -1,4 +1,11 @@
-"""Total-variation denoising (Chambolle–Pock primal-dual, ported from AiSurf)."""
+"""Experimental total-variation decomposition adapted from AiSurf.
+
+Upstream project:
+https://github.com/QuantumMaterialsModelling/AiSurf-Automated-Identification-of-Surface-images
+
+This ProbeFlow adaptation has not been rigorously validated and is included
+for testing purposes.
+"""
 
 from __future__ import annotations
 
@@ -76,6 +83,11 @@ def tv_denoise(
       preserves terraces without staircasing.
     * ``"tv_l1"``      — Isotropic TV-L1. More aggressive on impulsive noise,
       but staircases on gently curved terraces.
+
+    This is an experimental adaptation of AiSurf's Total Variation
+    decomposition work. It has not been rigorously validated within ProbeFlow
+    and is included for testing purposes. Scientific users should consult and
+    cite the original AiSurf work linked in this module's documentation.
 
     Parameters
     ----------

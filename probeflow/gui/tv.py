@@ -1,4 +1,4 @@
-"""TV-denoise tab — exposes probeflow.processing.tv_denoise in the GUI.
+"""Experimental TV-denoise tab adapted from AiSurf's TV decomposition work.
 
 Kept in its own module so the optional TV-denoise UI lives alongside the
 kernel it wraps, without bloating the main Browse/Viewer file.
@@ -33,6 +33,16 @@ from probeflow.processing.display import clip_range_from_array as _clip_range_fr
 
 
 PLANE_NAMES = ["Z fwd", "Z bwd", "I fwd", "I bwd"]
+AISURF_PROJECT_URL = (
+    "https://github.com/QuantumMaterialsModelling/"
+    "AiSurf-Automated-Identification-of-Surface-images"
+)
+TV_ATTRIBUTION_HTML = (
+    "Experimental feature - total-variation decomposition adapted from "
+    f'<a href="{AISURF_PROJECT_URL}">AiSurf: Automated Identification of '
+    "Surface Images</a>. This ProbeFlow implementation has not been rigorously "
+    "validated and is included for testing purposes."
+)
 
 
 def _sep() -> QFrame:
@@ -99,11 +109,14 @@ class TVPanel(QWidget):
         self._canvas = FigureCanvasQTAgg(self._fig)
         lay.addWidget(self._canvas, 1)
 
-        powered = QLabel("Powered by AiSurf")
-        powered.setFont(ui_font(8))
-        powered.setAlignment(Qt.AlignCenter)
-        powered.setStyleSheet("color: #888;")
-        lay.addWidget(powered)
+        attribution = QLabel(TV_ATTRIBUTION_HTML)
+        attribution.setFont(ui_font(8))
+        attribution.setAlignment(Qt.AlignCenter)
+        attribution.setWordWrap(True)
+        attribution.setOpenExternalLinks(True)
+        attribution.setTextInteractionFlags(Qt.TextBrowserInteraction)
+        attribution.setStyleSheet("color: #888;")
+        lay.addWidget(attribution)
 
     # ── Public API ─────────────────────────────────────────────────────────────
     def load_entry(self, entry, plane_idx: int, arr: np.ndarray,

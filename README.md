@@ -137,3 +137,10 @@ The original Createc-decoding work was written by
 [Rohan Platts](https://github.com/rohanplatts). ProbeFlow builds on that
 foundation with browsing, conversion, processing, ROI workflows, spectroscopy
 handling, FFT tools, and export provenance.
+
+The experimental Total Variation decomposition feature is adapted from
+[AiSurf: Automated Identification of Surface Images](https://github.com/QuantumMaterialsModelling/AiSurf-Automated-Identification-of-Surface-images),
+developed by Quantum Materials Modelling. The ProbeFlow adaptation has not been
+rigorously validated and is included for testing purposes. For scientific use,
+please consult and cite the [original AiSurf Total Variation
+work](https://arxiv.org/abs/2505.08843).
