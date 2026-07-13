@@ -27,6 +27,7 @@ def save_viewer_png(
     add_scalebar: bool = True,
     include_provenance: bool = True,
     image_mask_set=None,
+    scan_range_m: tuple[float, float] | None = None,
 ) -> str:
     """Write *arr* to *out_path* as a PNG with embedded provenance metadata.
 
@@ -41,20 +42,35 @@ def save_viewer_png(
     from probeflow.provenance.export import build_scan_export_provenance, png_display_state
 
     try:
+        load_error = None
         try:
             _scan = load_scan(entry_path)
-            w_m, h_m = _scan.scan_range_m
-        except Exception:
+        except Exception as exc:
             _scan = None
-            w_m = h_m = 0.0
+            load_error = exc
+        if include_provenance and _scan is None:
+            return f"Export error: source scan could not be loaded for provenance: {load_error}"
+
+        effective_range = scan_range_m
+        if effective_range is None and _scan is not None:
+            effective_range = _scan.scan_range_m
+        if effective_range is None:
+            effective_range = (0.0, 0.0)
+        w_m, h_m = float(effective_range[0]), float(effective_range[1])
 
         vmin, vmax = drs.resolve(arr)
         provenance = None
         if include_provenance and _scan is not None:
             try:
+                # Provenance describes the exported processed array. Keep the
+                # source Scan itself untouched while giving the export record
+                # the same calibrated range used by the scale bar.
+                import copy
+                provenance_scan = copy.copy(_scan)
+                provenance_scan.scan_range_m = (w_m, h_m)
                 ps = processing_state_from_gui(processing or {})
                 provenance = build_scan_export_provenance(
-                    _scan,
+                    provenance_scan,
                     channel_index=ch_idx,
                     channel_name=ch_name,
                     processing_state=ps,

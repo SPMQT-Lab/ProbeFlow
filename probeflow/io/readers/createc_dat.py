@@ -380,7 +380,10 @@ def _trim_createc_stack(
     Real complete Createc fixtures record ``ImageYPosMax`` as ``Num.Y + 1``.
     Interpreting the field as one-based "next Y position" gives the completed
     row count as ``ImageYPosMax - 1``.  When the field is absent or outside the
-    declared image height, the legacy non-zero channel-0 heuristic is retained.
+    declared image height, the fallback removes only trailing rows that are
+    zero/nonfinite through the final column across every stored channel; a zero
+    in channel 0 alone is valid and is not sufficient evidence of an incomplete
+    row.
     """
 
     Ny = int(stack.shape[1])

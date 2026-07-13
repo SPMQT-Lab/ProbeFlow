@@ -106,3 +106,32 @@ def test_processing_history_roundtrip_is_idempotent():
 
 def test_processing_history_empty_by_default():
     assert _scan().processing_history == []
+
+
+def test_processing_history_keeps_timestamps_aligned_when_bookkeeping_is_filtered():
+    scan = _scan()
+    scan.processing_history = [
+        {"op": "file_load", "params": {}, "timestamp": "LOAD"},
+        {"op": "align_rows", "params": {"method": "median"}, "timestamp": "ALIGN"},
+        {"op": "export_png", "params": {}, "timestamp": "EXPORT"},
+    ]
+
+    assert scan.processing_history == [
+        {"op": "align_rows", "params": {"method": "median"}, "timestamp": "ALIGN"},
+    ]
+
+
+def test_provenance_history_format_preserves_processing_timestamp():
+    scan = _scan()
+    scan.processing_history = [
+        {"operation_id": "file_load", "parameters": {}, "timestamp": "LOAD"},
+        {
+            "operation_id": "smooth",
+            "parameters": {"sigma_px": 1.5},
+            "timestamp": "SMOOTH",
+        },
+    ]
+
+    assert scan.processing_history == [
+        {"op": "smooth", "params": {"sigma_px": 1.5}, "timestamp": "SMOOTH"},
+    ]

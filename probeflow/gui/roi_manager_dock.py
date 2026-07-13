@@ -193,7 +193,7 @@ class ROIManagerPanel(QWidget):
         if roi_id is None or roi_set is None:
             return
         roi = roi_set.get(roi_id)
-        if roi is None:
+        if roi is None or roi.kind not in AREA_ROI_KINDS:
             return
         get_shape = self._cb.get("get_image_shape")
         image_shape = get_shape() if get_shape else None
@@ -212,7 +212,7 @@ class ROIManagerPanel(QWidget):
             return
         rois = [roi_set.get(rid) for rid in roi_ids]
         rois = [r for r in rois if r is not None]
-        if len(rois) < 2:
+        if len(rois) < 2 or any(r.kind not in AREA_ROI_KINDS for r in rois):
             return
         mode = self._combine_mode.currentText()
         from probeflow.core import roi as _roi_module
@@ -224,11 +224,16 @@ class ROIManagerPanel(QWidget):
     def _on_item_selection_changed(self) -> None:
         ids = self._selected_roi_ids()
         n = len(ids)
+        roi_set = self._roi_set_getter()
+        selected = [roi_set.get(rid) for rid in ids] if roi_set is not None else []
+        all_area = len(selected) == n and all(
+            roi is not None and roi.kind in AREA_ROI_KINDS for roi in selected
+        )
         self._rename_btn.setEnabled(n == 1)
         self._delete_btn.setEnabled(n >= 1)
         self._active_btn.setEnabled(n == 1)
-        self._invert_btn.setEnabled(n == 1)
-        self._combine_btn.setEnabled(n >= 2)
+        self._invert_btn.setEnabled(n == 1 and all_area)
+        self._combine_btn.setEnabled(n >= 2 and all_area)
         self._cb.get("on_roi_selection_changed", lambda: None)()
 
     # ── context menu ─────────────────────────────────────────────────────────
@@ -260,7 +265,7 @@ class ROIManagerPanel(QWidget):
         set_active_act.triggered.connect(self._on_set_active)
 
         invert_act = menu.addAction("Invert")
-        invert_act.setEnabled(roi is not None)
+        invert_act.setEnabled(is_area)
         invert_act.triggered.connect(self._on_invert)
 
         menu.addSeparator()

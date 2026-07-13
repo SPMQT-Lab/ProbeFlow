@@ -36,15 +36,21 @@ def show_roi_histogram(
     if len(vals) == 0:
         QMessageBox.information(parent, "Histogram", "No pixels in ROI.")
         return
+    finite = vals[np.isfinite(vals)]
+    if finite.size == 0:
+        QMessageBox.information(
+            parent, "Histogram", "ROI contains no finite pixel values."
+        )
+        return
 
     scale, unit, _ = channel_unit_fn()
     unit_str = f" {unit}" if unit else ""
     QMessageBox.information(
         parent, f"Histogram: {roi.name}",
-        f"Pixels: {len(vals)}\n"
-        f"Min:  {float(vals.min()) * scale:.4g}{unit_str}\n"
-        f"Max:  {float(vals.max()) * scale:.4g}{unit_str}\n"
-        f"Mean: {float(vals.mean()) * scale:.4g}{unit_str}",
+        f"Pixels: {len(vals)} ({finite.size} finite)\n"
+        f"Min:  {float(finite.min()) * scale:.4g}{unit_str}\n"
+        f"Max:  {float(finite.max()) * scale:.4g}{unit_str}\n"
+        f"Mean: {float(finite.mean()) * scale:.4g}{unit_str}",
     )
 
 

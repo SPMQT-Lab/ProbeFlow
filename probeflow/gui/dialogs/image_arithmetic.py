@@ -482,14 +482,23 @@ class ImageArithmeticDialog(QDialog):
         entry = self._selected_entry()
         if entry is None:
             raise ValueError("No source image selected.")
+        source_path = Path(entry.path).resolve()
+        from probeflow.core.source_identity import sha256_file
+
+        stat = source_path.stat()
         plane_idx = int(self._plane_combo.currentData() or 0)
         return {
             "operation": self._operation(),
             "operand_type": "image",
-            "source_path": str(Path(entry.path).resolve()),
+            "source_path": str(source_path),
             "source_label": str(getattr(entry, "stem", Path(entry.path).stem)),
             "plane_idx": plane_idx,
             "plane_label": self._plane_combo.currentText(),
+            "source_fingerprint": {
+                "file_size_bytes": int(stat.st_size),
+                "mtime_ns": int(stat.st_mtime_ns),
+                "sha256": sha256_file(source_path),
+            },
         }
 
     def _generated_params(self) -> dict[str, Any]:

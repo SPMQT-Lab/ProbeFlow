@@ -456,8 +456,33 @@ def _load_arithmetic_operand_image(params: "dict[str, Any]") -> np.ndarray:
 
     from probeflow.core.scan_loader import load_scan
 
+    path = Path(str(source_path))
+    fingerprint = params.get("source_fingerprint")
+    if isinstance(fingerprint, dict):
+        from probeflow.core.source_identity import sha256_file
+
+        try:
+            stat = path.stat()
+            actual_size = int(stat.st_size)
+            actual_hash = sha256_file(path)
+        except OSError as exc:
+            raise ValueError(
+                f"Could not fingerprint image arithmetic operand {source_path!r}: {exc}"
+            ) from exc
+        expected_size = fingerprint.get("file_size_bytes")
+        expected_hash = fingerprint.get("sha256")
+        if (
+            expected_size is not None and actual_size != int(expected_size)
+        ) or (
+            expected_hash and actual_hash != str(expected_hash)
+        ):
+            raise ValueError(
+                "Image arithmetic operand has changed since this processing step "
+                f"was created: {source_path!r}. Remove and recreate the step."
+            )
+
     try:
-        scan = load_scan(Path(str(source_path)))
+        scan = load_scan(path)
     except Exception as exc:
         raise ValueError(
             f"Could not load image arithmetic operand {source_path!r}: {exc}"
@@ -482,6 +507,7 @@ def apply_processing_state(
     pixel_size_x_m: float | None = None,
     pixel_size_y_m: float | None = None,
     operand_resolver=None,
+    strict: bool = False,
     _depth: int = 0,
 ) -> np.ndarray:
     """Apply *state* steps in order to *arr*.
@@ -527,6 +553,11 @@ def apply_processing_state(
         callers that don't want that hidden I/O can inject a resolver that
         looks up the operand in an in-memory cache or dict (review
         arch-backend #13).
+    strict:
+        When true, any recoverable ``UserWarning`` emitted while resolving or
+        applying a requested step becomes ``ValueError``.  Interactive preview
+        keeps the default forgiving behavior; CLI and export validation use
+        strict mode so recorded steps cannot be silently skipped.
 
     Returns
     -------
@@ -538,6 +569,27 @@ def apply_processing_state(
         If a step contains an unrecognised operation name, or if ROI-in-ROI
         nesting exceeds depth 2.
     """
+    if strict and _depth == 0:
+        import warnings
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always", UserWarning)
+            result = apply_processing_state(
+                arr,
+                state,
+                roi_set,
+                mask_set=mask_set,
+                pixel_size_x_m=pixel_size_x_m,
+                pixel_size_y_m=pixel_size_y_m,
+                operand_resolver=operand_resolver,
+                strict=False,
+                _depth=0,
+            )
+        failures = [str(item.message) for item in caught if issubclass(item.category, UserWarning)]
+        if failures:
+            raise ValueError("Strict processing rejected warning: " + "; ".join(failures))
+        return result
+
     # Always return a fresh float64 copy so raw Scan planes are never mutated.
     a = arr.astype(np.float64, copy=True)
 
@@ -1112,6 +1164,7 @@ def apply_processing_state_with_calibration(
     mask_set: "Any | None" = None,
     scan_range_m: tuple[float, float] | None,
     operand_resolver=None,
+    strict: bool = False,
 ) -> tuple[np.ndarray, tuple[float, float] | None]:
     """Apply *state* to *arr* and return the post-processing scan_range.
 
@@ -1170,6 +1223,7 @@ def apply_processing_state_with_calibration(
             pixel_size_x_m=psx,
             pixel_size_y_m=psy,
             operand_resolver=operand_resolver,
+            strict=strict,
         )
         h_out, w_out = a.shape
         if (h_out, w_out) != (h_in, w_in):

@@ -30,7 +30,7 @@ from probeflow.gui.viewer.geometric_ops import (
 )
 from probeflow.processing.gui_adapter import processing_state_from_gui
 from probeflow.processing.state import (
-    apply_processing_state,
+    apply_processing_state_with_calibration,
     assert_roi_references_resolved,
 )
 from probeflow.provenance import build_export_record, display_lines
@@ -628,6 +628,7 @@ class ImageViewerProcessingExportMixin:
             add_scalebar=self._export_scalebar_enabled(),
             include_provenance=self._export_provenance_enabled(),
             image_mask_set=getattr(self, "_image_mask_set", None),
+            scan_range_m=self._processed_scan_range_m(),
         )
         if msg.startswith("Saved") and self._processing_history is not None:
             self._mark_history_export(out_path, export_parameters={"export_kind": "viewer_png"})
@@ -674,19 +675,16 @@ class ImageViewerProcessingExportMixin:
             return False
         if not self._assert_mask_scopes_current(ps):
             return False
-        if (
-            self._raw_arr is not None
-            and self._processing_state_has_image_arithmetic_operand(ps)
-        ):
+        if self._raw_arr is not None and ps.steps:
             try:
-                # Forward calibration (review image-proc #1) — preflight
-                # must mirror what _refresh_display_array does so it
-                # validates the same pipeline that will execute.
-                psx, psy = self._processing_pixel_sizes_m()
-                apply_processing_state(
+                # Export is strict even though live preview is forgiving: every
+                # recorded step must resolve and execute before an artifact can
+                # claim that processing history.
+                apply_processing_state_with_calibration(
                     self._raw_arr, ps, self._image_roi_set,
                     mask_set=mask_set,
-                    pixel_size_x_m=psx, pixel_size_y_m=psy,
+                    scan_range_m=getattr(self, "_scan_range_m", None),
+                    strict=True,
                 )
             except Exception as exc:
                 self._status_lbl.setText(f"Export blocked: Processing failed: {exc}")

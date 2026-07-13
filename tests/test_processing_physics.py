@@ -768,6 +768,23 @@ class TestMeasurePeriodicitySecondPass:
 
     # ── B: lattice orientation ────────────────────────────────────────────────
 
+    def test_anisotropic_pixels_use_physical_reciprocal_angle(self):
+        """A physically 45-degree grating remains 45 degrees on 2:1 pixels."""
+        Ny = Nx = 128
+        dx_m, dy_m = 2e-9, 1e-9
+        # kx=8 and ky=4 give equal physical frequencies:
+        # 8/(Nx*dx) == 4/(Ny*dy).
+        arr = _sine_wave(Ny, Nx, fx=8 / Nx, fy=4 / Ny, amp=1.0)
+
+        peak = measure_periodicity(
+            arr,
+            pixel_size_x_m=dx_m,
+            pixel_size_y_m=dy_m,
+            n_peaks=1,
+        )[0]
+
+        assert abs((peak["angle_deg"] % 180.0) - 45.0) < 1.0
+
     def test_grating_at_non_trivial_angle_recovered_within_five_degrees(self):
         """A grating whose wave-vector is not 45° must be recovered correctly.
 

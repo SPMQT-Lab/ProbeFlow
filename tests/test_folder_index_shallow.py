@@ -127,3 +127,20 @@ def test_peek_file_budget_caps_counts(tmp_path):
     uncapped = _peek_subfolder(sub, max_files=400)
     assert uncapped.counts_capped is False
     assert uncapped.n_scans == 10
+
+
+def test_peek_budget_ignores_unsupported_files(tmp_path):
+    import shutil
+    from probeflow.core.indexing import _peek_subfolder
+
+    src = next(TESTDATA.glob("*.sxm"), None) or next(TESTDATA.glob("*.dat"))
+    sub = tmp_path / "experiment"
+    sub.mkdir()
+    for i in range(10):
+        (sub / f"log_{i:02d}.txt").write_text("not probe data")
+    shutil.copy(src, sub / f"zz_scan{src.suffix}")
+
+    result = _peek_subfolder(sub, max_files=1)
+
+    assert result.n_scans == 1
+    assert result.counts_capped is False

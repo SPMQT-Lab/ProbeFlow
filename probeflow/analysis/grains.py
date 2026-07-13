@@ -288,8 +288,12 @@ def measure_periodicity(
         freq_m   = math.sqrt(freq_m_x**2 + freq_m_y**2)
         period_m = 1.0 / freq_m if freq_m > 0 else 0.0
 
-        angle_deg = math.degrees(math.atan2(fy * pixel_size_y_m,
-                                             fx * pixel_size_x_m))
+        # Orientation belongs to the physical reciprocal vector.  Multiplying
+        # the pixel frequencies by pixel size (the old implementation) applies
+        # anisotropy in the wrong direction and effectively squares the aspect
+        # ratio error.  The period above already uses these calibrated
+        # components, so derive the angle from the same vector.
+        angle_deg = math.degrees(math.atan2(freq_m_y, freq_m_x))
 
         results.append({
             'period_m':  period_m,

@@ -266,6 +266,57 @@ def test_save_viewer_png_can_skip_provenance(tmp_path):
     assert "Saved" in msg
 
 
+def test_save_viewer_png_uses_explicit_processed_scan_range(tmp_path):
+    from probeflow.gui.viewer.png_export import save_viewer_png
+
+    arr = np.zeros((4, 6), dtype=float)
+    fake_scan = MagicMock()
+    fake_scan.scan_range_m = (60e-9, 40e-9)
+    drs = MagicMock()
+    drs.resolve.return_value = (0.0, 1.0)
+    processed_range = (12e-9, 8e-9)
+
+    with patch(
+        "probeflow.core.scan_loader.load_scan", return_value=fake_scan,
+    ), patch(
+        "probeflow.provenance.export.build_scan_export_provenance",
+        return_value="prov",
+    ) as build_provenance, patch(
+        "probeflow.processing.export_png",
+    ) as export_png:
+        msg = save_viewer_png(
+            arr, str(tmp_path / "viewer.png"), tmp_path / "source.sxm",
+            "gray", 1.0, 99.0, drs, {}, None, 0, "Z",
+            scan_range_m=processed_range,
+        )
+
+    assert "Saved" in msg
+    assert export_png.call_args.kwargs["scan_range_m"] == processed_range
+    provenance_scan = build_provenance.call_args.args[0]
+    assert provenance_scan.scan_range_m == processed_range
+    assert fake_scan.scan_range_m == (60e-9, 40e-9)
+
+
+def test_save_viewer_png_fails_closed_when_requested_provenance_source_is_missing(tmp_path):
+    from probeflow.gui.viewer.png_export import save_viewer_png
+
+    drs = MagicMock()
+    drs.resolve.return_value = (0.0, 1.0)
+    with patch(
+        "probeflow.core.scan_loader.load_scan",
+        side_effect=FileNotFoundError("gone"),
+    ), patch("probeflow.processing.export_png") as export_png:
+        msg = save_viewer_png(
+            np.zeros((4, 4)), str(tmp_path / "viewer.png"),
+            tmp_path / "missing.sxm", "gray", 1.0, 99.0,
+            drs, {}, None, 0, "Z", include_provenance=True,
+            scan_range_m=(4e-9, 4e-9),
+        )
+
+    assert msg.startswith("Export error: source scan could not be loaded")
+    export_png.assert_not_called()
+
+
 # ── save_provenance_json ──────────────────────────────────────────────────────
 
 def test_save_provenance_json_writes_file(tmp_path):
