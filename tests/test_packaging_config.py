@@ -89,3 +89,33 @@ def test_build_script_recreates_an_arm64_python_313_environment():
     assert '"${PYTHON}" -m venv --clear' in source
     assert '"${ROOT}[desktop]"' in source
     assert "constraints-arm64.txt" in source
+
+
+def test_dmg_builder_creates_and_verifies_drag_install_artifact():
+    builder = (REPO_ROOT / "scripts" / "build_macos_dmg.sh").read_text(
+        encoding="utf-8"
+    )
+    validator = (REPO_ROOT / "scripts" / "validate_macos_dmg.sh").read_text(
+        encoding="utf-8"
+    )
+
+    for expected in (
+        "build_macos_app.sh",
+        "ProbeFlow-${ARTIFACT_VERSION}-macOS-arm64.dmg",
+        "ln -s /Applications",
+        "hdiutil create",
+        "-format UDZO",
+        "validate_macos_dmg.sh",
+        "shasum -a 256",
+    ):
+        assert expected in builder
+
+    for expected in (
+        "hdiutil verify",
+        "hdiutil attach",
+        "-readonly",
+        "validate_macos_app.py",
+        '"${MOUNTED_APP}/Contents/MacOS/ProbeFlow" --smoke-test',
+        'readlink "${MOUNT_POINT}/Applications"',
+    ):
+        assert expected in validator

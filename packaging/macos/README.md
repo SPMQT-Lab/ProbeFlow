@@ -33,6 +33,24 @@ release step:
 scripts/build_macos_app.sh
 ```
 
+To rebuild the application and package it as a drag-to-install disk image:
+
+```bash
+scripts/build_macos_dmg.sh
+```
+
+This creates `ProbeFlow-1.0.0-rc1-macOS-arm64.dmg` and its `.sha256` checksum
+under `build/macos/dist/`. The mounted image contains `ProbeFlow.app` and an
+alias to `/Applications`. The script verifies the disk image, mounts it
+read-only, repeats the application-bundle audit, and launches the packaged
+smoke test from the mounted volume. Use `--skip-app-build` only when the
+existing application was built from the exact source revision being packaged.
+
+The resulting DMG is ad-hoc signed and suitable for local testing. A GitHub
+Release can provide it as a direct download, but distribution without the
+usual macOS security warning requires Developer ID signing and Apple
+notarization in the following release step.
+
 Set `PROBEFLOW_BUILD_PYTHON` to override the extracted Python 3.13.14 runtime, or
 `PROBEFLOW_BUILD_ROOT` to place the disposable virtual environment and build
 artifacts outside the repository. The script rejects non-arm64 interpreters,
