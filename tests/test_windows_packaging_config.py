@@ -6,6 +6,12 @@ from pathlib import Path
 import struct
 import tomllib
 
+from scripts.validate_windows_app import (
+    IMAGE_FILE_MACHINE_AMD64,
+    IMAGE_FILE_MACHINE_I386,
+    _machine_is_allowed,
+)
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 WINDOWS_DIR = REPO_ROOT / "packaging" / "windows"
@@ -121,6 +127,15 @@ def test_windows_validator_requires_x64_and_rejects_unused_qt():
     assert '"PySide6" / "Qt" / "bin"' not in source
 
 
+def test_windows_validator_only_exempts_the_nsis_x86_uninstaller():
+    assert _machine_is_allowed(Path("ProbeFlow.exe"), IMAGE_FILE_MACHINE_AMD64)
+    assert _machine_is_allowed(
+        Path("Uninstall ProbeFlow.exe"), IMAGE_FILE_MACHINE_I386
+    )
+    assert not _machine_is_allowed(Path("ProbeFlow.exe"), IMAGE_FILE_MACHINE_I386)
+    assert not _machine_is_allowed(Path("_internal/foreign.dll"), IMAGE_FILE_MACHINE_I386)
+
+
 def test_nsis_installer_is_per_user_and_has_clean_uninstall():
     source = (WINDOWS_DIR / "ProbeFlow.nsi").read_text(encoding="utf-8")
 
@@ -131,6 +146,7 @@ def test_nsis_installer_is_per_user_and_has_clean_uninstall():
         'CreateShortcut "$SMPROGRAMS\\ProbeFlow.lnk"',
         "CurrentVersion\\Uninstall\\ProbeFlow",
         'WriteUninstaller "$INSTDIR\\Uninstall ProbeFlow.exe"',
+        '"UninstallString" "$\\\"$INSTDIR\\Uninstall ProbeFlow.exe$\\\""',
         'RMDir /r "$INSTDIR"',
         "${RunningX64}",
     ):
@@ -147,6 +163,7 @@ def test_installer_builder_installs_smoke_tests_and_uninstalls():
         "ProbeFlow-$ArtifactVersion-Windows-x64-Setup.exe",
         "ProbeFlow-$ArtifactVersion-Windows-x64-portable.zip",
         "makensis.exe",
+        '"/WX"',
         "Get-FileHash -Algorithm SHA256",
         '"/S", "/D=$InstallRoot"',
         "validate_windows_app.py",

@@ -9,7 +9,9 @@ import sys
 
 
 IMAGE_FILE_MACHINE_AMD64 = 0x8664
+IMAGE_FILE_MACHINE_I386 = 0x014C
 NATIVE_SUFFIXES = {".dll", ".exe", ".pyd"}
+APPROVED_X86_INSTALLER_BINARIES = {Path("Uninstall ProbeFlow.exe")}
 
 
 def _text(value: bytes | str) -> str:
@@ -26,6 +28,15 @@ def _version_strings(pe) -> dict[str, str]:
             for table in getattr(entry, "StringTable", ()):
                 values.update({_text(key): _text(value) for key, value in table.entries.items()})
     return values
+
+
+def _machine_is_allowed(relative_path: Path, machine: int) -> bool:
+    """Allow x64 application code and NSIS's compatibility uninstaller stub."""
+
+    return machine == IMAGE_FILE_MACHINE_AMD64 or (
+        machine == IMAGE_FILE_MACHINE_I386
+        and relative_path in APPROVED_X86_INSTALLER_BINARIES
+    )
 
 
 def validate(app_dir: Path) -> None:
@@ -91,14 +102,19 @@ def validate(app_dir: Path) -> None:
     ]
     if not binaries:
         raise RuntimeError("Windows bundle contains no PE binaries")
+    approved_x86 = 0
     for path in binaries:
+        relative_path = path.relative_to(app_dir)
         pe = pefile.PE(str(path), fast_load=True)
         try:
-            if pe.FILE_HEADER.Machine != IMAGE_FILE_MACHINE_AMD64:
+            machine = pe.FILE_HEADER.Machine
+            if not _machine_is_allowed(relative_path, machine):
                 raise RuntimeError(
-                    f"Non-x64 PE binary: {path.relative_to(app_dir)} "
-                    f"(machine 0x{pe.FILE_HEADER.Machine:04x})"
+                    f"Unexpected PE architecture: {relative_path} "
+                    f"(machine 0x{machine:04x})"
                 )
+            if machine == IMAGE_FILE_MACHINE_I386:
+                approved_x86 += 1
         finally:
             pe.close()
 
@@ -123,7 +139,8 @@ def validate(app_dir: Path) -> None:
         raise RuntimeError(f"ProbeFlow.exe version metadata mismatch: {mismatched}")
 
     print(
-        f"Validated {app_dir.name}: {len(binaries)} x64 PE files, "
+        f"Validated {app_dir.name}: {len(binaries) - approved_x86} x64 PE files, "
+        f"{approved_x86} approved NSIS x86 uninstaller, "
         "resources, licenses, and version metadata valid"
     )
 

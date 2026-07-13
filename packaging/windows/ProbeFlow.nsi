@@ -88,7 +88,7 @@ Section "ProbeFlow" SecMain
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ProbeFlow" \
     "InstallLocation" "$INSTDIR"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ProbeFlow" \
-    "UninstallString" '$"$INSTDIR\Uninstall ProbeFlow.exe$"'
+    "UninstallString" "$\"$INSTDIR\Uninstall ProbeFlow.exe$\""
   WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ProbeFlow" \
     "NoModify" 1
   WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ProbeFlow" \

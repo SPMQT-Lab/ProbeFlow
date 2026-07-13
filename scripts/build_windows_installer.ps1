@@ -46,6 +46,7 @@ Remove-Item -Force -ErrorAction SilentlyContinue $Installer, "$Installer.sha256"
 Write-Host "Building $InstallerName with $MakeNsis"
 & $MakeNsis `
     "/V3" `
+    "/WX" `
     "/DSOURCE_DIR=$App" `
     "/DOUTPUT_FILE=$Installer" `
     "/DICON_FILE=$Icon" `
