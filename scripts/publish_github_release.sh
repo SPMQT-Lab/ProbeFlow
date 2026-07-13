@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Publish the notarized ProbeFlow DMG and required source assets as a prerelease.
+# Publish the unnotarized ProbeFlow DMG and required source assets as a prerelease.
 
 set -euo pipefail
 
@@ -19,6 +19,12 @@ DISPLAY_VERSION="${VERSION/rc/ RC }"
 TAG="v${ARTIFACT_VERSION}"
 DMG_NAME="ProbeFlow-${ARTIFACT_VERSION}-macOS-arm64.dmg"
 DMG="${DIST_DIR}/${DMG_NAME}"
+
+if [[ "${1:-}" != "--unsigned" || $# -ne 1 ]]; then
+    echo "Usage: $0 --unsigned" >&2
+    echo "The flag confirms that this release is not Developer ID-signed or notarized." >&2
+    exit 2
+fi
 
 if [[ -n "$(git -C "${ROOT}" status --porcelain)" ]]; then
     echo "The repository must be clean before publishing a release." >&2
@@ -40,16 +46,22 @@ if gh release view "${TAG}" >/dev/null 2>&1; then
 fi
 
 if [[ ! -f "${DMG}" || ! -f "${DMG}.sha256" ]]; then
-    echo "Notarized DMG or checksum is missing under ${DIST_DIR}." >&2
+    echo "DMG or checksum is missing under ${DIST_DIR}." >&2
     exit 1
 fi
-/usr/bin/xcrun stapler validate "${DMG}"
-/usr/sbin/spctl \
-    --assess \
-    --type open \
-    --context context:primary-signature \
-    --verbose=2 \
-    "${DMG}"
+
+if /usr/bin/xcrun stapler validate "${DMG}" >/dev/null 2>&1; then
+    echo "The DMG has a notarization ticket; review the unsigned release notes." >&2
+    exit 1
+fi
+
+(
+    cd "${DIST_DIR}"
+    /usr/bin/shasum -a 256 -c "${DMG_NAME}.sha256"
+)
+
+PROBEFLOW_VALIDATION_PYTHON="${BUILD_ROOT}/venv/bin/python" \
+    "${ROOT}/scripts/validate_macos_dmg.sh" "${DMG}"
 
 ASSETS=("${DMG}" "${DMG}.sha256")
 MANIFEST_PYTHON="${BUILD_ROOT}/venv/bin/python"
@@ -90,7 +102,7 @@ for asset in "${ASSETS[@]}"; do
     fi
 done
 
-echo "Publishing ${TAG} from ${LOCAL_HEAD}"
+echo "Publishing unnotarized ${TAG} from ${LOCAL_HEAD}"
 gh release create "${TAG}" \
     --target "${LOCAL_HEAD}" \
     --title "ProbeFlow ${DISPLAY_VERSION}" \

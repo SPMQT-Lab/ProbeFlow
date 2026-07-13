@@ -186,17 +186,19 @@ def test_notarization_script_keeps_credentials_out_of_arguments():
         assert secret_argument not in source
 
 
-def test_github_release_requires_notarization_and_corresponding_sources():
+def test_github_release_requires_explicit_unsigned_mode_and_release_checks():
     source = (REPO_ROOT / "scripts" / "publish_github_release.sh").read_text(
         encoding="utf-8"
     )
 
     for expected in (
+        '"--unsigned"',
         "status --porcelain",
         "origin/main",
         "gh auth status",
         "stapler validate",
-        "spctl",
+        "shasum -a 256 -c",
+        "validate_macos_dmg.sh",
         "qt_source_archives",
         "QT_CORRESPONDING_SOURCE.txt",
         "gh release create",

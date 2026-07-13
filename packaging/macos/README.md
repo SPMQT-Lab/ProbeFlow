@@ -46,12 +46,27 @@ read-only, repeats the application-bundle audit, and launches the packaged
 smoke test from the mounted volume. Use `--skip-app-build` only when the
 existing application was built from the exact source revision being packaged.
 
-The resulting DMG is ad-hoc signed and suitable for local testing. A GitHub
-Release can provide it as a direct download, but distribution without the
-usual macOS security warning requires Developer ID signing and Apple
-notarization in the following release step.
+The application inside the resulting DMG is ad-hoc signed and suitable for
+local testing or free distribution. The DMG itself is unsigned. A GitHub
+Release can provide it as a direct download, but downloaded copies display the
+usual macOS unidentified-developer warning because they have no Developer ID
+signature or Apple notarization.
 
-## Developer ID release
+## Unsigned GitHub release
+
+ProbeFlow currently uses the free, unnotarized distribution path. Before
+publishing, `scripts/publish_github_release.sh --unsigned` requires a clean
+checkout equal to `origin/main`, a valid DMG checksum, a complete mounted-bundle
+audit and smoke test, and all five Qt corresponding-source archives. The
+explicit flag prevents accidentally describing an unsigned build as notarized.
+
+The release notes tell users to attempt the first launch and then approve
+ProbeFlow under **System Settings → Privacy & Security → Open Anyway**. This is
+an unavoidable extra installation step for an app distributed without a paid
+Apple Developer ID. The release script creates the `v1.0.0-rc1` GitHub
+prerelease and will not overwrite an existing release.
+
+## Optional Developer ID release
 
 The release build supports Developer ID signing without storing credentials in
 the repository. Install a `Developer ID Application` certificate in the login
@@ -80,11 +95,9 @@ The build caches those official archives under
 `build/macos/downloads/qt-source/`; their full license texts and upstream
 attribution records are also embedded in the application.
 
-After notarization, `scripts/publish_github_release.sh` performs the final
-publication guardrails: it requires a clean checkout equal to `origin/main`, a
-valid stapled ticket and Gatekeeper assessment, the DMG checksum, and all five
-corresponding-source archives before creating the `v1.0.0-rc1` GitHub
-prerelease. It will not overwrite an existing release.
+The notarization script remains available if the project adopts a paid Apple
+Developer ID later. The unsigned publication workflow and release notes must be
+changed before publishing a notarized build.
 
 Set `PROBEFLOW_BUILD_PYTHON` to override the extracted Python 3.13.14 runtime, or
 `PROBEFLOW_BUILD_ROOT` to place the disposable virtual environment and build
