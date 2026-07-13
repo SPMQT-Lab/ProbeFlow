@@ -51,6 +51,41 @@ Release can provide it as a direct download, but distribution without the
 usual macOS security warning requires Developer ID signing and Apple
 notarization in the following release step.
 
+## Developer ID release
+
+The release build supports Developer ID signing without storing credentials in
+the repository. Install a `Developer ID Application` certificate in the login
+Keychain, then store notarization credentials under a named Keychain profile:
+
+```bash
+xcrun notarytool store-credentials "ProbeFlow-notary"
+```
+
+Build, sign, submit, staple and verify the release with:
+
+```bash
+PROBEFLOW_CODESIGN_IDENTITY="Developer ID Application: …" \
+PROBEFLOW_NOTARY_PROFILE="ProbeFlow-notary" \
+  scripts/notarize_macos_dmg.sh
+```
+
+No Apple password or API key is written to the repository or build logs. The
+script uses PyInstaller's hardened-runtime signing for every collected native
+binary, signs the disk image, waits for Apple's result, staples the ticket,
+checks Gatekeeper assessment, and regenerates the checksum after stapling.
+
+Every binary GitHub Release must publish the five checksum-pinned Qt 6.11
+corresponding-source archives listed in `runtime_licenses.toml` beside the DMG.
+The build caches those official archives under
+`build/macos/downloads/qt-source/`; their full license texts and upstream
+attribution records are also embedded in the application.
+
+After notarization, `scripts/publish_github_release.sh` performs the final
+publication guardrails: it requires a clean checkout equal to `origin/main`, a
+valid stapled ticket and Gatekeeper assessment, the DMG checksum, and all five
+corresponding-source archives before creating the `v1.0.0-rc1` GitHub
+prerelease. It will not overwrite an existing release.
+
 Set `PROBEFLOW_BUILD_PYTHON` to override the extracted Python 3.13.14 runtime, or
 `PROBEFLOW_BUILD_ROOT` to place the disposable virtual environment and build
 artifacts outside the repository. The script rejects non-arm64 interpreters,

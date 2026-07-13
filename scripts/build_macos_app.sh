@@ -14,6 +14,8 @@ PYTHON_SHA256="8e58affb218c155a1dfdc27b291f817129669f8760e7a297adb2e4439ba5d2e8"
 PYTHON_RUNTIME="${BUILD_ROOT}/python-runtime-${PYTHON_VERSION}"
 PYTHON_FRAMEWORK="${PYTHON_RUNTIME}/Python_Framework.pkg/Payload/Versions/3.13"
 DEFAULT_PYTHON="${PYTHON_FRAMEWORK}/bin/python3.13"
+LICENSE_MANIFEST="${ROOT}/packaging/macos/runtime_licenses.toml"
+LICENSE_DIR="${BUILD_ROOT}/licenses"
 
 provision_python() {
     local download_dir="${BUILD_ROOT}/downloads"
@@ -110,6 +112,19 @@ print(f"OpenCV {cv2.__version__}; scikit-learn {sklearn.__version__}")
 print(f"gwyfile {getattr(gwyfile, '__version__', 'installed')}")
 PY
 
+echo "Collecting third-party licenses and corresponding-source metadata"
+"${VENV}/bin/python" "${ROOT}/scripts/collect_python_licenses.py" \
+    --manifest "${LICENSE_MANIFEST}" \
+    --output "${LICENSE_DIR}/python"
+mkdir -p "${LICENSE_DIR}/runtime/CPython-${PYTHON_VERSION}"
+/usr/bin/ditto \
+    "${PYTHON_FRAMEWORK}/lib/python3.13/LICENSE.txt" \
+    "${LICENSE_DIR}/runtime/CPython-${PYTHON_VERSION}/LICENSE.txt"
+"${VENV}/bin/python" "${ROOT}/scripts/prepare_qt_release_materials.py" \
+    --manifest "${LICENSE_MANIFEST}" \
+    --download-dir "${BUILD_ROOT}/downloads/qt-source" \
+    --license-output "${LICENSE_DIR}/qt"
+
 if [[ ${PREPARE_ONLY} -eq 1 ]]; then
     echo "Build environment is ready; application build skipped."
     exit 0
@@ -119,6 +134,16 @@ echo "Building ProbeFlow.app"
 export PYINSTALLER_CONFIG_DIR="${BUILD_ROOT}/pyinstaller-cache"
 export MPLCONFIGDIR="${BUILD_ROOT}/matplotlib-cache"
 export XDG_CACHE_HOME="${BUILD_ROOT}/cache"
+export PROBEFLOW_LICENSE_DIR="${LICENSE_DIR}"
+if [[ -n "${PROBEFLOW_CODESIGN_IDENTITY:-}" ]]; then
+    if ! /usr/bin/security find-identity -v -p codesigning | \
+        grep -F "${PROBEFLOW_CODESIGN_IDENTITY}" >/dev/null; then
+        echo "Code-signing identity is not installed: ${PROBEFLOW_CODESIGN_IDENTITY}" >&2
+        exit 1
+    fi
+    export PYINSTALLER_STRICT_BUNDLE_CODESIGN_ERROR=1
+    export PYINSTALLER_VERIFY_BUNDLE_SIGNATURE=1
+fi
 "${VENV}/bin/pyinstaller" \
     --clean \
     --noconfirm \

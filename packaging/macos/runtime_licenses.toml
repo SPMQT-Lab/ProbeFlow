@@ -1,0 +1,80 @@
+schema_version = 1
+
+# Runtime distributions represented in the frozen application. The collector
+# fails the build if a wheel's license files disappear unexpectedly.
+runtime_distributions = [
+  "contourpy",
+  "cycler",
+  "fonttools",
+  "gwyfile",
+  "ImageIO",
+  "joblib",
+  "kiwisolver",
+  "lazy-loader",
+  "matplotlib",
+  "networkx",
+  "numpy",
+  "opencv-python",
+  "packaging",
+  "pillow",
+  "pyinstaller",
+  "PySide6",
+  "PySide6_Addons",
+  "PySide6_Essentials",
+  "pyparsing",
+  "python-dateutil",
+  "scikit-image",
+  "scikit-learn",
+  "scipy",
+  "setuptools",
+  "shapely",
+  "shiboken6",
+  "six",
+  "threadpoolctl",
+  "tifffile",
+]
+
+# These Qt wheels declare their licenses in metadata but omit the full texts.
+# The texts and component attributions are taken from the checksum-pinned
+# corresponding source archives below.
+licenses_from_source_archives = [
+  "PySide6",
+  "PySide6_Addons",
+  "PySide6_Essentials",
+  "shiboken6",
+]
+
+[[qt_source_archives]]
+component = "qtbase"
+version = "6.11.0"
+filename = "qtbase-everywhere-src-6.11.0.tar.xz"
+url = "https://download.qt.io/official_releases/qt/6.11/6.11.0/submodules/qtbase-everywhere-src-6.11.0.tar.xz"
+sha256 = "231ad85979864d914dc9568a1b71c91d6cf20d7b2021d059103bf0eb51cb755e"
+
+[[qt_source_archives]]
+component = "qtimageformats"
+version = "6.11.0"
+filename = "qtimageformats-everywhere-src-6.11.0.tar.xz"
+url = "https://download.qt.io/official_releases/qt/6.11/6.11.0/submodules/qtimageformats-everywhere-src-6.11.0.tar.xz"
+sha256 = "d3adb02ac5e2fe24068dbdaee0d7cc68cc3fa8553291c1bfce77c9fe8e940cc8"
+
+[[qt_source_archives]]
+component = "qtsvg"
+version = "6.11.0"
+filename = "qtsvg-everywhere-src-6.11.0.tar.xz"
+url = "https://download.qt.io/official_releases/qt/6.11/6.11.0/submodules/qtsvg-everywhere-src-6.11.0.tar.xz"
+sha256 = "dfa8d653be07087d9407ed4a4ebae847f8953e0b7abd829f089803ab652a30e6"
+
+[[qt_source_archives]]
+component = "qttranslations"
+version = "6.11.0"
+filename = "qttranslations-everywhere-src-6.11.0.tar.xz"
+url = "https://download.qt.io/official_releases/qt/6.11/6.11.0/submodules/qttranslations-everywhere-src-6.11.0.tar.xz"
+sha256 = "54f48b2fe4316892ff930195f170a5385644acc7393505f3155c066b8e1ffe56"
+
+[[qt_source_archives]]
+component = "pyside-setup"
+version = "6.11.0"
+filename = "pyside-setup-everywhere-src-6.11.0.tar.xz"
+url = "https://download.qt.io/official_releases/QtForPython/pyside6/PySide6-6.11.0-src/pyside-setup-everywhere-src-6.11.0.tar.xz"
+sha256 = "48d5c44d7c3ed861055d5491486e6a220ef5006573cae01a5fae3fb69d786336"

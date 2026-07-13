@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import ast
+import os
 from pathlib import Path
 import tomllib
 
@@ -15,6 +16,17 @@ MACOS_DIR = ROOT / "packaging" / "macos"
 METADATA = tomllib.loads(
     (MACOS_DIR / "app_metadata.toml").read_text(encoding="utf-8")
 )["application"]
+CODESIGN_IDENTITY = os.environ.get("PROBEFLOW_CODESIGN_IDENTITY") or None
+ENTITLEMENTS_FILE = os.environ.get("PROBEFLOW_ENTITLEMENTS_FILE") or None
+LICENSE_DIR = Path(
+    os.environ.get("PROBEFLOW_LICENSE_DIR", ROOT / "build" / "macos" / "licenses")
+)
+if not LICENSE_DIR.is_dir():
+    raise FileNotFoundError(
+        f"Release license bundle is missing: {LICENSE_DIR}; use scripts/build_macos_app.sh"
+    )
+if ENTITLEMENTS_FILE and not Path(ENTITLEMENTS_FILE).is_file():
+    raise FileNotFoundError(f"Entitlements file does not exist: {ENTITLEMENTS_FILE}")
 
 
 def literal_assignment(path: Path, name: str) -> str:
@@ -63,6 +75,8 @@ datas = [
     (str(ROOT / "probeflow" / "data" / "file_cushions"), "probeflow/data/file_cushions"),
     (str(ROOT / "LICENSE"), "."),
     (str(ROOT / "packaging" / "THIRD_PARTY_NOTICES.md"), "."),
+    (str(ROOT / "packaging" / "macos" / "QT_LGPL_COMPLIANCE.md"), "."),
+    (str(LICENSE_DIR), "THIRD_PARTY_LICENSES"),
 ]
 datas += copy_metadata("gwyfile")
 
@@ -72,7 +86,7 @@ a = Analysis(
     binaries=[],
     datas=datas,
     hiddenimports=hidden_imports,
-    hookspath=[],
+    hookspath=[str(MACOS_DIR / "hooks")],
     hooksconfig={},
     runtime_hooks=[],
     excludes=["PyQt5", "PyQt6", "PySide2", "pytest", "tkinter"],
@@ -96,8 +110,8 @@ exe = EXE(
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=METADATA["primary_architecture"],
-    codesign_identity=None,
-    entitlements_file=None,
+    codesign_identity=CODESIGN_IDENTITY,
+    entitlements_file=ENTITLEMENTS_FILE,
 )
 
 coll = COLLECT(

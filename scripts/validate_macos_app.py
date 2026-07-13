@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 import plistlib
 import subprocess
@@ -13,11 +14,25 @@ import tomllib
 REPO_ROOT = Path(__file__).resolve().parents[1]
 METADATA_PATH = REPO_ROOT / "packaging" / "macos" / "app_metadata.toml"
 FORBIDDEN_DEPENDENCY_PREFIXES = ("/Users/", "/opt/homebrew/", "/opt/anaconda3/")
+FORBIDDEN_QT_COMPONENTS = (
+    "Frameworks/PySide6/Qt/lib/QtVirtualKeyboard.framework",
+    "Frameworks/PySide6/Qt/plugins/platforminputcontexts/libqtvirtualkeyboardplugin.dylib",
+    "Frameworks/PySide6/Qt/plugins/imageformats/libqpdf.dylib",
+)
 
 
 def _run(*args: str) -> str:
     result = subprocess.run(args, check=True, capture_output=True, text=True)
     return result.stdout
+
+
+def _codesign_details(path: Path) -> str:
+    return subprocess.run(
+        ["codesign", "-dv", "--verbose=4", str(path)],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stderr
 
 
 def _version_tuple(value: str) -> tuple[int, ...]:
@@ -57,6 +72,14 @@ def validate_app(app: Path) -> None:
         resources / "ProbeFlow.icns",
         resources / "LICENSE",
         resources / "THIRD_PARTY_NOTICES.md",
+        resources / "QT_LGPL_COMPLIANCE.md",
+        resources / "THIRD_PARTY_LICENSES" / "python" / "PYTHON_DISTRIBUTIONS.txt",
+        resources / "THIRD_PARTY_LICENSES" / "qt" / "QT_CORRESPONDING_SOURCE.txt",
+        resources
+        / "THIRD_PARTY_LICENSES"
+        / "runtime"
+        / "CPython-3.13.14"
+        / "LICENSE.txt",
         resources / "probeflow" / "assets" / "logo.png",
         resources / "probeflow" / "data" / "file_cushions" / "header_format.json",
     )
@@ -65,6 +88,17 @@ def validate_app(app: Path) -> None:
         raise RuntimeError(f"Missing application resources: {', '.join(missing)}")
     if not list(resources.glob("gwyfile-*.dist-info/METADATA")):
         raise RuntimeError("gwyfile package metadata is missing")
+
+    forbidden_components = [
+        str(contents / relative)
+        for relative in FORBIDDEN_QT_COMPONENTS
+        if (contents / relative).exists()
+    ]
+    if forbidden_components:
+        raise RuntimeError(
+            "Unused or GPL-only Qt component in application: "
+            + ", ".join(forbidden_components)
+        )
 
     mach_o_files = _mach_o_files(contents)
     if not mach_o_files:
@@ -106,10 +140,38 @@ def validate_app(app: Path) -> None:
         ["codesign", "--verify", "--deep", "--strict", str(app)],
         check=True,
     )
+    signature_details = _codesign_details(app)
+    expected_identity = os.environ.get("PROBEFLOW_CODESIGN_IDENTITY")
+    if expected_identity:
+        if expected_identity not in signature_details:
+            raise RuntimeError(
+                f"Application is not signed by expected identity: {expected_identity}"
+            )
+        if "runtime" not in signature_details:
+            raise RuntimeError("Developer ID application is missing hardened runtime")
+        team_lines = [
+            line for line in signature_details.splitlines() if line.startswith("TeamIdentifier=")
+        ]
+        if len(team_lines) != 1 or team_lines[0] == "TeamIdentifier=not set":
+            raise RuntimeError("Developer ID application has no signing TeamIdentifier")
+        expected_team = team_lines[0]
+        for binary in mach_o_files:
+            binary_details = _codesign_details(binary)
+            if expected_team not in binary_details:
+                raise RuntimeError(
+                    f"Nested binary has a different signing team: {binary}"
+                )
+            if "runtime" not in binary_details:
+                raise RuntimeError(f"Nested binary lacks hardened runtime: {binary}")
+        signature_kind = "Developer ID and hardened-runtime signatures"
+    else:
+        if "Signature=adhoc" not in signature_details:
+            raise RuntimeError("Expected an ad-hoc signature for the unsigned test build")
+        signature_kind = "ad-hoc signatures"
     print(
         f"Validated {app.name}: {len(mach_o_files)} arm64 Mach-O files, "
         f"maximum deployment target macOS {maximum_minos_text}, metadata and "
-        "ad-hoc signatures valid"
+        f"{signature_kind} valid"
     )
 
 

@@ -2,7 +2,7 @@
 
 ProbeFlow is released under the MIT License. Copyright © 2026 SPMQT-Lab and
 contributors. The complete ProbeFlow license is in the repository `LICENSE`
-file and will be included with the packaged application.
+file and is included with the packaged application.
 
 ## Adapted and attributed work
 
@@ -17,9 +17,13 @@ file and will be included with the packaged application.
 ## Direct runtime libraries
 
 The first desktop build is based on these direct libraries. Their complete
-license texts and the licenses of all resolved transitive libraries must be
-copied from the frozen build environment into the application resources before
-the release DMG is published.
+license texts and the licenses of resolved transitive libraries are included
+under `THIRD_PARTY_LICENSES` in the application resources.
+
+Qt and Qt for Python are used under their LGPLv3 option. The accompanying
+`QT_LGPL_COMPLIANCE.md` explains the corresponding-source release assets and
+how recipients can run ProbeFlow with compatible modified Qt libraries. The
+unused, GPL-only Qt Virtual Keyboard component is excluded from the release.
 
 | Library | Release baseline | License | Project |
 |---|---:|---|---|

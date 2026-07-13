@@ -64,6 +64,9 @@ def test_pyinstaller_recipe_tracks_metadata_and_required_resources():
         '"probeflow/assets"',
         '"probeflow/data/file_cushions"',
         '"THIRD_PARTY_NOTICES.md"',
+        '"QT_LGPL_COMPLIANCE.md"',
+        '"THIRD_PARTY_LICENSES"',
+        'MACOS_DIR / "hooks"',
         '"cv2"',
         '"gwyfile.objects"',
         '"matplotlib.backends.backend_pdf"',
@@ -71,6 +74,7 @@ def test_pyinstaller_recipe_tracks_metadata_and_required_resources():
         '"sklearn.cluster"',
         'console=False',
         'argv_emulation=False',
+        'os.environ.get("PROBEFLOW_CODESIGN_IDENTITY")',
     ):
         assert expected in source
 
@@ -84,6 +88,9 @@ def test_build_script_recreates_an_arm64_python_313_environment():
     assert "pkgutil --expand-full" in source
     assert "relocate_python_framework.py" in source
     assert "validate_macos_app.py" in source
+    assert "collect_python_licenses.py" in source
+    assert "prepare_qt_release_materials.py" in source
+    assert "CPython-${PYTHON_VERSION}/LICENSE.txt" in source
     assert '"${APP}/Contents/MacOS/ProbeFlow" --smoke-test' in source
     assert "platform.machine()" in source
     assert '"${PYTHON}" -m venv --clear' in source
@@ -107,6 +114,8 @@ def test_dmg_builder_creates_and_verifies_drag_install_artifact():
         "-format UDZO",
         "validate_macos_dmg.sh",
         "shasum -a 256",
+        "PROBEFLOW_CODESIGN_IDENTITY",
+        "/usr/bin/codesign",
     ):
         assert expected in builder
 
@@ -119,3 +128,78 @@ def test_dmg_builder_creates_and_verifies_drag_install_artifact():
         'readlink "${MOUNT_POINT}/Applications"',
     ):
         assert expected in validator
+
+
+def test_release_excludes_unused_gpl_only_qt_plugin():
+    hook = (
+        MACOS_DIR / "hooks" / "hook-PySide6.QtGui.py"
+    ).read_text(encoding="utf-8")
+    validator = (REPO_ROOT / "scripts" / "validate_macos_app.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "pyside6_library_info.collect_module" in hook
+    assert "libqtvirtualkeyboardplugin.dylib" in hook
+    assert "libqpdf.dylib" in hook
+    assert "QtVirtualKeyboard.framework" in validator
+    assert "Nested binary has a different signing team" in validator
+    assert "Nested binary lacks hardened runtime" in validator
+
+
+def test_runtime_license_manifest_pins_corresponding_qt_sources():
+    config = tomllib.loads(
+        (MACOS_DIR / "runtime_licenses.toml").read_text(encoding="utf-8")
+    )
+
+    assert {item["component"] for item in config["qt_source_archives"]} == {
+        "qtbase",
+        "qtimageformats",
+        "qtsvg",
+        "qttranslations",
+        "pyside-setup",
+    }
+    assert all(len(item["sha256"]) == 64 for item in config["qt_source_archives"])
+    assert "PySide6" in config["licenses_from_source_archives"]
+    assert "pyinstaller" in config["runtime_distributions"]
+    assert "qtvirtualkeyboard" not in {
+        item["component"] for item in config["qt_source_archives"]
+    }
+
+
+def test_notarization_script_keeps_credentials_out_of_arguments():
+    source = (REPO_ROOT / "scripts" / "notarize_macos_dmg.sh").read_text(
+        encoding="utf-8"
+    )
+
+    for expected in (
+        "PROBEFLOW_CODESIGN_IDENTITY",
+        "PROBEFLOW_NOTARY_PROFILE",
+        "notarytool submit",
+        "--keychain-profile",
+        "stapler staple",
+        "stapler validate",
+        "spctl",
+        "context:primary-signature",
+    ):
+        assert expected in source
+    for secret_argument in ("--apple-id", "--password", "--issuer", "--key-id"):
+        assert secret_argument not in source
+
+
+def test_github_release_requires_notarization_and_corresponding_sources():
+    source = (REPO_ROOT / "scripts" / "publish_github_release.sh").read_text(
+        encoding="utf-8"
+    )
+
+    for expected in (
+        "status --porcelain",
+        "origin/main",
+        "gh auth status",
+        "stapler validate",
+        "spctl",
+        "qt_source_archives",
+        "QT_CORRESPONDING_SOURCE.txt",
+        "gh release create",
+        "--prerelease",
+    ):
+        assert expected in source

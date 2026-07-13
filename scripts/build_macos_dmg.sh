@@ -62,6 +62,16 @@ echo "Creating ${DMG_NAME}"
     -ov \
     "${DMG}"
 
+if [[ -n "${PROBEFLOW_CODESIGN_IDENTITY:-}" ]]; then
+    echo "Signing ${DMG_NAME} with ${PROBEFLOW_CODESIGN_IDENTITY}"
+    /usr/bin/codesign \
+        --force \
+        --timestamp \
+        --sign "${PROBEFLOW_CODESIGN_IDENTITY}" \
+        "${DMG}"
+    /usr/bin/codesign --verify --strict --verbose=2 "${DMG}"
+fi
+
 PROBEFLOW_VALIDATION_PYTHON="${BUILD_ROOT}/venv/bin/python" \
     "${ROOT}/scripts/validate_macos_dmg.sh" "${DMG}"
 
