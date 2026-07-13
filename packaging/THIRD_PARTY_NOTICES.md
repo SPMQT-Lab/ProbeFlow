@@ -39,7 +39,11 @@ unused, GPL-only Qt Virtual Keyboard component is excluded from the release.
 ## Desktop feature libraries
 
 The full desktop build includes the optional lattice and Gwyddion export
-features. Their exact versions are pinned in the clean macOS build environment.
+features. Their exact versions are pinned in the clean desktop release environments.
+
+The Windows installer is built with the open-source
+[Nullsoft Scriptable Install System](https://nsis.sourceforge.io/) under its
+zlib/libpng licensing terms.
 
 | Library | Current baseline | License | Project |
 |---|---:|---|---|

@@ -14,7 +14,7 @@ PYTHON_SHA256="8e58affb218c155a1dfdc27b291f817129669f8760e7a297adb2e4439ba5d2e8"
 PYTHON_RUNTIME="${BUILD_ROOT}/python-runtime-${PYTHON_VERSION}"
 PYTHON_FRAMEWORK="${PYTHON_RUNTIME}/Python_Framework.pkg/Payload/Versions/3.13"
 DEFAULT_PYTHON="${PYTHON_FRAMEWORK}/bin/python3.13"
-LICENSE_MANIFEST="${ROOT}/packaging/macos/runtime_licenses.toml"
+LICENSE_MANIFEST="${ROOT}/packaging/runtime_licenses.toml"
 LICENSE_DIR="${BUILD_ROOT}/licenses"
 
 provision_python() {

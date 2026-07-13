@@ -1,7 +1,7 @@
 schema_version = 1
 
-# Runtime distributions represented in the frozen application. The collector
-# fails the build if a wheel's license files disappear unexpectedly.
+# Runtime distributions represented in the frozen desktop applications. The
+# collector fails the build if a wheel's license files disappear unexpectedly.
 runtime_distributions = [
   "contourpy",
   "cycler",

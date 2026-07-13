@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller recipe for the native Apple Silicon ProbeFlow application."""
+"""PyInstaller recipe for the native Windows x64 ProbeFlow application."""
 
 from __future__ import annotations
 
@@ -12,21 +12,17 @@ from PyInstaller.utils.hooks import collect_submodules, copy_metadata
 
 
 ROOT = Path(SPECPATH).resolve().parents[1]
-MACOS_DIR = ROOT / "packaging" / "macos"
+WINDOWS_DIR = ROOT / "packaging" / "windows"
 METADATA = tomllib.loads(
-    (MACOS_DIR / "app_metadata.toml").read_text(encoding="utf-8")
+    (WINDOWS_DIR / "app_metadata.toml").read_text(encoding="utf-8")
 )["application"]
-CODESIGN_IDENTITY = os.environ.get("PROBEFLOW_CODESIGN_IDENTITY") or None
-ENTITLEMENTS_FILE = os.environ.get("PROBEFLOW_ENTITLEMENTS_FILE") or None
 LICENSE_DIR = Path(
-    os.environ.get("PROBEFLOW_LICENSE_DIR", ROOT / "build" / "macos" / "licenses")
+    os.environ.get("PROBEFLOW_LICENSE_DIR", ROOT / "build" / "windows" / "licenses")
 )
 if not LICENSE_DIR.is_dir():
     raise FileNotFoundError(
-        f"Release license bundle is missing: {LICENSE_DIR}; use scripts/build_macos_app.sh"
+        f"Release license bundle is missing: {LICENSE_DIR}; use scripts/build_windows_app.ps1"
     )
-if ENTITLEMENTS_FILE and not Path(ENTITLEMENTS_FILE).is_file():
-    raise FileNotFoundError(f"Entitlements file does not exist: {ENTITLEMENTS_FILE}")
 
 
 def literal_assignment(path: Path, name: str) -> str:
@@ -48,15 +44,10 @@ version_path = (
     module_path / "__init__.py" if module_path.is_dir() else module_path.with_suffix(".py")
 )
 SOURCE_VERSION = literal_assignment(version_path, version_attribute)
-if SOURCE_VERSION.split("rc", 1)[0] != METADATA["bundle_short_version"]:
-    raise ValueError(
-        "The package version and macOS bundle_short_version describe different releases"
-    )
+expected_product_version = SOURCE_VERSION.replace("rc", " RC ")
+if expected_product_version != METADATA["product_version"]:
+    raise ValueError("The package version and Windows product version describe different releases")
 
-# ProbeFlow's GUI compatibility modules use importlib to preserve public import
-# paths during the ongoing refactor, so static analysis cannot see every GUI
-# module. Application, numerical and file-I/O imports reached by those modules
-# are then followed normally by PyInstaller and its package hooks.
 hidden_imports = collect_submodules("probeflow.gui")
 hidden_imports += [
     "cv2",
@@ -75,7 +66,7 @@ datas = [
     (str(ROOT / "probeflow" / "data" / "file_cushions"), "probeflow/data/file_cushions"),
     (str(ROOT / "LICENSE"), "."),
     (str(ROOT / "packaging" / "THIRD_PARTY_NOTICES.md"), "."),
-    (str(ROOT / "packaging" / "macos" / "QT_LGPL_COMPLIANCE.md"), "."),
+    (str(WINDOWS_DIR / "QT_LGPL_COMPLIANCE.md"), "."),
     (str(LICENSE_DIR), "THIRD_PARTY_LICENSES"),
 ]
 datas += copy_metadata("gwyfile")
@@ -108,10 +99,10 @@ exe = EXE(
     upx=False,
     console=False,
     disable_windowed_traceback=False,
-    argv_emulation=False,
-    target_arch=METADATA["primary_architecture"],
-    codesign_identity=CODESIGN_IDENTITY,
-    entitlements_file=ENTITLEMENTS_FILE,
+    icon=str(ROOT / METADATA["icon"]),
+    version=str(WINDOWS_DIR / "version_info.txt"),
+    uac_admin=False,
+    uac_uiaccess=False,
 )
 
 coll = COLLECT(
@@ -121,24 +112,4 @@ coll = COLLECT(
     strip=False,
     upx=False,
     name=METADATA["executable_name"],
-)
-
-app = BUNDLE(
-    coll,
-    name=f"{METADATA['name']}.app",
-    icon=str(ROOT / METADATA["icon"]),
-    bundle_identifier=METADATA["bundle_identifier"],
-    version=METADATA["bundle_short_version"],
-    info_plist={
-        "CFBundleName": METADATA["name"],
-        "CFBundleDisplayName": METADATA["name"],
-        "CFBundleShortVersionString": METADATA["bundle_short_version"],
-        "CFBundleVersion": str(METADATA["bundle_build_number"]),
-        "NSHumanReadableCopyright": METADATA["copyright"],
-        "LSApplicationCategoryType": METADATA["category_type"],
-        "LSMinimumSystemVersion": METADATA["minimum_macos_version"],
-        "NSPrincipalClass": "NSApplication",
-        "NSHighResolutionCapable": True,
-        "NSAppleScriptEnabled": False,
-    },
 )

@@ -90,7 +90,7 @@ binary, signs the disk image, waits for Apple's result, staples the ticket,
 checks Gatekeeper assessment, and regenerates the checksum after stapling.
 
 Every binary GitHub Release must publish the five checksum-pinned Qt 6.11
-corresponding-source archives listed in `runtime_licenses.toml` beside the DMG.
+corresponding-source archives listed in `../runtime_licenses.toml` beside the DMG.
 The build caches those official archives under
 `build/macos/downloads/qt-source/`; their full license texts and upstream
 attribution records are also embedded in the application.

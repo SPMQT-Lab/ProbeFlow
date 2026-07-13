@@ -1,0 +1,17 @@
+schema_version = 1
+
+[application]
+name = "ProbeFlow"
+executable_name = "ProbeFlow"
+publisher = "SPMQT-Lab"
+version_source = "probeflow.__version__"
+product_version = "1.0.0 RC 1"
+file_version = [1, 0, 0, 1]
+copyright = "Copyright © 2026 SPMQT-Lab and contributors"
+license = "MIT"
+minimum_windows_release = "Windows 10 version 1809"
+primary_architecture = "x86_64"
+installer_scope = "per-user"
+icon = "packaging/windows/ProbeFlow.ico"
+project_url = "https://github.com/SPMQT-Lab/ProbeFlow"
+support_url = "https://github.com/SPMQT-Lab/ProbeFlow/issues"

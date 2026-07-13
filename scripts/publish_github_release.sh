@@ -7,7 +7,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_ROOT="${PROBEFLOW_BUILD_ROOT:-${ROOT}/build/macos}"
 DIST_DIR="${BUILD_ROOT}/dist"
 QT_SOURCE_DIR="${BUILD_ROOT}/downloads/qt-source"
-LICENSE_MANIFEST="${ROOT}/packaging/macos/runtime_licenses.toml"
+LICENSE_MANIFEST="${ROOT}/packaging/runtime_licenses.toml"
 NOTES="${ROOT}/packaging/macos/release_notes_1.0.0rc1.md"
 
 VERSION="$(

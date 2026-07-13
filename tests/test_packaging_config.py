@@ -66,7 +66,7 @@ def test_pyinstaller_recipe_tracks_metadata_and_required_resources():
         '"THIRD_PARTY_NOTICES.md"',
         '"QT_LGPL_COMPLIANCE.md"',
         '"THIRD_PARTY_LICENSES"',
-        'MACOS_DIR / "hooks"',
+        'ROOT / "packaging" / "pyinstaller-hooks"',
         '"cv2"',
         '"gwyfile.objects"',
         '"matplotlib.backends.backend_pdf"',
@@ -132,7 +132,7 @@ def test_dmg_builder_creates_and_verifies_drag_install_artifact():
 
 def test_release_excludes_unused_gpl_only_qt_plugin():
     hook = (
-        MACOS_DIR / "hooks" / "hook-PySide6.QtGui.py"
+        REPO_ROOT / "packaging" / "pyinstaller-hooks" / "hook-PySide6.QtGui.py"
     ).read_text(encoding="utf-8")
     validator = (REPO_ROOT / "scripts" / "validate_macos_app.py").read_text(
         encoding="utf-8"
@@ -148,7 +148,7 @@ def test_release_excludes_unused_gpl_only_qt_plugin():
 
 def test_runtime_license_manifest_pins_corresponding_qt_sources():
     config = tomllib.loads(
-        (MACOS_DIR / "runtime_licenses.toml").read_text(encoding="utf-8")
+        (REPO_ROOT / "packaging" / "runtime_licenses.toml").read_text(encoding="utf-8")
     )
 
     assert {item["component"] for item in config["qt_source_archives"]} == {

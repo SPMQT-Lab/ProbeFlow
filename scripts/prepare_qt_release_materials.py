@@ -23,9 +23,12 @@ def _sha256(path: Path) -> str:
 def _download(url: str, destination: Path) -> None:
     temporary = destination.with_suffix(destination.suffix + ".partial")
     temporary.unlink(missing_ok=True)
+    curl = shutil.which("curl")
+    if curl is None:
+        raise RuntimeError("curl is required to download Qt source archives")
     subprocess.run(
         [
-            "/usr/bin/curl",
+            curl,
             "--location",
             "--fail",
             "--show-error",
@@ -55,7 +58,7 @@ def prepare(manifest_path: Path, download_dir: Path, license_output: Path) -> No
     source_index = [
         "Qt corresponding-source archives for the ProbeFlow desktop release",
         "",
-        "These unmodified, checksum-pinned archives must be published beside the DMG.",
+        "These unmodified, checksum-pinned archives must accompany binary releases.",
         "",
     ]
     for archive in config["qt_source_archives"]:
