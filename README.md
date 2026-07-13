@@ -12,8 +12,8 @@ keeping the physical calibration (nm, pA, V) that plain bitmaps lose. It
 reads Createc, Nanonis, and RHK files, and includes a command-line interface
 for scripting and batch work.
 
-> **Beta software.** ProbeFlow is `0.0.0b0`: the GUI, CLI, Python API, and
-> JSON sidecar formats may still change. Raw microscope files are treated as
+> **ProbeFlow 1.0 release candidate.** Version `1.0.0rc1` is the candidate for
+> the first standalone desktop release. Raw microscope files are treated as
 > read-only — processing and exports always write new files.
 
 ## Get started

@@ -2,7 +2,7 @@
 # full suite green on macOS / Python 3.13).
 #
 # Usage — reproduce the verified environment:
-#   pip install -e ".[all]" -c constraints.txt
+#   pip install -e ".[dev,all]" -c constraints.txt
 #
 # This is a pip constraints file, not a requirements file: it pins versions
 # only for packages that get installed anyway, so applying it never adds
@@ -16,6 +16,12 @@ PySide6==6.11.0
 matplotlib==3.10.0
 shapely==2.1.2
 scikit-image==0.25.0
+# Optional end-user features included in the desktop application. These pins
+# are part of the release environment even though a source installation may
+# omit the corresponding extras.
+opencv-python==4.13.0.92
+scikit-learn==1.6.1
+gwyfile==0.3.0
 # Toolchain: CI and the pre-commit hook pin the same ruff so lint results
 # cannot drift between a contributor's machine and CI.
 ruff==0.15.12

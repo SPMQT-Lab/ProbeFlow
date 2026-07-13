@@ -1996,6 +1996,7 @@ def test_viewer_export_tab_shows_summary_and_format_controls(qapp, monkeypatch):
     assert dlg._export_scalebar_chk.isChecked()
     assert dlg._save_png_btn.text().endswith("Save PNG copy…")
     assert dlg._save_pdf_btn.text() == "Save PDF copy…"
+    assert "borderless image composition" in dlg._save_pdf_btn.toolTip()
     assert dlg._save_sxm_btn.isEnabled()
     assert dlg._save_gwy_btn.text() == "Save GWY copy…"
 
@@ -2087,28 +2088,25 @@ def test_viewer_save_pdf_action_dispatches_current_view_writer(qapp, monkeypatch
         ),
     )
 
-    class FakeScan:
-        processing_state = type("PS", (), {"steps": []})()
-
     saved_calls = []
 
-    def fake_save_processed_image(scan, plane_idx, path, **kwargs):
-        saved_calls.append((plane_idx, path, kwargs))
-        return f"Saved processed image -> {path.name}"
+    def fake_save_viewer_pdf(*args, **kwargs):
+        saved_calls.append((args, kwargs))
+        return f"Saved → {Path(args[1]).name}"
 
     monkeypatch.setattr(dlg, "_assert_exportable_processing", lambda: True)
-    monkeypatch.setattr(dlg, "_processed_scan_for_export", lambda: (FakeScan(), 1))
-    monkeypatch.setattr(export_mixin, "save_processed_image", fake_save_processed_image)
+    monkeypatch.setattr(export_mixin, "save_viewer_pdf", fake_save_viewer_pdf)
 
     dlg._on_save_pdf()
 
-    assert captured_dialog["default"].endswith("example_viewer.pdf")
-    assert saved_calls[0][0] == 1
-    assert saved_calls[0][1] == out_without_suffix.with_suffix(".pdf")
-    assert saved_calls[0][2]["include_provenance"] is False
-    assert saved_calls[0][2]["add_scalebar"] is False
-    assert saved_calls[0][2]["display_settings"] is None
-    assert "Saved processed image" in dlg._status_lbl.text()
+    assert captured_dialog["default"].endswith("example_viewer_pdf.pdf")
+    args, kwargs = saved_calls[0]
+    np.testing.assert_array_equal(args[0], dlg._display_arr)
+    assert args[1] == out_without_suffix.with_suffix(".pdf")
+    assert kwargs["include_provenance"] is False
+    assert kwargs["add_scalebar"] is False
+    assert kwargs["scan_range_m"] == dlg._processed_scan_range_m()
+    assert "Saved" in dlg._status_lbl.text()
 
     dlg.close()
     dlg.deleteLater()
@@ -2169,7 +2167,9 @@ def test_viewer_direct_data_export_actions_dispatch_current_view_writer(
 
     getattr(dlg, method_name)()
 
-    assert captured_dialog["default"].endswith(f"example_viewer{suffix}")
+    assert captured_dialog["default"].endswith(
+        f"example_viewer_{suffix.lstrip('.')}{suffix}"
+    )
     assert saved_calls[0][0] == 1
     assert saved_calls[0][1] == out_without_suffix.with_suffix(suffix)
     assert saved_calls[0][2]["include_provenance"] is True
@@ -2186,6 +2186,43 @@ def test_tv_attribution_marks_feature_as_experimental_and_links_upstream():
     assert "adapted from" in TV_ATTRIBUTION_HTML
     assert "not been rigorously validated" in TV_ATTRIBUTION_HTML
     assert "testing purposes" in TV_ATTRIBUTION_HTML
+
+
+def test_about_dialog_displays_release_version(qapp):
+    from PySide6.QtWidgets import QLabel
+
+    from probeflow import display_version
+    from probeflow.gui.dialogs.about import AboutDialog
+    from probeflow.gui.styling import THEMES
+
+    dlg = AboutDialog(THEMES["dark"])
+    label_texts = [label.text() for label in dlg.findChildren(QLabel)]
+
+    assert f"Version {display_version()}" in label_texts
+
+    dlg.close()
+    dlg.deleteLater()
+
+
+def test_qt_application_metadata_uses_release_version():
+    from probeflow import __version__
+    from probeflow.gui.app import _configure_application_metadata
+
+    class FakeApplication:
+        name = None
+        version = None
+
+        def setApplicationName(self, value):
+            self.name = value
+
+        def setApplicationVersion(self, value):
+            self.version = value
+
+    app = FakeApplication()
+    _configure_application_metadata(app)
+
+    assert app.name == "ProbeFlow"
+    assert app.version == __version__
 
 
 def test_tv_load_from_browse_reuses_processed_scan_helper(qapp, monkeypatch):

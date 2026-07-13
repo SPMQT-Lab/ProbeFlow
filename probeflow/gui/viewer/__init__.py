@@ -45,6 +45,7 @@ _EXPORTS: dict[str, str] = {
     "roi_geometry_changed": "roi_ops",
     "roi_line_set_width": "roi_ops",
     "save_roi_set": "roi_sidecar",
+    "save_viewer_pdf": "pdf_export",
     "save_viewer_png": "png_export",
     "select_nth_roi": "roi_ops",
     "selected_or_active_roi_id": "roi_ops",

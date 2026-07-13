@@ -321,9 +321,16 @@ def test_anonymized_qplus_fixture_decodes_all_10_channels():
     ]
 
 
-def test_dat_to_sxm_rejects_noncanonical_multichannel_dat(tmp_path, cushion_dir):
-    with pytest.raises(ValueError, match="canonical STM"):
-        convert_dat_to_sxm(QPLUS_10CH_DAT, tmp_path, cushion_dir)
+def test_dat_to_sxm_preserves_noncanonical_multichannel_dat(tmp_path, cushion_dir):
+    source = load_scan(QPLUS_10CH_DAT)
+
+    convert_dat_to_sxm(QPLUS_10CH_DAT, tmp_path, cushion_dir)
+
+    converted = load_scan(tmp_path / "createc_afm.sxm")
+    assert converted.plane_names == source.plane_names
+    assert converted.plane_units == source.plane_units
+    for actual, expected in zip(converted.planes, source.planes):
+        np.testing.assert_allclose(actual, expected, rtol=1e-6, atol=1e-15)
 
 
 def test_metadata_uses_createc_report_without_constructing_scan(

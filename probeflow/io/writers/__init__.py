@@ -48,6 +48,8 @@ def save_scan(scan, out_path, plane_idx: int = 0, **kwargs) -> None:
                 "cushion_dir",
                 "clip_low",
                 "clip_high",
+                "processed_plane_idx",
+                "include_provenance",
                 "overwrite",
                 "overwrite_sidecars",
             )

@@ -14,6 +14,7 @@ from probeflow.gui.config import load_config, save_config
 from probeflow.gui.roi_context import active_area_roi_context
 from probeflow.gui.viewer import (
     export_line_profile,
+    save_viewer_pdf,
     save_viewer_png,
     transform_mask_set_for_display_op,
     transform_roi_set_for_display_op,
@@ -491,7 +492,12 @@ class ImageViewerProcessingExportMixin:
     def _default_viewer_export_path(self, suffix: str) -> Path:
         entry = self._entries[self._idx]
         suffix = suffix if suffix.startswith(".") else f".{suffix}"
-        return Path.home() / f"{entry.stem}_viewer{suffix}"
+        # Provenance sidecars deliberately use the artifact stem (for example,
+        # ``scan.probeflow.json``). Give each format a distinct default stem so
+        # trying PNG, PDF, SXM and GWY in sequence cannot make their sidecars
+        # collide with one another.
+        format_tag = "" if suffix == ".png" else f"_{suffix.lstrip('.')}"
+        return Path.home() / f"{entry.stem}_viewer{format_tag}{suffix}"
 
     def _export_provenance_enabled(self) -> bool:
         checkbox = getattr(self, "_export_provenance_chk", None)
@@ -877,7 +883,51 @@ class ImageViewerProcessingExportMixin:
         self._status_lbl.setText(msg)
 
     def _on_save_pdf(self):
-        self._on_save_current_view_as(".pdf", "Save PDF", "PDF figures (*.pdf)")
+        entry = self._entries[self._idx]
+        if not self._assert_exportable_processing():
+            return
+        out_path = self._ask_save_path(
+            "Save PDF",
+            str(self._default_viewer_export_path(".pdf")),
+            "PDF images (*.pdf)",
+        )
+        if not out_path:
+            return
+        out = Path(out_path)
+        if not out.suffix:
+            out = out.with_suffix(".pdf")
+        arr = self._current_export_array()
+        if arr is None:
+            self._status_lbl.setText("No data to save.")
+            return
+
+        msg = save_viewer_pdf(
+            arr,
+            out,
+            entry.path,
+            self._viewer_colormap,
+            self._clip_low,
+            self._clip_high,
+            self._drs,
+            self._processing,
+            self._image_roi_set,
+            self._ch_cb.currentIndex(),
+            self._ch_cb.currentText() or None,
+            processing_history=(
+                self._processing_history.to_dict()
+                if self._processing_history is not None else None
+            ),
+            add_scalebar=self._export_scalebar_enabled(),
+            include_provenance=self._export_provenance_enabled(),
+            image_mask_set=getattr(self, "_image_mask_set", None),
+            scan_range_m=self._processed_scan_range_m(),
+        )
+        if msg.startswith("Saved") and self._processing_history is not None:
+            self._mark_history_export(
+                out,
+                export_parameters={"export_kind": "viewer_pdf"},
+            )
+        self._status_lbl.setText(msg)
 
     def _on_save_sxm(self):
         self._on_save_current_view_as(".sxm", "Save SXM", "Nanonis SXM (*.sxm)")

@@ -94,6 +94,20 @@ def test_python_m_probeflow_cli_help_works():
     assert "ProbeFlow" in result.stdout
 
 
+def test_python_m_probeflow_cli_reports_release_version():
+    from probeflow import __version__
+
+    result = subprocess.run(
+        [sys.executable, "-m", "probeflow.cli", "--version"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout.strip() == f"probeflow {__version__}"
+
+
 def test_index_folder_script_help_imports_canonical_indexer():
     result = subprocess.run(
         [sys.executable, "scripts/index_folder.py", "--help"],

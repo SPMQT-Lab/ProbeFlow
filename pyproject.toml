@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "probeflow"
-version = "0.0.0b0"  # beta — surfaces and on-disk formats may change
+dynamic = ["version"]
 description = "ProbeFlow — STM scan browser, processor, and Createc↔Nanonis toolkit. Browse .sxm scans with colormaps, apply line corrections / background subtraction / smoothing / FFT / grain detection, and convert Createc .dat files to Nanonis .sxm + PNG from either a GUI or a bash-friendly CLI."
 readme = "README.md"
 license = {text = "MIT"}
@@ -32,7 +32,11 @@ dev      = ["pytest", "vulture", "ruff>=0.15,<0.16", "pre-commit"]
 # (analysis/lattice.py); both are lazy-imported with a friendly install hint.
 lattice  = ["opencv-python", "scikit-learn"]
 gwyddion = ["gwyfile"]
-all      = ["opencv-python", "scikit-learn", "gwyfile", "pytest"]
+# Complete end-user feature set used by standalone desktop distributions.
+# Development tools remain in the separate ``dev`` extra so release bundles
+# never collect pytest by accident.
+desktop  = ["opencv-python", "scikit-learn", "gwyfile"]
+all      = ["opencv-python", "scikit-learn", "gwyfile"]
 
 [project.scripts]
 probeflow = "probeflow.cli:main"
@@ -40,8 +44,14 @@ dat-sxm   = "probeflow.io.converters.createc_dat_to_sxm:main"
 dat-png   = "probeflow.io.converters.createc_dat_to_png:main"
 dat-npy   = "probeflow.io.converters.createc_dat_to_npy:main"
 
+[project.gui-scripts]
+probeflow-gui = "probeflow.gui.launcher:main"
+
 [tool.setuptools]
 include-package-data = true
+
+[tool.setuptools.dynamic]
+version = {attr = "probeflow.__version__"}
 
 [tool.setuptools.packages.find]
 include = ["probeflow", "probeflow.*"]

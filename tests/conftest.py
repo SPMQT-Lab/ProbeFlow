@@ -17,6 +17,7 @@ SAMPLE_DAT_NAMES = (
 )
 SXM_CONVERTIBLE_DAT_NAMES = (
     "createc_scan_11nm.dat",
+    "createc_afm.dat",
     "createc_terrace.dat",
 )
 

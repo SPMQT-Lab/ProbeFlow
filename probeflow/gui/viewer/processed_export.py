@@ -187,6 +187,7 @@ def save_processed_image(
                 colormap=colormap, clip_low=clip_low, clip_high=clip_high,
                 show_scalebar=add_scalebar,
                 provenance=provenance,
+                include_provenance=include_provenance,
             )
         elif suffix == ".csv":
             scan.save_csv(out_path, plane_idx=plane_idx, provenance=provenance)
@@ -198,13 +199,13 @@ def save_processed_image(
                 provenance=provenance,
             )
         elif suffix == ".sxm":
-            if scan.processing_state.steps and scan.n_planes > 1:
-                return (
-                    "Processed SXM export is blocked because SXM writes all planes. "
-                    "Use PNG/CSV/PDF/GWY for the selected plane until per-plane "
-                    "SXM processing provenance is supported."
-                )
-            scan.save_sxm(out_path)
+            scan.save_sxm(
+                out_path,
+                processed_plane_idx=(
+                    plane_idx if scan.processing_state.steps else None
+                ),
+                include_provenance=include_provenance,
+            )
         else:
             return "Unsupported processed image format. Use .sxm, .png, .csv, .pdf, or .gwy."
 

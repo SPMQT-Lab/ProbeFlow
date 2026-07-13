@@ -9,6 +9,7 @@ from PySide6.QtCore import QSize, Qt, QUrl
 from PySide6.QtGui import QCursor, QDesktopServices, QMovie, QPixmap
 from PySide6.QtWidgets import QDialog, QFrame, QLabel, QPushButton, QVBoxLayout
 
+from probeflow import display_version
 from probeflow.core.resources import asset_path
 
 LOGO_PATH = asset_path("logo.png")
@@ -82,6 +83,7 @@ class AboutDialog(QDialog):
             lay.addWidget(lbl)
 
         _row("ProbeFlow", 16, bold=True)
+        _row(f"Version {display_version()}", 11, bold=True)
         _row("Createc → Nanonis File Conversion", 11, sub=True)
         lay.addWidget(_sep())
         _row("Developed at SPMQT-Lab", 11, bold=True)

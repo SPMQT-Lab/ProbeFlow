@@ -135,6 +135,7 @@ def test_save_processed_image_pdf_can_skip_provenance(tmp_path):
         colormap="gray", clip_low=1.0, clip_high=99.0,
         show_scalebar=True,
         provenance=None,
+        include_provenance=False,
     )
     assert "Saved processed image" in msg
 
@@ -207,7 +208,9 @@ def test_save_processed_image_unsupported_suffix(tmp_path):
     assert "Unsupported" in msg
 
 
-def test_save_processed_image_sxm_blocked_multiplane(tmp_path):
+def test_save_processed_image_sxm_records_processed_plane_for_multiplane_scan(
+    tmp_path,
+):
     from probeflow.gui.viewer.processed_export import save_processed_image
 
     scan = _make_fake_scan()
@@ -217,8 +220,12 @@ def test_save_processed_image_sxm_blocked_multiplane(tmp_path):
 
     msg = save_processed_image(scan, 0, out)
 
-    assert "blocked" in msg
-    scan.save_sxm.assert_not_called()
+    assert "Saved processed image" in msg
+    scan.save_sxm.assert_called_once_with(
+        out,
+        processed_plane_idx=0,
+        include_provenance=True,
+    )
 
 
 def test_save_processed_image_exception_returns_error_string(tmp_path):
@@ -232,6 +239,69 @@ def test_save_processed_image_exception_returns_error_string(tmp_path):
 
     assert "Save processed image error" in msg
     assert "disk full" in msg
+
+
+# ── save_viewer_pdf ──────────────────────────────────────────────────────────
+
+def test_borderless_pdf_uses_image_dimensions_as_page_dimensions(tmp_path):
+    from probeflow.processing.pdf_export import export_image_pdf
+
+    arr = np.arange(96, dtype=float).reshape(8, 12)
+    lut = np.stack([np.arange(256, dtype=np.uint8)] * 3, axis=1)
+    out = tmp_path / "viewer.pdf"
+
+    export_image_pdf(
+        arr,
+        out,
+        "gray",
+        0.0,
+        100.0,
+        lut_fn=lambda _name: lut,
+        scan_range_m=(12e-9, 8e-9),
+        add_scalebar=False,
+    )
+
+    payload = out.read_bytes()
+    assert payload.startswith(b"%PDF")
+    assert b"/MediaBox [ 0 0 12 8 ]" in payload
+    assert not out.with_suffix(".probeflow.json").exists()
+
+
+def test_save_viewer_pdf_can_skip_provenance(tmp_path):
+    from probeflow.gui.viewer.pdf_export import save_viewer_pdf
+
+    arr = np.zeros((8, 12), dtype=float)
+    out = tmp_path / "viewer.pdf"
+    drs = MagicMock()
+    drs.resolve.return_value = (0.0, 1.0)
+
+    with patch(
+        "probeflow.processing.pdf_export.export_image_pdf"
+    ) as export_pdf:
+        msg = save_viewer_pdf(
+            arr,
+            out,
+            Path("/missing/source.sxm"),
+            "gray",
+            1.0,
+            99.0,
+            drs,
+            {},
+            None,
+            0,
+            "Z forward",
+            include_provenance=False,
+            add_scalebar=False,
+            scan_range_m=(12e-9, 8e-9),
+        )
+
+    assert msg.startswith("Saved")
+    export_pdf.assert_called_once()
+    args, kwargs = export_pdf.call_args
+    np.testing.assert_array_equal(args[0], arr)
+    assert args[1] == out
+    assert kwargs["provenance"] is None
+    assert kwargs["add_scalebar"] is False
 
 
 # ── save_viewer_png ──────────────────────────────────────────────────────────

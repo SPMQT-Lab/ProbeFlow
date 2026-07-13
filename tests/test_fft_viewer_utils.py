@@ -109,13 +109,17 @@ def test_fft_splitter_can_give_more_height_to_fft(qapp):
         qapp.processEvents()
 
 
-def test_focus_fft_hides_reference_and_tools_then_restores(qapp):
+def test_focus_fft_hides_reference_and_lower_tools_then_restores(qapp):
     import numpy as np
 
     dlg = FFTViewerDialog(np.ones((16, 16)), (1e-9, 1e-9))
     try:
         dlg.show()
         qapp.processEvents()
+
+        assert not hasattr(dlg, "_show_tools_btn")
+        assert not hasattr(dlg, "_show_tools_act")
+        assert not hasattr(dlg, "_side_panel")
 
         dlg._focus_fft_btn.setChecked(True)
         qapp.processEvents()

@@ -22,8 +22,8 @@ def _utc_now() -> str:
 
 def _get_version() -> str | None:
     try:
-        from importlib.metadata import version
-        return version("probeflow")
+        from probeflow import __version__
+        return str(__version__)
     except Exception:
         return None
 

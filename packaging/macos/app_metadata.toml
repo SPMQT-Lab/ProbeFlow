@@ -1,0 +1,18 @@
+schema_version = 1
+
+[application]
+name = "ProbeFlow"
+executable_name = "ProbeFlow"
+bundle_identifier = "au.edu.uq.spmqt.probeflow"
+version_source = "probeflow.__version__"
+bundle_short_version = "1.0.0"
+bundle_build_number = 1
+copyright = "Copyright © 2026 SPMQT-Lab and contributors"
+license = "MIT"
+category_type = "public.app-category.utilities"
+minimum_macos_version = "15.0"
+primary_architecture = "arm64"
+future_architectures = ["x86_64", "universal2"]
+icon = "packaging/macos/ProbeFlow.icns"
+project_url = "https://github.com/SPMQT-Lab/ProbeFlow"
+support_url = "https://github.com/SPMQT-Lab/ProbeFlow/issues"

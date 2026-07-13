@@ -376,8 +376,7 @@ class ProbeFlowWindow(QMainWindow):
         restart_action = QAction("Restart ProbeFlow", self)
         restart_action.setShortcut(QKeySequence("Ctrl+Shift+R"))
         restart_action.setToolTip(
-            "Relaunch ProbeFlow — picks up any code changes immediately "
-            "(useful during development with an editable pip install)")
+            "Relaunch ProbeFlow and reopen the current Browse folder")
         restart_action.triggered.connect(self._restart_app)
         file_menu.addAction(restart_action)
         file_menu.addSeparator()
@@ -1530,22 +1529,17 @@ class ProbeFlowWindow(QMainWindow):
 
     # ── Restart ────────────────────────────────────────────────────────────────
     def _restart_app(self) -> None:
-        """Relaunch ProbeFlow in a fresh process and close this window.
-
-        Because ProbeFlow is installed with ``pip install -e .``, the new
-        process picks up any source-file edits you made since the last launch —
-        no reinstall step needed.  The new window appears before this one
-        closes so there is no gap in the taskbar.
-
-        The current folder is passed via ``--browse`` so you land back where
-        you were automatically.
-        """
+        """Relaunch ProbeFlow and preserve the current Browse folder."""
         import subprocess
 
-        # Always use ``python -m probeflow gui`` rather than sys.argv so this
-        # works identically whether ProbeFlow was started as ``probeflow gui``,
-        # ``python -m probeflow gui``, or from an IDE.
-        args = [sys.executable, "-m", "probeflow", "gui"]
+        if getattr(sys, "frozen", False):
+            # In a PyInstaller app sys.executable is the ProbeFlow launcher,
+            # not a Python interpreter. It accepts the desktop launcher's
+            # arguments directly.
+            args = [sys.executable]
+        else:
+            # The source checkout exposes its CLI as probeflow.cli.__main__.
+            args = [sys.executable, "-m", "probeflow.cli", "gui"]
 
         cur = self._grid.current_dir()
         if cur:
@@ -1626,9 +1620,18 @@ class ProbeFlowWindow(QMainWindow):
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────
+def _configure_application_metadata(app) -> None:
+    """Set version metadata shared by the live GUI and packaged app."""
+
+    from probeflow import __version__
+
+    app.setApplicationName("ProbeFlow")
+    app.setApplicationVersion(__version__)
+
+
 def main(*, browse_folder: "Optional[Path]" = None) -> None:
     app    = QApplication.instance() or QApplication(sys.argv)
-    app.setApplicationName("ProbeFlow")
+    _configure_application_metadata(app)
     from probeflow.gui.tooltips import install_global_tooltips
     install_global_tooltips(app)
     window = ProbeFlowWindow(browse_folder=browse_folder)

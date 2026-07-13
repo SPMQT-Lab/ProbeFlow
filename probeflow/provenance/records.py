@@ -369,6 +369,7 @@ def source_record_from_scan(
     metadata: dict[str, Any] = {}
     try:
         if channel_index is not None and 0 <= int(channel_index) < len(scan.planes):
+            metadata["channel_index"] = int(channel_index)
             metadata["array_shape"] = list(scan.planes[int(channel_index)].shape)
     except Exception:
         pass

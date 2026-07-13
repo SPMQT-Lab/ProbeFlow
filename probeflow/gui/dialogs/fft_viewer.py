@@ -283,23 +283,13 @@ class FFTViewerDialog(
 
         tb.addStretch(1)
 
-        show_tools_btn = QPushButton("Show tools")
-        show_tools_btn.setFont(ui_font(9))
-        show_tools_btn.setFixedHeight(24)
-        show_tools_btn.setMinimumWidth(86)
-        show_tools_btn.setCheckable(True)
-        show_tools_btn.setToolTip("Show or hide the cursor details side panel")
-        show_tools_btn.toggled.connect(self._on_show_tools_toggled)
-        tb.addWidget(show_tools_btn)
-        self._show_tools_btn = show_tools_btn
-
         focus_btn = QPushButton("Focus FFT")
         focus_btn.setFont(ui_font(9))
         focus_btn.setFixedHeight(24)
         focus_btn.setMinimumWidth(86)
         focus_btn.setCheckable(True)
         focus_btn.setToolTip(
-            "Hide the real-space reference, side panel, and lower tools "
+            "Hide the real-space reference and lower tools "
             "for a larger FFT view. Click again to exit."
         )
         focus_btn.toggled.connect(self._on_focus_fft_toggled)
@@ -373,11 +363,6 @@ class FFTViewerDialog(
             act.triggered.connect(lambda _c=False, s=slot: s())
             zoom_menu.addAction(act)
         view_menu.addSeparator()
-        self._show_tools_act = QAction("Show cursor tools", view_menu, checkable=True)
-        self._show_tools_act.triggered.connect(
-            lambda checked: self._show_tools_btn.setChecked(checked)
-        )
-        view_menu.addAction(self._show_tools_act)
         self._focus_fft_act = QAction("Focus FFT", view_menu, checkable=True)
         self._focus_fft_act.triggered.connect(
             lambda checked: self._focus_fft_btn.setChecked(checked)
@@ -454,24 +439,6 @@ class FFTViewerDialog(
         fft_top_lay.setContentsMargins(0, 0, 0, 0)
         fft_top_lay.setSpacing(8)
         fft_top_lay.addWidget(self._canvas_fft, 1)
-
-        side_panel = QFrame()
-        side_panel.setMinimumWidth(190)
-        side_panel.setMaximumWidth(240)
-        side_lay = QVBoxLayout(side_panel)
-        side_lay.setContentsMargins(8, 8, 8, 8)
-        side_lay.setSpacing(8)
-        cursor_title = QLabel("Cursor")
-        cursor_title.setFont(ui_font(9, weight=QFont.Bold))
-        self._cursor_readout_lbl = QLabel("Move over the FFT")
-        self._cursor_readout_lbl.setFont(mono_font(8))
-        self._cursor_readout_lbl.setWordWrap(True)
-        side_lay.addWidget(cursor_title)
-        side_lay.addWidget(self._cursor_readout_lbl)
-        side_lay.addStretch(1)
-        fft_top_lay.addWidget(side_panel)
-        self._side_panel = side_panel
-        side_panel.hide()  # hidden by default; "Show tools" in toolbar reveals it
 
         self._tab_widget = QTabWidget()
         self._tab_widget.setMinimumHeight(300)
@@ -1213,12 +1180,6 @@ class FFTViewerDialog(
         tabs = getattr(self, "_tab_widget", None)
         if tabs is not None:
             tabs.setVisible(not checked)
-        # Side panel: hidden in focus mode; otherwise follow the tools toggle
-        side = getattr(self, "_side_panel", None)
-        if side is not None:
-            tools_btn = getattr(self, "_show_tools_btn", None)
-            tools_on = tools_btn is not None and tools_btn.isChecked()
-            side.setVisible(not checked and tools_on)
         btn = getattr(self, "_focus_fft_btn", None)
         if btn is not None:
             btn.setText("Exit Focus" if checked else "Focus FFT")
@@ -1227,24 +1188,8 @@ class FFTViewerDialog(
             act.setChecked(checked)
         QTimer.singleShot(0, self, self._adapt_zoom_to_canvas)
 
-    def _on_show_tools_toggled(self, checked: bool) -> None:
-        side = getattr(self, "_side_panel", None)
-        if side is not None:
-            focus_active = getattr(self, "_focus_fft_active", False)
-            side.setVisible(checked and not focus_active)
-        btn = getattr(self, "_show_tools_btn", None)
-        if btn is not None:
-            btn.setText("Hide tools" if checked else "Show tools")
-        act = getattr(self, "_show_tools_act", None)
-        if act is not None and act.isChecked() != checked:
-            act.setChecked(checked)
-        QTimer.singleShot(0, self, self._adapt_zoom_to_canvas)
-
     def _set_status_text(self, text: str) -> None:
         self._status_lbl.setText(text)
-        lbl = getattr(self, "_cursor_readout_lbl", None)
-        if lbl is not None:
-            lbl.setText(text or "Move over the FFT")
 
     # ── zoom / pan ─────────────────────────────────────────────────────────────
 
@@ -1284,7 +1229,7 @@ class FFTViewerDialog(
         """Re-fit q_x to the current canvas aspect and redraw, preserving q_y zoom.
 
         The single chokepoint for every canvas-size change — window resize,
-        splitter drag, Focus FFT / Show tools toggles — wired to the matplotlib
+        splitter drag or the Focus FFT toggle — wired to the matplotlib
         ``resize_event`` so circles stay circular no matter how the size changed.
         """
         if self._use_equal_aspect():

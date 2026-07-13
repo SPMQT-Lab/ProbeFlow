@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
+from probeflow import __version__
 from probeflow.cli.processing_ops import (
     _add_common_io,
     _cmd_single_op,
@@ -74,6 +75,11 @@ def _build_parser() -> argparse.ArgumentParser:
             "  probeflow dat2sxm -- --input-dir data/scans --output-dir out/sxm\n"
             "  probeflow dat2npy -- --input-dir data/scans --output-dir out/npy\n"
         ),
+    )
+    p.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
     )
     sub = p.add_subparsers(dest="command", required=True, metavar="<command>")
 

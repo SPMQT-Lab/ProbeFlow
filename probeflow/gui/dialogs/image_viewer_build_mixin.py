@@ -652,6 +652,9 @@ class ImageViewerBuildMixin:
         self._save_pdf_btn = QPushButton("Save PDF copy…")
         self._save_pdf_btn.setFont(ui_font(8, weight=QFont.Bold))
         self._save_pdf_btn.setFixedHeight(26)
+        self._save_pdf_btn.setToolTip(
+            "Save the same borderless image composition as PNG in a PDF file."
+        )
         self._save_pdf_btn.clicked.connect(self._on_save_pdf)
         export_lay.addWidget(self._save_pdf_btn)
 

@@ -18,12 +18,16 @@ Launch the GUI via ``probeflow gui`` (see ``pyproject.toml`` for the
 console-script wiring) or programmatically via ``probeflow.gui.main()``.
 """
 
-from importlib.metadata import PackageNotFoundError, version as _package_version
+__version__ = "1.0.0rc1"
 
-try:
-    __version__ = _package_version("probeflow")
-except PackageNotFoundError:
-    __version__ = "0.0.0b0"
+
+def display_version() -> str:
+    """Return a human-readable form of the PEP 440 release version."""
+
+    release, separator, candidate = __version__.partition("rc")
+    if separator and candidate:
+        return f"{release} RC {candidate}"
+    return __version__
 
 # Public API: the vendor-agnostic Scan abstraction + dispatcher.
 # Importing these does not pull in PySide6 / matplotlib.
@@ -38,5 +42,5 @@ __all__ = [
     "ScanMetadata", "read_scan_metadata", "metadata_from_scan",
     "ProbeFlowItem", "index_folder",
     "LoadSignature", "identify_scan_file", "identify_spectrum_file",
-    "__version__",
+    "__version__", "display_version",
 ]

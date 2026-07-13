@@ -1,0 +1,36 @@
+# Complete dependency resolution for the macOS arm64 release environment.
+# Verified on 2026-07-13 with the official Python.org CPython 3.13.14 macOS
+# framework. Regenerate only after creating a clean environment and exercising
+# the complete test/build cycle.
+altgraph==0.17.5
+contourpy==1.3.3
+cycler==0.12.1
+fonttools==4.63.0
+gwyfile==0.3.0
+imageio==2.37.3
+joblib==1.5.3
+kiwisolver==1.5.0
+lazy-loader==0.5
+macholib==1.16.4
+matplotlib==3.10.0
+networkx==3.6.1
+numpy==2.1.3
+opencv-python==4.13.0.92
+packaging==26.2
+pillow==12.2.0
+pyinstaller==6.21.0
+pyinstaller-hooks-contrib==2026.6
+pyparsing==3.3.2
+PySide6==6.11.0
+PySide6_Addons==6.11.0
+PySide6_Essentials==6.11.0
+python-dateutil==2.9.0.post0
+scikit-image==0.25.0
+scikit-learn==1.6.1
+scipy==1.15.3
+setuptools==83.0.0
+shapely==2.1.2
+shiboken6==6.11.0
+six==1.17.0
+threadpoolctl==3.6.0
+tifffile==2026.6.1

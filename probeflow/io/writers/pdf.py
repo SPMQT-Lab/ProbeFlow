@@ -35,6 +35,7 @@ def write_pdf(
     show_scalebar: bool = True,
     scalebar_length_nm: Optional[float] = None,
     provenance=None,
+    include_provenance: bool = True,
     overwrite: bool = False,
     overwrite_sidecars: bool = False,
 ) -> None:
@@ -67,26 +68,29 @@ def write_pdf(
             f"{scan.n_planes} plane(s)"
         )
     out_path = Path(out_path)
-    if provenance is None:
-        provenance = build_scan_export_provenance(
-            scan,
-            channel_index=plane_idx,
-            display_state={
-                "colormap": colormap,
-                "clip_low": float(clip_low),
-                "clip_high": float(clip_high),
-                "show_colorbar": bool(show_colorbar),
-                "show_scalebar": bool(show_scalebar),
-                "scalebar_length_nm": scalebar_length_nm,
-            },
-            export_kind="pdf",
-            output_path=out_path,
+    if include_provenance:
+        if provenance is None:
+            provenance = build_scan_export_provenance(
+                scan,
+                channel_index=plane_idx,
+                display_state={
+                    "colormap": colormap,
+                    "clip_low": float(clip_low),
+                    "clip_high": float(clip_high),
+                    "show_colorbar": bool(show_colorbar),
+                    "show_scalebar": bool(show_scalebar),
+                    "scalebar_length_nm": scalebar_length_nm,
+                },
+                export_kind="pdf",
+                output_path=out_path,
+            )
+        check_provenance_sidecar_collisions(
+            out_path,
+            legacy=hasattr(provenance, "to_dict"),
+            overwrite=overwrite_sidecars,
         )
-    check_provenance_sidecar_collisions(
-        out_path,
-        legacy=hasattr(provenance, "to_dict"),
-        overwrite=overwrite_sidecars,
-    )
+    else:
+        provenance = None
     check_output_available(out_path, overwrite=overwrite)
 
     arr = scan.planes[plane_idx]
@@ -160,12 +164,13 @@ def write_pdf(
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, format="pdf")
     plt.close(fig)
-    write_provenance_sidecars(
-        out_path,
-        provenance,
-        export_format="pdf",
-        overwrite=overwrite_sidecars,
-    )
+    if provenance is not None:
+        write_provenance_sidecars(
+            out_path,
+            provenance,
+            export_format="pdf",
+            overwrite=overwrite_sidecars,
+        )
 
 
 _NICE_NM = [0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000]
