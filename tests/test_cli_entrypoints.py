@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -90,7 +91,23 @@ def test_python_m_probeflow_cli_help_works():
         text=True,
     )
 
-    assert result.returncode == 0
+    assert result.returncode == 0, result.stderr
+    assert "ProbeFlow" in result.stdout
+
+
+def test_python_m_probeflow_cli_help_survives_legacy_windows_encoding():
+    env = dict(os.environ)
+    env["PYTHONIOENCODING"] = "cp1252:strict"
+    result = subprocess.run(
+        [sys.executable, "-m", "probeflow.cli", "--help"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        encoding="cp1252",
+        env=env,
+    )
+
+    assert result.returncode == 0, result.stderr
     assert "ProbeFlow" in result.stdout
 
 

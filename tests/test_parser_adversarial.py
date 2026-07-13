@@ -245,13 +245,15 @@ class TestNanonisSpecEdges:
         from probeflow.io.readers.nanonis_spec import read_nanonis_spec
 
         p = tmp_path / "single.dat"
-        p.write_text(
+        contents = (
             "Experiment\tHistory Data\r\n"
             "[DATA]\r\n"
             "Current (A)\r\n"
-            + "".join(f"{v:.3e}\r\n" for v in np.linspace(1e-12, 5e-12, 40)),
-            encoding="latin-1",
+            + "".join(f"{v:.3e}\r\n" for v in np.linspace(1e-12, 5e-12, 40))
         )
+        # Write bytes so Windows text-mode newline translation cannot turn
+        # the explicit CRLF sequences into CR-CR-LF blank lines.
+        p.write_bytes(contents.encode("latin-1"))
         spec = read_nanonis_spec(p)
         assert spec.metadata["n_points"] == 40
         assert spec.channels["Current"].shape == (40,)

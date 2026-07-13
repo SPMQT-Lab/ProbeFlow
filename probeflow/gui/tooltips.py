@@ -17,6 +17,7 @@ from PySide6.QtWidgets import QToolTip
 
 # Max tooltip width in px before text wraps to the next row.
 _WRAP_PX = 340
+_SHORT_NATURAL_CHARS = 48
 
 
 def _needs_wrap(text: str) -> bool:
@@ -25,11 +26,17 @@ def _needs_wrap(text: str) -> bool:
     Short tooltips must keep their natural size — a fixed-width table leaves
     a mostly-empty box around one short sentence.
     """
+    lines = text.splitlines()
+    # Some headless Windows Qt backends report inflated default-font metrics.
+    # A genuinely short line should remain natural-size regardless of the
+    # display backend used to measure it.
+    if all(len(line) <= _SHORT_NATURAL_CHARS for line in lines):
+        return False
     try:
         metrics = QFontMetrics(QToolTip.font())
         return any(
             metrics.horizontalAdvance(line) > _WRAP_PX
-            for line in text.splitlines()
+            for line in lines
         )
     except Exception:
         return True  # be safe: cap width rather than risk a screen-wide strip

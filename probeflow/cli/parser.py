@@ -56,6 +56,19 @@ from probeflow.cli.commands.spectroscopy import (
 )
 
 
+def _make_cli_streams_encoding_safe() -> None:
+    """Prevent Unicode help text from crashing legacy Windows terminals."""
+
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(errors="replace")
+        except (OSError, ValueError):
+            pass
+
+
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="probeflow",
@@ -546,6 +559,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
+    _make_cli_streams_encoding_safe()
     # Version-drift is the most confusing failure class to diagnose from a
     # user report: name it up front, and stamp any crash with the environment.
     from probeflow.core.env_check import install_crash_banner, report_environment
