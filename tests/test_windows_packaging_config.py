@@ -116,6 +116,9 @@ def test_windows_validator_requires_x64_and_rejects_unused_qt():
         "ProductVersion",
     ):
         assert expected in source
+    assert 'internal / "PySide6" / "Qt6Core.dll"' in source
+    assert 'internal / "PySide6" / "Qt6Widgets.dll"' in source
+    assert '"PySide6" / "Qt" / "bin"' not in source
 
 
 def test_nsis_installer_is_per_user_and_has_clean_uninstall():

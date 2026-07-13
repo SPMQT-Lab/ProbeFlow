@@ -53,8 +53,8 @@ def validate(app_dir: Path) -> None:
         / "CPython-3.13.14"
         / "LICENSE.txt",
         internal / "THIRD_PARTY_LICENSES" / "qt" / "QT_CORRESPONDING_SOURCE.txt",
-        internal / "PySide6" / "Qt" / "bin" / "Qt6Core.dll",
-        internal / "PySide6" / "Qt" / "bin" / "Qt6Widgets.dll",
+        internal / "PySide6" / "Qt6Core.dll",
+        internal / "PySide6" / "Qt6Widgets.dll",
         internal / "python313.dll",
     )
     missing = [str(path.relative_to(app_dir)) for path in required if not path.exists()]
@@ -92,15 +92,21 @@ def validate(app_dir: Path) -> None:
     if not binaries:
         raise RuntimeError("Windows bundle contains no PE binaries")
     for path in binaries:
-        with pefile.PE(str(path), fast_load=True) as pe:
+        pe = pefile.PE(str(path), fast_load=True)
+        try:
             if pe.FILE_HEADER.Machine != IMAGE_FILE_MACHINE_AMD64:
                 raise RuntimeError(
                     f"Non-x64 PE binary: {path.relative_to(app_dir)} "
                     f"(machine 0x{pe.FILE_HEADER.Machine:04x})"
                 )
+        finally:
+            pe.close()
 
-    with pefile.PE(str(executable), fast_load=False) as pe:
+    pe = pefile.PE(str(executable), fast_load=False)
+    try:
         version = _version_strings(pe)
+    finally:
+        pe.close()
     expected_version = {
         "CompanyName": "SPMQT-Lab",
         "FileDescription": "ProbeFlow desktop application",
