@@ -9,6 +9,7 @@ from typing import Callable
 
 import numpy as np
 
+from probeflow.core.operation_specs import BUILTIN_OPERATIONS
 from probeflow.io.common import setup_logging
 from probeflow.processing.state import ProcessingState, ProcessingStep
 from probeflow.core.scan_loader import load_scan
@@ -314,31 +315,55 @@ def _parse_processing_steps(steps_spec: list[str] | tuple[str, ...] | None) -> l
         parts = params.split(",") if params else []
 
         if name == "align-rows":
-            method = parts[0] if parts else "median"
+            method = parts[0] if parts else BUILTIN_OPERATIONS.default_for(
+                "align_rows", "method"
+            )
             ops.append(_op_align_rows(method))
         elif name == "remove-bad-lines":
-            mad = float(parts[0]) if parts else 5.0
+            mad = float(parts[0]) if parts else BUILTIN_OPERATIONS.default_for(
+                "remove_bad_lines", "threshold_mad"
+            )
             ops.append(_op_remove_bad_lines(mad))
         elif name == "plane-bg":
-            order = int(parts[0]) if parts else 1
+            order = int(parts[0]) if parts else BUILTIN_OPERATIONS.default_for(
+                "plane_bg", "order"
+            )
             if order not in (1, 2, 3, 4):
                 raise ValueError(f"plane-bg order must be 1-4, got {order}")
             ops.append(_op_plane_bg(order))
         elif name == "facet-level":
-            deg = float(parts[0]) if parts else 3.0
+            deg = float(parts[0]) if parts else BUILTIN_OPERATIONS.default_for(
+                "facet_level", "threshold_deg"
+            )
             ops.append(_op_facet_level(deg))
         elif name == "smooth":
-            sigma = float(parts[0]) if parts else 1.0
+            sigma = float(parts[0]) if parts else BUILTIN_OPERATIONS.default_for(
+                "smooth", "sigma_px"
+            )
             ops.append(_op_smooth(sigma))
         elif name == "edge":
-            method = parts[0] if parts else "laplacian"
-            sigma = float(parts[1]) if len(parts) > 1 else 1.0
-            sigma2 = float(parts[2]) if len(parts) > 2 else 2.0
+            method = parts[0] if parts else BUILTIN_OPERATIONS.default_for(
+                "edge_detect", "method"
+            )
+            sigma = float(parts[1]) if len(parts) > 1 else BUILTIN_OPERATIONS.default_for(
+                "edge_detect", "sigma"
+            )
+            sigma2 = float(parts[2]) if len(parts) > 2 else BUILTIN_OPERATIONS.default_for(
+                "edge_detect", "sigma2"
+            )
             ops.append(_op_edge(method, sigma, sigma2))
         elif name == "fft":
-            mode = parts[0] if parts else "low_pass"
-            cutoff = float(parts[1]) if len(parts) > 1 else 0.1
-            window = parts[2] if len(parts) > 2 else "hanning"
+            mode = parts[0] if parts else BUILTIN_OPERATIONS.default_for(
+                "fourier_filter", "mode"
+            )
+            cutoff = (
+                float(parts[1])
+                if len(parts) > 1
+                else BUILTIN_OPERATIONS.default_for("fourier_filter", "cutoff")
+            )
+            window = parts[2] if len(parts) > 2 else BUILTIN_OPERATIONS.default_for(
+                "fourier_filter", "window"
+            )
             ops.append(_op_fft(mode, cutoff, window))
         elif name == "flip-h":
             ops.append(_op_flip_horizontal())
@@ -351,8 +376,12 @@ def _parse_processing_steps(steps_spec: list[str] | tuple[str, ...] | None) -> l
         elif name == "rotate-270":
             ops.append(_op_rotate_270_cw())
         elif name == "rotate":
-            angle = float(parts[0]) if parts else 0.0
-            order = int(parts[1]) if len(parts) > 1 else 1
+            angle = float(parts[0]) if parts else BUILTIN_OPERATIONS.default_for(
+                "rotate_arbitrary", "angle_degrees"
+            )
+            order = int(parts[1]) if len(parts) > 1 else BUILTIN_OPERATIONS.default_for(
+                "rotate_arbitrary", "order"
+            )
             ops.append(_op_rotate_arbitrary(angle, order))
         else:
             raise ValueError(f"Unknown pipeline step: {name!r}")

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
+from typing import Any
 
 from probeflow.core.operations.model import OperationGroup, OperationSpec
 
@@ -54,3 +56,14 @@ class OperationCatalog:
 
     def for_group(self, group: OperationGroup) -> tuple[OperationSpec, ...]:
         return tuple(spec for spec in self.specs if spec.group == group)
+
+    def default_for(self, operation_id: str, parameter: str) -> Any:
+        """Return a copied execution default for an interface adapter."""
+        spec = self.by_id(operation_id)
+        if spec is None:
+            raise KeyError(f"Unknown processing operation: {operation_id!r}")
+        if parameter not in spec.default_params:
+            raise KeyError(
+                f"Operation {operation_id!r} has no default for {parameter!r}"
+            )
+        return deepcopy(spec.default_params[parameter])

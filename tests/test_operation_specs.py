@@ -44,6 +44,18 @@ def test_catalog_keeps_canonical_lookup_separate_from_alias_resolution():
     assert catalog.resolve("rotate_90_cw") is rotate
 
 
+def test_catalog_returns_copied_defaults_and_clear_missing_default_errors():
+    catalog = OperationCatalog(
+        (OperationSpec("filter", "spatial", default_params={"points": [1]}),)
+    )
+    points = catalog.default_for("filter", "points")
+    points.append(2)
+
+    assert catalog.default_for("filter", "points") == [1]
+    with pytest.raises(KeyError, match="has no default"):
+        catalog.default_for("filter", "missing")
+
+
 def test_catalog_rejects_duplicate_aliases():
     with pytest.raises(ValueError, match="globally unique"):
         OperationCatalog(
