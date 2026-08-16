@@ -243,6 +243,9 @@ Console entry points are `probeflow`, `dat-sxm`, `dat-png`, and `dat-npy`.
 
 ## Export and provenance
 
+The canonical hierarchy and legacy-field mapping are defined in
+[`provenance.md`](provenance.md).
+
 Writers under `io.writers` support SXM, GWY, PNG, PDF, and CSV. JSON helpers and
 Createc-to-NPY conversion provide other structured outputs. Writers refuse to
 overwrite raw input and normally refuse output collisions unless explicitly
