@@ -22,6 +22,7 @@ from typing import Any
 import numpy as np
 
 from probeflow.core.roi import AREA_ROI_KINDS, ROI
+from probeflow.core.operation_specs import BUILTIN_OPERATIONS
 # ProcessingState / ProcessingStep moved to probeflow.core.processing_state
 # (review arch-backend #14).  Re-exported here so the historical
 # ``from probeflow.processing.state import ProcessingState`` import path
@@ -609,7 +610,12 @@ def apply_processing_state(
     # there is no duplicated op-classification to drift (the calibrated path
     # detects shape changes empirically, not by an op-name set).
     for step_index, step in enumerate(state.steps):
-        p = step.params
+        spec = BUILTIN_OPERATIONS.by_id(step.op)
+        # ProcessingStep already validates the ID, so this is an internal
+        # consistency guard rather than a new user-facing validation path.
+        if spec is None:
+            raise ValueError(f"No operation contract for {step.op!r}")
+        p = spec.params_with_defaults(step.params)
         if step.op == "remove_bad_lines":
             a = _proc.remove_bad_lines(
                 a,
