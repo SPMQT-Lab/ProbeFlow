@@ -18,57 +18,13 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
 
+from probeflow.core.operation_specs import BUILTIN_OPERATIONS
+
 
 # ── Supported operations (must match probeflow.processing function names) ─────
 
-_SUPPORTED_OPS: frozenset[str] = frozenset({
-    "remove_bad_lines",
-    "align_rows",
-    "plane_bg",
-    "stm_line_bg",
-    "stm_background",
-    "facet_level",
-    "smooth",
-    "median_smooth",
-    "gaussian_high_pass",
-    "edge_detect",
-    "fourier_filter",
-    "fft_soft_border",
-    "periodic_notch_filter",
-    "mains_pickup_suppression",
-    "inverse_fft_filter",
-    "symmetrize_fft",
-    "linear_undistort",
-    "affine_lattice_correction",
-    "arithmetic",
-    "set_zero_point",
-    "set_zero_plane",
-    "roi",
-    "mask",
-    "flip_horizontal",
-    "flip_vertical",
-    "rotate_90_cw",
-    "rotate_180",
-    "rotate_270_cw",
-    "rotate_arbitrary",
-    "shear",
-    "scale_image",
-    "crop",
-    "interpolate_masked",
-    "remove_spots_auto",
-    "image_threshold",
-    "quantize_bit_depth",
-})
-
-_ROI_ELIGIBLE_OPS: frozenset[str] = frozenset({
-    "smooth",
-    "median_smooth",
-    "gaussian_high_pass",
-    "edge_detect",
-    "fourier_filter",
-    "fft_soft_border",
-    "arithmetic",
-})
+_SUPPORTED_OPS: frozenset[str] = BUILTIN_OPERATIONS.operation_ids
+_ROI_ELIGIBLE_OPS: frozenset[str] = BUILTIN_OPERATIONS.roi_eligible_ids
 
 
 # ── Dataclasses ───────────────────────────────────────────────────────────────
@@ -81,7 +37,7 @@ class ProcessingStep:
     params: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if self.op not in _SUPPORTED_OPS:
+        if BUILTIN_OPERATIONS.by_id(self.op) is None:
             raise ValueError(
                 f"Unknown processing operation {self.op!r}. "
                 f"Supported operations: {sorted(_SUPPORTED_OPS)}"

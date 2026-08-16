@@ -22,11 +22,13 @@ Naming conventions
 
 from __future__ import annotations
 
+from probeflow.core.operation_specs import BUILTIN_OPERATIONS
+
 # ── long ↔ short aliases (only the rotations differ) ────────────────────────
 LONG_TO_SHORT: dict[str, str] = {
-    "rotate_90_cw": "rot90_cw",
-    "rotate_180": "rot180",
-    "rotate_270_cw": "rot270_cw",
+    spec.operation_id: alias
+    for spec in BUILTIN_OPERATIONS.specs
+    for alias in spec.aliases
 }
 SHORT_TO_LONG: dict[str, str] = {short: long for long, short in LONG_TO_SHORT.items()}
 
@@ -45,26 +47,22 @@ def to_long(operation: str) -> str:
 
 # ── op classes (short form — the vocabulary ROI/overlay/scan logic switches on)
 # Exact pixel-coordinate transforms: ROI geometry survives them unchanged.
-LOSSLESS_OPS: frozenset[str] = frozenset({
-    "flip_horizontal",
-    "flip_vertical",
-    "rot90_cw",
-    "rot180",
-    "rot270_cw",
-})
+LOSSLESS_OPS: frozenset[str] = frozenset(
+    {"flip_horizontal", "flip_vertical", *LONG_TO_SHORT.values()}
+)
 
 # Lossless ops that exchange the physical X and Y extents (transpose dims), so
 # ``scan_range_m`` must be swapped.
-DIMENSION_SWAPPING_OPS: frozenset[str] = frozenset({"rot90_cw", "rot270_cw"})
+DIMENSION_SWAPPING_OPS: frozenset[str] = frozenset(
+    to_short(spec.operation_id)
+    for spec in BUILTIN_OPERATIONS.specs
+    if spec.shape_policy == "swap_axes"
+)
 
 # ── simple geometric op names in LONG form (the flip/rotate family) ──────────
 # These are the names listed by the grouped dispatch branches and the GUI
 # adapter; they are members of ``_SUPPORTED_OPS`` and map 1:1 to
 # ``processing.geometry`` functions.
-SIMPLE_GEOMETRIC_OPS: frozenset[str] = frozenset({
-    "flip_horizontal",
-    "flip_vertical",
-    "rotate_90_cw",
-    "rotate_180",
-    "rotate_270_cw",
-})
+SIMPLE_GEOMETRIC_OPS: frozenset[str] = frozenset(
+    {"flip_horizontal", "flip_vertical", *LONG_TO_SHORT.keys()}
+)
