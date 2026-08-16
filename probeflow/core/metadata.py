@@ -25,6 +25,7 @@ from probeflow.core.browse_filters import (
     createc_visible_height_m,
 )
 from probeflow.core.common import _f, _i
+from probeflow.core.formats.builtins import BUILTIN_FORMATS
 
 
 # ── ScanMetadata dataclass ────────────────────────────────────────────────────
@@ -61,16 +62,12 @@ class ScanMetadata:
     experiment_metadata: dict[str, Any] = field(default_factory=dict)
 
 
-# ── Format string mapping ────────────────────────────────────────────────────
-
-_FORMAT_MAP = {"dat": "createc_dat", "sxm": "nanonis_sxm", "sm4": "rhk_sm4"}
-
-
 # ── metadata_from_scan ───────────────────────────────────────────────────────
 
 def metadata_from_scan(scan) -> ScanMetadata:
     """Build a :class:`ScanMetadata` from an already-loaded ``Scan``."""
-    source_format = _FORMAT_MAP.get(scan.source_format, scan.source_format)
+    definition = BUILTIN_FORMATS.by_identifier(scan.source_format)
+    source_format = definition.format_id if definition is not None else scan.source_format
 
     shape = scan.planes[0].shape if scan.planes else None
     plane_names = tuple(scan.plane_names)
@@ -417,16 +414,6 @@ def _extract_rhk_fields(hdr: dict) -> tuple:
 
 # ── read_scan_metadata ───────────────────────────────────────────────────────
 
-# Map a sniffed FileType straight to the scan reader vocabulary, so callers that
-# already sniffed (e.g. folder indexing) can skip identify_scan_file's repeat
-# sniff + exists/is_file/resolve round-trips.
-_SCAN_FILE_TYPE_FORMATS = {
-    "createc_image": "dat",
-    "nanonis_image": "sxm",
-    "rhk_sm4_image": "sm4",
-}
-
-
 def read_scan_metadata(path, *, file_type=None) -> ScanMetadata:
     """Return :class:`ScanMetadata` for a Createc DAT or Nanonis SXM image file.
 
@@ -438,24 +425,15 @@ def read_scan_metadata(path, *, file_type=None) -> ScanMetadata:
     when given for a supported image type, the redundant re-sniff / stat done by
     ``identify_scan_file`` is skipped (the network-drive indexing fast path).
     """
-    source_format = _SCAN_FILE_TYPE_FORMATS.get(getattr(file_type, "value", None))
-    if source_format is None:
+    definition = BUILTIN_FORMATS.by_file_type(file_type) if file_type is not None else None
+    if definition is None:
         from probeflow.core.loaders import identify_scan_file
 
         sig = identify_scan_file(path)
-        source_format, path = sig.source_format, sig.path
+        path = sig.path
+        definition = BUILTIN_FORMATS.by_file_type(sig.file_type)
 
-    if source_format == "dat":
-        from probeflow.io.readers.createc_scan import read_dat_metadata
-
-        return read_dat_metadata(path)
-    if source_format == "sxm":
-        from probeflow.io.readers.nanonis_sxm import read_sxm_metadata
-
-        return read_sxm_metadata(path)
-    if source_format == "sm4":
-        from probeflow.io.readers.rhk_sm4 import read_sm4_metadata
-
-        return read_sm4_metadata(path)
-
-    raise ValueError(f"Unsupported scan source format: {source_format!r}")
+    if definition is None or definition.kind != "scan":
+        identifier = getattr(file_type, "value", None)
+        raise ValueError(f"Unsupported scan source format: {identifier!r}")
+    return definition.read_metadata(path)
