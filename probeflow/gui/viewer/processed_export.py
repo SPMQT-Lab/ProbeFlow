@@ -51,26 +51,15 @@ def build_processed_scan_for_export(
     Raises ``ValueError`` if there is no image data and ``display_arr`` is
     also ``None``.
     """
-    from probeflow.core.scan_loader import load_scan
-    from probeflow.processing.gui_adapter import processing_state_from_gui
+    from probeflow.workflows import load_processed_scan
 
-    scan = load_scan(path)
-    idx = max(0, min(channel_idx, scan.n_planes - 1))
-
-    if display_arr is None:
-        if scan.n_planes == 0:
-            raise ValueError("No image data loaded.")
-        arr = scan.planes[idx]
-    else:
-        arr = display_arr
-
-    scan.planes[idx] = np.asarray(arr, dtype=np.float64).copy()
-    if scan_range_m is not None:
-        scan.scan_range_m = (float(scan_range_m[0]), float(scan_range_m[1]))
-    state = processing_state_from_gui(processing_gui_state or {})
-    if state.steps:
-        scan.record_processing_state(state)
-    return scan, idx
+    return load_processed_scan(
+        path,
+        channel_idx,
+        display_arr,
+        processing_gui_state,
+        scan_range_m=scan_range_m,
+    )
 
 
 def build_processed_export_provenance(
