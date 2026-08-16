@@ -13,7 +13,7 @@ import copy as _copy
 import hashlib as _hashlib
 import json as _json
 import tempfile as _tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -349,6 +349,8 @@ def build_scan_export_provenance(
     conversion = "dat_to_sxm" if (
         export_format == "sxm" and getattr(scan, "source_format", None) == "dat"
     ) else None
+    roi_data = roi_set.to_dict() if roi_set is not None else None
+    mask_data = mask_set.to_dict() if mask_set is not None else None
     export_record = build_export_record(
         history,
         export_path=out_str,
@@ -357,31 +359,18 @@ def build_scan_export_provenance(
         export_parameters={"export_kind": str(export_kind)},
         warnings=tuple(warnings or ()),
         conversion=conversion,
-        rois=roi_set.to_dict() if roi_set is not None else None,
-        masks=mask_set.to_dict() if mask_set is not None else None,
+        rois=roi_data,
+        masks=mask_data,
     )
-    return ExportProvenance(
-        source_file=prov.source_file,
-        source_format=prov.source_format,
-        item_type=prov.item_type,
-        channel_name=prov.channel_name,
-        channel_index=prov.channel_index,
-        array_shape=prov.array_shape,
-        scan_range_m=prov.scan_range_m,
-        units=prov.units,
-        processing_state=ps_dict,
-        display_state=ds_dict,
-        probeflow_version=prov.probeflow_version,
-        export_timestamp=prov.export_timestamp,
+    return replace(
+        prov,
         export_kind=str(export_kind),
         output_path=privacy_safe_path(out_str),
-        source_id=prov.source_id,
-        channel_id=prov.channel_id,
         processing_state_hash=processing_state_hash(ps_dict),
         artifact_id=artifact_id,
         warnings=tuple(warnings or ()),
-        rois=roi_set.to_dict() if roi_set is not None else None,
-        masks=mask_set.to_dict() if mask_set is not None else None,
+        rois=roi_data,
+        masks=mask_data,
         processing_history=history.to_dict(),
         export_record=export_record.to_dict(),
         warning=export_record.warning,
