@@ -14,6 +14,19 @@ if TYPE_CHECKING:
     from probeflow.provenance.export import ExportProvenance
 
 
+_CONTROLLED_WRITER_OPTIONS = frozenset(
+    {
+        "include_meta",
+        "include_provenance",
+        "overwrite",
+        "overwrite_sidecars",
+        "plane_idx",
+        "processed_plane_idx",
+        "provenance",
+    }
+)
+
+
 @dataclass(frozen=True)
 class ProcessedExportRequest:
     """Everything needed to write one processed scan artifact."""
@@ -50,6 +63,12 @@ class ProcessedExportRequest:
             "writer_options",
             MappingProxyType(dict(self.writer_options)),
         )
+        controlled = _CONTROLLED_WRITER_OPTIONS & self.writer_options.keys()
+        if controlled:
+            raise ValueError(
+                "Workflow-controlled writer options cannot be overridden: "
+                f"{sorted(controlled)}"
+            )
         if self.display_state is not None:
             object.__setattr__(
                 self,
@@ -72,6 +91,7 @@ class ProcessedExportResult:
     destination: Path
     export_format: str
     plane_idx: int
+    warnings: tuple[str, ...] = ()
     provenance: "ExportProvenance | None" = field(
         default=None,
         repr=False,

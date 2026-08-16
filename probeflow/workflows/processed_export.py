@@ -168,6 +168,7 @@ def write_processed_export(
         destination=request.destination,
         export_format=suffix.lstrip("."),
         plane_idx=request.plane_idx,
+        warnings=request.warnings,
         provenance=provenance,
     )
 

@@ -35,6 +35,15 @@ def test_request_copies_mutable_interface_options(tmp_path):
     assert request.writer_options == {"clip_low": 1.0}
 
 
+def test_request_keeps_overwrite_policy_out_of_writer_options(tmp_path):
+    with pytest.raises(ValueError, match="cannot be overridden"):
+        ProcessedExportRequest(
+            _scan(),
+            tmp_path / "image.png",
+            writer_options={"overwrite": True},
+        )
+
+
 @pytest.mark.parametrize(
     ("suffix", "method"),
     [
@@ -143,3 +152,20 @@ def test_workflow_rejects_unsupported_formats_before_writing(tmp_path):
         )
 
     scan.save.assert_not_called()
+
+
+def test_workflow_passes_explicit_overwrite_authority(tmp_path):
+    scan = _scan()
+
+    write_processed_export(
+        ProcessedExportRequest(
+            scan,
+            tmp_path / "image.csv",
+            include_provenance=False,
+            overwrite=True,
+            overwrite_sidecars=True,
+        )
+    )
+
+    assert scan.save_csv.call_args.kwargs["overwrite"] is True
+    assert scan.save_csv.call_args.kwargs["overwrite_sidecars"] is True
