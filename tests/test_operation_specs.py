@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from probeflow.core.operation_specs import BUILTIN_OPERATIONS
 from probeflow.core.operations import OperationCatalog, OperationSpec
 from probeflow.core.operations.frequency import FREQUENCY_OPERATION_SPECS
 from probeflow.core.operations.geometry import GEOMETRY_OPERATION_SPECS
@@ -141,3 +142,20 @@ def test_geometry_specs_capture_aliases_shape_and_range_rules():
     assert catalog.by_id("rotate_90_cw").range_policy == "swap_axes"
     assert catalog.by_id("scale_image").range_policy == "preserve"
     assert catalog.by_id("crop").range_policy == "scale_with_shape"
+
+
+def test_builtin_catalog_matches_the_existing_processing_vocabulary():
+    from probeflow.core.processing_state import _ROI_ELIGIBLE_OPS, _SUPPORTED_OPS
+
+    assert BUILTIN_OPERATIONS.operation_ids == _SUPPORTED_OPS
+    assert BUILTIN_OPERATIONS.roi_eligible_ids == _ROI_ELIGIBLE_OPS
+    assert len(BUILTIN_OPERATIONS.specs) == 36
+
+
+def test_builtin_contract_contains_no_numerical_handlers():
+    assert all(isinstance(spec.handler_key, str) for spec in BUILTIN_OPERATIONS.specs)
+    assert not any(
+        callable(value)
+        for spec in BUILTIN_OPERATIONS.specs
+        for value in spec.default_params.values()
+    )
