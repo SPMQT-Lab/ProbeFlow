@@ -16,6 +16,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from probeflow.core.file_type import FileType, sniff_file_type
+from probeflow.core.formats.builtins import BUILTIN_FORMATS
+from probeflow.core.formats.model import FormatDefinition
 
 
 @dataclass(frozen=True)
@@ -26,6 +28,17 @@ class LoadSignature:
     file_type: FileType
     item_type: str
     source_format: str
+    format_id: str | None = None
+
+
+def _signature(path: Path, definition: FormatDefinition) -> LoadSignature:
+    return LoadSignature(
+        path=path,
+        file_type=definition.file_type,
+        item_type=definition.kind,
+        source_format=definition.load_identifier,
+        format_id=definition.format_id,
+    )
 
 
 def identify_scan_file(path) -> LoadSignature:
@@ -39,16 +52,22 @@ def identify_scan_file(path) -> LoadSignature:
     ft = sniff_file_type(p)
     suffix = p.suffix.lower()
 
-    if ft == FileType.NANONIS_IMAGE:
-        return LoadSignature(p, ft, "scan", "sxm")
-    if ft == FileType.CREATEC_IMAGE:
-        return LoadSignature(p, ft, "scan", "dat")
-    if ft == FileType.RHK_SM4_IMAGE:
-        return LoadSignature(p, ft, "scan", "sm4")
+    definition = BUILTIN_FORMATS.by_file_type(ft)
+    if definition is not None and definition.kind == "scan":
+        return _signature(p, definition)
     # ``.sxm`` is unambiguous, so let malformed headers fail in the reader's
     # metadata/full-load stages rather than at the sniff stage.
-    if ft == FileType.UNKNOWN and suffix == ".sxm":
-        return LoadSignature(p, FileType.NANONIS_IMAGE, "scan", "sxm")
+    if ft == FileType.UNKNOWN:
+        fallback = next(
+            (
+                candidate
+                for candidate in BUILTIN_FORMATS.for_suffix(suffix, kind="scan")
+                if candidate.allow_suffix_fallback
+            ),
+            None,
+        )
+        if fallback is not None:
+            return _signature(p, fallback)
     if ft == FileType.NANONIS_SPEC:
         raise ValueError(
             f"{p.name}: identified as spectroscopy during scan sniff stage; "
@@ -77,14 +96,22 @@ def identify_spectrum_file(path) -> LoadSignature:
     ft = sniff_file_type(p)
     suffix = p.suffix.lower()
 
-    if ft == FileType.NANONIS_SPEC:
-        return LoadSignature(p, ft, "spectrum", "nanonis_dat_spectrum")
-    if ft == FileType.CREATEC_SPEC:
-        return LoadSignature(p, ft, "spectrum", "createc_vert")
+    definition = BUILTIN_FORMATS.by_file_type(ft)
+    if definition is not None and definition.kind == "spectrum":
+        return _signature(p, definition)
     # ``.VERT`` is unambiguous, so allow malformed files through to the
     # metadata/full parser where DATA/header validation already lives.
-    if ft == FileType.UNKNOWN and suffix == ".vert":
-        return LoadSignature(p, FileType.CREATEC_SPEC, "spectrum", "createc_vert")
+    if ft == FileType.UNKNOWN:
+        fallback = next(
+            (
+                candidate
+                for candidate in BUILTIN_FORMATS.for_suffix(suffix, kind="spectrum")
+                if candidate.allow_suffix_fallback
+            ),
+            None,
+        )
+        if fallback is not None:
+            return _signature(p, fallback)
     if ft == FileType.NANONIS_IMAGE:
         raise ValueError(
             f"{p.name}: identified as Nanonis scan image during spectroscopy "

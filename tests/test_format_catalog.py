@@ -49,6 +49,7 @@ def test_builtin_catalog_declares_only_the_five_supported_structures() -> None:
     }
     assert BUILTIN_FORMATS.by_identifier("dat").format_id == "createc_dat"
     assert BUILTIN_FORMATS.by_identifier("sxm").format_id == "nanonis_sxm"
+    assert BUILTIN_FORMATS.by_identifier("dat").load_identifier == "dat"
 
 
 def test_definition_normalizes_suffixes_and_freezes_sets() -> None:
@@ -61,6 +62,7 @@ def test_definition_normalizes_suffixes_and_freezes_sets() -> None:
 
     assert definition.suffixes == (".dat",)
     assert definition.identifiers == frozenset({"dat", "createc_dat"})
+    assert definition.load_identifier == "dat"
     assert definition.export_formats == frozenset()
 
 

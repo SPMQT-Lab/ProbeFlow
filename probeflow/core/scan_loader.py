@@ -8,6 +8,7 @@ backward-compatible imports.
 
 from __future__ import annotations
 
+from probeflow.core.formats.builtins import BUILTIN_FORMATS
 from probeflow.core.scan_model import PLANE_CANON_NAMES, PLANE_CANON_UNITS, Scan
 
 
@@ -41,19 +42,10 @@ def load_scan_from_signature(sig) -> Scan:
     Lets callers that have already sniffed (e.g. the thumbnail path) skip a
     second identify_scan_file round-trip.
     """
-    if sig.source_format == "sxm":
-        from probeflow.io.readers.nanonis_sxm import read_sxm
-        scan = read_sxm(sig.path)
-        _validate(scan)
-        return scan
-    if sig.source_format == "dat":
-        from probeflow.io.readers.createc_scan import read_dat
-        scan = read_dat(sig.path)
-        _validate(scan)
-        return scan
-    if sig.source_format == "sm4":
-        from probeflow.io.readers.rhk_sm4 import read_sm4
-        scan = read_sm4(sig.path)
+    identifier = getattr(sig, "format_id", None) or sig.source_format
+    definition = BUILTIN_FORMATS.by_identifier(identifier)
+    if definition is not None and definition.kind == "scan":
+        scan = definition.read_full(sig.path)
         _validate(scan)
         return scan
 

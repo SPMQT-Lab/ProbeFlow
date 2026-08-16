@@ -34,6 +34,7 @@ class FormatDefinition:
     matches_header: SignatureMatcher
     read_metadata: FormatReader
     read_full: FormatReader
+    load_id: str | None = None
     matches_fallback: SignatureMatcher | None = None
     read_thumbnail: FormatReader | None = None
     export_formats: frozenset[str] = frozenset()
@@ -71,4 +72,9 @@ class FormatDefinition:
 
     @property
     def identifiers(self) -> frozenset[str]:
-        return frozenset({self.format_id, *self.aliases})
+        return frozenset({self.format_id, self.load_identifier, *self.aliases})
+
+    @property
+    def load_identifier(self) -> str:
+        """Identifier retained by existing Scan and LoadSignature objects."""
+        return self.load_id or self.format_id

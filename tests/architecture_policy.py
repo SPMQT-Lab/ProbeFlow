@@ -64,7 +64,6 @@ EXCEPTIONS = (
             {
                 "probeflow/core/indexing.py",
                 "probeflow/core/metadata.py",
-                "probeflow/core/scan_loader.py",
                 "probeflow/core/scan_model.py",
                 "probeflow/core/formats/builtins.py",
             }
