@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from probeflow.core.operations import OperationCatalog, OperationSpec
+from probeflow.core.operations.frequency import FREQUENCY_OPERATION_SPECS
 from probeflow.core.operations.spatial import SPATIAL_OPERATION_SPECS
 
 
@@ -77,4 +78,24 @@ def test_spatial_specs_capture_existing_defaults_and_scope_rules():
     assert catalog.by_id("facet_level").calibration_inputs == {
         "pixel_size_x_m",
         "pixel_size_y_m",
+    }
+
+
+def test_frequency_specs_capture_existing_defaults_and_scope_rules():
+    catalog = OperationCatalog(FREQUENCY_OPERATION_SPECS)
+
+    assert catalog.operation_ids == {
+        "fourier_filter",
+        "fft_soft_border",
+        "periodic_notch_filter",
+        "mains_pickup_suppression",
+        "inverse_fft_filter",
+        "symmetrize_fft",
+    }
+    assert catalog.roi_eligible_ids == {"fourier_filter", "fft_soft_border"}
+    assert catalog.by_id("inverse_fft_filter").params_with_defaults(None) == {
+        "selections": [],
+        "mode": "remove_selected",
+        "conjugate_symmetric": True,
+        "soft_px": 0.0,
     }
