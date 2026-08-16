@@ -155,27 +155,19 @@ def read_spec_file(
     The file type is identified from its content signature, so callers can
     pass either vendor format without worrying about extensions.
     """
+    from probeflow.core.formats.builtins import BUILTIN_FORMATS
     from probeflow.core.loaders import identify_spectrum_file
 
     sig = identify_spectrum_file(path)
-    if sig.source_format == "nanonis_dat_spectrum":
-        from probeflow.io.readers.nanonis_spec import read_nanonis_spec
-        spec = read_nanonis_spec(sig.path)
-        _apply_measurement_override(spec.metadata, measurement_mode)
-        return spec
-    return _read_createc_vert(
+    identifier = getattr(sig, "format_id", None) or sig.source_format
+    definition = BUILTIN_FORMATS.by_identifier(identifier)
+    if definition is None or definition.kind != "spectrum":
+        raise ValueError(f"Unsupported spectroscopy format: {identifier!r}")
+    return definition.read_full(
         sig.path,
         time_trace_threshold_mv=time_trace_threshold_mv,
         measurement_mode=measurement_mode,
     )
-
-
-# Sniffed FileType -> spectroscopy reader vocabulary, so an already-sniffed
-# caller (folder indexing) can skip identify_spectrum_file's repeat sniff/stat.
-_SPEC_FILE_TYPE_FORMATS = {
-    "nanonis_spec": "nanonis_dat_spectrum",
-    "createc_spec": "createc_vert",
-}
 
 
 def read_spec_metadata(
@@ -192,19 +184,19 @@ def read_spec_metadata(
     spectroscopy type, ``identify_spectrum_file``'s redundant re-sniff is
     skipped.
     """
-    source_format = _SPEC_FILE_TYPE_FORMATS.get(getattr(file_type, "value", None))
-    if source_format is None:
+    from probeflow.core.formats.builtins import BUILTIN_FORMATS
+
+    definition = BUILTIN_FORMATS.by_file_type(file_type) if file_type is not None else None
+    if definition is None or definition.kind != "spectrum":
         from probeflow.core.loaders import identify_spectrum_file
 
         sig = identify_spectrum_file(path)
-        source_format, path = sig.source_format, sig.path
-
-    if source_format == "nanonis_dat_spectrum":
-        from probeflow.io.readers.nanonis_spec import read_nanonis_spec_metadata
-        meta = read_nanonis_spec_metadata(path)
-        _apply_measurement_override(meta.metadata, measurement_mode)
-        return meta
-    return _read_createc_vert_metadata(
+        identifier = getattr(sig, "format_id", None) or sig.source_format
+        definition = BUILTIN_FORMATS.by_identifier(identifier)
+        path = sig.path
+    if definition is None or definition.kind != "spectrum":
+        raise ValueError(f"Unsupported spectroscopy format: {path}")
+    return definition.read_metadata(
         path,
         time_trace_threshold_mv=time_trace_threshold_mv,
         measurement_mode=measurement_mode,

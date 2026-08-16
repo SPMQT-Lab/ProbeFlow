@@ -56,28 +56,34 @@ def _read_rhk_thumbnail(path, resolve_index):
     return read_sm4_thumbnail_plane(path, resolve_index)
 
 
-def _read_createc_spec_metadata(path):
-    from probeflow.io.spectroscopy import read_spec_metadata
+def _read_createc_spec_metadata(path, **options):
+    from probeflow.io.spectroscopy import _read_createc_vert_metadata
 
-    return read_spec_metadata(path, file_type=FileType.CREATEC_SPEC)
-
-
-def _read_createc_spec(path):
-    from probeflow.io.spectroscopy import read_spec_file
-
-    return read_spec_file(path)
+    return _read_createc_vert_metadata(path, **options)
 
 
-def _read_nanonis_spec_metadata(path):
-    from probeflow.io.spectroscopy import read_spec_metadata
+def _read_createc_spec(path, **options):
+    from probeflow.io.spectroscopy import _read_createc_vert
 
-    return read_spec_metadata(path, file_type=FileType.NANONIS_SPEC)
+    return _read_createc_vert(path, **options)
 
 
-def _read_nanonis_spec(path):
-    from probeflow.io.spectroscopy import read_spec_file
+def _read_nanonis_spec_metadata(path, *, measurement_mode=None, **_options):
+    from probeflow.io.readers.nanonis_spec import read_nanonis_spec_metadata
+    from probeflow.io.spectroscopy import _apply_measurement_override
 
-    return read_spec_file(path)
+    metadata = read_nanonis_spec_metadata(path)
+    _apply_measurement_override(metadata.metadata, measurement_mode)
+    return metadata
+
+
+def _read_nanonis_spec(path, *, measurement_mode=None, **_options):
+    from probeflow.io.readers.nanonis_spec import read_nanonis_spec
+    from probeflow.io.spectroscopy import _apply_measurement_override
+
+    spec = read_nanonis_spec(path)
+    _apply_measurement_override(spec.metadata, measurement_mode)
+    return spec
 
 
 BUILTIN_FORMATS = FormatCatalog(
