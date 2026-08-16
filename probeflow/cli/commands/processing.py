@@ -120,7 +120,7 @@ def _cmd_prepare_png(args) -> int:
             scan.scan_range_m = new_range
         scan.record_processing_state(state)
 
-    from probeflow.provenance.prepared_export import write_prepared_png
+    from probeflow.workflows.prepared_export import write_prepared_png
     force = bool(getattr(args, "force", False))
     _ensure_output_available(args.output, force=force)
     write_prepared_png(

@@ -162,10 +162,10 @@ EXCEPTIONS = (
     ),
     DependencyException(
         source="provenance",
-        target="io",
+        target="workflows",
         files=frozenset({"probeflow/provenance/prepared_export.py"}),
-        reason="Prepared PNG export currently combines provenance and file writing.",
-        removal="Phase 5 moves this orchestration into workflows.",
+        reason="The historical prepared-export path delegates to its workflow owner.",
+        removal="Retain as a compatibility facade during the JOSS cycle.",
     ),
     DependencyException(
         source="cli",
