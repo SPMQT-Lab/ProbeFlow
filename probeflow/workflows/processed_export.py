@@ -46,7 +46,12 @@ def _copy_with_export_values(request: ProcessedExportRequest):
 
 
 def _build_provenance(scan, request: ProcessedExportRequest, suffix: str):
-    if not request.include_provenance or suffix == ".sxm":
+    should_build = (
+        request.include_provenance
+        if request.build_provenance is None
+        else request.build_provenance
+    )
+    if not should_build or suffix == ".sxm":
         return None
 
     from probeflow.provenance.export import build_scan_export_provenance

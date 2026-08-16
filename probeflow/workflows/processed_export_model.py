@@ -35,6 +35,7 @@ class ProcessedExportRequest:
     export_kind: str | None = None
     warnings: tuple[str, ...] = ()
     include_provenance: bool = True
+    build_provenance: bool | None = None
     overwrite: bool = False
     overwrite_sidecars: bool = False
     writer_options: Mapping[str, Any] = field(default_factory=dict)

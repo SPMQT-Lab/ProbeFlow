@@ -158,58 +158,61 @@ def save_processed_image(
     Returns a status string (success or error message) — the caller shows it
     in the UI.  No Qt dependency.
     """
-    from probeflow.provenance.export import check_provenance_sidecar_collisions
+    from probeflow.workflows import ProcessedExportRequest, write_processed_export
 
     suffix = out_path.suffix.lower()
     try:
-        provenance = None
+        build_provenance = include_provenance and display_settings is not None
         if include_provenance and suffix != ".sxm" and display_settings is not None:
-            provenance = build_processed_export_provenance(
-                scan, out_path, plane_idx, display_settings,
-                roi_set=roi_set, mask_set=mask_set,
-                processing_history=processing_history,
-            )
             if suffix != ".png":
+                from probeflow.provenance.export import (
+                    check_provenance_sidecar_collisions,
+                )
+
                 check_provenance_sidecar_collisions(
                     out_path, legacy=False, probeflow=True,
                 )
 
+        writer_options = {}
         if suffix == ".png":
-            scan.save_png(
-                out_path, plane_idx=plane_idx,
-                colormap=colormap, clip_low=clip_low, clip_high=clip_high,
-                add_scalebar=add_scalebar,
-                provenance=provenance,
-            )
+            writer_options = {
+                "colormap": colormap,
+                "clip_low": clip_low,
+                "clip_high": clip_high,
+                "add_scalebar": add_scalebar,
+            }
         elif suffix == ".pdf":
-            scan.save_pdf(
-                out_path, plane_idx=plane_idx,
-                colormap=colormap, clip_low=clip_low, clip_high=clip_high,
-                show_scalebar=add_scalebar,
-                provenance=provenance,
+            writer_options = {
+                "colormap": colormap,
+                "clip_low": clip_low,
+                "clip_high": clip_high,
+                "show_scalebar": add_scalebar,
+            }
+
+        write_processed_export(
+            ProcessedExportRequest(
+                scan=scan,
+                destination=out_path,
+                plane_idx=plane_idx,
+                display_state=display_settings,
+                roi_set=roi_set,
+                mask_set=mask_set,
+                processing_history=processing_history,
+                export_kind=f"viewer_{suffix.lstrip('.')}",
                 include_provenance=include_provenance,
+                build_provenance=build_provenance,
+                writer_options=writer_options,
             )
-        elif suffix == ".csv":
-            scan.save_csv(out_path, plane_idx=plane_idx, provenance=provenance)
-        elif suffix == ".gwy":
-            scan.save_gwy(
-                out_path, plane_idx=plane_idx,
-                include_provenance=include_provenance,
-                include_meta=include_provenance,
-                provenance=provenance,
-            )
-        elif suffix == ".sxm":
-            scan.save_sxm(
-                out_path,
-                processed_plane_idx=(
-                    plane_idx if scan.processing_state.steps else None
-                ),
-                include_provenance=include_provenance,
-            )
-        else:
-            return "Unsupported processed image format. Use .sxm, .png, .csv, .pdf, or .gwy."
+        )
 
         return f"Saved processed image -> {out_path.name}"
+    except ValueError as exc:
+        if "Unsupported processed image format" in str(exc):
+            return (
+                "Unsupported processed image format. "
+                "Use .sxm, .png, .csv, .pdf, or .gwy."
+            )
+        return f"Save processed image error: {exc}"
     except Exception as exc:
         return f"Save processed image error: {exc}"
 
