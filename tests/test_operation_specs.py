@@ -181,3 +181,18 @@ def test_executor_does_not_redeclare_catalog_defaults():
     ]
 
     assert duplicate_defaults == []
+
+
+def test_calibrated_replay_shape_sets_follow_the_catalog():
+    from probeflow.processing.state import (
+        _SHAPE_CHANGING_EXTENT_PRESERVING,
+        _SHAPE_CHANGING_PIXEL_SIZE_PRESERVING,
+    )
+
+    assert _SHAPE_CHANGING_PIXEL_SIZE_PRESERVING == {
+        "rotate_arbitrary",
+        "shear",
+        "affine_lattice_correction",
+        "crop",
+    }
+    assert _SHAPE_CHANGING_EXTENT_PRESERVING == {"scale_image"}

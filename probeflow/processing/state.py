@@ -1121,16 +1121,17 @@ def apply_processing_state(
 #   * ``preserve_extent``: scale_image resamples to a new pixel density while
 #     the physical extent is preserved.  scan_range_m stays fixed; pixel_size
 #     scales inversely with the new shape.
-_SHAPE_CHANGING_PIXEL_SIZE_PRESERVING: frozenset[str] = frozenset({
-    "rotate_arbitrary",
-    "shear",
-    "affine_lattice_correction",
-    "crop",
-})
+_SHAPE_CHANGING_PIXEL_SIZE_PRESERVING: frozenset[str] = frozenset(
+    spec.operation_id
+    for spec in BUILTIN_OPERATIONS.specs
+    if spec.range_policy == "scale_with_shape"
+)
 
-_SHAPE_CHANGING_EXTENT_PRESERVING: frozenset[str] = frozenset({
-    "scale_image",
-})
+_SHAPE_CHANGING_EXTENT_PRESERVING: frozenset[str] = frozenset(
+    spec.operation_id
+    for spec in BUILTIN_OPERATIONS.specs
+    if spec.shape_policy == "resize" and spec.range_policy == "preserve"
+)
 
 
 def _update_scan_range_for_op(
