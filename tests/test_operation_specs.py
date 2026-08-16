@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from probeflow.core.operations import OperationCatalog, OperationSpec
+from probeflow.core.operations.spatial import SPATIAL_OPERATION_SPECS
 
 
 def test_operation_spec_copies_defaults_and_preserves_unknown_parameters():
@@ -43,3 +44,37 @@ def test_catalog_rejects_duplicate_aliases():
                 OperationSpec("second", "spatial", aliases=frozenset({"old"})),
             )
         )
+
+
+def test_spatial_specs_capture_existing_defaults_and_scope_rules():
+    catalog = OperationCatalog(SPATIAL_OPERATION_SPECS)
+
+    assert catalog.operation_ids == {
+        "remove_bad_lines",
+        "align_rows",
+        "plane_bg",
+        "stm_line_bg",
+        "stm_background",
+        "facet_level",
+        "smooth",
+        "median_smooth",
+        "gaussian_high_pass",
+        "edge_detect",
+        "remove_spots_auto",
+        "image_threshold",
+        "quantize_bit_depth",
+    }
+    assert catalog.roi_eligible_ids == {
+        "smooth",
+        "median_smooth",
+        "gaussian_high_pass",
+        "edge_detect",
+    }
+    assert catalog.by_id("plane_bg").default_params == {
+        "order": 1,
+        "step_tolerance": False,
+    }
+    assert catalog.by_id("facet_level").calibration_inputs == {
+        "pixel_size_x_m",
+        "pixel_size_y_m",
+    }
