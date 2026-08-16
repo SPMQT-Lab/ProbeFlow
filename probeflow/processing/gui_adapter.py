@@ -131,14 +131,7 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
     steps = []
 
     roi_scope = gui_state.get("processing_scope") == "roi"
-    roi_eligible = {
-        "smooth",
-        "median_smooth",
-        "gaussian_high_pass",
-        "edge_detect",
-        "fourier_filter",
-        "fft_soft_border",
-    }
+    roi_eligible = _ROI_ELIGIBLE_OPS
     roi_id = None
     if roi_scope:
         roi_id = gui_state.get("processing_roi_id") or gui_state.get("roi_id")
