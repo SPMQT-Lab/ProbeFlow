@@ -308,7 +308,7 @@ change numerical algorithms before independent human scientific validation.
 | 2. Provenance | Complete | `78efeb9` to `eba0eed`; canonical field map, lossless legacy adapter, and removal of the `core -> processing.history` back-edge |
 | 3. Format definitions | Complete | `370ace9` to `0ee1d90`; one five-format catalog used by detection, metadata, loading, indexing, thumbnails, and GUI adapters |
 | 4. Operation contracts | Complete | `05a80e3` to `673fa25`; one 36-operation catalog used by state, replay, GUI, CLI, scope/calibration rules, aliases, and provenance; 609 focused regression tests pass |
-| 5. Export workflow | Not started | Depends on the completed provenance contract |
+| 5. Export workflow | Complete | `2761233` to `0f28626`; typed Qt-free workflow used by prepared PNG, viewer processed-image, and CLI processing exports; 221 cross-format export and provenance tests pass |
 | 6. Viewer session | Optional; not started | Must not delay JOSS-critical validation |
 
 “Complete” here means the architectural work and automated equivalence checks
@@ -591,6 +591,10 @@ content, embedded comments, warnings, collision behaviour, destination names,
 and raw-file protection match the baseline for each currently supported export
 path. Cancellation and GUI message presentation remain interface concerns.
 
+The low-level borderless viewer PNG/PDF renderers remain separate. They define
+a different pixel-composition contract and are not application orchestration;
+moving them or changing writer APIs is outside this behaviour-preserving phase.
+
 ### Phase 6: introduce `ViewerSession`
 
 **Goal:** Make viewer behaviour testable without redesigning the GUI.
@@ -631,7 +635,7 @@ exports match the baseline; importing the session does not import PySide6.
 | `OPS-0` | `OperationSpec`, validation contract, registry | `ARCH-1` |
 | `OPS-1` to `OPS-4` | The four operation groups above | `OPS-0` |
 | `EXPORT-1` | Qt-free workflow and non-GUI migration | `PROV-2` |
-| `EXPORT-2` | GUI migration and obsolete dependency removal | `EXPORT-1` |
+| `EXPORT-2` | GUI migration and remaining-boundary documentation | `EXPORT-1` |
 | `VIEW-1` | Viewer attribute inventory and session skeleton | `OPS-4`, `EXPORT-2` |
 | `VIEW-2` to `VIEW-5` | The four viewer state groups above | `VIEW-1` |
 

@@ -29,8 +29,9 @@ Desktop GUI                 Command line                 Python API
                  vendor readers, writers, converters
 ```
 
-The diagram is conceptual. Workflow orchestration currently exists in several
-packages rather than in one application layer.
+The diagram is conceptual. Shared processed-image export orchestration now
+lives in `workflows`; unrelated conversion, measurement, and analysis commands
+remain with their interface adapters.
 
 ## Package ownership
 
@@ -44,14 +45,15 @@ packages rather than in one application layer.
 | `analysis` | Higher-level feature, grain, periodicity, lattice, point-pattern, and plotting routines. |
 | `spectroscopy` | Display-oriented spectrum models and transformations after file decoding. |
 | `provenance` | Processing-history records, export records, sidecar construction, and replay metadata. |
+| `workflows` | Qt-free application orchestration over backend models, provenance, and writers. |
 | `gui` | PySide6 windows, dialogs, canvases, controllers, rendering adapters, and background workers. |
 | `cli` | Argument parsing and command orchestration over the other packages. |
 | `data` | Packaged byte fixtures used by the Nanonis-compatible SXM writer. |
 
-`core`, `io`, `processing`, `measurements`, `analysis`, `spectroscopy`, and
-`provenance` are intended to remain Qt-free. The GUI may depend on all backend
-packages. The CLI may depend on backend packages and imports the GUI only for
-the `gui` command.
+`core`, `io`, `processing`, `measurements`, `analysis`, `spectroscopy`,
+`provenance`, and `workflows` are intended to remain Qt-free. The GUI may
+depend on all backend packages. The CLI may depend on backend packages and
+imports the GUI only for the `gui` command.
 
 ### Actual dependency exceptions
 
@@ -61,11 +63,12 @@ The current backend is not a strict acyclic layer stack:
 - `io` depends on `core` models and provenance; rendered writers also use
   processing display/export helpers.
 - `processing` depends on `core`; compatibility shims forward to `analysis`
-  and `spectroscopy`, while PNG/PDF export helpers call `io` and provenance.
+  and `spectroscopy`. Array-level PNG/PDF renderers still call `io` collision
+  checks and provenance sidecar helpers.
 - `measurements` uses core identity helpers and spectroscopy models;
   `analysis` uses measurement models and some I/O helpers.
-- `provenance` uses core and processing models; `prepared_export` also invokes
-  the PNG writer.
+- `provenance` uses core and processing models. Its historical
+  `prepared_export` path is a thin delegate to `workflows`.
 
 These are existing seams, not the desired extension API. Some function-local
 imports prevent runtime cycles and defer heavy dependencies.
@@ -259,10 +262,9 @@ The GUI source is grouped as follows:
 ## CLI architecture
 
 `cli.parser` defines commands and dispatches to `cli.commands`. Shared
-processing syntax and helpers live in `cli.processing_ops`. Commands load data,
-call processing or analysis functions, construct provenance, and write outputs.
-The CLI is an adapter, but some workflows are duplicated with Qt-free helpers
-under `gui`.
+processing syntax and helpers live in `cli.processing_ops`. Commands load data
+and call processing or analysis functions. Processed PNG/SXM output and
+prepared PNG handoff use the shared Qt-free export workflow.
 
 Console entry points are `probeflow`, `dat-sxm`, `dat-png`, and `dat-npy`.
 `probeflow-gui` is the desktop entry point.
@@ -277,6 +279,15 @@ Createc-to-NPY conversion provide other structured outputs. Writers refuse to
 overwrite raw input and normally refuse output collisions unless explicitly
 allowed.
 
+`workflows.processed_export_model` defines `ProcessedExportRequest` and
+`ProcessedExportResult`. The request carries the source `Scan`, optional
+processed plane and calibrated range, processing and display state, ROIs,
+masks, history, warnings, destination, writer options, and explicit overwrite
+authority. `workflows.processed_export` builds provenance once and selects an
+existing writer; it contains no encoder. GUI processed-image export, CLI
+processing output, and prepared PNG handoff use this workflow. Historical GUI
+and provenance helpers remain delegates.
+
 The current provenance path contains several related models:
 
 - `Scan.processing_state`: canonical numerical steps attached to a scan;
@@ -290,9 +301,12 @@ provenance sidecars. Sidecar writes use a sibling temporary file followed by an
 atomic replace. Corrupt preferred sidecars raise instead of silently loading a
 stale fallback.
 
-The processed-image GUI path reloads the source `Scan`, inserts the displayed
-processed plane, attaches processing state, builds provenance, and delegates to
-the relevant writer. Raw source files are not modified.
+`workflows.processed_scan` reloads the source `Scan`, inserts the displayed
+processed plane, attaches processing state and calibrated range, and leaves the
+source object and raw file untouched. Low-level borderless viewer PNG/PDF
+renderers remain separate because they promise a pixel composition different
+from the scan writers; consolidating those encoders would be a separate output
+contract change.
 
 ## Public API and compatibility
 
@@ -325,6 +339,9 @@ registration is internal to the GUI.
 ## Deliberate exceptions and invariants
 
 - `Scan.save_*` imports writers lazily to avoid cycles and heavy imports.
+- The array-level PNG/PDF renderer dependency exceptions remain until a
+  separately approved writer/rendering split; the export workflow deliberately
+  preserves existing writer behaviour.
 - The processing dispatcher remains explicit because operations have different
   context, ROI, mask, operand, shape, and calibration needs.
 - Backend imports must not load PySide6.

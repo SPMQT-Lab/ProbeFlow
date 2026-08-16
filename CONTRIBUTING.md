@@ -79,6 +79,8 @@ changing package boundaries. In summary:
   point-pattern analysis.
 - `probeflow/spectroscopy/` — decoded-spectrum display models and transforms.
 - `probeflow/provenance/` — processing history and export provenance.
+- `probeflow/workflows/` — Qt-free application orchestration over backend
+  models and writers. **Not** widgets, dialogs, or CLI parsing.
 - `probeflow/gui/` — PySide6 widgets and dialogs only. **Not** numerical
   kernels, **not** vendor parsers, **not** model definitions.
 - `probeflow/cli/` — orchestration over the canonical APIs above.

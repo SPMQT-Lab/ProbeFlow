@@ -82,7 +82,10 @@ EXCEPTIONS = (
             }
         ),
         reason="Rendered exports currently prepare display arrays inside I/O paths.",
-        removal="Phase 5 moves preparation into the shared export workflow.",
+        removal=(
+            "Retain until a separately approved writer/rendering split; the shared "
+            "workflow preserves writer output."
+        ),
     ),
     DependencyException(
         source="processing",
@@ -107,8 +110,8 @@ EXCEPTIONS = (
                 "probeflow/processing/png_export.py",
             }
         ),
-        reason="Compatibility export helpers currently call file writers.",
-        removal="Phase 5 replaces their implementations with workflow delegates.",
+        reason="Array-level PNG/PDF compatibility exports own artifact writing.",
+        removal="Retain until a separately approved writer/rendering split.",
     ),
     DependencyException(
         source="processing",
@@ -119,8 +122,8 @@ EXCEPTIONS = (
                 "probeflow/processing/png_export.py",
             }
         ),
-        reason="Compatibility export helpers currently construct provenance.",
-        removal="Phase 5 replaces their implementations with workflow delegates.",
+        reason="Array-level PNG/PDF compatibility exports own provenance sidecars.",
+        removal="Retain until a separately approved writer/rendering split.",
     ),
     DependencyException(
         source="analysis",
