@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import ast
+import inspect
+import textwrap
+
 import pytest
 
 from probeflow.core.operation_specs import BUILTIN_OPERATIONS
@@ -159,3 +163,21 @@ def test_builtin_contract_contains_no_numerical_handlers():
         for spec in BUILTIN_OPERATIONS.specs
         for value in spec.default_params.values()
     )
+
+
+def test_executor_does_not_redeclare_catalog_defaults():
+    from probeflow.processing.state import apply_processing_state
+
+    tree = ast.parse(textwrap.dedent(inspect.getsource(apply_processing_state)))
+    duplicate_defaults = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "p"
+        and node.func.attr == "get"
+        and len(node.args) > 1
+    ]
+
+    assert duplicate_defaults == []

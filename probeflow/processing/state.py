@@ -619,14 +619,14 @@ def apply_processing_state(
         if step.op == "remove_bad_lines":
             a = _proc.remove_bad_lines(
                 a,
-                threshold_mad=float(p.get("threshold_mad", 5.0)),
-                method=str(p.get("method", "mad")),
-                polarity=str(p.get("polarity", "bright")),
-                min_segment_length_px=int(p.get("min_segment_length_px", 2)),
-                max_adjacent_bad_lines=int(p.get("max_adjacent_bad_lines", 1)),
+                threshold_mad=float(p["threshold_mad"]),
+                method=str(p["method"]),
+                polarity=str(p["polarity"]),
+                min_segment_length_px=int(p["min_segment_length_px"]),
+                max_adjacent_bad_lines=int(p["max_adjacent_bad_lines"]),
             )
         elif step.op == "align_rows":
-            a = _proc.align_rows(a, method=p.get("method", "median"))
+            a = _proc.align_rows(a, method=p["method"])
         elif step.op == "plane_bg":
             # Resolve new ROI expression parameters (fit_roi, apply_roi, exclude_roi)
             fit_roi = _resolve_bg_roi_param(p, "fit_roi", a.shape, roi_set)
@@ -644,22 +644,22 @@ def apply_processing_state(
                 cal_kwargs["pixel_size_y_m"] = float(pixel_size_y_m)
             a = _proc.subtract_background(
                 a,
-                order=int(p.get("order", 1)),
+                order=int(p["order"]),
                 fit_roi=fit_roi,
                 apply_roi=apply_roi,
                 exclude_roi=exclude_roi,
-                step_tolerance=bool(p.get("step_tolerance", False)),
+                step_tolerance=bool(p["step_tolerance"]),
                 fit_rect=p.get("fit_rect"),
                 **cal_kwargs,
             )
         elif step.op == "stm_line_bg":
             a = _proc.stm_line_background(
                 a,
-                mode=str(p.get("mode", "step_tolerant")),
+                mode=str(p["mode"]),
             )
         elif step.op == "stm_background":
             fit_mask = _resolve_mask_roi_param(p, "fit", a.shape, roi_set)
-            fit_region = str(p.get("fit_region", "whole_image"))
+            fit_region = str(p["fit_region"])
             if fit_region == "active_roi" and fit_mask is None:
                 # The ROI mask could not be resolved (no roi_set, missing ROI,
                 # or non-area ROI) — _resolve_mask_roi_param already warned and
@@ -671,12 +671,12 @@ def apply_processing_state(
                 a,
                 _proc.STMBackgroundParams(
                     fit_region=fit_region,
-                    line_statistic=str(p.get("line_statistic", "median")),
-                    model=str(p.get("model", "linear")),
-                    linear_x_first=bool(p.get("linear_x_first", False)),
+                    line_statistic=str(p["line_statistic"]),
+                    model=str(p["model"]),
+                    linear_x_first=bool(p["linear_x_first"]),
                     blur_length=p.get("blur_length"),
                     jump_threshold=p.get("jump_threshold"),
-                    preserve_level=str(p.get("preserve_level", "median")),
+                    preserve_level=str(p["preserve_level"]),
                 ),
                 mask=fit_mask,
             )
@@ -690,44 +690,44 @@ def apply_processing_state(
                 cal_kwargs["pixel_size_y_m"] = float(pixel_size_y_m)
             a = _proc.facet_level(
                 a,
-                threshold_deg=float(p.get("threshold_deg", 3.0)),
+                threshold_deg=float(p["threshold_deg"]),
                 **cal_kwargs,
             )
         elif step.op == "smooth":
-            a = _proc.gaussian_smooth(a, sigma_px=float(p.get("sigma_px", 1.0)))
+            a = _proc.gaussian_smooth(a, sigma_px=float(p["sigma_px"]))
         elif step.op == "median_smooth":
-            a = _proc.median_smooth(a, size_px=int(p.get("size_px", 3)))
+            a = _proc.median_smooth(a, size_px=int(p["size_px"]))
         elif step.op == "gaussian_high_pass":
             a = _proc.gaussian_high_pass(
                 a,
-                sigma_px=float(p.get("sigma_px", 8.0)),
+                sigma_px=float(p["sigma_px"]),
             )
         elif step.op == "edge_detect":
             a = _proc.edge_detect(
                 a,
-                method=p.get("method", "laplacian"),
-                sigma=float(p.get("sigma", 1.0)),
-                sigma2=float(p.get("sigma2", 2.0)),
+                method=p["method"],
+                sigma=float(p["sigma"]),
+                sigma2=float(p["sigma2"]),
             )
         elif step.op == "fourier_filter":
             a = _proc.fourier_filter(
                 a,
-                mode=p.get("mode", "low_pass"),
-                cutoff=float(p.get("cutoff", 0.10)),
-                window=str(p.get("window", "hanning")),
+                mode=p["mode"],
+                cutoff=float(p["cutoff"]),
+                window=str(p["window"]),
             )
         elif step.op == "fft_soft_border":
             a = _proc.fft_soft_border(
                 a,
-                mode=str(p.get("mode", "low_pass")),
-                cutoff=float(p.get("cutoff", 0.10)),
-                border_frac=float(p.get("border_frac", 0.12)),
+                mode=str(p["mode"]),
+                cutoff=float(p["cutoff"]),
+                border_frac=float(p["border_frac"]),
             )
         elif step.op == "periodic_notch_filter":
             a = _proc.periodic_notch_filter(
                 a,
-                p.get("peaks", ()),
-                radius_px=float(p.get("radius_px", 3.0)),
+                p["peaks"],
+                radius_px=float(p["radius_px"]),
             )
         elif step.op == "mains_pickup_suppression":
             # All inputs (speed, geometry, frequency, harmonics, notch) are in
@@ -740,17 +740,17 @@ def apply_processing_state(
                 a,
                 scan_speed_m_per_s=p.get("scan_speed_m_per_s"),
                 scan_range_m=tuple(sr) if sr else (0.0, 0.0),
-                mains_frequency_hz=float(p.get("mains_frequency_hz", 50.0)),
-                harmonics=None if p.get("harmonics", 3) is None else int(p.get("harmonics", 3)),
-                notch_radius_px=float(p.get("notch_radius_px", 3.0)),
-                fast_axis=str(p.get("fast_axis", "x")),
-                snap_window_px=int(p.get("snap_window_px", 2)),
-                notch_shape=str(p.get("notch_shape", "spot")),
-                min_q_nm_inv=float(p.get("min_q_nm_inv", 0.0)),
+                mains_frequency_hz=float(p["mains_frequency_hz"]),
+                harmonics=None if p["harmonics"] is None else int(p["harmonics"]),
+                notch_radius_px=float(p["notch_radius_px"]),
+                fast_axis=str(p["fast_axis"]),
+                snap_window_px=int(p["snap_window_px"]),
+                notch_shape=str(p["notch_shape"]),
+                min_q_nm_inv=float(p["min_q_nm_inv"]),
                 extra_streaks_px=tuple(
                     int(v) for v in (p.get("extra_streaks_px") or ())
                 ),
-                notch_fill=str(p.get("notch_fill", "zero")),
+                notch_fill=str(p["notch_fill"]),
             )
         elif step.op == "inverse_fft_filter":
             # Selection geometry is stored in FFT-pixel offsets (exact for the
@@ -759,12 +759,12 @@ def apply_processing_state(
             # / paint); a missing kind reads as ellipse for legacy states.
             # Conjugate symmetry keeps the result real.
             from probeflow.processing.inverse_fft import fourier_region_from_dict
-            regions = [fourier_region_from_dict(s) for s in p.get("selections", [])]
+            regions = [fourier_region_from_dict(s) for s in p["selections"]]
             a = _proc.inverse_fft_filter(
                 a, regions,
-                mode=str(p.get("mode", "remove_selected")),
-                conjugate=bool(p.get("conjugate_symmetric", True)),
-                soft_px=float(p.get("soft_px", 0.0)),
+                mode=str(p["mode"]),
+                conjugate=bool(p["conjugate_symmetric"]),
+                soft_px=float(p["soft_px"]),
             )
         elif step.op == "symmetrize_fft":
             # Rotate-and-average n-fold symmetrization.  Registration shifts
@@ -772,31 +772,31 @@ def apply_processing_state(
             # the symmetry parameters are stored.
             a = _proc.symmetrize_filter(
                 a,
-                int(p.get("n_fold", 1)),
-                mirror=bool(p.get("mirror", False)),
-                mirror_axis_deg=float(p.get("mirror_axis_deg", 0.0)),
-                register=bool(p.get("register", True)),
-                interpolation=str(p.get("interpolation", "linear")),
-                strict_coverage=bool(p.get("strict_coverage", False)),
+                int(p["n_fold"]),
+                mirror=bool(p["mirror"]),
+                mirror_axis_deg=float(p["mirror_axis_deg"]),
+                register=bool(p["register"]),
+                interpolation=str(p["interpolation"]),
+                strict_coverage=bool(p["strict_coverage"]),
             )
         elif step.op == "linear_undistort":
             a = _proc.linear_undistort(
                 a,
-                shear_x=float(p.get("shear_x", 0.0)),
-                scale_y=float(p.get("scale_y", 1.0)),
+                shear_x=float(p["shear_x"]),
+                scale_y=float(p["scale_y"]),
             )
         elif step.op == "affine_lattice_correction":
             matrix = np.asarray(p["matrix"], dtype=np.float64)
             a = _proc.affine_lattice_correction(
                 a,
                 matrix,
-                expand_canvas=bool(p.get("expand_canvas", True)),
-                interpolation=str(p.get("interpolation", "bilinear")),
-                fill_mode=str(p.get("fill_mode", "nan")),
+                expand_canvas=bool(p["expand_canvas"]),
+                interpolation=str(p["interpolation"]),
+                fill_mode=str(p["fill_mode"]),
                 fill_value=float(p["fill_value"]) if p.get("fill_value") is not None else None,
             )
         elif step.op == "arithmetic":
-            operand_type = str(p.get("operand_type", "constant"))
+            operand_type = str(p["operand_type"])
             operand_image = None
             if operand_type == "image":
                 resolver = operand_resolver or _load_arithmetic_operand_image
@@ -804,14 +804,14 @@ def apply_processing_state(
             elif operand_type == "generated":
                 operand_image = _proc.generate_arithmetic_pattern(
                     a.shape,
-                    str(p.get("pattern", "checkerboard")),
-                    float(p.get("amplitude_si", 0.0)),
-                    period_px=int(p.get("period_px", 16)),
-                    seed=int(p.get("seed", 1)),
+                    str(p["pattern"]),
+                    float(p["amplitude_si"]),
+                    period_px=int(p["period_px"]),
+                    seed=int(p["seed"]),
                 )
             a = _proc.apply_arithmetic(
                 a,
-                operation=str(p.get("operation", "add")),
+                operation=str(p["operation"]),
                 operand_type=operand_type,
                 value_si=p.get("value_si"),
                 factor=p.get("factor"),
@@ -820,16 +820,16 @@ def apply_processing_state(
         elif step.op == "set_zero_point":
             a = _proc.set_zero_point(
                 a,
-                int(p.get("y_px", 0)),
-                int(p.get("x_px", 0)),
-                patch=int(p.get("patch", 1)),
+                int(p["y_px"]),
+                int(p["x_px"]),
+                patch=int(p["patch"]),
             )
         elif step.op == "set_zero_plane":
             try:
                 a = _proc.set_zero_plane(
                     a,
-                    p.get("points_px", ()),
-                    patch=int(p.get("patch", 1)),
+                    p["points_px"],
+                    patch=int(p["patch"]),
                 )
             except ValueError as _zp_err:
                 import warnings
@@ -846,7 +846,7 @@ def apply_processing_state(
                     "Nested 'roi' steps inside 'roi' steps are not allowed."
                 )
             try:
-                nested = ProcessingStep.from_dict(p.get("step", {}))
+                nested = ProcessingStep.from_dict(p["step"])
             except (KeyError, TypeError, ValueError):
                 continue
             if nested.op not in _ROI_ELIGIBLE_OPS:
@@ -916,7 +916,7 @@ def apply_processing_state(
                     "Nested scope steps inside scope steps are not allowed."
                 )
             try:
-                nested = ProcessingStep.from_dict(p.get("step", {}))
+                nested = ProcessingStep.from_dict(p["step"])
             except (KeyError, TypeError, ValueError):
                 continue
             if nested.op not in _ROI_ELIGIBLE_OPS:
@@ -1016,22 +1016,22 @@ def apply_processing_state(
                 )
             a = _proc.rotate_arbitrary(
                 a,
-                angle_degrees=float(p.get("angle_degrees", 0.0)),
-                order=int(p.get("order", 1)),
+                angle_degrees=float(p["angle_degrees"]),
+                order=int(p["order"]),
             )
         elif step.op == "shear":
             a = _proc.shear(
                 a,
-                shear_x=float(p.get("shear_x", 0.0)),
-                shear_y=float(p.get("shear_y", 0.0)),
-                interpolation=str(p.get("interpolation", "bilinear")),
+                shear_x=float(p["shear_x"]),
+                shear_y=float(p["shear_y"]),
+                interpolation=str(p["interpolation"]),
             )
         elif step.op == "scale_image":
             a = _proc.scale_image(
                 a,
                 int(p["new_height"]),
                 int(p["new_width"]),
-                order=int(p.get("order", 1)),
+                order=int(p["order"]),
             )
         elif step.op == "crop":
             try:
@@ -1078,8 +1078,8 @@ def apply_processing_state(
         elif step.op == "remove_spots_auto":
             a = _proc.remove_spots_auto(
                 a,
-                threshold_mad=float(p.get("threshold_mad", 6.0)),
-                window_px=int(p.get("window_px", 5)),
+                threshold_mad=float(p["threshold_mad"]),
+                window_px=int(p["window_px"]),
             )
         elif step.op == "image_threshold":
             lower = float(p["lower"]) if p.get("lower") is not None else None
@@ -1088,7 +1088,7 @@ def apply_processing_state(
                 a,
                 lower=lower,
                 upper=upper,
-                mode=str(p.get("mode", "clip")),
+                mode=str(p["mode"]),
             )
         elif step.op == "quantize_bit_depth":
             # Review physics #3 / numerical #3 / image-proc #7 cluster:
