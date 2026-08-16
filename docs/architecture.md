@@ -136,10 +136,12 @@ path -> sniff_file_type -> identify_scan_file -> LoadSignature
      -> load_scan_from_signature -> vendor reader -> validate_scan -> Scan
 ```
 
-`core.file_type` owns signatures and `FileType`. `core.loaders` converts those
-to `LoadSignature`. `core.scan_loader` dispatches to readers. Metadata dispatch
-is separately implemented in `core.metadata`; spectroscopy has another
-dispatcher in `io.spectroscopy`.
+`core.formats` owns the typed format contract and `FileType` identity.
+`core.file_type` currently owns signature matching, `core.loaders` converts the
+identity to `LoadSignature`, and `core.scan_loader` dispatches to readers.
+Metadata dispatch is separately implemented in `core.metadata`; spectroscopy
+has another dispatcher in `io.spectroscopy`. Phase 3 will migrate these tables
+into one immutable built-in catalog without adding plugin discovery.
 
 RHK can decode a selected image page for thumbnails. Createc and Nanonis image
 thumbnails currently use a full scan decode.

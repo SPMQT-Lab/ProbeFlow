@@ -480,11 +480,12 @@ optional GUI dependency.
 **Goal:** Give each supported input structure one declaration without rewriting
 its reader.
 
-**Canonical ownership:** Add `probeflow/io/formats.py` for `FormatDefinition`
-and the built-in registry. `core.file_type`, `core.loaders`,
-`core.scan_loader`, `core.metadata`, and `core.indexing` remain public facades
-while delegating format-specific choices to the registry. Registry functions
-must return Qt-free data.
+**Canonical ownership:** Use the small `probeflow/core/formats/` package for
+`FormatDefinition` and the immutable built-in catalog. This keeps the loading
+contract beside `FileType` without putting vendor decoding in `core`.
+`core.file_type`, `core.loaders`, `core.scan_loader`, `core.metadata`, and
+`core.indexing` remain public facades; actual readers remain under `io` and are
+loaded lazily. Catalog functions must return Qt-free data.
 
 **Work:**
 

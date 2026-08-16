@@ -11,8 +11,9 @@ concern, not an IO implementation detail — ``core.loaders`` and
 
 from __future__ import annotations
 
-from enum import Enum
 from pathlib import Path
+
+from probeflow.core.formats.model import FileType
 
 
 # Read at most this many bytes from the start of each file while sniffing.
@@ -35,15 +36,6 @@ def has_supported_suffix(path) -> bool:
         return Path(path).suffix.lower() in _SNIFF_SUFFIXES
     except (TypeError, ValueError):
         return False
-
-
-class FileType(Enum):
-    CREATEC_IMAGE = "createc_image"
-    CREATEC_SPEC = "createc_spec"
-    NANONIS_IMAGE = "nanonis_image"
-    NANONIS_SPEC = "nanonis_spec"
-    RHK_SM4_IMAGE = "rhk_sm4_image"
-    UNKNOWN = "unknown"
 
 
 # RHK SM4: "STiMage 005." encoded as UTF-16-LE, starting at byte offset 2.
