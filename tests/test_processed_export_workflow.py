@@ -98,6 +98,42 @@ def test_workflow_uses_a_prebuilt_provenance_record(tmp_path):
     assert result.provenance == "existing"
 
 
+def test_workflow_replaces_export_state_instead_of_appending_it(tmp_path):
+    from probeflow.core.processing_state import ProcessingState, ProcessingStep
+    from probeflow.core.scan_model import Scan
+
+    scan = Scan(
+        planes=[np.zeros((3, 4))],
+        plane_names=["Z"],
+        plane_units=["m"],
+        plane_synthetic=[False],
+        header={},
+        scan_range_m=(4e-9, 3e-9),
+        source_path=tmp_path / "source.sxm",
+        source_format="sxm",
+        processing_state=ProcessingState([ProcessingStep("smooth")]),
+    )
+    replacement = ProcessingState([ProcessingStep("plane_bg")])
+    request = ProcessedExportRequest(
+        scan,
+        tmp_path / "image.png",
+        processing_state=replacement,
+        include_provenance=False,
+    )
+
+    exported = {}
+
+    def capture(export_scan, *_args, **_kwargs):
+        exported["scan"] = export_scan
+
+    with patch.object(Scan, "save_png", capture):
+        write_processed_export(request)
+
+    exported_scan = exported["scan"]
+    assert [step.op for step in exported_scan.processing_state.steps] == ["plane_bg"]
+    assert [step.op for step in scan.processing_state.steps] == ["smooth"]
+
+
 def test_workflow_rejects_unsupported_formats_before_writing(tmp_path):
     scan = _scan()
 

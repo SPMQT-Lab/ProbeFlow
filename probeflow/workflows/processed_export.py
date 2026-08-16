@@ -40,8 +40,7 @@ def _copy_with_export_values(request: ProcessedExportRequest):
             if hasattr(state, "to_dict"):
                 state = state.to_dict()
             state = ProcessingState.from_dict(dict(state))
-        if state.steps:
-            scan.record_processing_state(state)
+        scan.processing_state = state
     return scan
 
 
