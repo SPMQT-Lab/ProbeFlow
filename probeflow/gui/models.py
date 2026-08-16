@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+from probeflow.core.formats.builtins import BUILTIN_FORMATS
 from probeflow.io.createc_interpretation import scan_mode_label, spec_measurement_label
 
 # ── Data model ────────────────────────────────────────────────────────────────
@@ -52,8 +53,8 @@ class SxmFile:
     @classmethod
     def from_index_item(cls, item) -> "SxmFile":
         """Build the legacy GUI scan entry from a package-level ProbeFlowItem."""
-        fmt = {"createc_dat": "dat", "nanonis_sxm": "sxm", "rhk_sm4": "sm4"}.get(
-            item.source_format, item.source_format)
+        definition = BUILTIN_FORMATS.by_identifier(item.source_format)
+        fmt = definition.load_identifier if definition is not None else item.source_format
         experiment = dict(item.metadata.get("experiment_metadata") or {})
         label = scan_mode_label(experiment)
         if item.load_error or item.shape is None:
