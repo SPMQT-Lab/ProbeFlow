@@ -6,6 +6,7 @@ import pytest
 
 from probeflow.core.operations import OperationCatalog, OperationSpec
 from probeflow.core.operations.frequency import FREQUENCY_OPERATION_SPECS
+from probeflow.core.operations.scoped import SCOPED_OPERATION_SPECS
 from probeflow.core.operations.spatial import SPATIAL_OPERATION_SPECS
 
 
@@ -99,3 +100,20 @@ def test_frequency_specs_capture_existing_defaults_and_scope_rules():
         "conjugate_symmetric": True,
         "soft_px": 0.0,
     }
+
+
+def test_scoped_specs_capture_wrappers_and_multi_input_rules():
+    catalog = OperationCatalog(SCOPED_OPERATION_SPECS)
+
+    assert catalog.operation_ids == {
+        "arithmetic",
+        "set_zero_point",
+        "set_zero_plane",
+        "roi",
+        "mask",
+        "interpolate_masked",
+    }
+    assert catalog.roi_eligible_ids == {"arithmetic"}
+    assert catalog.by_id("roi").handler_key == "scope_roi"
+    assert catalog.by_id("mask").handler_key == "scope_mask"
+    assert catalog.by_id("arithmetic").default_params["operation"] == "add"
