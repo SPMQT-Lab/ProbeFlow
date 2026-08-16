@@ -44,7 +44,14 @@ def _copy_with_export_values(request: ProcessedExportRequest):
     return scan
 
 
-def _build_provenance(scan, request: ProcessedExportRequest, suffix: str):
+def build_processed_export_provenance(
+    request: ProcessedExportRequest,
+    *,
+    scan=None,
+):
+    """Build the workflow's canonical provenance object without writing."""
+    scan = request.scan if scan is None else scan
+    suffix = request.destination.suffix.lower()
     if request.provenance is not None:
         return request.provenance
     should_build = (
@@ -155,7 +162,7 @@ def write_processed_export(
         )
 
     scan = _copy_with_export_values(request)
-    provenance = _build_provenance(scan, request, suffix)
+    provenance = build_processed_export_provenance(request, scan=scan)
     _write_with_existing_writer(scan, request, suffix, provenance)
     return ProcessedExportResult(
         destination=request.destination,
@@ -165,4 +172,4 @@ def write_processed_export(
     )
 
 
-__all__ = ["write_processed_export"]
+__all__ = ["build_processed_export_provenance", "write_processed_export"]

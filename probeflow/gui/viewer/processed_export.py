@@ -76,24 +76,23 @@ def build_processed_export_provenance(
     ``display_settings`` should be a plain dict (e.g. from
     ``DisplayRangeController.to_dict()`` merged with colormap/scalebar keys).
     """
-    from probeflow.provenance.export import build_scan_export_provenance
+    from probeflow.workflows import (
+        ProcessedExportRequest,
+        build_processed_export_provenance as _build_provenance,
+    )
 
     suffix = out_path.suffix.lower().lstrip(".") or "export"
-    channel_name = (
-        scan.plane_names[plane_idx]
-        if plane_idx < len(scan.plane_names) else None
-    )
-    return build_scan_export_provenance(
-        scan,
-        channel_index=plane_idx,
-        channel_name=channel_name,
-        processing_state=scan.processing_state,
-        display_state=display_settings,
-        export_kind=f"viewer_{suffix}",
-        output_path=out_path,
-        roi_set=roi_set,
-        mask_set=mask_set,
-        processing_history=processing_history,
+    return _build_provenance(
+        ProcessedExportRequest(
+            scan=scan,
+            destination=out_path,
+            plane_idx=plane_idx,
+            display_state=display_settings,
+            roi_set=roi_set,
+            mask_set=mask_set,
+            processing_history=processing_history,
+            export_kind=f"viewer_{suffix}",
+        )
     )
 
 
