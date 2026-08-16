@@ -98,6 +98,7 @@ def test_spatial_specs_capture_existing_defaults_and_scope_rules():
         "pixel_size_x_m",
         "pixel_size_y_m",
     }
+    assert catalog.by_id("quantize_bit_depth").required_params == {"bits"}
 
 
 def test_frequency_specs_capture_existing_defaults_and_scope_rules():

@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 import warnings
 
+from probeflow.core.operation_specs import BUILTIN_OPERATIONS
 from probeflow.core.op_vocab import SIMPLE_GEOMETRIC_OPS
 from probeflow.core.processing_state import _ROI_ELIGIBLE_OPS
 
@@ -79,6 +80,13 @@ ROI_ELIGIBLE_FILTER_TRIGGER_KEYS: tuple[str, ...] = (
 )
 
 
+def _operation_defaults(operation_id: str) -> dict:
+    spec = BUILTIN_OPERATIONS.by_id(operation_id)
+    if spec is None:
+        raise KeyError(f"Unknown processing operation: {operation_id!r}")
+    return spec.params_with_defaults(None)
+
+
 def roi_eligible_filter_specs(gui_state: dict) -> list[tuple[str, dict]]:
     """Return canonical ``(op, params)`` for ROI-eligible local filters.
 
@@ -97,22 +105,27 @@ def roi_eligible_filter_specs(gui_state: dict) -> list[tuple[str, dict]]:
     if s.get("highpass_sigma"):
         specs.append(("gaussian_high_pass", {"sigma_px": float(s["highpass_sigma"])}))
     if s.get("edge_method"):
+        defaults = _operation_defaults("edge_detect")
         specs.append(("edge_detect", {
             "method": str(s["edge_method"]),
-            "sigma": float(s.get("edge_sigma", 1.0)),
-            "sigma2": float(s.get("edge_sigma2", 2.0)),
+            "sigma": float(s.get("edge_sigma", defaults["sigma"])),
+            "sigma2": float(s.get("edge_sigma2", defaults["sigma2"])),
         }))
     if s.get("fft_mode") is not None:
+        defaults = _operation_defaults("fourier_filter")
         specs.append(("fourier_filter", {
             "mode": str(s["fft_mode"]),
-            "cutoff": float(s.get("fft_cutoff", 0.10)),
-            "window": str(s.get("fft_window", "hanning")),
+            "cutoff": float(s.get("fft_cutoff", defaults["cutoff"])),
+            "window": str(s.get("fft_window", defaults["window"])),
         }))
     if s.get("fft_soft_border"):
+        defaults = _operation_defaults("fft_soft_border")
         specs.append(("fft_soft_border", {
-            "mode": str(s.get("fft_soft_mode", "low_pass")),
-            "cutoff": float(s.get("fft_soft_cutoff", 0.10)),
-            "border_frac": float(s.get("fft_soft_border_frac", 0.12)),
+            "mode": str(s.get("fft_soft_mode", defaults["mode"])),
+            "cutoff": float(s.get("fft_soft_cutoff", defaults["cutoff"])),
+            "border_frac": float(
+                s.get("fft_soft_border_frac", defaults["border_frac"])
+            ),
         }))
     return specs
 
@@ -172,39 +185,56 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
 
     bad_lines_method = gui_state.get("remove_bad_lines")
     if bad_lines_method:
+        defaults = _operation_defaults("remove_bad_lines")
         # Legacy boolean True maps to the original MAD method.
         if bad_lines_method is True or bad_lines_method == "True":
-            bad_lines_method = "mad"
+            bad_lines_method = defaults["method"]
         threshold = gui_state.get(
             "remove_bad_lines_threshold",
-            gui_state.get("threshold_mad", 5.0),
+            gui_state.get("threshold_mad", defaults["threshold_mad"]),
         )
         _append_step(ProcessingStep("remove_bad_lines", {
             "threshold_mad": float(threshold),
             "method": str(bad_lines_method),
-            "polarity": str(gui_state.get("remove_bad_lines_polarity", "bright")),
+            "polarity": str(
+                gui_state.get("remove_bad_lines_polarity", defaults["polarity"])
+            ),
             "min_segment_length_px": int(
-                gui_state.get("remove_bad_lines_min_segment_length_px", 2)
+                gui_state.get(
+                    "remove_bad_lines_min_segment_length_px",
+                    defaults["min_segment_length_px"],
+                )
             ),
             "max_adjacent_bad_lines": int(
-                gui_state.get("remove_bad_lines_max_adjacent_bad_lines", 1)
+                gui_state.get(
+                    "remove_bad_lines_max_adjacent_bad_lines",
+                    defaults["max_adjacent_bad_lines"],
+                )
             ),
         }))
 
     plane_bg = gui_state.get("plane_bg")
     if isinstance(plane_bg, dict):
+        defaults = _operation_defaults("plane_bg")
         _append_step(ProcessingStep("plane_bg", {
-            "order": int(plane_bg.get("order", 1)),
+            "order": int(plane_bg.get("order", defaults["order"])),
         }))
 
     stm_bg = gui_state.get("stm_background")
     if isinstance(stm_bg, dict):
+        defaults = _operation_defaults("stm_background")
         params = {
-            "fit_region": str(stm_bg.get("fit_region", "whole_image")),
-            "line_statistic": str(stm_bg.get("line_statistic", "median")),
-            "model": str(stm_bg.get("model", "linear")),
-            "linear_x_first": bool(stm_bg.get("linear_x_first", False)),
-            "preserve_level": str(stm_bg.get("preserve_level", "median")),
+            "fit_region": str(stm_bg.get("fit_region", defaults["fit_region"])),
+            "line_statistic": str(
+                stm_bg.get("line_statistic", defaults["line_statistic"])
+            ),
+            "model": str(stm_bg.get("model", defaults["model"])),
+            "linear_x_first": bool(
+                stm_bg.get("linear_x_first", defaults["linear_x_first"])
+            ),
+            "preserve_level": str(
+                stm_bg.get("preserve_level", defaults["preserve_level"])
+            ),
         }
         if stm_bg.get("blur_length") is not None:
             params["blur_length"] = float(stm_bg["blur_length"])
@@ -239,25 +269,30 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
 
     edge_method = gui_state.get("edge_method")
     if edge_method:
+        defaults = _operation_defaults("edge_detect")
         _append_step(ProcessingStep("edge_detect", {
             "method": str(edge_method),
-            "sigma":  float(gui_state.get("edge_sigma",  1.0)),
-            "sigma2": float(gui_state.get("edge_sigma2", 2.0)),
+            "sigma": float(gui_state.get("edge_sigma", defaults["sigma"])),
+            "sigma2": float(gui_state.get("edge_sigma2", defaults["sigma2"])),
         }))
 
     fft_mode = gui_state.get("fft_mode")
     if fft_mode is not None:
+        defaults = _operation_defaults("fourier_filter")
         _append_step(ProcessingStep("fourier_filter", {
             "mode":   str(fft_mode),
-            "cutoff": float(gui_state.get("fft_cutoff", 0.10)),
-            "window": str(gui_state.get("fft_window",   "hanning")),
+            "cutoff": float(gui_state.get("fft_cutoff", defaults["cutoff"])),
+            "window": str(gui_state.get("fft_window", defaults["window"])),
         }))
 
     if gui_state.get("fft_soft_border"):
+        defaults = _operation_defaults("fft_soft_border")
         _append_step(ProcessingStep("fft_soft_border", {
-            "mode":        str(gui_state.get("fft_soft_mode",        "low_pass")),
-            "cutoff":      float(gui_state.get("fft_soft_cutoff",      0.10)),
-            "border_frac": float(gui_state.get("fft_soft_border_frac", 0.12)),
+            "mode": str(gui_state.get("fft_soft_mode", defaults["mode"])),
+            "cutoff": float(gui_state.get("fft_soft_cutoff", defaults["cutoff"])),
+            "border_frac": float(
+                gui_state.get("fft_soft_border_frac", defaults["border_frac"])
+            ),
         }))
 
     notches = gui_state.get("periodic_notches")
@@ -271,17 +306,21 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
                 invalid_peaks += 1
                 continue
         if peaks:
+            defaults = _operation_defaults("periodic_notch_filter")
             _append_step(ProcessingStep("periodic_notch_filter", {
                 "peaks": peaks,
-                "radius_px": float(gui_state.get("periodic_notch_radius", 3.0)),
+                "radius_px": float(
+                    gui_state.get("periodic_notch_radius", defaults["radius_px"])
+                ),
             }))
         elif invalid_peaks:
             _warn_skipped_step("periodic_notch_filter", "no valid notch coordinates")
 
     if gui_state.get("linear_undistort"):
-        shear_x = float(gui_state.get("undistort_shear_x", 0.0))
-        scale_y = float(gui_state.get("undistort_scale_y", 1.0))
-        if shear_x != 0.0 or scale_y != 1.0:
+        defaults = _operation_defaults("linear_undistort")
+        shear_x = float(gui_state.get("undistort_shear_x", defaults["shear_x"]))
+        scale_y = float(gui_state.get("undistort_scale_y", defaults["scale_y"]))
+        if shear_x != defaults["shear_x"] or scale_y != defaults["scale_y"]:
             _append_step(ProcessingStep("linear_undistort", {
                 "shear_x": shear_x,
                 "scale_y": scale_y,
@@ -331,11 +370,12 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
     set_zero = gui_state.get("set_zero_xy")
     if set_zero is not None:
         try:
+            defaults = _operation_defaults("set_zero_point")
             x_px, y_px = int(set_zero[0]), int(set_zero[1])
             _emit_zero_step(ProcessingStep("set_zero_point", {
                 "x_px":  x_px,
                 "y_px":  y_px,
-                "patch": int(gui_state.get("set_zero_patch", 1)),
+                "patch": int(gui_state.get("set_zero_patch", defaults["patch"])),
             }))
         except (TypeError, ValueError, IndexError) as exc:
             _warn_skipped_step("set_zero_point", str(exc) or "invalid coordinates")
@@ -351,9 +391,10 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
                 invalid_points += 1
                 continue
         if len(points) >= 3:
+            defaults = _operation_defaults("set_zero_plane")
             _emit_zero_step(ProcessingStep("set_zero_plane", {
                 "points_px": points[:3],
-                "patch": int(gui_state.get("set_zero_patch", 1)),
+                "patch": int(gui_state.get("set_zero_patch", defaults["patch"])),
             }))
         else:
             detail = "requires at least three valid points"
@@ -548,6 +589,7 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
             _append_step(ProcessingStep(op_name, {}))
         elif op_name == "affine_lattice_correction":
             import numpy as _np
+            defaults = _operation_defaults(op_name)
             raw_matrix = op_params.get("matrix")
             if raw_matrix is None:
                 _warn_skipped_step(
@@ -565,9 +607,13 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
                 continue
             params: dict = {
                 "matrix": matrix,
-                "expand_canvas": bool(op_params.get("expand_canvas", True)),
-                "interpolation": str(op_params.get("interpolation", "bilinear")),
-                "fill_mode": str(op_params.get("fill_mode", "nan")),
+                "expand_canvas": bool(
+                    op_params.get("expand_canvas", defaults["expand_canvas"])
+                ),
+                "interpolation": str(
+                    op_params.get("interpolation", defaults["interpolation"])
+                ),
+                "fill_mode": str(op_params.get("fill_mode", defaults["fill_mode"])),
             }
             if op_params.get("fill_value") is not None:
                 params["fill_value"] = float(op_params["fill_value"])
@@ -614,21 +660,28 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
                     pass
             _append_step(ProcessingStep("affine_lattice_correction", params))
         elif op_name == "rotate_arbitrary":
+            defaults = _operation_defaults(op_name)
             _append_step(ProcessingStep("rotate_arbitrary", {
-                "angle_degrees": float(op_params.get("angle_degrees", 0.0)),
-                "order": int(op_params.get("order", 1)),
+                "angle_degrees": float(
+                    op_params.get("angle_degrees", defaults["angle_degrees"])
+                ),
+                "order": int(op_params.get("order", defaults["order"])),
             }))
         elif op_name == "shear":
+            defaults = _operation_defaults(op_name)
             _append_step(ProcessingStep("shear", {
-                "shear_x": float(op_params.get("shear_x", 0.0)),
-                "shear_y": float(op_params.get("shear_y", 0.0)),
-                "interpolation": str(op_params.get("interpolation", "bilinear")),
+                "shear_x": float(op_params.get("shear_x", defaults["shear_x"])),
+                "shear_y": float(op_params.get("shear_y", defaults["shear_y"])),
+                "interpolation": str(
+                    op_params.get("interpolation", defaults["interpolation"])
+                ),
             }))
         elif op_name == "scale_image":
+            defaults = _operation_defaults(op_name)
             _append_step(ProcessingStep("scale_image", {
                 "new_height": int(op_params["new_height"]),
                 "new_width": int(op_params["new_width"]),
-                "order": int(op_params.get("order", 1)),
+                "order": int(op_params.get("order", defaults["order"])),
             }))
         elif op_name == "crop":
             try:
@@ -642,12 +695,18 @@ def processing_state_from_gui(gui_state: dict) -> "ProcessingState":
                 _warn_skipped_step("crop", str(exc) or "invalid crop bounds")
                 continue
         elif op_name == "remove_spots_auto":
+            defaults = _operation_defaults(op_name)
             _append_step(ProcessingStep("remove_spots_auto", {
-                "threshold_mad": float(op_params.get("threshold_mad", 6.0)),
-                "window_px": int(op_params.get("window_px", 5)),
+                "threshold_mad": float(
+                    op_params.get("threshold_mad", defaults["threshold_mad"])
+                ),
+                "window_px": int(op_params.get("window_px", defaults["window_px"])),
             }))
         elif op_name == "image_threshold":
-            thr_params: dict = {"mode": str(op_params.get("mode", "clip"))}
+            defaults = _operation_defaults(op_name)
+            thr_params: dict = {
+                "mode": str(op_params.get("mode", defaults["mode"]))
+            }
             if op_params.get("lower") is not None:
                 thr_params["lower"] = float(op_params["lower"])
             if op_params.get("upper") is not None:

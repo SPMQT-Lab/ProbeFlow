@@ -104,6 +104,7 @@ SPATIAL_OPERATION_SPECS: tuple[OperationSpec, ...] = (
     OperationSpec(
         "quantize_bit_depth",
         "spatial",
+        required_params=frozenset({"bits"}),
         optional_params=frozenset({"vmin", "vmax"}),
     ),
 )
