@@ -298,6 +298,22 @@ change numerical algorithms before independent human scientific validation.
 
 ## Implementation plan
 
+### Progress
+
+| Phase | Status | Evidence |
+|---|---|---|
+| 0. Behavioural baseline | Complete | `7e17a8b`; five-format read-only checks and recorded local limitations |
+| 1. Package boundaries | Complete | `f3fd44b`; static policy, named exceptions, and Qt confinement |
+| 2. Provenance | Complete | `78efeb9` to `eba0eed`; canonical field map, lossless legacy adapter, and removal of the `core -> processing.history` back-edge |
+| 3. Format definitions | Not started | Must preserve the five-format baseline |
+| 4. Operation contracts | Not started | Must preserve every existing processing state and result |
+| 5. Export workflow | Not started | Depends on the completed provenance contract |
+| 6. Viewer session | Optional; not started | Must not delay JOSS-critical validation |
+
+“Complete” here means the architectural work and automated equivalence checks
+for that phase are complete. It does not mean independent scientific validation
+has occurred.
+
 ### Delivery rules
 
 Every refactor must follow the same order:
