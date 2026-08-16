@@ -85,9 +85,10 @@ changing package boundaries. In summary:
   **Not** model definitions or numerical kernels; it imports the GUI only for
   the `gui` launcher command.
 Some compatibility and lazy-import exceptions already exist; they are listed
-in the architecture map and should not be copied into new code. If a change
-crosses a boundary, prefer a small adapter in the caller over moving domain
-code into a foreign package.
+in the architecture map and declared in `tests/architecture_policy.py`; static
+tests prevent them from spreading to new modules. If a change crosses a
+boundary, prefer a small adapter in the caller over moving domain code into a
+foreign package.
 
 ## Compatibility shims
 

@@ -321,8 +321,10 @@ Repository support code is separated from the installed package:
 `tests/test_layout_compatibility.py` checks canonical import locations,
 Qt-free backend imports, and compatibility surfaces.
 `tests/test_pipeline_connectivity.py` checks operation dispatch and selected
-import boundaries. Reader, writer, calibration, provenance, replay, GUI, and
-packaging tests cover their respective seams.
+import boundaries. `tests/test_architecture_boundaries.py` statically enforces
+the package rules and confines each existing back-edge to the files declared in
+`tests/architecture_policy.py`. Reader, writer, calibration, provenance,
+replay, GUI, and packaging tests cover their respective seams.
 
 CI runs tests on Python 3.11 and 3.12 plus linting; a weekly canary checks newer
 dependencies. Any accepted boundary change must update this document,
