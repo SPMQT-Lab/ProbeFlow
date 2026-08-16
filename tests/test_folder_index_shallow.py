@@ -76,6 +76,23 @@ def test_subfolder_sample_paths_are_scan_files(tmp_path):
         assert p.suffix.lower() in (".dat", ".sxm")
 
 
+def test_subfolder_preview_counts_rhk_as_a_scan(tmp_path):
+    """Every catalogued scan format should contribute to folder previews."""
+    import shutil
+
+    sample = tmp_path / "sample"
+    sample.mkdir()
+    rhk_scan = sample / "scan.sm4"
+    shutil.copy(TESTDATA / "rhk.sm4", rhk_scan)
+
+    idx = index_folder_shallow(tmp_path)
+    sample_entry = next(s for s in idx.subfolders if s.name == "sample")
+
+    assert sample_entry.n_scans == 1
+    assert sample_entry.n_specs == 0
+    assert sample_entry.sample_scan_paths == (rhk_scan,)
+
+
 def test_subfolders_alpha_sorted():
     idx = index_folder_shallow(TESTDATA)
     names = [s.name for s in idx.subfolders]
