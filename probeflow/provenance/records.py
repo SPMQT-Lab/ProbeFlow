@@ -420,6 +420,30 @@ def source_record_from_scan(
     )
 
 
+def _processing_history_from_source(
+    source: SourceRecord,
+    processing_state: Any | None,
+) -> ProcessingHistory:
+    """Build the common load-and-process history for one source record."""
+
+    history = ProcessingHistory(source_record=source)
+    load_name = _load_operation_name(source.source_file_type)
+    history.append_step(
+        operation_id="file_load",
+        operation_name=load_name,
+        operation_version=source.loader_version,
+        parameters={
+            "source_path": source.source_path,
+            "source_file_type": source.source_file_type,
+            "channel": source.channel,
+            "loader_name": source.loader_name,
+        },
+    )
+
+    append_processing_state(history, processing_state)
+    return history
+
+
 def processing_history_from_scan(
     scan: Any,
     *,
@@ -436,24 +460,10 @@ def processing_history_from_scan(
         channel_name=channel_name,
         include_file_hash=include_file_hash,
     )
-    history = ProcessingHistory(source_record=source)
-    load_name = _load_operation_name(source.source_file_type)
-    history.append_step(
-        operation_id="file_load",
-        operation_name=load_name,
-        operation_version=source.loader_version,
-        parameters={
-            "source_path": source.source_path,
-            "source_file_type": source.source_file_type,
-            "channel": source.channel,
-            "loader_name": source.loader_name,
-        },
-    )
 
     if processing_state is None:
         processing_state = getattr(scan, "processing_state", None)
-    append_processing_state(history, processing_state)
-    return history
+    return _processing_history_from_source(source, processing_state)
 
 
 def append_processing_state(

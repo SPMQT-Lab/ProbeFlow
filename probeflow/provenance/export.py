@@ -22,6 +22,8 @@ from probeflow.core.source_identity import privacy_safe_path, sanitize_export_da
 from probeflow.provenance.records import (
     ExportRecord,
     ProcessingHistory,
+    SourceRecord,
+    _processing_history_from_source,
     build_export_record,
     processing_history_from_scan,
 )
@@ -135,22 +137,26 @@ class ExportProvenance:
                 "loader_name": None,
                 "loader_version": self.probeflow_version,
                 "metadata": {
+                    "item_type": self.item_type,
+                    "channel_index": self.channel_index,
                     "array_shape": list(self.array_shape) if self.array_shape else None,
                     "scan_range_m": list(self.scan_range_m) if self.scan_range_m else None,
                     "unit": self.units,
                 },
                 "file_hash": None,
             }
-            history = ProcessingHistory.from_dict({
-                "source_record": source,
-                "steps": [],
-            })
+            history = _processing_history_from_source(
+                SourceRecord.from_dict(source),
+                self.processing_state,
+            )
         record = build_export_record(
             history,
             export_path=self.output_path,
             export_format=self.export_kind or "export",
             display_settings=self.display_state,
             warnings=self.warnings,
+            rois=self.rois,
+            masks=self.masks,
         )
         data = record.to_dict()
         if self.warning and self.warning not in data["warnings"]:
