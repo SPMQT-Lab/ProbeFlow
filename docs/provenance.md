@@ -26,7 +26,7 @@ schema.
 | Model | Current purpose | Canonical source |
 |---|---|---|
 | `Scan.processing_history` | Older list-of-dictionaries API | `Scan.processing_state` plus retained timestamps |
-| `processing.history` | Converts the old list API to and from `ProcessingState` | `ProcessingState` |
+| `processing.history` | Older import path for history conversion helpers | Re-exports `core.processing_history` |
 | `provenance.export.ExportProvenance` | Older writer-facing object and `.provenance.json` payload | An `ExportRecord` when available |
 | `provenance.records.ProcessingStep` | Deprecated class name | Alias of `ProvenanceStep` |
 

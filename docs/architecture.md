@@ -57,8 +57,7 @@ the `gui` command.
 
 The current backend is not a strict acyclic layer stack:
 
-- `core` calls `io` lazily for loading, metadata, and `Scan.save_*`, and calls
-  `processing.history` to expose compatibility history.
+- `core` calls `io` lazily for loading, metadata, and `Scan.save_*`.
 - `io` depends on `core` models and provenance; rendered writers also use
   processing display/export helpers.
 - `processing` depends on `core`; compatibility shims forward to `analysis`
@@ -90,6 +89,8 @@ vendor-specific invariants immediately after full loading.
 `ProcessingState` and `ProcessingStep` live in `core.processing_state` so
 `Scan` can own processing state without importing numerical kernels. The
 historical import from `processing.state` is retained as a re-export.
+Legacy history-dictionary translation lives in `core.processing_history`;
+`processing.history` retains the old import path as a thin re-export.
 
 ### Regions and masks
 

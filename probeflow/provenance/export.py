@@ -265,7 +265,7 @@ def processing_state_from_history(history: list[dict[str, Any]] | None) -> dict[
     Timestamps are intentionally omitted from the canonical processing state;
     they describe when a step was applied, not what numerical operation it is.
     """
-    from probeflow.processing.history import processing_state_dict_from_history
+    from probeflow.core.processing_history import processing_state_dict_from_history
     return processing_state_dict_from_history(history)
 
 

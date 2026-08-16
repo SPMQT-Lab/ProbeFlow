@@ -1,9 +1,9 @@
 """Phase 0 safety-net: characterize the ``Scan`` save/history surface.
 
-``Scan`` currently reaches up into ``io.writers`` and ``processing.history`` via
-function-local imports (the god-object entanglement targeted by the core
-de-risking plan, Phase 2).  These tests lock the current behaviour of those
-methods so the Phase-2 "thin delegation" refactor is guarded end-to-end.
+``Scan`` reaches into ``io.writers`` through function-local imports for its
+public save methods. These tests lock the current behaviour of those methods
+and the legacy processing-history view so thin delegation remains guarded
+end-to-end.
 
 Pure backend; no Qt.
 """
@@ -106,6 +106,13 @@ def test_processing_history_roundtrip_is_idempotent():
 
 def test_processing_history_empty_by_default():
     assert _scan().processing_history == []
+
+
+def test_processing_history_import_path_remains_compatible():
+    from probeflow.core.processing_history import processing_state_from_history as canonical
+    from probeflow.processing.history import processing_state_from_history as compatibility
+
+    assert compatibility is canonical
 
 
 def test_processing_history_keeps_timestamps_aligned_when_bookkeeping_is_filtered():

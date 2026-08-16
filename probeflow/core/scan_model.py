@@ -19,6 +19,10 @@ from typing import Any
 
 import numpy as np
 
+from probeflow.core.processing_history import (
+    processing_history_entries_from_state,
+    processing_state_and_timestamps_from_history,
+)
 from probeflow.core.processing_state import ProcessingState
 
 
@@ -163,7 +167,6 @@ class Scan:
         self._processing_history_timestamps.extend([ts] * len(state.steps))
 
     def _processing_history_entries(self) -> list[dict[str, Any]]:
-        from probeflow.processing.history import processing_history_entries_from_state
         return processing_history_entries_from_state(
             self.processing_state,
             timestamps=self._processing_history_timestamps,
@@ -176,9 +179,6 @@ class Scan:
 
     @processing_history.setter
     def processing_history(self, entries: list[dict] | None) -> None:
-        from probeflow.processing.history import (
-            processing_state_and_timestamps_from_history,
-        )
         state, timestamps = processing_state_and_timestamps_from_history(entries)
         self._processing_state = state
         self._processing_history_timestamps = timestamps

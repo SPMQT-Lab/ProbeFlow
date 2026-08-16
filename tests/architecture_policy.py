@@ -72,13 +72,6 @@ EXCEPTIONS = (
         removal="Retain as named public facades during the JOSS cycle.",
     ),
     DependencyException(
-        source="core",
-        target="processing",
-        files=frozenset({"probeflow/core/scan_model.py"}),
-        reason="Scan.processing_history exposes the legacy history representation.",
-        removal="Phase 2 replaces this with a provenance compatibility adapter.",
-    ),
-    DependencyException(
         source="io",
         target="processing",
         files=frozenset(
