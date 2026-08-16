@@ -194,9 +194,9 @@ not add formats or a third-party plugin system.
 
 **Change:** Add one typed `OperationSpec` for each existing operation.
 
-**What it is:** Each specification should define its operation ID, kernel
-version, parameter schema and defaults, ROI and mask rules, and effect on array
-shape and physical calibration.
+**What it is:** Each specification defines its operation ID, display name,
+handler key, existing parameter defaults, ROI and mask rules, and effect on
+array shape and physical calibration.
 
 **Why the current state is bad:** These facts are split across
 `core.op_vocab`, `core.processing_state`, `processing.gui_adapter`,
@@ -204,8 +204,9 @@ shape and physical calibration.
 checks the operation name but does not fully validate its parameters. An
 interface can therefore encode an operation differently from replay.
 
-**If implemented:** GUI, CLI, validation, replay, and provenance will use the
-same contract. Invalid state will fail before a numerical kernel is called.
+**If implemented:** GUI, CLI, validation, replay, and provenance use the same
+contract. Historical unknown parameters remain tolerated; stricter value
+validation would be a separate behaviour change.
 
 **Implementation prompt:** Add operation specifications around the existing
 dispatcher. Migrate one operation at a time. Compare arrays, calibration,
@@ -306,7 +307,7 @@ change numerical algorithms before independent human scientific validation.
 | 1. Package boundaries | Complete | `f3fd44b`; static policy, named exceptions, and Qt confinement |
 | 2. Provenance | Complete | `78efeb9` to `eba0eed`; canonical field map, lossless legacy adapter, and removal of the `core -> processing.history` back-edge |
 | 3. Format definitions | Complete | `370ace9` to `0ee1d90`; one five-format catalog used by detection, metadata, loading, indexing, thumbnails, and GUI adapters |
-| 4. Operation contracts | Not started | Must preserve every existing processing state and result |
+| 4. Operation contracts | Complete | `05a80e3` to `673fa25`; one 36-operation catalog used by state, replay, GUI, CLI, scope/calibration rules, aliases, and provenance; 609 focused regression tests pass |
 | 5. Export workflow | Not started | Depends on the completed provenance contract |
 | 6. Viewer session | Optional; not started | Must not delay JOSS-critical validation |
 

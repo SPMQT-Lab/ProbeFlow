@@ -175,6 +175,14 @@ Numerical kernels are grouped under `processing` by purpose: alignment,
 background correction, bad-line repair, filters, FFT operations, geometry,
 masks, arithmetic, repair, display conversion, and experimental TV processing.
 
+`core.operations` owns the kernel-free contract for all 36 replayable
+operations. Small spatial, frequency, scoped, and geometry definition modules
+declare canonical IDs, compatibility aliases, display names, defaults,
+required and optional parameters, allowed scopes, handler keys, shape effects,
+calibration inputs, and physical-range policy. `core.operation_specs` is the
+stable facade over their immutable built-in catalog. Numerical callables do
+not live in the catalog.
+
 ```text
 GUI controls or CLI syntax
   -> ProcessingStep list
@@ -188,6 +196,15 @@ translates it into canonical steps. `processing.state` executes those steps in
 an explicit dispatcher and resolves nested ROI/mask scopes. Shape-changing
 operations pass through the calibration-aware wrapper so the physical extent
 can follow the output array.
+
+`ProcessingStep`, GUI and CLI adapters, replay defaults, ROI/mask eligibility,
+geometry aliases, calibration updates, and provenance labels query the same
+catalog. Compatibility sets in `core.processing_state` and maps in
+`core.op_vocab` are derived views. The dispatcher stays explicit because the
+kernels have different inputs; it resolves catalog defaults before dispatch
+and contains no second default table. The contract preserves historical
+unknown parameters and sparse serialized states rather than introducing new
+validation failures during this refactor.
 
 Display settings such as colourmap and contrast are separate from numerical
 processing. The workflow-replay tests compare display, export, and replay for
@@ -297,9 +314,10 @@ There is no third-party plugin loader. Optional OpenCV/scikit-learn lattice
 support and `gwyfile` export are dependency extras loaded lazily. Existing file
 support is declared in `core.formats.builtins`; a reader remains a small `io`
 adapter with format-specific tests. Adding formats is outside the current JOSS
-scope. New processing operations still require edits to the supported-operation
-set, dispatcher, parameter translation, provenance handling, tests, and any
-interface that exposes them.
+scope. A new processing operation requires one catalog specification, one
+explicit execution branch or binding, scientific tests, and deliberate
+exposure by an interface. It does not require separate supported-operation,
+scope, calibration, alias, default, or provenance-label tables.
 
 Viewer commands are centrally described in `gui.viewer.shortcuts`, but command
 registration is internal to the GUI.
