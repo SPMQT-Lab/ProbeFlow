@@ -80,6 +80,24 @@ def test_workflow_builds_one_provenance_record_for_the_writer(tmp_path):
     assert result.provenance == "provenance"
 
 
+def test_workflow_uses_a_prebuilt_provenance_record(tmp_path):
+    scan = _scan()
+    request = ProcessedExportRequest(
+        scan,
+        tmp_path / "image.png",
+        provenance="existing",
+    )
+
+    with patch(
+        "probeflow.provenance.export.build_scan_export_provenance",
+    ) as build:
+        result = write_processed_export(request)
+
+    build.assert_not_called()
+    assert scan.save_png.call_args.kwargs["provenance"] == "existing"
+    assert result.provenance == "existing"
+
+
 def test_workflow_rejects_unsupported_formats_before_writing(tmp_path):
     scan = _scan()
 

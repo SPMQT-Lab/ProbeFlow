@@ -32,6 +32,7 @@ class ProcessedExportRequest:
     roi_set: Any | None = field(default=None, repr=False, compare=False)
     mask_set: Any | None = field(default=None, repr=False, compare=False)
     processing_history: Any | None = field(default=None, repr=False, compare=False)
+    provenance: Any | None = field(default=None, repr=False, compare=False)
     export_kind: str | None = None
     warnings: tuple[str, ...] = ()
     include_provenance: bool = True

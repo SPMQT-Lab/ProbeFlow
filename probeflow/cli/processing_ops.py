@@ -179,22 +179,32 @@ def _write_output(
     """Write either an .sxm (all planes) or a colorised PNG (selected plane)."""
     default_suffix = _default_output_suffix(args, default_suffix)
     force = bool(getattr(args, "force", False))
+    from probeflow.workflows import (
+        ProcessedExportRequest,
+        write_processed_export,
+    )
+
     if args.png:
         out_path = _derive_output(args, _png_output_suffix(default_suffix))
         _ensure_output_available(out_path, force=force)
         provenance = _cli_png_provenance(scan, args.plane, args, out_path, "cli_png")
-        scan.save_png(
-            out_path,
-            plane_idx=args.plane,
-            colormap=args.colormap,
-            clip_low=args.clip_low,
-            clip_high=args.clip_high,
-            add_scalebar=not args.no_scalebar,
-            scalebar_unit=args.scalebar_unit,
-            scalebar_pos=args.scalebar_pos,
-            provenance=provenance,
-            overwrite=force,
-            overwrite_sidecars=force,
+        write_processed_export(
+            ProcessedExportRequest(
+                scan=scan,
+                destination=out_path,
+                plane_idx=args.plane,
+                provenance=provenance,
+                overwrite=force,
+                overwrite_sidecars=force,
+                writer_options={
+                    "colormap": args.colormap,
+                    "clip_low": args.clip_low,
+                    "clip_high": args.clip_high,
+                    "add_scalebar": not args.no_scalebar,
+                    "scalebar_unit": args.scalebar_unit,
+                    "scalebar_pos": args.scalebar_pos,
+                },
+            )
         )
     else:
         out_path = _derive_output(args, default_suffix)
@@ -206,7 +216,15 @@ def _write_output(
                 "processing provenance is supported."
             )
         _ensure_output_available(out_path, force=force)
-        scan.save_sxm(out_path, overwrite=force, overwrite_sidecars=force)
+        write_processed_export(
+            ProcessedExportRequest(
+                scan=scan,
+                destination=out_path,
+                plane_idx=args.plane,
+                overwrite=force,
+                overwrite_sidecars=force,
+            )
+        )
     log.info("[OK] %s → %s", args.input.name, out_path)
     return out_path
 

@@ -46,6 +46,8 @@ def _copy_with_export_values(request: ProcessedExportRequest):
 
 
 def _build_provenance(scan, request: ProcessedExportRequest, suffix: str):
+    if request.provenance is not None:
+        return request.provenance
     should_build = (
         request.include_provenance
         if request.build_provenance is None
