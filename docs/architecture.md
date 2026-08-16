@@ -37,7 +37,7 @@ packages rather than in one application layer.
 | Package | Current responsibility |
 |---|---|
 | `probeflow` | Version and small public, vendor-neutral API. |
-| `core` | `Scan`, `ProcessingState`, ROIs, masks, validation, format sniffing, metadata, and folder indexing. |
+| `core` | `Scan`, `ProcessingState`, ROIs, masks, validation, the built-in format catalog, metadata, and folder indexing. |
 | `io` | Vendor readers, writers, converters, format byte layouts, spectroscopy file decoding, and JSON sidecars. |
 | `processing` | Qt-free image transformations, display preparation, GUI-state translation, and pipeline replay. |
 | `measurements` | Measurement result models, calibrated measurement kernels, feature sets, and tabular export. |
@@ -136,12 +136,18 @@ path -> sniff_file_type -> identify_scan_file -> LoadSignature
      -> load_scan_from_signature -> vendor reader -> validate_scan -> Scan
 ```
 
-`core.formats` owns the typed format contract and `FileType` identity.
-`core.file_type` currently owns signature matching, `core.loaders` converts the
-identity to `LoadSignature`, and `core.scan_loader` dispatches to readers.
-Metadata dispatch is separately implemented in `core.metadata`; spectroscopy
-has another dispatcher in `io.spectroscopy`. Phase 3 will migrate these tables
-into one immutable built-in catalog without adding plugin discovery.
+`core.formats` owns `FileType`, content predicates, `FormatDefinition`, and the
+immutable five-format catalog. A definition declares its stable ID, aliases,
+kind, suffixes, readers, thumbnail capability, and existing export formats.
+Reader imports are lazy, so vendor decoding remains in `io` and `core` remains
+Qt-free. There is no discovery or third-party plugin API.
+
+`core.file_type` is the bounded-read sniffing facade. `core.loaders` converts a
+catalog match to `LoadSignature`. Scan and spectrum facades, metadata loading,
+folder indexing, GUI model adaptation, and thumbnail selection all resolve the
+same definition. Short IDs (`dat`, `sxm`, `sm4`) remain compatibility aliases
+for `Scan` and existing callers; index records use canonical vendor-qualified
+IDs.
 
 RHK can decode a selected image page for thumbnails. Createc and Nanonis image
 thumbnails currently use a full scan decode.
@@ -288,11 +294,12 @@ for compatibility and are not extension points.
 ## Current extension seams
 
 There is no third-party plugin loader. Optional OpenCV/scikit-learn lattice
-support and `gwyfile` export are dependency extras loaded lazily. New formats
-currently require edits to sniffing, loading, metadata, indexing, thumbnail,
-GUI mapping, tests, and documentation. New processing operations require edits
-to the supported-operation set, dispatcher, parameter translation, provenance
-handling, tests, and any interface that exposes them.
+support and `gwyfile` export are dependency extras loaded lazily. Existing file
+support is declared in `core.formats.builtins`; a reader remains a small `io`
+adapter with format-specific tests. Adding formats is outside the current JOSS
+scope. New processing operations still require edits to the supported-operation
+set, dispatcher, parameter translation, provenance handling, tests, and any
+interface that exposes them.
 
 Viewer commands are centrally described in `gui.viewer.shortcuts`, but command
 registration is internal to the GUI.

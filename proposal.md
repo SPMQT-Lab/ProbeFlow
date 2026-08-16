@@ -305,7 +305,7 @@ change numerical algorithms before independent human scientific validation.
 | 0. Behavioural baseline | Complete | `7e17a8b`; five-format read-only checks and recorded local limitations |
 | 1. Package boundaries | Complete | `f3fd44b`; static policy, named exceptions, and Qt confinement |
 | 2. Provenance | Complete | `78efeb9` to `eba0eed`; canonical field map, lossless legacy adapter, and removal of the `core -> processing.history` back-edge |
-| 3. Format definitions | Not started | Must preserve the five-format baseline |
+| 3. Format definitions | Complete | `370ace9` to `0ee1d90`; one five-format catalog used by detection, metadata, loading, indexing, thumbnails, and GUI adapters |
 | 4. Operation contracts | Not started | Must preserve every existing processing state and result |
 | 5. Export workflow | Not started | Depends on the completed provenance contract |
 | 6. Viewer session | Optional; not started | Must not delay JOSS-critical validation |
