@@ -6,6 +6,7 @@ import pytest
 
 from probeflow.core.operations import OperationCatalog, OperationSpec
 from probeflow.core.operations.frequency import FREQUENCY_OPERATION_SPECS
+from probeflow.core.operations.geometry import GEOMETRY_OPERATION_SPECS
 from probeflow.core.operations.scoped import SCOPED_OPERATION_SPECS
 from probeflow.core.operations.spatial import SPATIAL_OPERATION_SPECS
 
@@ -117,3 +118,26 @@ def test_scoped_specs_capture_wrappers_and_multi_input_rules():
     assert catalog.by_id("roi").handler_key == "scope_roi"
     assert catalog.by_id("mask").handler_key == "scope_mask"
     assert catalog.by_id("arithmetic").default_params["operation"] == "add"
+
+
+def test_geometry_specs_capture_aliases_shape_and_range_rules():
+    catalog = OperationCatalog(GEOMETRY_OPERATION_SPECS)
+
+    assert catalog.operation_ids == {
+        "linear_undistort",
+        "affine_lattice_correction",
+        "flip_horizontal",
+        "flip_vertical",
+        "rotate_90_cw",
+        "rotate_180",
+        "rotate_270_cw",
+        "rotate_arbitrary",
+        "shear",
+        "scale_image",
+        "crop",
+    }
+    assert catalog.resolve("rot90_cw").operation_id == "rotate_90_cw"
+    assert catalog.by_id("rotate_90_cw").shape_policy == "swap_axes"
+    assert catalog.by_id("rotate_90_cw").range_policy == "swap_axes"
+    assert catalog.by_id("scale_image").range_policy == "preserve"
+    assert catalog.by_id("crop").range_policy == "scale_with_shape"
