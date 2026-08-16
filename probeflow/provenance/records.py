@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from probeflow.core.operation_specs import BUILTIN_OPERATIONS
 from probeflow.core.source_identity import privacy_safe_path, sanitize_export_data
 
 
@@ -616,31 +617,17 @@ def _load_operation_name(source_file_type: str | None) -> str:
 
 
 def _operation_name(op: str, params: dict[str, Any]) -> str:
-    if op == "align_rows":
-        return "Row alignment"
-    if op == "remove_bad_lines":
-        return "Bad-line removal"
-    if op in {"plane_bg", "stm_line_bg", "stm_background", "facet_level"}:
-        return "Background subtraction"
-    if op == "smooth":
-        return "Gaussian blur/smoothing"
-    if op == "gaussian_high_pass":
-        return "Gaussian high-pass filter"
-    if op == "edge_detect":
-        return "Edge detection"
-    if op in {"fourier_filter", "fft_soft_border", "periodic_notch_filter"}:
-        return "FFT filtering"
-    if op == "linear_undistort":
-        return "Linear undistort"
-    if op == "set_zero_point":
-        return "Set zero point"
-    if op == "set_zero_plane":
-        return "Set zero plane"
-    if op in ("roi", "mask"):
-        if op == "roi" and isinstance(params, dict) and params.get("scope_kind") == "region":
+    spec = BUILTIN_OPERATIONS.resolve(op)
+    canonical_op = spec.operation_id if spec is not None else op
+    if canonical_op in ("roi", "mask"):
+        if (
+            canonical_op == "roi"
+            and isinstance(params, dict)
+            and params.get("scope_kind") == "region"
+        ):
             scope = "Region"
         else:
-            scope = "ROI" if op == "roi" else "Mask"
+            scope = "ROI" if canonical_op == "roi" else "Mask"
         nested = params.get("step") if isinstance(params, dict) else None
         nested_op = nested.get("op") if isinstance(nested, dict) else None
         if nested_op:
@@ -648,35 +635,46 @@ def _operation_name(op: str, params: dict[str, Any]) -> str:
         return f"{scope}-scoped processing"
     if op.startswith("export_"):
         return f"Export: {op.removeprefix('export_').upper()}"
+    if spec is not None:
+        return str(spec.display_name)
     return op.replace("_", " ").title()
 
 
 def _step_summary(step: ProvenanceStep) -> str:
     p = step.parameters or {}
-    op = step.operation_id
+    spec = BUILTIN_OPERATIONS.resolve(step.operation_id)
+    op = spec.operation_id if spec is not None else step.operation_id
+    resolved = spec.params_with_defaults(p) if spec is not None else p
     if op == "file_load":
         return step.operation_name
     if op == "align_rows":
-        return f"Row alignment: {p.get('method', 'median')}"
+        return f"Row alignment: {resolved['method']}"
     if op == "remove_bad_lines":
+        threshold = p.get(
+            "threshold_mad",
+            p.get("threshold", resolved["threshold_mad"]),
+        )
         bits = [
-            f"threshold={p.get('threshold_mad', p.get('threshold', 5.0))}",
-            f"method={p.get('method', 'mad')}",
+            f"threshold={threshold}",
+            f"method={resolved['method']}",
         ]
         if "min_segment_length_px" in p:
             bits.append(f"px={p['min_segment_length_px']}")
         return "Bad lines: " + ", ".join(bits)
     if op == "plane_bg":
-        return f"Background: plane subtraction order={p.get('order', 1)}"
+        return f"Background: plane subtraction order={resolved['order']}"
     if op == "stm_background":
-        return f"Background: {p.get('model', 'linear')} ({p.get('line_statistic', 'median')})"
+        return (
+            f"Background: {resolved['model']} "
+            f"({resolved['line_statistic']})"
+        )
     if op == "smooth":
-        return f"Gaussian blur/smoothing: sigma={p.get('sigma_px', 1.0)} px"
+        return f"Gaussian blur/smoothing: sigma={resolved['sigma_px']} px"
     if op == "edge_detect":
-        method = str(p.get("method", "laplacian"))
+        method = str(resolved["method"])
         if method in ("sobel", "scharr"):
             return f"Edge detection: {method} gradient magnitude"
-        return f"Edge detection: {method} (sigma={p.get('sigma', 1.0)} px)"
+        return f"Edge detection: {method} (sigma={resolved['sigma']} px)"
     if op in ("roi", "mask"):
         is_region = op == "roi" and p.get("scope_kind") == "region"
         scope = "Region" if is_region else ("ROI" if op == "roi" else "Mask")
@@ -708,10 +706,11 @@ def _step_summary(step: ProvenanceStep) -> str:
         return f"Export: {fmt}"
     if op == "dat_to_sxm":
         return "Converted Createc .dat to Nanonis-compatible .sxm"
+    operation_name = str(spec.display_name) if spec is not None else step.operation_name
     if p:
         params = ", ".join(f"{key}={value}" for key, value in sorted(p.items()))
-        return f"{step.operation_name}: {params}"
-    return step.operation_name
+        return f"{operation_name}: {params}"
+    return operation_name
 
 
 def _histogram_summary(display: dict[str, Any]) -> str:

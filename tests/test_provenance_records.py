@@ -114,6 +114,26 @@ def test_processing_step_append_records_state_ids(tmp_path):
     assert step.parameters == {"method": "median"}
 
 
+def test_processing_summary_uses_the_canonical_operation_name():
+    history = ProcessingHistory(
+        SourceRecord(
+            source_filename="scan.sxm",
+            source_path="/data/scan.sxm",
+            source_file_type="Nanonis .sxm",
+            channel="Z",
+            loader_name="Nanonis .sxm reader",
+            loader_version="1.0",
+        )
+    )
+    history.append_step(
+        operation_id="rot90_cw",
+        operation_name="Legacy rotation",
+        parameters={},
+    )
+
+    assert history.short_summary() == "Rotate 90 Cw"
+
+
 def test_processing_history_json_roundtrip(tmp_path):
     scan = _scan(tmp_path)
     state = ProcessingState([

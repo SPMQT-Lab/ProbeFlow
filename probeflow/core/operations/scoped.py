@@ -32,11 +32,13 @@ SCOPED_OPERATION_SPECS: tuple[OperationSpec, ...] = (
     OperationSpec(
         "set_zero_point",
         "scoped",
+        display_name="Set zero point",
         default_params={"x_px": 0, "y_px": 0, "patch": 1},
     ),
     OperationSpec(
         "set_zero_plane",
         "scoped",
+        display_name="Set zero plane",
         default_params={"points_px": (), "patch": 1},
     ),
     OperationSpec(

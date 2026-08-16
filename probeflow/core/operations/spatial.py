@@ -13,6 +13,7 @@ SPATIAL_OPERATION_SPECS: tuple[OperationSpec, ...] = (
     OperationSpec(
         "remove_bad_lines",
         "spatial",
+        display_name="Bad-line removal",
         default_params={
             "threshold_mad": 5.0,
             "method": "mad",
@@ -24,11 +25,13 @@ SPATIAL_OPERATION_SPECS: tuple[OperationSpec, ...] = (
     OperationSpec(
         "align_rows",
         "spatial",
+        display_name="Row alignment",
         default_params={"method": "median"},
     ),
     OperationSpec(
         "plane_bg",
         "spatial",
+        display_name="Background subtraction",
         default_params={"order": 1, "step_tolerance": False},
         optional_params=frozenset(
             {
@@ -46,11 +49,13 @@ SPATIAL_OPERATION_SPECS: tuple[OperationSpec, ...] = (
     OperationSpec(
         "stm_line_bg",
         "spatial",
+        display_name="Background subtraction",
         default_params={"mode": "step_tolerant"},
     ),
     OperationSpec(
         "stm_background",
         "spatial",
+        display_name="Background subtraction",
         default_params={
             "fit_region": "whole_image",
             "line_statistic": "median",
@@ -63,12 +68,14 @@ SPATIAL_OPERATION_SPECS: tuple[OperationSpec, ...] = (
     OperationSpec(
         "facet_level",
         "spatial",
+        display_name="Background subtraction",
         default_params={"threshold_deg": 3.0},
         calibration_inputs=_PIXEL_CALIBRATION,
     ),
     OperationSpec(
         "smooth",
         "spatial",
+        display_name="Gaussian blur/smoothing",
         default_params={"sigma_px": 1.0},
         allowed_scopes=_LOCAL_SCOPES,
     ),
@@ -81,12 +88,14 @@ SPATIAL_OPERATION_SPECS: tuple[OperationSpec, ...] = (
     OperationSpec(
         "gaussian_high_pass",
         "spatial",
+        display_name="Gaussian high-pass filter",
         default_params={"sigma_px": 8.0},
         allowed_scopes=_LOCAL_SCOPES,
     ),
     OperationSpec(
         "edge_detect",
         "spatial",
+        display_name="Edge detection",
         default_params={"method": "laplacian", "sigma": 1.0, "sigma2": 2.0},
         allowed_scopes=_LOCAL_SCOPES,
     ),

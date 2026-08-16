@@ -29,6 +29,14 @@ def test_operation_spec_copies_defaults_and_preserves_unknown_parameters():
     assert first["future_parameter"] is True
 
 
+def test_operation_spec_provides_a_stable_display_name():
+    assert OperationSpec("rotate_90_cw", "geometry").display_name == "Rotate 90 Cw"
+    assert (
+        OperationSpec("smooth", "spatial", display_name="Gaussian smoothing").display_name
+        == "Gaussian smoothing"
+    )
+
+
 def test_catalog_keeps_canonical_lookup_separate_from_alias_resolution():
     rotate = OperationSpec(
         "rotate_90_cw",
@@ -98,6 +106,7 @@ def test_spatial_specs_capture_existing_defaults_and_scope_rules():
         "pixel_size_x_m",
         "pixel_size_y_m",
     }
+    assert catalog.by_id("smooth").display_name == "Gaussian blur/smoothing"
     assert catalog.by_id("quantize_bit_depth").required_params == {"bits"}
 
 

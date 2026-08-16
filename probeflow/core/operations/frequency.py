@@ -12,18 +12,21 @@ FREQUENCY_OPERATION_SPECS: tuple[OperationSpec, ...] = (
     OperationSpec(
         "fourier_filter",
         "frequency",
+        display_name="FFT filtering",
         default_params={"mode": "low_pass", "cutoff": 0.10, "window": "hanning"},
         allowed_scopes=_LOCAL_SCOPES,
     ),
     OperationSpec(
         "fft_soft_border",
         "frequency",
+        display_name="FFT filtering",
         default_params={"mode": "low_pass", "cutoff": 0.10, "border_frac": 0.12},
         allowed_scopes=_LOCAL_SCOPES,
     ),
     OperationSpec(
         "periodic_notch_filter",
         "frequency",
+        display_name="FFT filtering",
         default_params={"peaks": (), "radius_px": 3.0},
     ),
     OperationSpec(

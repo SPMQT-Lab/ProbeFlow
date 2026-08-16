@@ -34,6 +34,7 @@ class OperationSpec:
     calibration_inputs: frozenset[str] = frozenset()
     range_policy: RangePolicy = "preserve"
     handler_key: str | None = None
+    display_name: str | None = None
 
     def __post_init__(self) -> None:
         if not self.operation_id or not self.operation_id.strip():
@@ -67,6 +68,11 @@ class OperationSpec:
         object.__setattr__(self, "allowed_scopes", scopes)
         object.__setattr__(self, "calibration_inputs", calibration)
         object.__setattr__(self, "handler_key", self.handler_key or self.operation_id)
+        object.__setattr__(
+            self,
+            "display_name",
+            self.display_name or self.operation_id.replace("_", " ").title(),
+        )
 
     @property
     def parameter_names(self) -> frozenset[str]:

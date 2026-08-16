@@ -9,6 +9,7 @@ GEOMETRY_OPERATION_SPECS: tuple[OperationSpec, ...] = (
     OperationSpec(
         "linear_undistort",
         "geometry",
+        display_name="Linear undistort",
         default_params={"shear_x": 0.0, "scale_y": 1.0},
     ),
     OperationSpec(
