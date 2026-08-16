@@ -28,12 +28,13 @@ class FormatDefinition:
     """One built-in format and the capabilities ProbeFlow currently supports."""
 
     file_type: FileType
-    source_format: str
+    format_id: str
     kind: FormatKind
     suffixes: tuple[str, ...]
     matches_header: SignatureMatcher
     read_metadata: FormatReader
     read_full: FormatReader
+    matches_fallback: SignatureMatcher | None = None
     read_thumbnail: FormatReader | None = None
     export_formats: frozenset[str] = frozenset()
     aliases: frozenset[str] = frozenset()
@@ -42,8 +43,8 @@ class FormatDefinition:
     def __post_init__(self) -> None:
         if self.file_type is FileType.UNKNOWN:
             raise ValueError("UNKNOWN cannot be registered as a supported format")
-        if not self.source_format or not self.source_format.strip():
-            raise ValueError("source_format must be a non-empty stable identifier")
+        if not self.format_id or not self.format_id.strip():
+            raise ValueError("format_id must be a non-empty stable identifier")
         if self.kind not in {"scan", "spectrum"}:
             raise ValueError(f"Unsupported format kind: {self.kind!r}")
         if not self.suffixes:
@@ -60,6 +61,8 @@ class FormatDefinition:
         ):
             if not callable(reader):
                 raise TypeError(f"{name} must be callable")
+        if self.matches_fallback is not None and not callable(self.matches_fallback):
+            raise TypeError("matches_fallback must be callable when provided")
         if self.read_thumbnail is not None and not callable(self.read_thumbnail):
             raise TypeError("read_thumbnail must be callable when provided")
         object.__setattr__(self, "suffixes", normalized)
@@ -68,4 +71,4 @@ class FormatDefinition:
 
     @property
     def identifiers(self) -> frozenset[str]:
-        return frozenset({self.source_format, *self.aliases})
+        return frozenset({self.format_id, *self.aliases})

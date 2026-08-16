@@ -46,6 +46,24 @@ class FormatCatalog:
             None,
         )
 
+    @property
+    def supported_suffixes(self) -> frozenset[str]:
+        return frozenset(
+            suffix
+            for definition in self.definitions
+            for suffix in definition.suffixes
+        )
+
+    def match_header(self, head: bytes) -> FormatDefinition | None:
+        """Return the first exact match, then try conservative fallbacks."""
+        for definition in self.definitions:
+            if definition.matches_header(head):
+                return definition
+        for definition in self.definitions:
+            if definition.matches_fallback is not None and definition.matches_fallback(head):
+                return definition
+        return None
+
     def for_suffix(
         self,
         suffix: str,

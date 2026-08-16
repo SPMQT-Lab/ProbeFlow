@@ -66,9 +66,10 @@ EXCEPTIONS = (
                 "probeflow/core/metadata.py",
                 "probeflow/core/scan_loader.py",
                 "probeflow/core/scan_model.py",
+                "probeflow/core/formats/builtins.py",
             }
         ),
-        reason="Public loading, metadata, indexing, and Scan.save_* facades delegate lazily.",
+        reason="Public loading facades and the format catalog delegate lazily to I/O.",
         removal="Retain as named public facades during the JOSS cycle.",
     ),
     DependencyException(
