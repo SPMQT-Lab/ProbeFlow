@@ -8,7 +8,7 @@ artifacts. It does not control instruments. Raw microscope files are read-only;
 all changes are held in memory or written to new files.
 
 This document maps the current implementation. It does not certify scientific
-correctness. Proposed refactors are listed in [`proposal.md`](../proposal.md).
+correctness.
 
 ## System map
 
@@ -364,7 +364,6 @@ Repository support code is separated from the installed package:
 | `.github/workflows` | CI, dependency canary, and Windows release build. |
 | `docs` | User guides, format notes, maintenance records, and architecture decisions. |
 | `scope.md` | Agreed narrow JOSS publication scope. |
-| `proposal.md` | Prioritised architecture-refactor prompts. |
 
 `tests/test_layout_compatibility.py` checks canonical import locations,
 Qt-free backend imports, and compatibility surfaces.
