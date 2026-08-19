@@ -13,7 +13,7 @@ from probeflow.core.browse_filters import (
 from probeflow.gui.typography import ui_font
 from PySide6.QtCore import Qt, QThreadPool, QTimer, Signal, Slot
 from PySide6.QtGui import QCursor, QImage, QPixmap
-from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QMenu, QPushButton, QScrollArea, QVBoxLayout, QWidget
 
 from probeflow.gui.models import FolderEntry, SxmFile, VertFile, browse_entry_key
 from probeflow.gui.rendering import (
@@ -55,6 +55,8 @@ class ThumbnailGrid(QWidget):
     selection_changed = Signal(int)      # count of selected items
     view_requested    = Signal(object)   # SxmFile to open in full-size viewer
     card_context_action = Signal(object, str)  # entry, action key — re-emitted from cards
+    create_folder_requested = Signal()
+    move_scans_requested = Signal()
     folder_changed    = Signal(object)   # current folder Path (after navigation)
     root_changed      = Signal(object)   # root folder Path (after open-folder dialog)
     folder_filter_started = Signal(str)
@@ -110,6 +112,12 @@ class ThumbnailGrid(QWidget):
         self._scroll.setFrameShape(QFrame.NoFrame)
 
         self._content = QWidget()
+        self._content.setContextMenuPolicy(Qt.CustomContextMenu)
+        self._content.customContextMenuRequested.connect(
+            lambda pos: self._show_background_menu(self._content.mapToGlobal(pos)))
+        self._scroll.viewport().setContextMenuPolicy(Qt.CustomContextMenu)
+        self._scroll.viewport().customContextMenuRequested.connect(
+            lambda pos: self._show_background_menu(self._scroll.viewport().mapToGlobal(pos)))
         self._grid    = QGridLayout(self._content)
         self._grid.setSpacing(self.GAP)
         self._grid.setContentsMargins(self.GAP, self.GAP, self.GAP, self.GAP)
@@ -179,6 +187,20 @@ class ThumbnailGrid(QWidget):
         self._grid.addWidget(self._empty_lbl, 0, 0)
 
     # ── Public API ────────────────────────────────────────────────────────────
+    def _show_background_menu(self, global_pos) -> None:
+        if self._current_dir is None:
+            return
+        menu = QMenu(self)
+        menu.addAction("Create folder…", self.create_folder_requested.emit)
+        scans = [entry for entry in self.get_selected_entries() if isinstance(entry, SxmFile)]
+        if scans:
+            menu.addSeparator()
+            menu.addAction(
+                f"Move {len(scans)} selected scan{'s' if len(scans) != 1 else ''}…",
+                self.move_scans_requested.emit,
+            )
+        menu.exec(global_pos)
+
     def set_root(self, path: Path):
         """Set a new browse root (called by 'Open folder…') and navigate to it.
 

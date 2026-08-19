@@ -161,6 +161,12 @@ class ScanCard(_BrowseCard):
             lambda: self.context_action_requested.emit(self.entry, "show_metadata"))
         menu.addAction(a_meta_show)
 
+        menu.addSeparator()
+        a_move = QAction("Move selected scans to folder…", self)
+        a_move.triggered.connect(
+            lambda: self.context_action_requested.emit(self.entry, "move_scans"))
+        menu.addAction(a_move)
+
         menu.exec(event.globalPos())
 
 
