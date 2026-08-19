@@ -191,13 +191,13 @@ class ThumbnailGrid(QWidget):
         if self._current_dir is None:
             return
         menu = QMenu(self)
-        menu.addAction("Create folder…", self.create_folder_requested.emit)
+        menu.addAction("Create folder…", lambda: self.create_folder_requested.emit())
         scans = [entry for entry in self.get_selected_entries() if isinstance(entry, SxmFile)]
         if scans:
             menu.addSeparator()
             menu.addAction(
                 f"Move {len(scans)} selected scan{'s' if len(scans) != 1 else ''}…",
-                self.move_scans_requested.emit,
+                lambda: self.move_scans_requested.emit(),
             )
         menu.exec(global_pos)
 
