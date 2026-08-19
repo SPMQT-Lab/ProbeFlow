@@ -862,6 +862,10 @@ class ProbeFlowWindow(QMainWindow):
         # Make the spectra multi-select discoverable: once two or more spectra
         # are Ctrl-selected, point at the action that consumes them.
         if n_selected >= 2 and hasattr(self, "_status_bar"):
+            selected = self._grid.get_selected_entries()
+            if any(not isinstance(entry, VertFile) for entry in selected):
+                self._status_bar.showMessage(f"{n_selected} files selected")
+                return
             self._status_bar.showMessage(
                 f"{n_selected} spectra selected — use 'Overlay selected spectra…' "
                 "to compare them."

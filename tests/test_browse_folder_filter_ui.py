@@ -163,7 +163,7 @@ def test_folders_hidden_in_images_and_spectra_modes(qapp):
     assert grid._is_entry_visible(folder) is True
 
 
-def test_ctrl_click_multi_selects_spectra_but_not_images(qapp):
+def test_ctrl_click_toggles_scans_and_spectra(qapp):
     grid = _quiet_grid(qapp)
     img_a = _scan_entry("img_a", 10.0, 10.0)
     img_b = _scan_entry("img_b", 10.0, 10.0)
@@ -173,18 +173,51 @@ def test_ctrl_click_multi_selects_spectra_but_not_images(qapp):
     qapp.processEvents()
     qapp.processEvents()
 
-    # Ctrl+click across two spectra accumulates a multi-selection.
+    # Ctrl+click accumulates selections for both file types.
     grid._on_card_click(spec_a, True)
     grid._on_card_click(spec_b, True)
     assert len(grid.get_selected()) == 2
 
-    # Ctrl+click on an image behaves like a plain click: single selection.
-    grid._on_card_click(img_a, True)
+    # A normal image click replaces the spectrum selection.
+    grid._on_card_click(img_a, False)
     assert len(grid.get_selected()) == 1
     assert grid.get_primary_entry() == img_a
+
+    # Ctrl+click adds and then removes an image.
     grid._on_card_click(img_b, True)
-    assert len(grid.get_selected()) == 1
-    assert grid.get_primary_entry() == img_b
+    assert len(grid.get_selected()) == 2
+    grid._on_card_click(img_b, True)
+    assert grid.get_selected_entries() == [img_a]
+    grid._on_card_click(img_a, True)
+    assert grid.get_selected() == set()
+    assert grid.get_primary_entry() is None
+
+
+def test_shift_click_selects_intermediate_scans(qapp):
+    grid = _quiet_grid(qapp)
+    scans = [_scan_entry(name, 10.0, 10.0) for name in "abcd"]
+    grid.load(scans, "/tmp")
+    qapp.processEvents()
+    qapp.processEvents()
+
+    grid._on_card_click(scans[0], False)
+    grid._on_card_click(scans[3], False, True)
+
+    assert grid.get_selected_entries() == scans
+    assert grid.get_primary_entry() == scans[3]
+
+
+def test_normal_click_replaces_range_selection(qapp):
+    grid = _quiet_grid(qapp)
+    scans = [_scan_entry(name, 10.0, 10.0) for name in "abc"]
+    grid.load(scans, "/tmp")
+    qapp.processEvents()
+
+    grid._on_card_click(scans[0], False)
+    grid._on_card_click(scans[2], False, True)
+    grid._on_card_click(scans[1], False)
+
+    assert grid.get_selected_entries() == [scans[1]]
 
 
 def test_grid_shows_filtering_status_during_async_folder_filter(qapp):

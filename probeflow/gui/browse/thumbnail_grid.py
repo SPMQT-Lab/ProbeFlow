@@ -48,7 +48,7 @@ class ThumbnailGrid(QWidget):
     Browse panel: folder toolbar + thumbnail grid.
 
     - All images share a global thumbnail appearance.
-    - Click = single-select; Ctrl+click = multi-select toggle.
+    - Click = single-select; Ctrl+click = toggle; Shift+click = range select.
     - Double-click = open full-size image viewer.
     """
     entry_selected    = Signal(object)   # primary SxmFile for sidebar
@@ -122,6 +122,7 @@ class ThumbnailGrid(QWidget):
         self._entries:        list[Union[SxmFile, VertFile, FolderEntry]]      = []
         self._selected:       set[str]                         = set()
         self._primary:        Optional[str]                    = None
+        self._selection_anchor: Optional[str]                  = None
         self._thumbnail_colormap: str                          = DEFAULT_CMAP_KEY
         self._thumbnail_processing: dict                       = {}
         self._sort_mode: str                                   = "name"
@@ -313,6 +314,7 @@ class ThumbnailGrid(QWidget):
         had_selection    = bool(self._selected)
         self._selected   = set()
         self._primary    = None
+        self._selection_anchor = None
         self._load_token = object()
         # Re-rendering drops the selection; announce it so selection-driven
         # UI (hints, menus) resets instead of going stale.
@@ -468,6 +470,8 @@ class ThumbnailGrid(QWidget):
             if self._thumbnail_size_name == "small":
                 card.set_compact_mode(True)
             self._cards[key] = card
+            if key in self._selected:
+                card.set_selected(True)
             # Append in entry order honouring the current filter; a filter or
             # column change mid-build triggers _relayout_filtered, which
             # re-places built cards and resets _next_grid_index.
@@ -828,36 +832,71 @@ class ThumbnailGrid(QWidget):
         if isinstance(entry, FolderEntry):
             return
         key = self._key_for(entry)
-        # Multi-select exists for pooling spectra (Overlay selected spectra);
-        # images have no multi-file action, so Ctrl+click on an image behaves
-        # like a plain click instead of building a selection that does nothing.
-        if ctrl and not isinstance(entry, VertFile):
-            ctrl = False
-        if ctrl:
-            # toggle this card in/out of selection
-            if key in self._selected:
-                self._selected.discard(key)
-                self._cards[key].set_selected(False)
-                self._primary = next(iter(self._selected), None) if self._selected else None
-            else:
-                self._selected.add(key)
-                self._cards[key].set_selected(True)
+        if shift:
+            range_keys = self._range_selection_keys(entry)
+            if range_keys is not None:
+                self._replace_selection(range_keys)
                 self._primary = key
+                self._announce_selection()
+                return
+        # Ctrl+click toggles any selectable file; the primary item continues
+        # to drive the browse information panel.
+        if ctrl:
+            selection = set(self._selected)
+            if key in self._selected:
+                selection.discard(key)
+            else:
+                selection.add(key)
+            self._replace_selection(selection)
+            self._selection_anchor = key
+            self._primary = key if key in self._selected else self._first_selected_key()
         else:
             # single select: deselect all others
-            for s in list(self._selected):
-                c = self._cards.get(s)
-                if c:
-                    c.set_selected(False)
-            self._selected = {key}
+            self._replace_selection({key})
             self._primary  = key
-            self._cards[key].set_selected(True)
+            self._selection_anchor = key
 
+        self._announce_selection()
+
+    def _replace_selection(self, keys: list[str] | set[str]) -> None:
+        new_selection = set(keys)
+        for key in self._selected ^ new_selection:
+            card = self._cards.get(key)
+            if card is not None:
+                card.set_selected(key in new_selection)
+        self._selected = new_selection
+
+    def _first_selected_key(self) -> Optional[str]:
+        return next(
+            (self._key_for(entry) for entry in self._entries
+             if not isinstance(entry, FolderEntry)
+             and self._key_for(entry) in self._selected),
+            None,
+        )
+
+    def _range_selection_keys(self, entry) -> list[str] | None:
+        anchor = self._selection_anchor
+        if anchor is None or type(entry) not in (SxmFile, VertFile):
+            return None
+        visible = [
+            item for item in self._entries
+            if type(item) is type(entry) and self._is_entry_visible(item)
+        ]
+        keys = [self._key_for(item) for item in visible]
+        target = self._key_for(entry)
+        if anchor not in keys or target not in keys:
+            return None
+        start, end = sorted((keys.index(anchor), keys.index(target)))
+        return keys[start:end + 1]
+
+    def _announce_selection(self) -> None:
         self.selection_changed.emit(len(self._selected))
         if self._primary:
             primary_entry = self.get_primary_entry()
             if primary_entry:
                 self.entry_selected.emit(primary_entry)
+        else:
+            self.entry_selected.emit(None)
 
     def _on_card_dbl(self, entry):
         # FolderCard emits its own folder_activated signal; the generic
@@ -1025,6 +1064,8 @@ class ThumbnailGrid(QWidget):
             if not isinstance(entry, FolderEntry) and self._is_entry_visible(entry)
         }
         new_selected = {key for key in self._selected if key in visible_keys}
+        if self._selection_anchor not in visible_keys:
+            self._selection_anchor = self._primary if self._primary in visible_keys else None
         if new_selected == self._selected:
             return
         for key in list(self._selected):
