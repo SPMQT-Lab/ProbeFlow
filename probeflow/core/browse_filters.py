@@ -27,8 +27,17 @@ class FolderFilterState:
 
     bias_value_mv: Optional[float] = None
     hide_incomplete: bool = False
+    tag_name: Optional[str] = None
 
     def has_metadata_filters(self) -> bool:
+        return bool(
+            self.bias_value_mv is not None
+            or self.hide_incomplete
+            or self.tag_name is not None
+        )
+
+    def has_subfolder_filters(self) -> bool:
+        """Return whether indexed subfolder metadata can resolve this state."""
         return bool(self.bias_value_mv is not None or self.hide_incomplete)
 
 
@@ -94,6 +103,7 @@ def scan_matches_folder_filters(
     completion_pct: Optional[float],
     bias_mv: Optional[float],
     state: FolderFilterState,
+    tag_name: Optional[str] = None,
 ) -> bool:
     """Return True when one scan satisfies all active metadata filters."""
     if state.bias_value_mv is not None:
@@ -104,6 +114,10 @@ def scan_matches_folder_filters(
 
     if state.hide_incomplete and completion_pct is not None:
         if float(completion_pct) < INCOMPLETE_COMPLETION_PCT:
+            return False
+
+    if state.tag_name is not None:
+        if tag_name is None or str(tag_name).casefold() != state.tag_name.casefold():
             return False
 
     return True
