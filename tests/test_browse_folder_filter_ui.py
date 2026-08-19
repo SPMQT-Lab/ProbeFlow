@@ -386,3 +386,39 @@ def test_app_export_uses_global_thread_pool(monkeypatch, tmp_path, qapp):
     assert started["paths"] == [entry.path]
     assert started["destination"] == str(tmp_path / "out")
     assert "worker" in started
+
+
+def test_open_folder_uses_native_directory_picker(monkeypatch, tmp_path):
+    from probeflow.gui.app import ProbeFlowWindow
+
+    calls = {}
+
+    class _NativeFileDialog:
+        ShowDirsOnly = object()
+
+        @staticmethod
+        def getExistingDirectory(parent, caption, directory, options):
+            calls.update(
+                parent=parent,
+                caption=caption,
+                directory=directory,
+                options=options,
+            )
+            return str(tmp_path)
+
+    selected = {}
+    fake = SimpleNamespace(
+        _show_browse=lambda: selected.setdefault("shown", True),
+        _grid=SimpleNamespace(set_root=lambda path: selected.setdefault("root", path)),
+        _spec_image_map={"old": "mapping"},
+        _browse_info=SimpleNamespace(clear=lambda: selected.setdefault("cleared", True)),
+        _update_browse_status=lambda: selected.setdefault("status_updated", True),
+    )
+    monkeypatch.setattr("probeflow.gui.app.QFileDialog", _NativeFileDialog)
+
+    ProbeFlowWindow._open_browse_folder(fake)
+
+    assert calls["caption"] == "Open folder containing scan / .VERT files"
+    assert calls["options"] is _NativeFileDialog.ShowDirsOnly
+    assert selected["root"] == Path(tmp_path)
+    assert fake._spec_image_map == {}

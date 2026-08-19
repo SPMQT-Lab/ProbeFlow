@@ -815,14 +815,13 @@ class ProbeFlowWindow(QMainWindow):
 
     # ── Browse ─────────────────────────────────────────────────────────────────
     def _open_browse_folder(self):
-        dialog = QFileDialog(self, "Open folder containing scan / .VERT files")
-        dialog.setFileMode(QFileDialog.Directory)
-        dialog.setOption(QFileDialog.ShowDirsOnly, False)
-        dialog.setOption(QFileDialog.DontUseNativeDialog, True)
-        if not dialog.exec():
-            return
-        selected = dialog.selectedFiles()
-        d = selected[0] if selected else ""
+        # The static helper uses the operating system's native folder picker.
+        d = QFileDialog.getExistingDirectory(
+            self,
+            "Open folder containing scan / .VERT files",
+            "",
+            QFileDialog.ShowDirsOnly,
+        )
         if not d:
             return
         self._show_browse()
