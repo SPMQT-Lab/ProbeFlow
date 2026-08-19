@@ -73,11 +73,9 @@ class ThumbnailGrid(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
-        # ── Breadcrumb bar (back/up + segments) ─────────────────────────────
+        # ── Breadcrumb bar (clickable path segments) ────────────────────────
         self._breadcrumb = _BreadcrumbBar(t)
         self._breadcrumb.segment_clicked.connect(self._on_breadcrumb_clicked)
-        self._breadcrumb.back_requested.connect(self._on_back_requested)
-        self._breadcrumb.up_requested.connect(self._on_up_requested)
         outer.addWidget(self._breadcrumb)
 
         # ── Path strip (folder name + count) ────────────────────────────────
@@ -172,11 +170,10 @@ class ThumbnailGrid(QWidget):
         # navigation state
         self._root:        Optional[Path] = None
         self._current_dir: Optional[Path] = None
-        self._history:     list[Path]     = []  # back stack of previous dirs
         # The folder whose entries the grid is actually showing. _current_dir
         # is optimistic (set at navigation intent, before the off-thread index
         # lands); when an index fails the two diverge and _current_dir is
-        # restored from this so refresh / history / card events stay
+        # restored from this so refresh and card events stay
         # consistent with what is on screen.
         self._rendered_dir: Optional[Path] = None
 
@@ -204,20 +201,16 @@ class ThumbnailGrid(QWidget):
     def set_root(self, path: Path):
         """Set a new browse root (called by 'Open folder…') and navigate to it.
 
-        Resets navigation history and clears any cached selection.
+        Resets the browse root and clears any cached selection.
         """
         path = Path(path)
         self._root = path
-        self._history = []
         self.root_changed.emit(path)
         self._navigate(path)
 
     def navigate_to(self, path: Path):
-        """Navigate to *path*, pushing the current folder onto the history."""
-        path = Path(path)
-        if self._current_dir is not None and path != self._current_dir:
-            self._history.append(self._current_dir)
-        self._navigate(path)
+        """Navigate to *path*."""
+        self._navigate(Path(path))
 
     def current_dir(self) -> Optional[Path]:
         return self._current_dir
@@ -228,9 +221,8 @@ class ThumbnailGrid(QWidget):
     def refresh(self) -> None:
         """Rescan the current folder and update the grid with any new files.
 
-        Does not push the current folder onto the navigation history, so
-        Back / breadcrumb state is unchanged. Safe to call at any time;
-        a no-op if no folder is open yet.
+        Breadcrumb state is unchanged. Safe to call at any time; a no-op if no
+        folder is open yet.
         """
         if self._current_dir is not None:
             self._navigate(self._current_dir)
@@ -246,10 +238,7 @@ class ThumbnailGrid(QWidget):
         self._current_dir = path
         if self._root is None:
             self._root = path
-        self._breadcrumb.set_state(
-            self._root, self._current_dir,
-            can_go_back=bool(self._history),
-        )
+        self._breadcrumb.set_state(self._root, self._current_dir)
         self._refresh_btn.setEnabled(False)  # re-enabled when the index lands
         self._path_lbl.setText(f"Indexing {path.name}…")
         self._nav_token = object()
@@ -292,11 +281,8 @@ class ThumbnailGrid(QWidget):
         self._refresh_btn.setEnabled(True)
         self._path_lbl.setText(f"Could not open {Path(path).name}: {message}")
         # The grid still shows the previously rendered folder, but
-        # _current_dir was optimistically set to the failed path: refresh()
-        # would retarget the failed folder and the next navigation would push
-        # it onto the Back history. Restore the displayed folder as current
-        # (only within the same root — a failed set_root has nothing
-        # consistent to restore to).
+        # _current_dir was optimistically set to the failed path. Restore the
+        # displayed folder as current when it is within the same root.
         rendered = self._rendered_dir
         if (
             rendered is not None
@@ -305,15 +291,7 @@ class ThumbnailGrid(QWidget):
             and rendered.is_relative_to(self._root)
         ):
             self._current_dir = rendered
-            # Drop the history entry the failed navigation pushed (it is the
-            # folder we just restored as current), so Back returns to where
-            # the user actually was before that.
-            if self._history and self._history[-1] == rendered:
-                self._history.pop()
-            self._breadcrumb.set_state(
-                self._root, self._current_dir,
-                can_go_back=bool(self._history),
-            )
+            self._breadcrumb.set_state(self._root, self._current_dir)
 
     def load(self, entries: list, folder_path: str = ""):
         """Legacy entry point: render a flat list of entries (no navigation).
@@ -327,8 +305,7 @@ class ThumbnailGrid(QWidget):
             self._root = p
             self._current_dir = p
             self._rendered_dir = p
-            self._history = []
-            self._breadcrumb.set_state(p, p, can_go_back=False)
+            self._breadcrumb.set_state(p, p)
         self._render_entries(entries)
 
     def _render_entries(self, entries: list):
@@ -521,24 +498,7 @@ class ThumbnailGrid(QWidget):
 
     def _on_breadcrumb_clicked(self, path: Path):
         if self._current_dir is not None and path != self._current_dir:
-            self._history.append(self._current_dir)
             self._navigate(path)
-
-    def _on_back_requested(self):
-        if not self._history:
-            return
-        previous = self._history.pop()
-        self._navigate(previous)
-
-    def _on_up_requested(self):
-        if self._current_dir is None or self._root is None:
-            return
-        if self._current_dir == self._root:
-            return
-        parent = self._current_dir.parent
-        if self._current_dir != parent:
-            self._history.append(self._current_dir)
-            self._navigate(parent)
 
     def _on_folder_activated(self, path):
         self.navigate_to(Path(path))

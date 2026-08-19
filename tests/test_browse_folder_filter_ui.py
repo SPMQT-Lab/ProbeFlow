@@ -59,6 +59,24 @@ def _quiet_grid(qapp):
     return grid
 
 
+def test_breadcrumb_uses_only_folder_segments(qapp, tmp_path):
+    from PySide6.QtWidgets import QPushButton
+
+    from probeflow.gui import THEMES
+    from probeflow.gui.browse.breadcrumbs import _BreadcrumbBar
+
+    root = tmp_path / "root"
+    current = root / "child"
+    current.mkdir(parents=True)
+
+    bar = _BreadcrumbBar(THEMES["dark"])
+    bar.set_state(root, current)
+
+    assert [button.text() for button in bar.findChildren(QPushButton)] == [
+        "root", "child",
+    ]
+
+
 def test_panel_emits_state_for_bias_pick_and_hide_incomplete(qapp):
     from probeflow.gui import THEMES
     from probeflow.gui.browse.panels import BrowseToolPanel
