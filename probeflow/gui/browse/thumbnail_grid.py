@@ -560,8 +560,8 @@ class ThumbnailGrid(QWidget):
             entry.path for entry in self._entries if isinstance(entry, SxmFile)
         ])
 
-    def tag_definition(self, name: str) -> Optional[BrowseTag]:
-        return self._tag_store.tag(name)
+    def tag_definitions(self) -> tuple[BrowseTag, ...]:
+        return self._tag_store.tags()
 
     def _on_folder_activated(self, path):
         self.navigate_to(Path(path))

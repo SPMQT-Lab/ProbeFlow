@@ -186,6 +186,33 @@ def test_panel_exposes_tag_filter_and_tag_sort(qapp):
     assert panel.get_sort_mode() == "tag"
 
 
+def test_tag_chooser_lists_existing_tags_and_palette(qapp, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox, QInputDialog
+
+    from probeflow.core.browse_tags import BrowseTag
+    from probeflow.gui.browse.tag_dialog import TagChooserDialog
+
+    deleted = []
+    dialog = TagChooserDialog(
+        [BrowseTag("Review", "#12ABEF")], deleted.append,
+    )
+    assert set(dialog._rows) == {"review"}
+    assert len(dialog.PALETTE) == 8
+
+    monkeypatch.setattr(
+        QMessageBox, "question", lambda *args, **kwargs: QMessageBox.Yes,
+    )
+    dialog._confirm_delete("Review")
+    assert deleted == ["Review"]
+    assert dialog._rows == {}
+
+    monkeypatch.setattr(
+        QInputDialog, "getText", lambda *args, **kwargs: ("New", True),
+    )
+    dialog._new_tag("#90BE6D")
+    assert dialog.choice() == ("New", "#90be6d")
+
+
 def test_grid_bias_options_lists_distinct_biases(qapp):
     grid = _quiet_grid(qapp)
     grid.load(

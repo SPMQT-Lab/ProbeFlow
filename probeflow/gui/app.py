@@ -28,10 +28,10 @@ from PySide6.QtCore import (
     Signal, Slot,
 )
 from PySide6.QtGui import (
-    QAction, QActionGroup, QColor, QFont, QKeySequence, QShortcut,
+    QAction, QActionGroup, QFont, QKeySequence, QShortcut,
 )
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QColorDialog, QDialog, QFileDialog,
+    QAbstractItemView, QApplication, QDialog, QFileDialog,
     QHeaderView, QInputDialog, QMainWindow, QMessageBox, QPushButton,
     QSizePolicy, QSplitter,
     QStatusBar, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
@@ -89,6 +89,7 @@ from probeflow.gui.workers import (
 )
 from probeflow.gui.browse import ThumbnailGrid, BrowseInfoPanel, BrowseToolPanel
 from probeflow.gui.browse.file_actions import create_folder, move_files
+from probeflow.gui.browse.tag_dialog import TagChooserDialog
 from probeflow.gui.convert import ConvertPanel, ConvertSidebar
 from probeflow.gui.workspace_window import WorkspaceWindow
 from probeflow.gui.dialogs.definitions import _DefinitionsDialog
@@ -848,20 +849,16 @@ class ProbeFlowWindow(QMainWindow):
         self._browse_tools.set_tag_options(self._grid.tag_options())
 
     def _on_tag_requested(self, entry) -> None:
-        """Walk the user through choosing a colour and naming a scan tag."""
-        color = QColorDialog.getColor(
-            QColor("#E9B949"), self, "Select tag colour"
+        """Choose an existing tag or create one from the compact palette."""
+        dialog = TagChooserDialog(
+            self._grid.tag_definitions(), self._grid.delete_tag, self,
         )
-        if not color.isValid():
+        if dialog.exec() != QDialog.Accepted:
             return
-        name, accepted = QInputDialog.getText(
-            self, "Name tag", "Tag name:",
-        )
-        name = " ".join(str(name).split()).strip()
-        if not accepted or not name:
+        choice = dialog.choice()
+        if choice is None:
             return
-        existing = self._grid.tag_definition(name)
-        color_hex = existing.color if existing is not None else color.name(QColor.HexRgb)
+        name, color_hex = choice
         try:
             self._grid.assign_tag(entry.path, name, color_hex)
         except ValueError as exc:
