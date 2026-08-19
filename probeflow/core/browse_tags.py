@@ -127,6 +127,8 @@ class BrowseTagStore:
         return self._tags.get(self._name_key(name))
 
     def tag_for(self, path: Path) -> Optional[BrowseTag]:
+        if self.root is None:
+            return None
         key = self._assignments.get(self._path_key(path))
         return self._tags.get(key) if key is not None else None
 
