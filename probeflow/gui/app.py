@@ -75,6 +75,7 @@ from probeflow.gui.models import (
     VertFile,
     scan_image_folder,
 )
+from probeflow.gui.metadata_display import metadata_rows
 from probeflow.gui.rendering import (
     CMAP_KEY,
     DEFAULT_CMAP_KEY,
@@ -1064,15 +1065,16 @@ class ProbeFlowWindow(QMainWindow):
             dlg.setWindowTitle(f"Metadata — {entry.stem}")
             dlg.resize(560, 600)
             v = QVBoxLayout(dlg)
-            tbl = QTableWidget(len(header), 2, dlg)
+            rows = metadata_rows(header)
+            tbl = QTableWidget(len(rows), 2, dlg)
             tbl.setHorizontalHeaderLabels(["Key", "Value"])
             tbl.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
             tbl.verticalHeader().setVisible(False)
             tbl.setEditTriggers(QAbstractItemView.NoEditTriggers)
             tbl.setFont(ui_font(9))
-            for row, k in enumerate(sorted(header)):
-                tbl.setItem(row, 0, QTableWidgetItem(str(k)))
-                tbl.setItem(row, 1, QTableWidgetItem(str(header[k])))
+            for row, (key, value) in enumerate(rows):
+                tbl.setItem(row, 0, QTableWidgetItem(key))
+                tbl.setItem(row, 1, QTableWidgetItem(value))
             v.addWidget(tbl)
             close_btn = QPushButton("Close", dlg)
             close_btn.clicked.connect(dlg.accept)

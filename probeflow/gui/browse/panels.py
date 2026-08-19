@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 )
 
 from probeflow.gui.models import PLANE_NAMES, SxmFile, VertFile
+from probeflow.gui.metadata_display import metadata_rows
 from probeflow.gui.rendering import (
     CMAP_KEY,
     CMAP_NAMES,
@@ -673,6 +674,14 @@ class BrowseInfoPanel(QWidget):
         is read once, off the GUI thread (this used to be a second synchronous
         full ``load_scan`` per card click).
         """
+        # SM4 headers contain per-page dictionaries under ``pages``.  Keep the
+        # existing priority order for flat SXM/Createc headers, but expand
+        # structured values instead of turning them into one long string.
+        if isinstance(hdr.get("pages"), list):
+            self._meta_rows = metadata_rows(hdr)
+            self._filter_meta()
+            return
+
         priority = [
             "REC_DATE", "REC_TIME", "SCAN_PIXELS", "SCAN_RANGE",
             "SCAN_OFFSET", "SCAN_ANGLE", "SCAN_DIR", "BIAS",
@@ -710,6 +719,8 @@ class BrowseInfoPanel(QWidget):
                 p_item.setForeground(QColor(t["accent_bg"]))
                 v_item = QTableWidgetItem(value)
                 v_item.setForeground(QColor(t["fg"]))
+                if param.startswith("Page ") and not value:
+                    p_item.setFont(ui_font(10, weight=QFont.Bold))
                 self.meta_table.setItem(row, 0, p_item)
                 self.meta_table.setItem(row, 1, v_item)
         self.meta_table.resizeRowsToContents()
