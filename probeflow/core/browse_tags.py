@@ -167,5 +167,4 @@ class BrowseTagStore:
         return [
             (tag, counts.get(self._name_key(tag.name), 0))
             for tag in self.tags()
-            if counts.get(self._name_key(tag.name), 0)
         ]

@@ -28,10 +28,10 @@ from PySide6.QtCore import (
     Signal, Slot,
 )
 from PySide6.QtGui import (
-    QAction, QActionGroup, QFont, QKeySequence, QShortcut,
+    QAction, QActionGroup, QColor, QFont, QKeySequence, QShortcut,
 )
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QDialog, QFileDialog,
+    QAbstractItemView, QApplication, QColorDialog, QDialog, QFileDialog,
     QHeaderView, QInputDialog, QMainWindow, QMessageBox, QPushButton,
     QSizePolicy, QSplitter,
     QStatusBar, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
@@ -295,6 +295,8 @@ class ProbeFlowWindow(QMainWindow):
         self._grid.selection_changed.connect(self._on_selection_changed)
         self._grid.view_requested.connect(self._open_viewer)
         self._grid.card_context_action.connect(self._on_card_context_action)
+        self._grid.tag_requested.connect(self._on_tag_requested)
+        self._grid.tags_changed.connect(self._on_grid_tags_changed)
         self._grid.create_folder_requested.connect(self._on_create_browse_folder)
         self._grid.move_scans_requested.connect(self._move_selected_scans)
         self._grid.folder_changed.connect(self._on_grid_folder_changed)
@@ -306,6 +308,7 @@ class ProbeFlowWindow(QMainWindow):
         self._browse_tools.overlay_spectra_requested.connect(self._on_overlay_selected_spectra)
         self._browse_tools.filter_changed.connect(self._on_filter_changed)
         self._browse_tools.folder_filter_changed.connect(self._on_folder_filter_changed)
+        self._browse_tools.delete_tag_requested.connect(self._on_delete_browse_tag)
         self._browse_tools.sort_mode_changed.connect(self._grid.set_sort_mode)
         self._browse_tools.export_filtered_requested.connect(self._on_export_filtered_folder)
         self._browse_tools.thumbnail_channel_changed.connect(self._on_thumbnail_channel_changed)
@@ -839,6 +842,42 @@ class ProbeFlowWindow(QMainWindow):
         self._update_browse_status()
         # The bias picker offers the biases actually present in this folder.
         self._browse_tools.set_bias_options(self._grid.bias_options())
+        self._browse_tools.set_tag_options(self._grid.tag_options())
+
+    def _on_grid_tags_changed(self) -> None:
+        self._browse_tools.set_tag_options(self._grid.tag_options())
+
+    def _on_tag_requested(self, entry) -> None:
+        """Walk the user through choosing a colour and naming a scan tag."""
+        color = QColorDialog.getColor(
+            QColor("#E9B949"), self, "Select tag colour"
+        )
+        if not color.isValid():
+            return
+        name, accepted = QInputDialog.getText(
+            self, "Name tag", "Tag name:",
+        )
+        name = " ".join(str(name).split()).strip()
+        if not accepted or not name:
+            return
+        existing = self._grid.tag_definition(name)
+        color_hex = existing.color if existing is not None else color.name(QColor.HexRgb)
+        try:
+            self._grid.assign_tag(entry.path, name, color_hex)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Could not add tag", str(exc))
+
+    def _on_delete_browse_tag(self, name: str) -> None:
+        answer = QMessageBox.question(
+            self,
+            "Delete tag",
+            f"Delete the tag '{name}' from this browse folder?\n"
+            "This removes it from every scan carrying it.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer == QMessageBox.Yes:
+            self._grid.delete_tag(name)
 
     def _format_browse_counts(self, counts) -> str:
         parts: list[str] = []

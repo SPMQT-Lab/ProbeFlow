@@ -10,6 +10,7 @@ from probeflow.core.browse_filters import (
     FolderFilterState,
     scan_matches_folder_filters,
 )
+from probeflow.core.browse_tags import BrowseTag, BrowseTagStore
 from probeflow.gui.typography import ui_font
 from PySide6.QtCore import Qt, QThreadPool, QTimer, Signal, Slot
 from PySide6.QtGui import QCursor, QImage, QPixmap
@@ -54,6 +55,8 @@ class ThumbnailGrid(QWidget):
     entry_selected    = Signal(object)   # primary SxmFile for sidebar
     selection_changed = Signal(int)      # count of selected items
     view_requested    = Signal(object)   # SxmFile to open in full-size viewer
+    tag_requested     = Signal(object)   # SxmFile with no tag assigned
+    tags_changed      = Signal()
     card_context_action = Signal(object, str)  # entry, action key — re-emitted from cards
     create_folder_requested = Signal()
     move_scans_requested = Signal()
@@ -140,6 +143,7 @@ class ThumbnailGrid(QWidget):
         self._current_cols: int                                = 1
         self._filter_mode: str                                 = "all"
         self._folder_filter_state: FolderFilterState           = FolderFilterState()
+        self._tag_store            = BrowseTagStore()
         self._folder_visibility: dict[Path, bool]             = {}
         self._folder_filter_token                              = object()
         self._folder_filter_pending: bool                      = False
@@ -205,6 +209,7 @@ class ThumbnailGrid(QWidget):
         """
         path = Path(path)
         self._root = path
+        self._tag_store.load(path)
         self.root_changed.emit(path)
         self._navigate(path)
 
@@ -305,6 +310,7 @@ class ThumbnailGrid(QWidget):
             self._root = p
             self._current_dir = p
             self._rendered_dir = p
+            self._tag_store.load(p)
             self._breadcrumb.set_state(p, p)
         self._render_entries(entries)
 
@@ -366,9 +372,11 @@ class ThumbnailGrid(QWidget):
         self._refresh_folder_filtering()
 
     def _scan_matches_folder_filters(self, entry: SxmFile) -> bool:
+        tag = self._tag_store.tag_for(entry.path)
         return scan_matches_folder_filters(
             completion_pct=entry.completion_pct,
             bias_mv=entry.bias_mv,
+            tag_name=tag.name if tag is not None else None,
             state=self._folder_filter_state,
         )
 
@@ -415,7 +423,7 @@ class ThumbnailGrid(QWidget):
 
     def _refresh_folder_filtering(self) -> None:
         folders = [entry for entry in self._entries if isinstance(entry, FolderEntry)]
-        if not self._folder_filter_state.has_metadata_filters():
+        if not self._folder_filter_state.has_subfolder_filters():
             self._folder_visibility = {Path(entry.path): True for entry in folders}
             self._folder_filter_pending = False
             self._update_path_summary()
@@ -464,6 +472,8 @@ class ThumbnailGrid(QWidget):
             else:
                 card = ScanCard(entry, self._t)
                 card.context_action_requested.connect(self.card_context_action)
+                card.tag_clicked.connect(self._on_tag_clicked)
+                card.set_tag(self._tag_store.tag_for(entry.path))
             card.clicked.connect(self._on_card_click)
             card.double_clicked.connect(self._on_card_dbl)
             if self._thumbnail_size_name == "small":
@@ -499,6 +509,59 @@ class ThumbnailGrid(QWidget):
     def _on_breadcrumb_clicked(self, path: Path):
         if self._current_dir is not None and path != self._current_dir:
             self._navigate(path)
+
+    def _on_tag_clicked(self, entry: SxmFile) -> None:
+        if self._tag_store.tag_for(entry.path) is None:
+            self.tag_requested.emit(entry)
+        else:
+            self.remove_tag(entry.path)
+
+    def assign_tag(self, path: Path, name: str, color: str) -> BrowseTag:
+        tag = self._tag_store.assign(Path(path), name, color)
+        for entry in self._entries:
+            if isinstance(entry, SxmFile) and Path(entry.path) == Path(path):
+                card = self._cards.get(self._key_for(entry))
+                if isinstance(card, ScanCard):
+                    card.set_tag(tag)
+                break
+        self._resort_files()
+        self._relayout_filtered()
+        self._update_path_summary()
+        self.tags_changed.emit()
+        return tag
+
+    def remove_tag(self, path: Path) -> None:
+        self._tag_store.remove(Path(path))
+        for entry in self._entries:
+            if isinstance(entry, SxmFile) and Path(entry.path) == Path(path):
+                card = self._cards.get(self._key_for(entry))
+                if isinstance(card, ScanCard):
+                    card.set_tag(None)
+                break
+        self._resort_files()
+        self._relayout_filtered()
+        self._update_path_summary()
+        self.tags_changed.emit()
+
+    def delete_tag(self, name: str) -> None:
+        self._tag_store.delete(name)
+        for entry in self._entries:
+            if isinstance(entry, SxmFile):
+                card = self._cards.get(self._key_for(entry))
+                if isinstance(card, ScanCard):
+                    card.set_tag(self._tag_store.tag_for(entry.path))
+        self._resort_files()
+        self._relayout_filtered()
+        self._update_path_summary()
+        self.tags_changed.emit()
+
+    def tag_options(self) -> list[tuple[BrowseTag, int]]:
+        return self._tag_store.options_for([
+            entry.path for entry in self._entries if isinstance(entry, SxmFile)
+        ])
+
+    def tag_definition(self, name: str) -> Optional[BrowseTag]:
+        return self._tag_store.tag(name)
 
     def _on_folder_activated(self, path):
         self.navigate_to(Path(path))
@@ -952,9 +1015,22 @@ class ThumbnailGrid(QWidget):
         """Order file entries by the active sort mode.
 
         ``name`` sorts by stem. ``size`` sorts by physical scan area, largest
-        first; entries without a known size (spectra, unreadable scans) keep
-        name order at the end.
+        first. ``tag`` groups labelled scans alphabetically, with untagged
+        scans and spectra at the end.
         """
+        if self._sort_mode == "tag":
+            def tag_key(entry):
+                tag = (
+                    self._tag_store.tag_for(entry.path)
+                    if isinstance(entry, SxmFile)
+                    else None
+                )
+                if tag is None:
+                    return (1, "", str(entry.stem).casefold())
+                return (0, tag.name.casefold(), str(entry.stem).casefold())
+
+            return sorted(file_entries, key=tag_key)
+
         if self._sort_mode != "size":
             return sorted(file_entries, key=lambda e: e.stem)
 
@@ -967,17 +1043,22 @@ class ThumbnailGrid(QWidget):
 
         return sorted(file_entries, key=key)
 
-    def set_sort_mode(self, mode: str) -> None:
-        """Re-order the cards by ``name`` or ``size`` without re-indexing."""
-        mode = mode if mode in ("name", "size") else "name"
-        if mode == self._sort_mode:
-            return
-        self._sort_mode = mode
+    def _resort_files(self) -> None:
         if not self._entries:
             return
         folders = [e for e in self._entries if isinstance(e, FolderEntry)]
         files = [e for e in self._entries if not isinstance(e, FolderEntry)]
         self._entries = folders + self._sorted_files(files)
+
+    def set_sort_mode(self, mode: str) -> None:
+        """Re-order the cards by name, size, or tag without re-indexing."""
+        mode = mode if mode in ("name", "size", "tag") else "name"
+        if mode == self._sort_mode:
+            return
+        self._sort_mode = mode
+        if not self._entries:
+            return
+        self._resort_files()
         self._relayout_filtered()
         self._schedule_visible_thumbnail_refresh(delay_ms=0)
 

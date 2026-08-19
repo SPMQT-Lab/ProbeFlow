@@ -3,15 +3,64 @@
 from __future__ import annotations
 
 from probeflow.gui.typography import ui_font
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QAction, QCursor, QPixmap
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QMenu, QVBoxLayout, QWidget
+from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from PySide6.QtGui import (
+    QAction, QColor, QCursor, QPainter, QPen, QPixmap, QPolygonF,
+)
+from PySide6.QtWidgets import (
+    QAbstractButton, QFrame, QHBoxLayout, QLabel, QMenu, QVBoxLayout, QWidget,
+)
 
+from probeflow.core.browse_tags import BrowseTag
 from probeflow.gui.models import FolderEntry, SxmFile, VertFile, _card_meta_str
 
 from .helpers import _card_compact_meta_str
 
 # ── Browse cards ──────────────────────────────────────────────────────────────
+class TagButton(QAbstractButton):
+    """Small outlined tag shape shown at the top-left of a scan image."""
+
+    def __init__(self, t: dict, parent=None):
+        super().__init__(parent)
+        self._t = t
+        self._tag: BrowseTag | None = None
+        self.setFixedSize(26, 26)
+        self.setCursor(QCursor(Qt.PointingHandCursor))
+        self.setFocusPolicy(Qt.NoFocus)
+        self.setToolTip("Add tag")
+
+    def set_tag(self, tag: BrowseTag | None) -> None:
+        self._tag = tag
+        self.setToolTip(
+            f"Remove tag '{tag.name}'" if tag is not None else "Add tag"
+        )
+        self.update()
+
+    def apply_theme(self, t: dict) -> None:
+        self._t = t
+        self.update()
+
+    def paintEvent(self, _event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        tag_color = QColor(self._tag.color) if self._tag is not None else QColor(
+            self._t["sub_fg"]
+        )
+        if self.underMouse() and self._tag is None:
+            tag_color = QColor(self._t["accent_bg"])
+        tag_color.setAlpha(225 if self._tag is not None else 255)
+        painter.setPen(QPen(tag_color, 1.6))
+        painter.setBrush(tag_color if self._tag is not None else Qt.NoBrush)
+        painter.drawPolygon(QPolygonF([
+            QPointF(4, 5), QPointF(14, 5), QPointF(21, 12),
+            QPointF(14, 19), QPointF(4, 19),
+        ]))
+        painter.setBrush(QColor(self._t["card_bg"]))
+        painter.setPen(Qt.NoPen)
+        painter.drawEllipse(QRectF(7, 8, 3, 3))
+        painter.end()
+
+
 class _BrowseCard(QFrame):
     """Shared thumbnail-card behavior for image and spectroscopy entries."""
 
@@ -125,6 +174,9 @@ class _BrowseCard(QFrame):
         self.meta_lbl.setStyleSheet(f"color: {t['sub_fg']}; background: transparent;")
         if getattr(self, "img_lbl", None) is not None:
             self.img_lbl.setStyleSheet(f"color: {t['sub_fg']}; background: transparent;")
+        tag_button = getattr(self, "tag_button", None)
+        if tag_button is not None:
+            tag_button.apply_theme(t)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -143,11 +195,19 @@ class ScanCard(_BrowseCard):
     """Single image thumbnail card."""
 
     context_action_requested = Signal(object, str)  # SxmFile, action key
+    tag_clicked = Signal(object)  # SxmFile
 
     def __init__(self, entry: SxmFile, t: dict, parent=None):
         super().__init__(entry, t, _card_meta_str(entry),
                          compact_meta_text=_card_compact_meta_str(entry),
                          parent=parent)
+        self.tag_button = TagButton(t, self.img_lbl)
+        self.tag_button.move(2, 2)
+        self.tag_button.raise_()
+        self.tag_button.clicked.connect(lambda: self.tag_clicked.emit(self.entry))
+
+    def set_tag(self, tag: BrowseTag | None) -> None:
+        self.tag_button.set_tag(tag)
 
     def contextMenuEvent(self, event):
         menu = QMenu(self)
