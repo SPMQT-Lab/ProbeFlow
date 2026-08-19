@@ -822,7 +822,7 @@ class ThumbnailGrid(QWidget):
                 for img in images
             ])
 
-    def _on_card_click(self, entry, ctrl: bool):
+    def _on_card_click(self, entry, ctrl: bool, shift: bool = False):
         # Folders are not selectable — selecting one would have no effect on
         # the info panel and would just confuse the file selection state.
         if isinstance(entry, FolderEntry):
