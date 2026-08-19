@@ -15,7 +15,7 @@ from .helpers import _card_compact_meta_str
 class _BrowseCard(QFrame):
     """Shared thumbnail-card behavior for image and spectroscopy entries."""
 
-    clicked        = Signal(object, bool)  # SxmFile, ctrl_held
+    clicked        = Signal(object, bool, bool)  # entry, ctrl_held, shift_held
     double_clicked = Signal(object)
 
     CARD_W = 200
@@ -129,7 +129,8 @@ class _BrowseCard(QFrame):
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             ctrl = bool(event.modifiers() & Qt.ControlModifier)
-            self.clicked.emit(self.entry, ctrl)
+            shift = bool(event.modifiers() & Qt.ShiftModifier)
+            self.clicked.emit(self.entry, ctrl, shift)
         super().mousePressEvent(event)
 
     def mouseDoubleClickEvent(self, event):
@@ -159,6 +160,12 @@ class ScanCard(_BrowseCard):
         a_meta_show.triggered.connect(
             lambda: self.context_action_requested.emit(self.entry, "show_metadata"))
         menu.addAction(a_meta_show)
+
+        menu.addSeparator()
+        a_move = QAction("Move selected scans to folder…", self)
+        a_move.triggered.connect(
+            lambda: self.context_action_requested.emit(self.entry, "move_scans"))
+        menu.addAction(a_move)
 
         menu.exec(event.globalPos())
 

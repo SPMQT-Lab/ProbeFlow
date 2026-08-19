@@ -352,7 +352,7 @@ class TestNavigationStateConsistency:
     def test_index_failure_restores_displayed_folder(self, qapp):
         """When the index for a navigation target fails, the grid keeps
         showing the old folder — current_dir must be restored to match, or
-        refresh() retargets the failed path and Back history corrupts."""
+        refresh() retargets the failed path and the displayed state diverges."""
         grid, entries = _make_grid(3)
         root = Path("/tmp/probeflow_navtest")
         grid.load(entries, str(root))
@@ -366,14 +366,11 @@ class TestNavigationStateConsistency:
             "current_dir still points at the failed folder while the old "
             "folder's entries are displayed"
         )
-        assert grid._history == [], (
-            "failed navigation left its push on the Back history"
-        )
         # The displayed entries were never replaced.
         assert grid.get_entries() == entries
-        # Next navigation pushes the folder the user was actually in.
+        # Next navigation starts directly from the requested folder.
         grid.navigate_to(root / "other")
-        assert grid._history == [root]
+        assert grid.current_dir() == root / "other"
 
     def test_stale_index_failure_is_ignored(self, qapp):
         """A failure arriving for a superseded navigation (token mismatch)

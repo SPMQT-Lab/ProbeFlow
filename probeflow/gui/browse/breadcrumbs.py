@@ -12,15 +12,9 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QSizePolicy, QWi
 
 # ── BreadcrumbBar ─────────────────────────────────────────────────────────────
 class _BreadcrumbBar(QWidget):
-    """Path strip with clickable segments + back/up buttons.
-
-    Segments are clickable and emit ``segment_clicked(Path)``. Back/up buttons
-    emit their own signals so the grid can decide whether they're enabled.
-    """
+    """Path strip with clickable folder segments."""
 
     segment_clicked = Signal(object)  # Path
-    back_requested  = Signal()
-    up_requested    = Signal()
 
     def __init__(self, t: dict, parent=None):
         super().__init__(parent)
@@ -31,22 +25,6 @@ class _BreadcrumbBar(QWidget):
         lay = QHBoxLayout(self)
         lay.setContentsMargins(8, 4, 8, 4)
         lay.setSpacing(4)
-
-        self._back_btn = QPushButton("←")
-        self._back_btn.setFixedSize(24, 24)
-        self._back_btn.setCursor(QCursor(Qt.PointingHandCursor))
-        self._back_btn.setEnabled(False)
-        self._back_btn.setVisible(False)
-        self._back_btn.clicked.connect(self.back_requested)
-        lay.addWidget(self._back_btn)
-
-        self._up_btn = QPushButton("↑")
-        self._up_btn.setFixedSize(24, 24)
-        self._up_btn.setCursor(QCursor(Qt.PointingHandCursor))
-        self._up_btn.setEnabled(False)
-        self._up_btn.setVisible(False)
-        self._up_btn.clicked.connect(self.up_requested)
-        lay.addWidget(self._up_btn)
 
         self._segments_host = QWidget()
         self._segments_lay = QHBoxLayout(self._segments_host)
@@ -62,14 +40,6 @@ class _BreadcrumbBar(QWidget):
     def apply_theme(self, t: dict):
         self._t = t
         self.setStyleSheet(f"background-color: {t['main_bg']};")
-        for btn in (self._back_btn, self._up_btn):
-            btn.setStyleSheet(
-                f"QPushButton {{ background-color: {t['card_bg']}; "
-                f"color: {t['fg']}; border: 1px solid {t['sep']}; "
-                f"border-radius: 3px; }}"
-                f"QPushButton:hover:enabled {{ border: 1px solid {t['accent_bg']}; }}"
-                f"QPushButton:disabled {{ color: {t['sub_fg']}; }}"
-            )
         self._restyle_segments()
 
     def _restyle_segments(self):
@@ -86,17 +56,9 @@ class _BreadcrumbBar(QWidget):
             elif isinstance(w, QLabel):
                 w.setStyleSheet(f"color: {t['sub_fg']}; background: transparent;")
 
-    def set_state(self, root: Optional[Path], current: Optional[Path],
-                  *, can_go_back: bool):
+    def set_state(self, root: Optional[Path], current: Optional[Path]):
         self._root = root
         self._current = current
-        can_go_up = current is not None and root is not None and current != root
-        # Hidden (not just greyed) when unusable: disabled 24px squares read as
-        # inert decoration next to the folder title.
-        self._back_btn.setEnabled(can_go_back)
-        self._back_btn.setVisible(can_go_back)
-        self._up_btn.setEnabled(can_go_up)
-        self._up_btn.setVisible(can_go_up)
         self._rebuild_segments()
 
     def _clear_segments(self):
