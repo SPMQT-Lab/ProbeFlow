@@ -1,5 +1,7 @@
 # ProbeFlow Architecture
 
+A document outlining how the code for ProbeFlow is structured, what the fundamental objects the code uses are, and what rules / boundaries have governed the development of the current architecture. 
+
 ## Purpose
 
 ProbeFlow is post-acquisition STM/SPM software. It browses data, loads
@@ -40,6 +42,23 @@ channel metadata, calibrated physical range, source identity, warnings, and
 processing state. GUI graphics are views over the persisted `core` ROI and mask
 models.
 
+## Fundamental objects
+
+| Object | Role | Owned by |
+|---|---|---|
+| `Scan` | One loaded image dataset: planes, channel metadata, calibration, source identity, warnings, and processing state. | `core.scan_model` |
+| `ProcessingState` / `ProcessingStep` | Ordered, serialisable numerical recipe. A step is an operation ID plus sparse parameters. | `core.processing_state` |
+| `ROI` / `ROISet`; `ImageMask` / `MaskSet` | Persisted geometric and raster selections. | `core.roi`, `core.mask` |
+| `FileType`, `FormatDefinition`, `FormatCatalog`, `LoadSignature` | Content identification and the route from a path to a reader. | `core.formats`, `core.loaders` |
+| `ScanMetadata` / `ProbeFlowItem` | Lightweight metadata and folder-browser records; neither holds image arrays. | `core.metadata`, `core.indexing` |
+| `ProcessingHistory` / `ProvenanceStep` / `ExportRecord` | Source context, ordered history, warnings, and the persisted export record. | `provenance.records` |
+| `ProcessedExportRequest` / `ProcessedExportResult` | Input and result for shared processed-image export. | `workflows` |
+| `MeasurementResult` / `FeaturePoint` | Backend measurement output and detected features. | `measurements.models` |
+
+The ownership rule is simple: `core` holds durable domain data, `processing`
+changes arrays, `provenance` describes artifacts, `io` reads or writes bytes,
+and `workflows` composes those capabilities.
+
 ## Supported input structures
 
 Formats are declared once in `core.formats` and resolved by sniffing, loading,
@@ -56,7 +75,20 @@ metadata, indexing, thumbnails, and GUI adapters.
 `.dat` is identified by content because it is shared by Createc images and
 Nanonis spectra. Reader imports are lazy; vendor decoding remains in `io`.
 
-## Processing and calibration
+## Construction paths
+
+### Load
+
+```text
+path -> sniff_file_type -> identify_scan_file -> LoadSignature
+     -> load_scan_from_signature -> vendor reader -> validate_scan -> Scan
+```
+
+`FileType` is a public classification. `FormatDefinition` supplies the stable
+format ID, aliases, capabilities, and reader binding. `LoadSignature` records
+the selected route without loading the full file.
+
+### Process and calibrate
 
 `core.operations` defines the 36 supported operations without numerical
 callables. A contract records canonical IDs, aliases, display names, defaults,
@@ -76,7 +108,7 @@ updates, and provenance labels use the same catalog. The explicit dispatcher
 remains deliberate: operations have different inputs and scope semantics.
 Display settings are separate from numerical processing.
 
-## Provenance and export
+### Record and export
 
 - `ProcessingState` is the numerical recipe attached to a `Scan`.
 - `ProcessingHistory` owns source context, timestamps, and warnings.
@@ -90,6 +122,14 @@ output, and viewer processed-image export use this workflow.
 
 Writers support SXM, GWY, PNG, PDF, and CSV. They protect raw sources and
 existing outputs by default. Sidecars are written atomically.
+
+```text
+Scan + processed plane + state + display/selections
+  -> ProcessedExportRequest
+  -> workflow provenance builder
+  -> existing writer
+  -> artifact + ExportRecord sidecar
+```
 
 ## Interfaces
 
