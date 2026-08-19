@@ -32,7 +32,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QDialog, QFileDialog,
-    QHeaderView, QMainWindow, QPushButton,
+    QHeaderView, QInputDialog, QMainWindow, QMessageBox, QPushButton,
     QSizePolicy, QSplitter,
     QStatusBar, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
@@ -88,6 +88,7 @@ from probeflow.gui.workers import (
     FilteredFolderExportWorker,
 )
 from probeflow.gui.browse import ThumbnailGrid, BrowseInfoPanel, BrowseToolPanel
+from probeflow.gui.browse.file_actions import create_folder, move_files
 from probeflow.gui.convert import ConvertPanel, ConvertSidebar
 from probeflow.gui.workspace_window import WorkspaceWindow
 from probeflow.gui.dialogs.definitions import _DefinitionsDialog
@@ -294,6 +295,8 @@ class ProbeFlowWindow(QMainWindow):
         self._grid.selection_changed.connect(self._on_selection_changed)
         self._grid.view_requested.connect(self._open_viewer)
         self._grid.card_context_action.connect(self._on_card_context_action)
+        self._grid.create_folder_requested.connect(self._on_create_browse_folder)
+        self._grid.move_scans_requested.connect(self._move_selected_scans)
         self._grid.folder_changed.connect(self._on_grid_folder_changed)
         self._grid.folder_filter_started.connect(self._on_folder_filter_started)
         self._grid.folder_filter_finished.connect(self._on_folder_filter_finished)
@@ -1029,8 +1032,66 @@ class ProbeFlowWindow(QMainWindow):
         dlg = SpecOverlayDialog(entries, t, self)
         dlg.exec()
 
+    def _on_create_browse_folder(self) -> None:
+        parent = self._grid.current_dir()
+        if parent is None:
+            return
+        name, accepted = QInputDialog.getText(self, "Create folder", "Folder name:")
+        if not accepted:
+            return
+        try:
+            created = create_folder(parent, name)
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self, "Could not create folder", str(exc))
+            return
+        self._status_bar.showMessage(f"Created folder: {created.name}")
+        self._grid.refresh()
+
+    def _move_selected_scans(self, clicked_entry=None) -> None:
+        scans = [
+            entry for entry in self._grid.get_selected_entries()
+            if isinstance(entry, SxmFile)
+        ]
+        if not scans and isinstance(clicked_entry, SxmFile):
+            scans = [clicked_entry]
+        if not scans:
+            self._status_bar.showMessage("Select one or more scans first.")
+            return
+
+        current = self._grid.current_dir()
+        destination = QFileDialog.getExistingDirectory(
+            self,
+            "Move selected scans to folder",
+            str(current or Path.home()),
+        )
+        if not destination:
+            return
+        destination_path = Path(destination)
+        answer = QMessageBox.question(
+            self,
+            "Move scans",
+            f"Move {len(scans)} selected scan{'s' if len(scans) != 1 else ''} "
+            f"to {destination_path}?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        try:
+            move_files([entry.path for entry in scans], destination_path)
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self, "Could not move scans", str(exc))
+            return
+        self._status_bar.showMessage(
+            f"Moved {len(scans)} scan{'s' if len(scans) != 1 else ''}"
+        )
+        self._grid.refresh()
+
     def _on_card_context_action(self, entry, action: str):
         """Dispatch ScanCard right-click actions (export, show metadata)."""
+        if action == "move_scans":
+            self._move_selected_scans(entry)
+            return
         if action == "export_metadata_csv":
             try:
                 _scan = load_scan(entry.path)
