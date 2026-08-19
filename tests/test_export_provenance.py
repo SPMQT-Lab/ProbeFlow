@@ -116,6 +116,34 @@ def test_export_provenance_dict_contract():
     assert none_data["scan_range_m"] is None
 
 
+def test_legacy_provenance_projects_complete_current_record():
+    from probeflow.provenance.records import ExportRecord
+
+    prov = _minimal_provenance(
+        processing_state={
+            "steps": [{"op": "smooth", "params": {"sigma_px": 2.0}}],
+        },
+        export_kind="png",
+        output_path="result.png",
+        warnings=("reader warning",),
+        rois={"image_id": "scan", "rois": []},
+        masks={"image_id": "scan", "masks": []},
+    )
+
+    record = ExportRecord.from_dict(prov.to_export_record_dict())
+    operations = [step.operation_id for step in record.processing_history.steps]
+
+    assert operations == ["file_load", "smooth", "export_png"]
+    assert record.processing_history.steps[1].parameters == {"sigma_px": 2.0}
+    assert record.source_info.metadata["item_type"] == "scan"
+    assert record.source_info.metadata["channel_index"] == 0
+    assert record.display_settings == prov.display_state
+    assert "reader warning" in record.warnings
+    assert record.warning is not None and "not raw data" in record.warning
+    assert record.rois == prov.rois
+    assert record.masks == prov.masks
+
+
 def test_scan_export_provenance_contract(tmp_path):
     scan = _make_scan(shape=(64, 48), source_format="dat", scan_range_m=(2e-7, 3e-7), source_path="/data/test.dat")
     ps = ProcessingState(steps=[ProcessingStep("align_rows", {"method": "median"})])

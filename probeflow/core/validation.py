@@ -8,9 +8,14 @@ from __future__ import annotations
 
 import numpy as np
 
+from probeflow.core.formats.builtins import BUILTIN_FORMATS
 from probeflow.core.scan_model import Scan
 
-_SUPPORTED_FORMATS = {"dat", "sxm", "sm4"}
+_SUPPORTED_FORMATS = frozenset(
+    definition.load_identifier
+    for definition in BUILTIN_FORMATS.definitions
+    if definition.kind == "scan"
+)
 
 _CREATEC_PLANE_NAMES = [
     "Z forward",

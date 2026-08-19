@@ -284,13 +284,15 @@ class TestWriteSxmSafetyGuards:
 
     def test_source_equality_uses_resolved_paths(self, sample_sxm, tmp_path):
         """Disguised same-file path (relative vs absolute) must still raise."""
-        # Build a path that resolves to the same file but spells differently:
-        # use a symlink or a relative path through tmp_path that points back.
-        link = tmp_path / "link.sxm"
-        link.symlink_to(sample_sxm)
+        # Insert ``..`` into the path so it names the same file differently.
+        # This exercises ``Path.resolve()`` without Windows symlink privileges.
+        parent = sample_sxm.parent
+        alias = parent / ".." / parent.name / sample_sxm.name
+        assert alias != sample_sxm
+        assert alias.resolve() == sample_sxm.resolve()
         _, planes = read_all_sxm_planes(sample_sxm)
         with pytest.raises(ValueError, match="overwrite the source"):
-            write_sxm_with_planes(sample_sxm, link, planes)
+            write_sxm_with_planes(sample_sxm, alias, planes)
 
 
 class TestScanDirUpRoundTrip:

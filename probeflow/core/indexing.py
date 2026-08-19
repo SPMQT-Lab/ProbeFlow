@@ -21,20 +21,12 @@ from typing import Any, Optional
 from probeflow.core.browse_filters import FolderFilterState, scan_matches_folder_filters
 from probeflow.core.common import _f
 from probeflow.core.file_type import FileType, has_supported_suffix, sniff_file_type
+from probeflow.core.formats.builtins import BUILTIN_FORMATS
 
 # Folder names to always skip when walking.
 _SKIP_DIRS: frozenset[str] = frozenset({
     ".probeflow", ".git", "__pycache__", "output", "processed",
 })
-
-_FORMAT_MAP: dict[FileType, tuple[str, str]] = {
-    FileType.CREATEC_IMAGE: ("createc_dat",          "scan"),
-    FileType.NANONIS_IMAGE:  ("nanonis_sxm",           "scan"),
-    FileType.RHK_SM4_IMAGE:  ("rhk_sm4",               "scan"),
-    FileType.CREATEC_SPEC:   ("createc_vert",          "spectrum"),
-    FileType.NANONIS_SPEC:   ("nanonis_dat_spectrum",  "spectrum"),
-}
-
 
 # ── ProbeFlowItem ─────────────────────────────────────────────────────────────
 
@@ -47,7 +39,7 @@ class ProbeFlowItem:
 
     path: Path
     display_name: str
-    source_format: str                          # see _FORMAT_MAP above
+    source_format: str                          # stable FormatDefinition.format_id
     item_type: str                              # "scan" | "spectrum"
     shape: Optional[tuple[int, int]] = None     # (Ny, Nx) for scans
     channels: tuple[str, ...] = ()              # plane / channel names
@@ -103,10 +95,10 @@ def index_folder(
 
     def _process(path: Path) -> "Optional[ProbeFlowItem]":
         ft = sniff_file_type(path)
-        if ft not in _FORMAT_MAP:
+        definition = BUILTIN_FORMATS.by_file_type(ft)
+        if definition is None:
             return None
-        source_format, item_type = _FORMAT_MAP[ft]
-        item = _build_item(path, ft, source_format, item_type)
+        item = _build_item(path, ft, definition.format_id, definition.kind)
         if item.load_error is not None and not include_errors:
             return None
         return item
@@ -177,6 +169,9 @@ def _build_item(
     # paying a second stat round-trip (matters on a network drive).
     mtime_ns, size_bytes = stat if stat is not None else _file_stat(path)
     try:
+        definition = BUILTIN_FORMATS.by_file_type(ft)
+        if definition is None:
+            raise ValueError(f"Unsupported file type: {ft!r}")
         if item_type == "scan":
             return _item_from_scan(path, ft, source_format, mtime_ns, size_bytes)
         else:
@@ -200,8 +195,10 @@ def _item_from_scan(
     mtime_ns: Optional[int],
     size_bytes: Optional[int],
 ) -> ProbeFlowItem:
-    from probeflow.core.metadata import read_scan_metadata
-    meta = read_scan_metadata(path, file_type=ft)
+    definition = BUILTIN_FORMATS.by_file_type(ft)
+    if definition is None or definition.kind != "scan":
+        raise ValueError(f"Unsupported scan file type: {ft!r}")
+    meta = definition.read_metadata(path)
     extra = dict(meta.raw_header)
     extra["experiment_metadata"] = dict(meta.experiment_metadata)
     return ProbeFlowItem(
@@ -235,8 +232,12 @@ def _item_from_spec(
     mtime_ns: Optional[int],
     size_bytes: Optional[int],
 ) -> ProbeFlowItem:
-    from probeflow.io.spectroscopy import read_spec_metadata, spec_channel_to_dict
-    meta = read_spec_metadata(path, file_type=ft)
+    from probeflow.io.spectroscopy import spec_channel_to_dict
+
+    definition = BUILTIN_FORMATS.by_file_type(ft)
+    if definition is None or definition.kind != "spectrum":
+        raise ValueError(f"Unsupported spectrum file type: {ft!r}")
+    meta = definition.read_metadata(path)
     n_pts = meta.metadata.get("n_points")
     extra: dict[str, Any] = {
         "sweep_type": meta.metadata.get("sweep_type"),
@@ -369,11 +370,12 @@ def _peek_subfolder(
                 files_examined += 1
                 p = Path(e.path)
                 ft = sniff_file_type(p)
-                if ft in (FileType.CREATEC_IMAGE, FileType.NANONIS_IMAGE):
+                definition = BUILTIN_FORMATS.by_file_type(ft)
+                if definition is not None and definition.kind == "scan":
                     n_scans += 1
                     if len(samples) < max_samples:
                         samples.append(p)
-                elif ft in (FileType.CREATEC_SPEC, FileType.NANONIS_SPEC):
+                elif definition is not None and definition.kind == "spectrum":
                     n_specs += 1
             elif is_dir and depth < peek_depth:
                 queue.append((Path(e.path), depth + 1))
@@ -439,12 +441,16 @@ def subfolder_matches_filters(
                 item = cached
             else:
                 ft = sniff_file_type(path)
-                if ft not in _FORMAT_MAP:
+                definition = BUILTIN_FORMATS.by_file_type(ft)
+                if definition is None:
                     browse_cache.put_metadata(path, mtime_ns, size_bytes, None)
                     continue
-                source_format, item_type = _FORMAT_MAP[ft]
                 item = _build_item(
-                    path, ft, source_format, item_type, stat=(mtime_ns, size_bytes)
+                    path,
+                    ft,
+                    definition.format_id,
+                    definition.kind,
+                    stat=(mtime_ns, size_bytes),
                 )
                 if item.load_error is None:
                     browse_cache.put_metadata(path, mtime_ns, size_bytes, item)
@@ -518,11 +524,17 @@ def index_folder_shallow(
             return _filter_indexed(cached, include_errors)
 
         ft = sniff_file_type(p)
-        if ft not in _FORMAT_MAP:
+        definition = BUILTIN_FORMATS.by_file_type(ft)
+        if definition is None:
             browse_cache.put_metadata(p, mtime_ns, size_bytes, None)
             return None
-        source_format, item_type = _FORMAT_MAP[ft]
-        item = _build_item(p, ft, source_format, item_type, stat=(mtime_ns, size_bytes))
+        item = _build_item(
+            p,
+            ft,
+            definition.format_id,
+            definition.kind,
+            stat=(mtime_ns, size_bytes),
+        )
         # Never cache a failed read: the cache key is (path, mtime, size), so
         # a *transient* failure (network hiccup, file briefly locked by the
         # acquisition software) would otherwise pin this file as broken on

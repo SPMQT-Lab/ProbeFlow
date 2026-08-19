@@ -8,6 +8,15 @@ if TYPE_CHECKING:
     from probeflow.gui.models import SxmFile
 
 
+def _is_spectrum_path(path) -> bool:
+    """Return whether the shared format catalog identifies a spectrum."""
+    from probeflow.core.file_type import sniff_file_type
+    from probeflow.core.formats.builtins import BUILTIN_FORMATS
+
+    definition = BUILTIN_FORMATS.by_file_type(sniff_file_type(path))
+    return definition is not None and definition.kind == "spectrum"
+
+
 class SpecOverlayController:
     """Loads, stores, and displays spectroscopy position markers on a scan canvas.
 
@@ -65,7 +74,6 @@ class SpecOverlayController:
         if scan_range_m is None or scan_shape is None:
             return
 
-        from probeflow.io.file_type import FileType, sniff_file_type
         from probeflow.io.spectroscopy import read_spec_file
         from probeflow.analysis.spec_plot import spec_position_to_pixel, _parse_sxm_offset
         from probeflow.gui.models import VertFile
@@ -80,12 +88,11 @@ class SpecOverlayController:
             if not assigned:
                 return
 
-            spec_types = (FileType.CREATEC_SPEC, FileType.NANONIS_SPEC)
             candidates = [
                 f for f in sorted(folder.iterdir())
                 if f.is_file()
                    and f.stem in assigned
-                   and sniff_file_type(f) in spec_types
+                   and _is_spectrum_path(f)
             ]
 
             if scan_format == "sxm" and scan_header:
@@ -166,7 +173,6 @@ class SpecOverlayController:
         Returns ``(accepted, n_specs_mapped_to_this_image)``.
         The caller is responsible for reloading markers after a successful mapping.
         """
-        from probeflow.io.file_type import FileType, sniff_file_type
         from probeflow.gui.models import VertFile
         from probeflow.gui.dialogs import ViewerSpecMappingDialog
         from PySide6.QtWidgets import QDialog
@@ -174,8 +180,7 @@ class SpecOverlayController:
         try:
             spec_paths = sorted(
                 f for f in entry.path.parent.iterdir()
-                if f.is_file() and sniff_file_type(f) in (
-                    FileType.CREATEC_SPEC, FileType.NANONIS_SPEC)
+                if f.is_file() and _is_spectrum_path(f)
             )
         except Exception:
             spec_paths = []

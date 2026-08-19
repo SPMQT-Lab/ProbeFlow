@@ -13,7 +13,7 @@ import copy as _copy
 import hashlib as _hashlib
 import json as _json
 import tempfile as _tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -22,6 +22,8 @@ from probeflow.core.source_identity import privacy_safe_path, sanitize_export_da
 from probeflow.provenance.records import (
     ExportRecord,
     ProcessingHistory,
+    SourceRecord,
+    _processing_history_from_source,
     build_export_record,
     processing_history_from_scan,
 )
@@ -135,22 +137,26 @@ class ExportProvenance:
                 "loader_name": None,
                 "loader_version": self.probeflow_version,
                 "metadata": {
+                    "item_type": self.item_type,
+                    "channel_index": self.channel_index,
                     "array_shape": list(self.array_shape) if self.array_shape else None,
                     "scan_range_m": list(self.scan_range_m) if self.scan_range_m else None,
                     "unit": self.units,
                 },
                 "file_hash": None,
             }
-            history = ProcessingHistory.from_dict({
-                "source_record": source,
-                "steps": [],
-            })
+            history = _processing_history_from_source(
+                SourceRecord.from_dict(source),
+                self.processing_state,
+            )
         record = build_export_record(
             history,
             export_path=self.output_path,
             export_format=self.export_kind or "export",
             display_settings=self.display_state,
             warnings=self.warnings,
+            rois=self.rois,
+            masks=self.masks,
         )
         data = record.to_dict()
         if self.warning and self.warning not in data["warnings"]:
@@ -259,7 +265,7 @@ def processing_state_from_history(history: list[dict[str, Any]] | None) -> dict[
     Timestamps are intentionally omitted from the canonical processing state;
     they describe when a step was applied, not what numerical operation it is.
     """
-    from probeflow.processing.history import processing_state_dict_from_history
+    from probeflow.core.processing_history import processing_state_dict_from_history
     return processing_state_dict_from_history(history)
 
 
@@ -343,6 +349,8 @@ def build_scan_export_provenance(
     conversion = "dat_to_sxm" if (
         export_format == "sxm" and getattr(scan, "source_format", None) == "dat"
     ) else None
+    roi_data = roi_set.to_dict() if roi_set is not None else None
+    mask_data = mask_set.to_dict() if mask_set is not None else None
     export_record = build_export_record(
         history,
         export_path=out_str,
@@ -351,31 +359,18 @@ def build_scan_export_provenance(
         export_parameters={"export_kind": str(export_kind)},
         warnings=tuple(warnings or ()),
         conversion=conversion,
-        rois=roi_set.to_dict() if roi_set is not None else None,
-        masks=mask_set.to_dict() if mask_set is not None else None,
+        rois=roi_data,
+        masks=mask_data,
     )
-    return ExportProvenance(
-        source_file=prov.source_file,
-        source_format=prov.source_format,
-        item_type=prov.item_type,
-        channel_name=prov.channel_name,
-        channel_index=prov.channel_index,
-        array_shape=prov.array_shape,
-        scan_range_m=prov.scan_range_m,
-        units=prov.units,
-        processing_state=ps_dict,
-        display_state=ds_dict,
-        probeflow_version=prov.probeflow_version,
-        export_timestamp=prov.export_timestamp,
+    return replace(
+        prov,
         export_kind=str(export_kind),
         output_path=privacy_safe_path(out_str),
-        source_id=prov.source_id,
-        channel_id=prov.channel_id,
         processing_state_hash=processing_state_hash(ps_dict),
         artifact_id=artifact_id,
         warnings=tuple(warnings or ()),
-        rois=roi_set.to_dict() if roi_set is not None else None,
-        masks=mask_set.to_dict() if mask_set is not None else None,
+        rois=roi_data,
+        masks=mask_data,
         processing_history=history.to_dict(),
         export_record=export_record.to_dict(),
         warning=export_record.warning,

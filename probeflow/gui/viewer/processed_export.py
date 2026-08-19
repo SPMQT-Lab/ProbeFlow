@@ -51,26 +51,15 @@ def build_processed_scan_for_export(
     Raises ``ValueError`` if there is no image data and ``display_arr`` is
     also ``None``.
     """
-    from probeflow.core.scan_loader import load_scan
-    from probeflow.processing.gui_adapter import processing_state_from_gui
+    from probeflow.workflows import load_processed_scan
 
-    scan = load_scan(path)
-    idx = max(0, min(channel_idx, scan.n_planes - 1))
-
-    if display_arr is None:
-        if scan.n_planes == 0:
-            raise ValueError("No image data loaded.")
-        arr = scan.planes[idx]
-    else:
-        arr = display_arr
-
-    scan.planes[idx] = np.asarray(arr, dtype=np.float64).copy()
-    if scan_range_m is not None:
-        scan.scan_range_m = (float(scan_range_m[0]), float(scan_range_m[1]))
-    state = processing_state_from_gui(processing_gui_state or {})
-    if state.steps:
-        scan.record_processing_state(state)
-    return scan, idx
+    return load_processed_scan(
+        path,
+        channel_idx,
+        display_arr,
+        processing_gui_state,
+        scan_range_m=scan_range_m,
+    )
 
 
 def build_processed_export_provenance(
@@ -87,24 +76,23 @@ def build_processed_export_provenance(
     ``display_settings`` should be a plain dict (e.g. from
     ``DisplayRangeController.to_dict()`` merged with colormap/scalebar keys).
     """
-    from probeflow.provenance.export import build_scan_export_provenance
+    from probeflow.workflows import (
+        ProcessedExportRequest,
+        build_processed_export_provenance as _build_provenance,
+    )
 
     suffix = out_path.suffix.lower().lstrip(".") or "export"
-    channel_name = (
-        scan.plane_names[plane_idx]
-        if plane_idx < len(scan.plane_names) else None
-    )
-    return build_scan_export_provenance(
-        scan,
-        channel_index=plane_idx,
-        channel_name=channel_name,
-        processing_state=scan.processing_state,
-        display_state=display_settings,
-        export_kind=f"viewer_{suffix}",
-        output_path=out_path,
-        roi_set=roi_set,
-        mask_set=mask_set,
-        processing_history=processing_history,
+    return _build_provenance(
+        ProcessedExportRequest(
+            scan=scan,
+            destination=out_path,
+            plane_idx=plane_idx,
+            display_state=display_settings,
+            roi_set=roi_set,
+            mask_set=mask_set,
+            processing_history=processing_history,
+            export_kind=f"viewer_{suffix}",
+        )
     )
 
 
@@ -158,58 +146,61 @@ def save_processed_image(
     Returns a status string (success or error message) — the caller shows it
     in the UI.  No Qt dependency.
     """
-    from probeflow.provenance.export import check_provenance_sidecar_collisions
+    from probeflow.workflows import ProcessedExportRequest, write_processed_export
 
     suffix = out_path.suffix.lower()
     try:
-        provenance = None
+        build_provenance = include_provenance and display_settings is not None
         if include_provenance and suffix != ".sxm" and display_settings is not None:
-            provenance = build_processed_export_provenance(
-                scan, out_path, plane_idx, display_settings,
-                roi_set=roi_set, mask_set=mask_set,
-                processing_history=processing_history,
-            )
             if suffix != ".png":
+                from probeflow.provenance.export import (
+                    check_provenance_sidecar_collisions,
+                )
+
                 check_provenance_sidecar_collisions(
                     out_path, legacy=False, probeflow=True,
                 )
 
+        writer_options = {}
         if suffix == ".png":
-            scan.save_png(
-                out_path, plane_idx=plane_idx,
-                colormap=colormap, clip_low=clip_low, clip_high=clip_high,
-                add_scalebar=add_scalebar,
-                provenance=provenance,
-            )
+            writer_options = {
+                "colormap": colormap,
+                "clip_low": clip_low,
+                "clip_high": clip_high,
+                "add_scalebar": add_scalebar,
+            }
         elif suffix == ".pdf":
-            scan.save_pdf(
-                out_path, plane_idx=plane_idx,
-                colormap=colormap, clip_low=clip_low, clip_high=clip_high,
-                show_scalebar=add_scalebar,
-                provenance=provenance,
+            writer_options = {
+                "colormap": colormap,
+                "clip_low": clip_low,
+                "clip_high": clip_high,
+                "show_scalebar": add_scalebar,
+            }
+
+        write_processed_export(
+            ProcessedExportRequest(
+                scan=scan,
+                destination=out_path,
+                plane_idx=plane_idx,
+                display_state=display_settings,
+                roi_set=roi_set,
+                mask_set=mask_set,
+                processing_history=processing_history,
+                export_kind=f"viewer_{suffix.lstrip('.')}",
                 include_provenance=include_provenance,
+                build_provenance=build_provenance,
+                writer_options=writer_options,
             )
-        elif suffix == ".csv":
-            scan.save_csv(out_path, plane_idx=plane_idx, provenance=provenance)
-        elif suffix == ".gwy":
-            scan.save_gwy(
-                out_path, plane_idx=plane_idx,
-                include_provenance=include_provenance,
-                include_meta=include_provenance,
-                provenance=provenance,
-            )
-        elif suffix == ".sxm":
-            scan.save_sxm(
-                out_path,
-                processed_plane_idx=(
-                    plane_idx if scan.processing_state.steps else None
-                ),
-                include_provenance=include_provenance,
-            )
-        else:
-            return "Unsupported processed image format. Use .sxm, .png, .csv, .pdf, or .gwy."
+        )
 
         return f"Saved processed image -> {out_path.name}"
+    except ValueError as exc:
+        if "Unsupported processed image format" in str(exc):
+            return (
+                "Unsupported processed image format. "
+                "Use .sxm, .png, .csv, .pdf, or .gwy."
+            )
+        return f"Save processed image error: {exc}"
     except Exception as exc:
         return f"Save processed image error: {exc}"
 

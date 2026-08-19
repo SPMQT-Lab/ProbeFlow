@@ -63,24 +63,34 @@ corrupts them.
 
 ## Architectural boundaries
 
-Each top-level subpackage has a docstring describing what belongs there
-and what does **not**. Read these before adding new code:
+The authoritative current map, workflows, dependency exceptions, and extension
+seams are in [docs/architecture.md](docs/architecture.md). Read it before
+changing package boundaries. In summary:
 
 - `probeflow/core/` — `Scan` model, loaders, metadata, ROI geometry,
-  validation. **Not** GUI, **not** numerical kernels.
-- `probeflow/io/` — file sniffing, vendor-specific readers and writers,
-  `.sxm` byte layout. **Not** processing, **not** display.
-- `probeflow/processing/` — Qt-free numerical kernels and the
-  `ProcessingState` model.
-- `probeflow/analysis/` — grain/feature detection, lattice extraction,
-  pair correlation, spectroscopy plotting.
+  masks, indexing, and validation. **Not** GUI or numerical kernels.
+- `probeflow/io/` — vendor-specific readers and writers, converters, sidecars,
+  and `.sxm` byte layout. **Not** numerical processing or GUI display.
+- `probeflow/processing/` — Qt-free numerical kernels, processing-state
+  execution, and display-array preparation.
+- `probeflow/measurements/` — quantitative result models, measurement kernels,
+  feature sets, and tabular export.
+- `probeflow/analysis/` — higher-level grain/feature, lattice, periodicity, and
+  point-pattern analysis.
+- `probeflow/spectroscopy/` — decoded-spectrum display models and transforms.
 - `probeflow/provenance/` — processing history and export provenance.
+- `probeflow/workflows/` — Qt-free application orchestration over backend
+  models and writers. **Not** widgets, dialogs, or CLI parsing.
 - `probeflow/gui/` — PySide6 widgets and dialogs only. **Not** numerical
   kernels, **not** vendor parsers, **not** model definitions.
 - `probeflow/cli/` — orchestration over the canonical APIs above.
-  **Not** model definitions, **not** numerical kernels, **not** GUI.
-If a change crosses a boundary, prefer adding a small adapter in the
-caller over moving domain code into a foreign package.
+  **Not** model definitions or numerical kernels; it imports the GUI only for
+  the `gui` launcher command.
+Some compatibility and lazy-import exceptions already exist; they are listed
+in the architecture map and declared in `tests/architecture_policy.py`; static
+tests prevent them from spreading to new modules. If a change crosses a
+boundary, prefer a small adapter in the caller over moving domain code into a
+foreign package.
 
 ## Compatibility shims
 

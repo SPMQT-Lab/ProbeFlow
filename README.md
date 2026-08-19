@@ -126,6 +126,7 @@ scan.save("processed.png", colormap="gray")
 - [GUI guide](docs/gui.md) — the full tour with screenshots
 - [Command-line guide](docs/cli.md) — inspection, conversion, batch pipelines
 - [Createc `.dat` reader notes](docs/createc_dat_reader.md) — format details
+- [Architecture map](docs/architecture.md) — packages, workflows, and extension boundaries
 - [Contributor notes](CONTRIBUTING.md) — setup, tests, architecture boundaries
 - [Review and cleanup status](docs/review_status.md) — code-review record
 

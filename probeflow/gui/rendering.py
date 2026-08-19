@@ -190,13 +190,14 @@ def load_thumbnail_plane(
     of all of them.  Other formats fall back to a normal full load (their decode
     is a single read anyway).  Returns ``(arr | None, plane_names)``.
     """
+    from probeflow.core.formats.builtins import BUILTIN_FORMATS
     from probeflow.core.loaders import identify_scan_file
 
     sig = identify_scan_file(path)
-    if sig.source_format == "sm4":
-        from probeflow.io.readers.rhk_sm4 import read_sm4_thumbnail_plane
-
-        return read_sm4_thumbnail_plane(
+    identifier = getattr(sig, "format_id", None) or sig.source_format
+    definition = BUILTIN_FORMATS.by_identifier(identifier)
+    if definition is not None and definition.read_thumbnail is not None:
+        return definition.read_thumbnail(
             sig.path,
             lambda names: resolve_thumbnail_plane_index(names, semantic),
         )
