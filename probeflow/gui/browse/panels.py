@@ -4,6 +4,7 @@ from __future__ import annotations
 
 
 from probeflow.core.browse_filters import BIAS_MATCH_TOLERANCE_MV, FolderFilterState
+from probeflow.core.browse_tags import BrowseTag
 from probeflow.gui.typography import ui_font
 from PySide6.QtCore import Qt, QThreadPool, Signal, Slot
 from PySide6.QtGui import QColor, QCursor, QFont, QImage, QPixmap
@@ -62,6 +63,7 @@ class BrowseToolPanel(QWidget):
     filter_changed             = Signal(str)   # "all" | "images" | "spectra"
     sort_mode_changed          = Signal(str)   # "name" | "size"
     folder_filter_changed      = Signal(object)
+    delete_tag_requested       = Signal(str)
     export_filtered_requested  = Signal()
     thumbnail_channel_changed  = Signal(str)
     thumbnail_size_changed     = Signal(str)   # "large" | "small"
@@ -145,7 +147,7 @@ class BrowseToolPanel(QWidget):
         sort_lbl.setFont(ui_font(9, weight=QFont.Bold))
         lay.addWidget(sort_lbl)
         self.sort_cb = QComboBox()
-        self.sort_cb.addItems(["Name", "Scan size"])
+        self.sort_cb.addItems(["Name", "Scan size", "Tag"])
         self.sort_cb.setFont(ui_font(10))
         self.sort_cb.setToolTip(
             "Order of the thumbnail cards — by file name, or by physical scan "
@@ -164,6 +166,24 @@ class BrowseToolPanel(QWidget):
             "values actually present in this folder.")
         self.bias_cb.currentIndexChanged.connect(self._emit_folder_filter_state)
         lay.addWidget(self.bias_cb)
+
+        tag_lbl = QLabel("Tag")
+        tag_lbl.setFont(ui_font(9, weight=QFont.Bold))
+        lay.addWidget(tag_lbl)
+        self.tag_cb = QComboBox()
+        self.tag_cb.addItem("All tags", None)
+        self.tag_cb.setFont(ui_font(10))
+        self.tag_cb.setToolTip("Show only scans carrying the selected tag.")
+        self.tag_cb.currentIndexChanged.connect(self._emit_folder_filter_state)
+        lay.addWidget(self.tag_cb)
+
+        self._delete_tag_btn = QPushButton("Delete selected tag")
+        self._delete_tag_btn.setFont(ui_font(9))
+        self._delete_tag_btn.setFixedHeight(26)
+        self._delete_tag_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self._delete_tag_btn.setEnabled(False)
+        self._delete_tag_btn.clicked.connect(self._on_delete_selected_tag)
+        lay.addWidget(self._delete_tag_btn)
 
         self._hide_incomplete_cb = QCheckBox("Hide incomplete scans")
         self._hide_incomplete_cb.setFont(ui_font(9))
@@ -290,11 +310,14 @@ class BrowseToolPanel(QWidget):
         self.filter_changed.emit(mode)
 
     def _on_sort_changed(self, text: str) -> None:
-        self.sort_mode_changed.emit("size" if text == "Scan size" else "name")
+        mode = {"Scan size": "size", "Tag": "tag"}.get(text, "name")
+        self.sort_mode_changed.emit(mode)
 
     def _emit_folder_filter_state(self, *_args) -> None:
         if not hasattr(self, "bias_cb") or not hasattr(self, "_hide_incomplete_cb"):
             return
+        if hasattr(self, "_delete_tag_btn"):
+            self._delete_tag_btn.setEnabled(self.tag_cb.currentData() is not None)
         self.folder_filter_changed.emit(self.get_folder_filter_state())
 
     # ── Public API ─────────────────────────────────────────────────────────────
@@ -302,14 +325,39 @@ class BrowseToolPanel(QWidget):
         return self._filter_mode
 
     def get_sort_mode(self) -> str:
-        return "size" if self.sort_cb.currentText() == "Scan size" else "name"
+        return {"Scan size": "size", "Tag": "tag"}.get(
+            self.sort_cb.currentText(), "name"
+        )
 
     def get_folder_filter_state(self) -> FolderFilterState:
         bias = self.bias_cb.currentData()
         return FolderFilterState(
             bias_value_mv=float(bias) if bias is not None else None,
             hide_incomplete=self._hide_incomplete_cb.isChecked(),
+            tag_name=self.tag_cb.currentData(),
         )
+
+    def set_tag_options(self, options: list[tuple[BrowseTag, int]]) -> None:
+        """Rebuild the tag filter while preserving its current selection."""
+        previous = self.tag_cb.currentData()
+        self.tag_cb.blockSignals(True)
+        self.tag_cb.clear()
+        self.tag_cb.addItem("All tags", None)
+        restored_index = 0
+        for tag, count in options:
+            self.tag_cb.addItem(f"{tag.name} ({count})", tag.name)
+            if previous is not None and str(previous).casefold() == tag.name.casefold():
+                restored_index = self.tag_cb.count() - 1
+        self.tag_cb.setCurrentIndex(restored_index)
+        self.tag_cb.blockSignals(False)
+        self._delete_tag_btn.setEnabled(self.tag_cb.currentData() is not None)
+        if previous is not None and restored_index == 0:
+            self._emit_folder_filter_state()
+
+    def _on_delete_selected_tag(self) -> None:
+        name = self.tag_cb.currentData()
+        if name is not None:
+            self.delete_tag_requested.emit(str(name))
 
     def set_bias_options(self, options: list[tuple[float, int]]) -> None:
         """Rebuild the bias picker from ``(bias_mv, count)`` pairs.

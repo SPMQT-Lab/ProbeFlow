@@ -147,6 +147,72 @@ def test_grid_hide_incomplete_filter(qapp):
     assert grid.get_visible_scan_entries() == [full]
 
 
+def test_grid_tagging_filters_and_sorts_scans(qapp, tmp_path):
+    grid = _quiet_grid(qapp)
+    review = _scan_entry("review", 10.0, 10.0)
+    other = _scan_entry("other", 10.0, 10.0)
+    grid.load([other, review], str(tmp_path))
+    qapp.processEvents()
+
+    grid.assign_tag(review.path, "Review", "#12ABEF")
+    card = grid._cards[grid._key_for(review)]
+    assert card.tag_button._tag.name == "Review"
+
+    grid.set_folder_filter_state(FolderFilterState(tag_name="Review"))
+    assert grid.get_visible_scan_entries() == [review]
+
+    grid.set_sort_mode("tag")
+    assert grid.get_entries()[:2] == [review, other]
+    grid.remove_tag(review.path)
+    assert card.tag_button._tag is None
+    assert grid.get_visible_scan_entries() == []
+
+
+def test_panel_exposes_tag_filter_and_tag_sort(qapp):
+    from probeflow.core.browse_tags import BrowseTag
+    from probeflow.gui import THEMES
+    from probeflow.gui.browse.panels import BrowseToolPanel
+
+    panel = BrowseToolPanel(THEMES["dark"], {})
+    panel.set_tag_options([(BrowseTag("Review", "#12ABEF"), 2)])
+    panel.tag_cb.setCurrentIndex(1)
+
+    state = panel.get_folder_filter_state()
+    assert state.tag_name == "Review"
+    assert panel._delete_tag_btn.isEnabled()
+    assert "Tag" in [panel.sort_cb.itemText(i) for i in range(panel.sort_cb.count())]
+
+    panel.sort_cb.setCurrentText("Tag")
+    assert panel.get_sort_mode() == "tag"
+
+
+def test_tag_chooser_lists_existing_tags_and_palette(qapp, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox, QInputDialog
+
+    from probeflow.core.browse_tags import BrowseTag
+    from probeflow.gui.browse.tag_dialog import TagChooserDialog
+
+    deleted = []
+    dialog = TagChooserDialog(
+        [BrowseTag("Review", "#12ABEF")], deleted.append,
+    )
+    assert set(dialog._rows) == {"review"}
+    assert len(dialog.PALETTE) == 8
+
+    monkeypatch.setattr(
+        QMessageBox, "question", lambda *args, **kwargs: QMessageBox.Yes,
+    )
+    dialog._confirm_delete("Review")
+    assert deleted == ["Review"]
+    assert dialog._rows == {}
+
+    monkeypatch.setattr(
+        QInputDialog, "getText", lambda *args, **kwargs: ("New", True),
+    )
+    dialog._new_tag("#90BE6D")
+    assert dialog.choice() == ("New", "#90be6d")
+
+
 def test_grid_bias_options_lists_distinct_biases(qapp):
     grid = _quiet_grid(qapp)
     grid.load(

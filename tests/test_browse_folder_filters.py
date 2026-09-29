@@ -12,6 +12,7 @@ from probeflow.core.browse_filters import (
     createc_visible_height_m,
     scan_matches_folder_filters,
 )
+from probeflow.core.browse_tags import BrowseTagStore
 from probeflow.core.indexing import ProbeFlowItem, subfolder_matches_filters
 from probeflow.gui.models import SxmFile
 
@@ -71,6 +72,41 @@ def test_no_active_filters_matches_everything():
     assert not state.has_metadata_filters()
     assert scan_matches_folder_filters(
         completion_pct=None, bias_mv=None, state=state)
+
+
+def test_tag_filter_matches_only_the_selected_label():
+    state = FolderFilterState(tag_name="Review")
+    assert state.has_metadata_filters()
+    assert not state.has_subfolder_filters()
+    assert scan_matches_folder_filters(
+        completion_pct=None, bias_mv=None, tag_name="review", state=state)
+    assert not scan_matches_folder_filters(
+        completion_pct=None, bias_mv=None, tag_name="Other", state=state)
+    assert not scan_matches_folder_filters(
+        completion_pct=None, bias_mv=None, state=state)
+
+
+def test_browse_tag_store_round_trips_assignments_and_deletes(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    scan = root / "scan.sxm"
+
+    store = BrowseTagStore(root)
+    tag = store.assign(scan, "Review", "#12AbEf")
+    assert tag.name == "Review"
+    assert tag.color == "#12ABEF"
+    assert store.tag_for(scan) == tag
+
+    reopened = BrowseTagStore(root)
+    assert reopened.tag_for(scan) == tag
+    assert reopened.options_for([scan]) == [(tag, 1)]
+
+    reopened.remove(scan)
+    assert reopened.tag_for(scan) is None
+    reopened.assign(scan, "Review", "#12ABEF")
+    reopened.delete("review")
+    assert reopened.tags() == ()
+    assert reopened.tag_for(scan) is None
 
 
 def test_bias_options_group_and_count():

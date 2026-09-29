@@ -398,7 +398,7 @@ def subfolder_matches_filters(
     max_files: int = 400,
 ) -> bool:
     """Return True when a subfolder tree contains one matching scan."""
-    if not state.has_metadata_filters():
+    if not state.has_subfolder_filters():
         return True
 
     from probeflow.core import browse_cache
